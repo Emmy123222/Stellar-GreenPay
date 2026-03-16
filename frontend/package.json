@@ -10,17 +10,17 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "14.2.3",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "@stellar/stellar-sdk": "^12.0.0",
     "@stellar/freighter-api": "^2.0.0",
+    "@stellar/stellar-sdk": "^12.0.0",
     "axios": "^1.6.8",
     "clsx": "^2.1.1",
-    "date-fns": "^3.6.0"
+    "date-fns": "^3.6.0",
+    "next": "14.2.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^20.19.37",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",

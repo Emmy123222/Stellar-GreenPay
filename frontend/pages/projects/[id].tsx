@@ -8,7 +8,7 @@ import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
 import { fetchProject, fetchProjectUpdates } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS,copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import type { ClimateProject, ProjectUpdate } from "@/utils/types";
 
@@ -22,6 +22,14 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [updates,   setUpdates]   = useState<ProjectUpdate[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+
+  const handleCopyAddress = async (fullAddress: string) => {
+    if (copyStatus !== 'idle') return;
+    const success = await copyToClipboard(fullAddress);
+    setCopyStatus(success ? 'copied' : 'error');
+    setTimeout(() => setCopyStatus('idle'), 2000);
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -100,10 +108,40 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
             {/* Wallet link */}
             <div className="mt-4 pt-4 border-t border-forest-100 flex items-center gap-2 text-xs text-[#8aaa8a] font-body">
               <span>Project wallet:</span>
-              <a href={accountUrl(project.walletAddress)} target="_blank" rel="noopener noreferrer"
-                className="address-tag hover:border-forest-300 transition-colors">
-                {project.walletAddress.slice(0,8)}...{project.walletAddress.slice(-6)} ↗
-              </a>
+              <div className="flex items-center gap-1.5">
+                <a href={accountUrl(project.walletAddress)} target="_blank" rel="noopener noreferrer"
+                  className="address-tag hover:border-forest-300 transition-colors">
+                  {project.walletAddress.slice(0,8)}...{project.walletAddress.slice(-6)} ↗
+                </a>
+                
+                <button
+                  onClick={() => handleCopyAddress(project.walletAddress)}
+                  className="p-1 text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700 rounded transition-colors focus:outline-none focus:ring-1 focus:ring-forest-300 flex items-center justify-center w-6 h-6"
+                  title="Copy full wallet address"
+                  aria-label="Copy wallet address"
+                >
+                  {copyStatus === 'idle' ? (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  ) : copyStatus === 'copied' ? (
+                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                </button>
+
+                {copyStatus === 'copied' && (
+                  <span className="text-green-600 font-medium animate-fade-in">Copied!</span>
+                )}
+                {copyStatus === 'error' && (
+                  <span className="text-red-500 font-medium animate-fade-in">Error</span>
+                )}
+              </div>
             </div>
           </div>
 
