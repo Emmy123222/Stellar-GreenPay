@@ -22,6 +22,7 @@ const PRESETS = ["10", "25", "50", "100", "250"];
 export default function DonateForm({ project, publicKey, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState("");
   const [message, setMessage] = useState("");
+  const charCount = message.length;
   const [step, setStep]       = useState<Step>("idle");
   const [error, setError]     = useState<string | null>(null);
   const [txHash, setTxHash]   = useState<string | null>(null);
@@ -117,6 +118,23 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)}
             placeholder="Leave a message of support..." maxLength={100}
             className="input-field" />
+            <p
+  style={{
+    color:
+      charCount < 80
+        ? "#16a34a"
+        : charCount < 96
+        ? "#f59e0b"
+        : "#dc2626",
+    fontSize: "12px",
+  }}
+>
+  {charCount} / 100 characters
+</p>
+
+<p style={{ fontSize: "12px", color: "gray" }}>
+  Your message will appear in the public donation feed
+</p>
         </div>
 
         {step === "error" && error && (
