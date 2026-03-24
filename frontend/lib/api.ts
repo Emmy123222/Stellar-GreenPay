@@ -30,9 +30,11 @@ export async function recordDonation(payload: {
   return data.data;
 }
 
-export async function fetchProjectDonations(projectId: string, limit = 20) {
-  const { data } = await api.get<{ success: boolean; data: Donation[] }>(`/api/donations/project/${projectId}`, { params: { limit } });
-  return data.data;
+export async function fetchProjectDonations(projectId: string, limit = 20, cursor?: string) {
+  const params: { limit: number; cursor?: string } = { limit };
+  if (cursor) params.cursor = cursor;
+  const { data } = await api.get<{ success: boolean; data: Donation[]; nextCursor: string | null }>(`/api/donations/project/${projectId}`, { params });
+  return { donations: data.data, nextCursor: data.nextCursor };
 }
 
 export async function fetchDonorHistory(publicKey: string) {

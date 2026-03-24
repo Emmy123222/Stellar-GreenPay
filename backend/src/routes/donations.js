@@ -80,11 +80,23 @@ router.post("/", (req, res, next) => {
 // GET /api/donations/project/:id
 router.get("/project/:projectId", (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-  const result = Array.from(donations.values())
+  const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
+
+  let allDonations = Array.from(donations.values())
     .filter(d => d.projectId === req.params.projectId)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, limit);
-  res.json({ success: true, data: result });
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  // Filter by cursor if provided (only get donations older than cursor)
+  if (cursor) {
+    allDonations = allDonations.filter(d => new Date(d.createdAt) < cursor);
+  }
+
+  const result = allDonations.slice(0, limit);
+  const nextCursor = result.length === limit && allDonations.length > limit
+    ? result[result.length - 1].createdAt
+    : null;
+
+  res.json({ success: true, data: result, nextCursor });
 });
 
 // GET /api/donations/donor/:publicKey

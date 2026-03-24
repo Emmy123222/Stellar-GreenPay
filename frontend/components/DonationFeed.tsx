@@ -13,14 +13,34 @@ interface DonationFeedProps { projectId: string; refreshKey?: number; }
 export default function DonationFeed({ projectId, refreshKey = 0 }: DonationFeedProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading,   setLoading]   = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
+  // Initial load
   useEffect(() => {
     setLoading(true);
     fetchProjectDonations(projectId, 10)
-      .then(setDonations)
+      .then(({ donations: data, nextCursor: cursor }) => {
+        setDonations(data);
+        setNextCursor(cursor);
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [projectId, refreshKey]);
+
+  const handleLoadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const { donations: newDonations, nextCursor: cursor } = await fetchProjectDonations(projectId, 10, nextCursor);
+      setDonations(prev => [...prev, ...newDonations]);
+      setNextCursor(cursor);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   if (loading) return (
     <div className="space-y-3">
@@ -63,6 +83,15 @@ export default function DonationFeed({ projectId, refreshKey = 0 }: DonationFeed
           </div>
         </div>
       ))}
+      {nextCursor && (
+        <button
+          onClick={handleLoadMore}
+          disabled={loadingMore}
+          className="w-full mt-4 px-4 py-2 bg-forest-100 hover:bg-forest-200 text-forest-700 rounded-lg transition-colors font-body text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {loadingMore ? "Loading..." : "Load more donations"}
+        </button>
+      )}
     </div>
   );
 }
