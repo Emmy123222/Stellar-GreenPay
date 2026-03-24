@@ -17,18 +17,27 @@ const links = [
 
 export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarProps) {
   const router = useRouter();
+  const network = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet").toLowerCase();
+  const isMainnet = network === "mainnet";
+
   return (
     <nav className="sticky top-0 z-50 bg-white/90 backdrop-blur-xl border-b border-[rgba(34,114,57,0.12)] shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
 
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="w-8 h-8 rounded-lg bg-forest-100 border border-forest-200 flex items-center justify-center group-hover:border-forest-400 transition-colors">
-            <span className="text-base">🌱</span>
-          </div>
-          <span className="font-display font-bold text-forest-900 text-lg tracking-tight">
-            Stellar<span className="text-forest-500">GreenPay</span>
+        <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-2 group">
+            <div className="w-8 h-8 rounded-lg bg-forest-100 border border-forest-200 flex items-center justify-center group-hover:border-forest-400 transition-colors">
+              <span className="text-base">🌱</span>
+            </div>
+            <span className="font-display font-bold text-forest-900 text-lg tracking-tight">
+              Stellar<span className="text-forest-500">GreenPay</span>
+            </span>
+          </Link>
+
+          <span className={`hidden md:inline-flex ${isMainnet ? "badge-verified" : "badge-paused"}`}>
+            {isMainnet ? "Mainnet" : "Testnet"}
           </span>
-        </Link>
+        </div>
 
         <div className="hidden md:flex items-center gap-1">
           {links.map((l) => (
