@@ -11,7 +11,7 @@ const api = axios.create({
 });
 
 // ── Projects ──────────────────────────────────────────────────────────────────
-export async function fetchProjects(params?: { category?: string; status?: string; limit?: number }) {
+export async function fetchProjects(params?: { category?: string; status?: string; verified?: boolean; limit?: number }) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject[] }>("/api/projects", { params });
   return data.data;
 }

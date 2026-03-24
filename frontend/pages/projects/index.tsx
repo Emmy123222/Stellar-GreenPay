@@ -17,12 +17,18 @@ export default function ProjectsPage() {
 
   const category = (router.query.category as string) || "";
   const status   = (router.query.status   as string) || "active";
+  const verified = (router.query.verified as string) === "true";
 
   useEffect(() => {
     setLoading(true);
-    fetchProjects({ category: category || undefined, status: status || undefined, limit: 50 })
+    fetchProjects({ 
+      category: category || undefined, 
+      status: status || undefined, 
+      verified: verified || undefined,
+      limit: 50 
+    })
       .then(setProjects).catch(console.error).finally(() => setLoading(false));
-  }, [category, status]);
+  }, [category, status, verified]);
 
   const filtered = search.trim()
     ? projects.filter(p =>
@@ -72,6 +78,32 @@ export default function ProjectsPage() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <p className="label">Verification</p>
+            <button 
+              onClick={() => setFilter("verified", verified ? "" : "true")}
+              className={clsx(
+                "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors font-body",
+                verified 
+                  ? "bg-forest-100 text-forest-700" 
+                  : "text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700"
+              )}>
+              {/* Toggle Switch */}
+              <div className={clsx(
+                "relative w-10 h-6 rounded-full transition-colors",
+                verified ? "bg-emerald-600" : "bg-[#d0d0d0]"
+              )}>
+                <div className={clsx(
+                  "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                  verified ? "right-1" : "left-1"
+                )} />
+              </div>
+              <span className="flex-1 text-left">
+                ✓ Verified only <span className="text-xs text-[#8aaa8a]">({projects.filter(p => p.verified).length})</span>
+              </span>
+            </button>
           </div>
 
           <div>
