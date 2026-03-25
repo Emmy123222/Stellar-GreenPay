@@ -29,6 +29,14 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
   const amountNum = parseFloat(amount);
   const isValid   = !isNaN(amountNum) && amountNum >= 1;
 
+    const charCount = message.length;
+
+      const getCounterColor = () => {
+        if (charCount >= 96) return "text-red-500";
+        if (charCount >= 80) return "text-amber-500";
+        return "text-green-600";
+      };
+
   const handleDonate = async () => {
     if (!isValid || step !== "idle") return;
     setError(null);
@@ -119,6 +127,17 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
             className="input-field" />
         </div>
 
+        {/*  Helper text */}
+          <p className="text-xs text-muted-foreground mt-1">
+            Your message will appear in the public donation feed
+          </p>
+
+          {/* Character counter */}
+          <p className={`text-xs mt-1 ${getCounterColor()}`}>
+            {charCount} / 100 characters
+          </p>
+        </div>
+
         {step === "error" && error && (
           <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-body">{error}</div>
         )}
@@ -139,7 +158,6 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
           </p>
         )}
       </div>
-    </div>
   );
 }
 
