@@ -5,8 +5,11 @@
 const express = require("express");
 const router  = express.Router();
 const { profiles } = require("../services/store");
+const { createRateLimiter } = require("../middleware/rateLimiter")
 
-router.get("/", (req, res) => {
+const leaderboardLimiter = createRateLimiter(50, 1);
+
+router.get("/", leaderboardLimiter ,(req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
   const entries = Array.from(profiles.values())
     .sort((a, b) => parseFloat(b.totalDonatedXLM) - parseFloat(a.totalDonatedXLM))

@@ -5,11 +5,14 @@
 const express  = require("express");
 const router   = express.Router();
 const { projects } = require("../services/store");
+const { createRateLimiter } = require("../middleware/rateLimiter")
+
+const projectsLimiter = createRateLimiter(100, 1);
 
 const VALID_STATUSES    = ["active","completed","paused"];
 const VALID_CATEGORIES  = ["Reforestation","Solar Energy","Ocean Conservation","Clean Water","Wildlife Protection","Carbon Capture","Wind Energy","Sustainable Agriculture","Other"];
 
-router.get("/", (req, res) => {
+router.get("/", projectsLimiter,(req, res) => {
   const { category, status, verified, limit = 50 } = req.query;
   let result = Array.from(projects.values());
   if (status && VALID_STATUSES.includes(status))     result = result.filter(p => p.status === status);
