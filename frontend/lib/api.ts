@@ -23,7 +23,7 @@ export async function fetchProject(id: string) {
 
 // ── Donations ─────────────────────────────────────────────────────────────────
 export async function recordDonation(payload: {
-  projectId: string; donorAddress: string; amountXLM: string;
+  projectId: string; donorAddress: string; amountXLM?: string; amount?: string; currency?: "XLM" | "USDC";
   message?: string; transactionHash: string;
 }) {
   const { data } = await api.post<{ success: boolean; data: Donation }>("/api/donations", payload);

@@ -38,15 +38,16 @@ function computeBadges(totalXLM) {
 // POST /api/donations — record a donation after on-chain tx
 router.post("/", donationLimiter ,(req, res, next) => {
   try {
-    const { projectId, donorAddress, amountXLM, message, transactionHash } = req.body;
+    const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
     const project = projects.get(projectId);
     if (!project) { const e = new Error("Project not found"); e.status = 404; throw e; }
 
-    const amount = parseFloat(amountXLM);
-    if (isNaN(amount) || amount <= 0) { const e = new Error("Invalid amount"); e.status = 400; throw e; }
+  // Determine numeric amount depending on currency
+  const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0) { const e = new Error("Invalid amount"); e.status = 400; throw e; }
 
     // Deduplicate by tx hash
     const existing = Array.from(donations.values()).find(d => d.transactionHash === transactionHash);
@@ -54,14 +55,19 @@ router.post("/", donationLimiter ,(req, res, next) => {
 
     const donation = {
       id: uuid(), projectId, donorAddress,
-      amountXLM: amount.toFixed(7),
+      // Preserve legacy amountXLM for XLM donations, but store generic amount & currency for multi-currency support
+      ...(currency === "XLM" ? { amountXLM: parsedAmount.toFixed(7) } : {}),
+      amount: parsedAmount.toString(),
+      currency,
       message:   message?.trim().slice(0, 100) || null,
       transactionHash, createdAt: new Date().toISOString(),
     };
     donations.set(donation.id, donation);
 
     // Update project totals
-    project.raisedXLM = (parseFloat(project.raisedXLM) + amount).toFixed(7);
+    if (currency === "XLM") {
+      project.raisedXLM = (parseFloat(project.raisedXLM) + parsedAmount).toFixed(7);
+    }
     project.donorCount = Array.from(donations.values()).filter(d => d.projectId === projectId).map(d => d.donorAddress).filter((v, i, a) => a.indexOf(v) === i).length;
     project.updatedAt = new Date().toISOString();
 
@@ -71,8 +77,11 @@ router.post("/", donationLimiter ,(req, res, next) => {
       totalDonatedXLM: "0", projectsSupported: 0,
       badges: [], createdAt: new Date().toISOString(),
     };
-    const newTotal = parseFloat(profile.totalDonatedXLM) + amount;
-    profile.totalDonatedXLM = newTotal.toFixed(7);
+    // Only update XLM totals for now
+    if (currency === "XLM") {
+      const newTotal = parseFloat(profile.totalDonatedXLM) + parsedAmount;
+      profile.totalDonatedXLM = newTotal.toFixed(7);
+    }
     profile.projectsSupported = Array.from(donations.values()).filter(d => d.donorAddress === donorAddress).map(d => d.projectId).filter((v,i,a) => a.indexOf(v) === i).length;
     profile.badges = computeBadges(newTotal);
     profiles.set(donorAddress, profile);

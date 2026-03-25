@@ -39,7 +39,10 @@ export interface Donation {
   id: string;
   projectId: string;
   donorAddress: string;
-  amountXLM: string;
+  // Amount as stored and the currency used (e.g. "XLM" or "USDC").
+  amountXLM?: string;
+  amount?: string;
+  currency?: "XLM" | "USDC";
   message?: string;
   transactionHash: string;
   createdAt: string;
