@@ -1,13 +1,16 @@
 /**
  * lib/stellar.ts — Stellar SDK helpers for GreenPay
  */
-import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo } from "@stellar/stellar-sdk";
+import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative } from "@stellar/stellar-sdk";
 
 const NETWORK     = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
+const RPC_URL     = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
 
 export const NETWORK_PASSPHRASE = NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 export const server = new Horizon.Server(HORIZON_URL);
+export const rpcServer = new rpc.Server(RPC_URL);
+export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || "";
 
 export async function getXLMBalance(publicKey: string): Promise<string> {
   try {
@@ -60,4 +63,50 @@ export function explorerUrl(hash: string): string {
 }
 export function accountUrl(addr: string): string {
   return `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}/account/${addr}`;
+}
+
+/**
+ * Queries the Soroban contract for global impact metrics.
+ */
+export async function getGlobalImpactStats() {
+  if (!CONTRACT_ID) {
+    console.warn("CONTRACT_ID not set, returning zero stats");
+    return { totalRaisedXLM: "0", totalCO2OffsetGrams: "0", donationCount: 0 };
+  }
+
+  const contract = new Contract(CONTRACT_ID);
+  
+  try {
+    const [totalRaised, totalCO2, donationCount] = await Promise.all([
+      simulateCall(contract, "get_global_total"),
+      simulateCall(contract, "get_global_co2"),
+      simulateCall(contract, "get_donation_count")
+    ]);
+
+    // totalRaised is in stroops (i128), totalCO2 is in grams (i128)
+    return {
+      totalRaisedXLM: (Number(totalRaised) / 10_000_000).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      totalCO2OffsetGrams: totalCO2.toString(),
+      donationCount: Number(donationCount),
+    };
+  } catch (err) {
+    console.error("Failed to fetch global impact stats:", err);
+    return { totalRaisedXLM: "0", totalCO2OffsetGrams: "0", donationCount: 0 };
+  }
+}
+
+async function simulateCall(contract: Contract, method: string, args: any[] = []) {
+  // We use a dummy account for simulation
+  const dummyAccount = new Horizon.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
+  const tx = new TransactionBuilder(dummyAccount, { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
+    .addOperation(contract.call(method, ...args))
+    .setTimeout(30)
+    .build();
+
+  const result = await rpcServer.simulateTransaction(tx);
+
+  if (rpc.Api.isSimulationSuccess(result)) {
+    return scValToNative(result.result!.retval);
+  }
+  throw new Error(`Simulation failed for ${method}: ${JSON.stringify(result)}`);
 }

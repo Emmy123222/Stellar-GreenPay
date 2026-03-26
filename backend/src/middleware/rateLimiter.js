@@ -5,7 +5,7 @@ const rateLimit = require('express-rate-limit')
  * @param {number} maxRequests - max requests allowed
  * @param {number} windowMinutes - time window in minutes
  */
-export const createRateLimiter = (maxRequests, windowMinutes) => {
+const createRateLimiter = (maxRequests, windowMinutes) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max: maxRequests,
@@ -19,3 +19,5 @@ export const createRateLimiter = (maxRequests, windowMinutes) => {
     },
   });
 };
+
+module.exports = { createRateLimiter };
