@@ -76,3 +76,54 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
     </Link>
   );
 }
+
+export function ProjectCardSkeleton() {
+  return (
+    <div className="card animate-pulse flex flex-col h-full border border-[rgba(34,114,57,0.06)] shadow-none pointer-events-none">
+      
+      {/* Category icon + badges skeleton */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 rounded-xl bg-forest-100 border border-forest-200" />
+          <div className="space-y-1.5">
+            <div className="h-2.5 bg-forest-100 rounded-full w-16" />
+            <div className="h-2 bg-forest-50 rounded-full w-20" />
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5">
+           <div className="h-5 bg-forest-50 rounded-full w-16" />
+           <div className="h-5 bg-forest-100 rounded-full w-12" />
+        </div>
+      </div>
+
+      {/* Name & description skeleton */}
+      <div className="space-y-2.5 mb-5 flex-1">
+        <div className="h-4 bg-forest-100 rounded-full w-3/4" />
+        <div className="h-4 bg-forest-100 rounded-full w-1/2" />
+        <div className="pt-2 space-y-2">
+          <div className="h-2.5 bg-forest-50 rounded-full w-full" />
+          <div className="h-2.5 bg-forest-50 rounded-full w-full" />
+          <div className="h-2.5 bg-forest-50 rounded-full w-2/3" />
+        </div>
+      </div>
+
+      {/* Progress bar skeleton */}
+      <div className="mb-5">
+        <div className="flex justify-between mb-2">
+          <div className="h-2 bg-forest-50 rounded-full w-1/4" />
+          <div className="h-2 bg-forest-50 rounded-full w-1/3" />
+        </div>
+        <div className="h-2.5 bg-forest-100 rounded-full w-full" />
+      </div>
+
+      {/* Stats row skeleton */}
+      <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.05)]">
+        <div className="flex items-center gap-4">
+          <div className="h-3 bg-forest-50 rounded-full w-14" />
+          <div className="h-3 bg-forest-50 rounded-full w-16" />
+        </div>
+        <div className="h-3 bg-forest-100 rounded-full w-12" />
+      </div>
+    </div>
+  );
+}

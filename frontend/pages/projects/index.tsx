@@ -3,7 +3,7 @@
  */
 import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
-import ProjectCard from "@/components/ProjectCard";
+import ProjectCard, { ProjectCardSkeleton } from "@/components/ProjectCard";
 import { fetchProjects } from "@/lib/api";
 import { PROJECT_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
@@ -130,12 +130,7 @@ export default function ProjectsPage() {
           {loading ? (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="card animate-pulse space-y-3 h-64">
-                  <div className="flex gap-3"><div className="w-10 h-10 bg-forest-100 rounded-xl"/><div className="flex-1 space-y-1"><div className="h-3 bg-forest-100 rounded w-1/2"/><div className="h-2 bg-forest-50 rounded w-1/3"/></div></div>
-                  <div className="h-5 bg-forest-100 rounded w-3/4"/>
-                  <div className="h-3 bg-forest-50 rounded w-full"/>
-                  <div className="h-3 bg-forest-50 rounded w-5/6"/>
-                </div>
+                <ProjectCardSkeleton key={i} />
               ))}
             </div>
           ) : filtered.length === 0 ? (
