@@ -162,3 +162,86 @@
   .font-body    { font-family: 'Nunito', sans-serif; }
   .font-mono    { font-family: 'JetBrains Mono', monospace; }
 }
+
+/* Celebration Animation - CSS-only confetti/leaf shower */
+@keyframes leaf-fall {
+  0% {
+    transform: translateY(-10vh) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+@keyframes confetti-fall {
+  0% {
+    transform: translateY(-10vh) rotate(0deg) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(110vh) rotate(360deg) scale(0.5);
+    opacity: 0;
+  }
+}
+
+.celebration-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.celebration-leaf,
+.celebration-confetti {
+  position: absolute;
+  top: -20px;
+  animation: leaf-fall 4s linear forwards, confetti-fall 3.5s ease-out forwards;
+}
+
+.celebration-leaf {
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(135deg, #4caf70, #81c784);
+  border-radius: 0 70% 0 70%;
+}
+
+.celebration-confetti {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.celebration-confetti:nth-child(odd) {
+  background: #ffeb3b;
+}
+.celebration-confetti:nth-child(3n) {
+  background: #4caf70;
+}
+.celebration-confetti:nth-child(5n) {
+  background: #2196f3;
+}
+.celebration-confetti:nth-child(7n) {
+  background: #e91e63;
+}
+
+/* Progress bar shimmer/glow at 100% */
+@keyframes shimmer-glow {
+  0%, 100% {
+    box-shadow: 0 0 8px rgba(76, 175, 112, 0.4);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(76, 175, 112, 0.7);
+    filter: brightness(1.1);
+  }
+}
+
+.progress-fill-complete {
+  animation: shimmer-glow 2s ease-in-out infinite;
+}

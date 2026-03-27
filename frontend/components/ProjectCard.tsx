@@ -7,6 +7,7 @@ import { formatXLM, formatCO2, progressPercent, statusClass, statusLabel, CATEGO
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
+  const isComplete = pct >= 100;
 
   return (
     <Link href={`/projects/${project.id}`}>
@@ -25,7 +26,11 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           </div>
           <div className="flex items-center gap-1.5">
             {project.verified && <span className="badge-verified text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-body">✓ Verified</span>}
-            <span className={statusClass(project.status)}>{statusLabel(project.status)}</span>
+            {isComplete ? (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 font-body font-semibold">✅ Fully Funded</span>
+            ) : (
+              <span className={statusClass(project.status)}>{statusLabel(project.status)}</span>
+            )}
           </div>
         </div>
 
@@ -39,13 +44,21 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
 
         {/* Progress bar */}
         <div className="mb-4">
-          <div className="flex justify-between text-xs text-[#8aaa8a] mb-1.5 font-body">
-            <span>{formatXLM(project.raisedXLM)} raised</span>
-            <span>{pct}% of {formatXLM(project.goalXLM)}</span>
-          </div>
-          <div className="progress-bar">
-            <div className="progress-fill" style={{ width: `${pct}%` }} />
-          </div>
+          {isComplete ? (
+            <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-lg text-center text-sm font-semibold shadow-sm">
+              ✅ Fully Funded
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between text-xs text-[#8aaa8a] mb-1.5 font-body">
+                <span>{formatXLM(project.raisedXLM)} raised</span>
+                <span>{pct}% of {formatXLM(project.goalXLM)}</span>
+              </div>
+              <div className="progress-bar">
+                <div className={pct >= 100 ? "progress-fill progress-fill-complete" : "progress-fill"} style={{ width: `${Math.min(pct, 100)}%` }} />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Stats row */}

@@ -54,9 +54,25 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   );
 
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
+  const isComplete = pct >= 100;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+      {isComplete && (
+        <div className="celebration-overlay">
+          {Array.from({ length: 30 }).map((_, i) => (
+            <div
+              key={i}
+              className={i % 2 === 0 ? "celebration-leaf" : "celebration-confetti"}
+              style={{
+                left: `${Math.random() * 100}%`,
+                animationDelay: `${Math.random() * 2}s`,
+                animationDuration: `${3 + Math.random() * 2}s`,
+              }}
+            />
+          ))}
+        </div>
+      )}
 
       <Link href="/projects" className="inline-flex items-center gap-1 text-sm text-[#5a7a5a] hover:text-forest-700 transition-colors mb-6 font-body">
         ← Back to Projects
@@ -86,13 +102,21 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
 
             {/* Progress */}
             <div className="mb-5">
-              <div className="flex justify-between text-sm mb-2 font-body">
-                <span className="font-semibold text-forest-700">{formatXLM(project.raisedXLM)} raised</span>
-                <span className="text-[#5a7a5a]">{pct}% of {formatXLM(project.goalXLM)} goal</span>
-              </div>
-              <div className="progress-bar h-3">
-                <div className="progress-fill" style={{ width: `${pct}%` }} />
-              </div>
+              {isComplete ? (
+                <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-5 py-4 rounded-xl text-center font-semibold text-lg shadow-lg">
+                  🎉 Goal Reached!
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm mb-2 font-body">
+                    <span className="font-semibold text-forest-700">{formatXLM(project.raisedXLM)} raised</span>
+                    <span className="text-[#5a7a5a]">{pct}% of {formatXLM(project.goalXLM)} goal</span>
+                  </div>
+                  <div className="progress-bar h-3">
+                    <div className={pct >= 100 ? "progress-fill progress-fill-complete" : "progress-fill"} style={{ width: `${Math.min(pct, 100)}%` }} />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Stats row */}
