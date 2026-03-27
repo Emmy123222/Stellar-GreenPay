@@ -9,6 +9,7 @@ const helmet    = require("helmet");
 const morgan    = require("morgan");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
+const { runMigrations } = require("./db/migrate");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -37,8 +38,16 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
-app.listen(PORT, () => {
-  console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
+async function startServer() {
+  await runMigrations();
+  app.listen(PORT, () => {
+    console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error("[Startup Error]", err.message);
+  process.exit(1);
 });
 
 module.exports = app;
