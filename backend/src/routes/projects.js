@@ -4,9 +4,10 @@
 "use strict";
 const express = require("express");
 const router = express.Router();
-const { projects } = require("../services/store");
+const pool = require("../db/pool");
+const { mapProjectRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
-const { Contract, TransactionBuilder, Operation } = require("@stellar/stellar-sdk");
+const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 
 const VALID_STATUSES = ["active", "completed", "paused"];
 const VALID_CATEGORIES = [
@@ -21,32 +22,51 @@ const VALID_CATEGORIES = [
   "Other",
 ];
 
-router.get("/", (req, res) => {
-  const { category, status, verified, search, limit = 50 } = req.query;
-  let result = Array.from(projects.values());
-  if (status && VALID_STATUSES.includes(status))
-    result = result.filter((p) => p.status === status);
-  if (category && VALID_CATEGORIES.includes(category))
-    result = result.filter((p) => p.category === category);
-  if (verified === "true") result = result.filter((p) => p.verified === true);
+router.get("/", async (req, res, next) => {
+  try {
+    const { category, status, verified, search, limit = 50 } = req.query;
+    const where = [];
+    const values = [];
 
-  // Apply search filter if provided
-  if (search && typeof search === "string") {
-    const searchLower = search.toLowerCase();
-    result = result.filter(
-      (p) =>
-        p.name.toLowerCase().includes(searchLower) ||
-        p.description.toLowerCase().includes(searchLower) ||
-        p.location.toLowerCase().includes(searchLower) ||
-        (p.tags &&
-          p.tags.some((tag) => tag.toLowerCase().includes(searchLower))),
+    if (status && VALID_STATUSES.includes(status)) {
+      values.push(status);
+      where.push(`status = $${values.length}`);
+    }
+    if (category && VALID_CATEGORIES.includes(category)) {
+      values.push(category);
+      where.push(`category = $${values.length}`);
+    }
+    if (verified === "true") {
+      where.push("verified = true");
+    }
+    if (search && typeof search === "string") {
+      values.push(`%${search}%`);
+      where.push(`(
+        name ILIKE $${values.length}
+        OR description ILIKE $${values.length}
+        OR location ILIKE $${values.length}
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(tags) AS tag
+          WHERE tag ILIKE $${values.length}
+        )
+      )`);
+    }
+
+    values.push(Math.min(Number.parseInt(limit, 10) || 50, 100));
+    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+    const result = await pool.query(
+      `SELECT * FROM projects ${whereClause}
+       ORDER BY created_at DESC
+       LIMIT $${values.length}`,
+      values,
     );
-  }
 
-  result = result
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, Math.min(parseInt(limit) || 50, 100));
-  res.json({ success: true, data: result });
+    res.json({ success: true, data: result.rows.map(mapProjectRow) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 /**
@@ -105,24 +125,30 @@ router.post("/admin/confirm", async (req, res) => {
     const tx = await server.getTransaction(transactionHash);
     if (!tx.successful) throw new Error("Transaction failed");
 
-    const project = projects.get(projectId);
-    if (project) {
-      project.onChainVerified = true;
-      project.verified = true;
-      project.updatedAt = new Date().toISOString();
-      projects.set(projectId, project);
-    }
+    const result = await pool.query(
+      `UPDATE projects
+       SET on_chain_verified = true,
+           verified = true,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [projectId],
+    );
 
-    res.json({ success: true, data: project });
+    res.json({ success: true, data: result.rows[0] ? mapProjectRow(result.rows[0]) : null });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-router.get("/:id", (req, res) => {
-  const p = projects.get(req.params.id);
-  if (!p) return res.status(404).json({ error: "Project not found" });
-  res.json({ success: true, data: p });
+router.get("/:id", async (req, res, next) => {
+  try {
+    const result = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Project not found" });
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;

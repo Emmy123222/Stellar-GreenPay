@@ -5,10 +5,9 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuid } = require("uuid");
-const { donations, projects, profiles } = require("../services/store");
-const { createRateLimiter } = require("../middleware/rateLimiter")
-
-
+const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
+const { computeBadges, mapDonationRow } = require("../services/store");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 function validateKey(k) {
@@ -19,107 +18,156 @@ function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) { const e = new Error("Invalid transaction hash"); e.status = 400; throw e; }
 }
 
-// Badge thresholds in XLM
-const BADGE_THRESHOLDS = [
-  { tier: "earth",    min: 2000 },
-  { tier: "forest",   min: 500 },
-  { tier: "tree",     min: 100 },
-  { tier: "seedling", min: 10 },
-];
-
-function computeBadges(totalXLM) {
-  const earned = [];
-  for (const b of BADGE_THRESHOLDS) {
-    if (totalXLM >= b.min) { earned.push({ tier: b.tier, earnedAt: new Date().toISOString() }); break; }
-  }
-  return earned;
-}
-
 // POST /api/donations — record a donation after on-chain tx
-router.post("/", donationLimiter ,(req, res, next) => {
+router.post("/", donationLimiter, async (req, res, next) => {
+  const client = await pool.connect();
+  let inTransaction = false;
   try {
     const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
-    const project = projects.get(projectId);
-    if (!project) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectResult = await client.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
 
-  // Determine numeric amount depending on currency
-  const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
-  if (isNaN(parsedAmount) || parsedAmount <= 0) { const e = new Error("Invalid amount"); e.status = 400; throw e; }
+    // Determine numeric amount depending on currency
+    const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) { const e = new Error("Invalid amount"); e.status = 400; throw e; }
 
     // Deduplicate by tx hash
-    const existing = Array.from(donations.values()).find(d => d.transactionHash === transactionHash);
-    if (existing) return res.json({ success: true, data: existing });
+    const existingResult = await client.query(
+      "SELECT * FROM donations WHERE transaction_hash = $1",
+      [transactionHash],
+    );
+    if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
 
-    const donation = {
-      id: uuid(), projectId, donorAddress,
-      // Preserve legacy amountXLM for XLM donations, but store generic amount & currency for multi-currency support
-      ...(currency === "XLM" ? { amountXLM: parsedAmount.toFixed(7) } : {}),
-      amount: parsedAmount.toString(),
-      currency,
-      message:   message?.trim().slice(0, 100) || null,
-      transactionHash, createdAt: new Date().toISOString(),
-    };
-    donations.set(donation.id, donation);
+    await client.query("BEGIN");
+    inTransaction = true;
+
+    const donationResult = await client.query(
+      `INSERT INTO donations (
+        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      RETURNING *`,
+      [
+        uuid(),
+        projectId,
+        donorAddress,
+        currency === "XLM" ? parsedAmount : null,
+        parsedAmount,
+        currency,
+        message?.trim().slice(0, 100) || null,
+        transactionHash,
+      ],
+    );
 
     // Update project totals
-    if (currency === "XLM") {
-      project.raisedXLM = (parseFloat(project.raisedXLM) + parsedAmount).toFixed(7);
-    }
-    project.donorCount = Array.from(donations.values()).filter(d => d.projectId === projectId).map(d => d.donorAddress).filter((v, i, a) => a.indexOf(v) === i).length;
-    project.updatedAt = new Date().toISOString();
+    await client.query(
+      `UPDATE projects
+       SET raised_xlm = raised_xlm + $1::numeric,
+           donor_count = (
+             SELECT COUNT(DISTINCT donor_address)
+             FROM donations
+             WHERE project_id = $2
+           ),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [currency === "XLM" ? parsedAmount : 0, projectId],
+    );
 
     // Update donor profile
-    const profile = profiles.get(donorAddress) || {
-      publicKey: donorAddress, displayName: null, bio: null,
-      totalDonatedXLM: "0", projectsSupported: 0,
-      badges: [], createdAt: new Date().toISOString(),
-    };
-    // Only update XLM totals for now
-    if (currency === "XLM") {
-      const newTotal = parseFloat(profile.totalDonatedXLM) + parsedAmount;
-      profile.totalDonatedXLM = newTotal.toFixed(7);
-    }
-    profile.projectsSupported = Array.from(donations.values()).filter(d => d.donorAddress === donorAddress).map(d => d.projectId).filter((v,i,a) => a.indexOf(v) === i).length;
-    profile.badges = computeBadges(newTotal);
-    profiles.set(donorAddress, profile);
+    const existingProfileResult = await client.query(
+      "SELECT * FROM profiles WHERE public_key = $1",
+      [donorAddress],
+    );
+    const existingProfile = existingProfileResult.rows[0];
+    const previousTotal = existingProfile
+      ? Number.parseFloat(existingProfile.total_donated_xlm || "0")
+      : 0;
+    const newTotal = currency === "XLM" ? previousTotal + parsedAmount : previousTotal;
+    const projectsSupportedResult = await client.query(
+      `SELECT COUNT(DISTINCT project_id) AS count
+       FROM donations
+       WHERE donor_address = $1`,
+      [donorAddress],
+    );
+    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
+    const badges = computeBadges(newTotal);
 
-    res.status(201).json({ success: true, data: donation });
-  } catch (e) { next(e); }
+    await client.query(
+      `INSERT INTO profiles (
+        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())
+      ON CONFLICT (public_key) DO UPDATE SET
+        total_donated_xlm = EXCLUDED.total_donated_xlm,
+        projects_supported = EXCLUDED.projects_supported,
+        badges = EXCLUDED.badges,
+        updated_at = EXCLUDED.updated_at`,
+      [
+        donorAddress,
+        existingProfile?.display_name || null,
+        existingProfile?.bio || null,
+        newTotal.toFixed(7),
+        projectsSupported,
+        JSON.stringify(badges),
+      ],
+    );
+
+    await client.query("COMMIT");
+    inTransaction = false;
+    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+  } catch (e) {
+    if (inTransaction) await client.query("ROLLBACK");
+    next(e);
+  } finally {
+    client.release();
+  }
 });
 
 // GET /api/donations/project/:id
-router.get("/project/:projectId", (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
-  const cursor = req.query.cursor ? new Date(req.query.cursor) : null;
+router.get("/project/:projectId", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+    const values = hasCursor
+      ? [req.params.projectId, req.query.cursor, limit + 1]
+      : [req.params.projectId, limit + 1];
 
-  let allDonations = Array.from(donations.values())
-    .filter(d => d.projectId === req.params.projectId)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const query = hasCursor
+      ? `SELECT * FROM donations
+         WHERE project_id = $1
+           AND created_at < $2::timestamptz
+         ORDER BY created_at DESC
+         LIMIT $3`
+      : `SELECT * FROM donations
+         WHERE project_id = $1
+         ORDER BY created_at DESC
+         LIMIT $2`;
 
-  // Filter by cursor if provided (only get donations older than cursor)
-  if (cursor) {
-    allDonations = allDonations.filter(d => new Date(d.createdAt) < cursor);
+    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore ? result[result.length - 1].createdAt : null;
+
+    res.json({ success: true, data: result, nextCursor });
+  } catch (e) {
+    next(e);
   }
-
-  const result = allDonations.slice(0, limit);
-  const nextCursor = result.length === limit && allDonations.length > limit
-    ? result[result.length - 1].createdAt
-    : null;
-
-  res.json({ success: true, data: result, nextCursor });
 });
 
 // GET /api/donations/donor/:publicKey
-router.get("/donor/:publicKey", (req, res, next) => {
+router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
-    const result = Array.from(donations.values())
-      .filter(d => d.donorAddress === req.params.publicKey)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    res.json({ success: true, data: result });
+    const result = await pool.query(
+      `SELECT * FROM donations
+       WHERE donor_address = $1
+       ORDER BY created_at DESC`,
+      [req.params.publicKey],
+    );
+    res.json({ success: true, data: result.rows.map(mapDonationRow) });
   } catch (e) { next(e); }
 });
 

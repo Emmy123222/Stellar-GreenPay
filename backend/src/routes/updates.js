@@ -4,13 +4,21 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
-const { updates } = require("../services/store");
+const pool = require("../db/pool");
+const { mapProjectUpdateRow } = require("../services/store");
 
-router.get("/:projectId", (req, res) => {
-  const result = Array.from(updates.values())
-    .filter(u => u.projectId === req.params.projectId)
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  res.json({ success: true, data: result });
+router.get("/:projectId", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT * FROM project_updates
+       WHERE project_id = $1
+       ORDER BY created_at DESC`,
+      [req.params.projectId],
+    );
+    res.json({ success: true, data: result.rows.map(mapProjectUpdateRow) });
+  } catch (e) {
+    next(e);
+  }
 });
 
 module.exports = router;

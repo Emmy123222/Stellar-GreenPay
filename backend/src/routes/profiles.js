@@ -4,8 +4,9 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
-const { profiles } = require("../services/store");
-const { createRateLimiter } = require("../middleware/rateLimiter")
+const pool = require("../db/pool");
+const { mapProfileRow } = require("../services/store");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid public key"); e.status = 400; throw e; }
@@ -13,31 +14,36 @@ function validateKey(k) {
 
 const profilePostLimiter = createRateLimiter(20, 1);
 
-router.get("/:publicKey",(req, res, next) => {
+router.get("/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
-    const p = profiles.get(req.params.publicKey);
-    if (!p) { const e = new Error("Profile not found"); e.status = 404; throw e; }
-    res.json({ success: true, data: p });
+    const result = await pool.query("SELECT * FROM profiles WHERE public_key = $1", [req.params.publicKey]);
+    if (!result.rows[0]) { const e = new Error("Profile not found"); e.status = 404; throw e; }
+    res.json({ success: true, data: mapProfileRow(result.rows[0]) });
   } catch (e) { next(e); }
 });
 
-router.post("/", profilePostLimiter, (req, res, next) => {
+router.post("/", profilePostLimiter, async (req, res, next) => {
   try {
     const { publicKey, displayName, bio } = req.body;
     validateKey(publicKey);
-    const existing = profiles.get(publicKey) || {
-      publicKey, totalDonatedXLM: "0", projectsSupported: 0,
-      badges: [], createdAt: new Date().toISOString(),
-    };
-    const updated = {
-      ...existing,
-      displayName: displayName?.trim().slice(0, 30) || existing.displayName || null,
-      bio:         bio?.trim().slice(0, 300)         || existing.bio         || null,
-      updatedAt:   new Date().toISOString(),
-    };
-    profiles.set(publicKey, updated);
-    res.json({ success: true, data: updated });
+    const trimmedDisplayName = displayName?.trim().slice(0, 30) || null;
+    const trimmedBio = bio?.trim().slice(0, 300) || null;
+
+    const result = await pool.query(
+      `INSERT INTO profiles (
+        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, 0, 0, '[]'::jsonb, NOW(), NOW())
+      ON CONFLICT (public_key) DO UPDATE SET
+        display_name = COALESCE($2, profiles.display_name),
+        bio = COALESCE($3, profiles.bio),
+        updated_at = NOW()
+      RETURNING *`,
+      [publicKey, trimmedDisplayName, trimmedBio],
+    );
+
+    res.json({ success: true, data: mapProfileRow(result.rows[0]) });
   } catch (e) { next(e); }
 });
 
