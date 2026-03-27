@@ -3,7 +3,7 @@
  * Donation form for a climate project.
  */
 import { useState, useEffect } from "react";
-import { buildDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance } from "@/lib/stellar";
+import { buildDonationTransaction, buildContractDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { recordDonation } from "@/lib/api";
 import { formatXLM } from "@/utils/format";
@@ -30,6 +30,7 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
   const [xlmBalance, setXlmBalance] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
+  const [donorBadge, setDonorBadge] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -79,46 +80,98 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
     setError(null);
 
     try {
-      setStep("building");
-      const asset = currency === "USDC"
-        ? { code: "USDC", issuer: process.env.NEXT_PUBLIC_USDC_ISSUER }
-        : undefined;
+      const useContract = CONTRACT_ID && currency === "XLM";
 
-      if (currency === "USDC") {
-        // If usdc issuer is not configured, surface helpful error
-        if (!process.env.NEXT_PUBLIC_USDC_ISSUER) throw new Error("USDC issuer not configured (NEXT_PUBLIC_USDC_ISSUER).");
-        // If trustline missing, block
-        if (trustlineMissing) throw new Error("No USDC trustline on your account. Add a trustline to receive/send USDC.");
+      if (useContract) {
+        setStep("building");
+
+        // Get native XLM token address (for testnet/mainnet)
+        const nativeTokenAddress = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"; // Native XLM on testnet
+        const msgHash = message.trim() ? hashMessage(message.trim()) : 0;
+
+        const tx = await buildContractDonationTransaction({
+          contractId: CONTRACT_ID,
+          tokenAddress: nativeTokenAddress,
+          donor: publicKey,
+          projectId: project.id,
+          amount: amountNum.toFixed(7),
+          msgHash,
+        });
+
+        setStep("signing");
+        const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
+        if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
+
+        setStep("submitting");
+        const result = await submitTransaction(signedXDR);
+        setTxHash(result.hash);
+
+        setStep("recording");
+        // Query updated donor stats from contract
+        const stats = await getDonorStats(publicKey);
+        if (stats && stats.badge) {
+          const badgeNames: Record<string, string> = {
+            Seedling: "🌱 Seedling",
+            Tree: "🌳 Tree",
+            Forest: "🌲 Forest",
+            EarthGuardian: "🌍 Earth Guardian",
+          };
+          setDonorBadge(badgeNames[stats.badge] || null);
+        }
+
+        // Still record in backend for feed/analytics
+        await recordDonation({
+          projectId: project.id,
+          donorAddress: publicKey,
+          amount: amountNum.toString(),
+          currency: currency,
+          message: message.trim() || undefined,
+          transactionHash: result.hash,
+        });
+
+        setStep("success");
+        onSuccess?.();
+      } else {
+      // Fallback to standard payment
+        setStep("building");
+        const asset = currency === "USDC"
+          ? { code: "USDC", issuer: process.env.NEXT_PUBLIC_USDC_ISSUER }
+          : undefined;
+
+        if (currency === "USDC") {
+          if (!process.env.NEXT_PUBLIC_USDC_ISSUER) throw new Error("USDC issuer not configured (NEXT_PUBLIC_USDC_ISSUER).");
+          if (trustlineMissing) throw new Error("No USDC trustline on your account. Add a trustline to receive/send USDC.");
+        }
+
+        const tx = await buildDonationTransaction({
+          fromPublicKey: publicKey,
+          toPublicKey: project.walletAddress,
+          amount: currency === "XLM" ? amountNum.toFixed(7) : amountNum.toFixed(2),
+          memo: `GreenPay:${project.id.slice(0, 16)}`,
+          asset,
+        });
+
+        setStep("signing");
+        const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
+        if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
+
+        setStep("submitting");
+        const result = await submitTransaction(signedXDR);
+        setTxHash(result.hash);
+
+        setStep("recording");
+        await recordDonation({
+          projectId: project.id,
+          donorAddress: publicKey,
+          amount: amountNum.toString(),
+          currency: currency,
+          message: message.trim() || undefined,
+          transactionHash: result.hash,
+        });
+
+        setStep("success");
+        onSuccess?.();
       }
-
-      const tx = await buildDonationTransaction({
-        fromPublicKey: publicKey,
-        toPublicKey:   project.walletAddress,
-        amount:        currency === "XLM" ? amountNum.toFixed(7) : amountNum.toFixed(2),
-        memo:          `GreenPay:${project.id.slice(0, 16)}`,
-        asset,
-      });
-
-      setStep("signing");
-      const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
-      if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
-
-      setStep("submitting");
-      const result = await submitTransaction(signedXDR);
-      setTxHash(result.hash);
-
-      setStep("recording");
-      await recordDonation({
-        projectId:        project.id,
-        donorAddress:     publicKey,
-        amount:            amountNum.toString(),
-        currency:          currency,
-        message:          message.trim() || undefined,
-        transactionHash:  result.hash,
-      });
-
-      setStep("success");
-      onSuccess?.();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "An error occurred");
       setStep("error");
@@ -132,8 +185,14 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Thank you!</h3>
         <p className="text-[#5a7a5a] text-sm mb-4 font-body">
-          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>.
+          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>.
         </p>
+        {donorBadge && (
+          <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
+            <p className="text-sm font-semibold text-forest-900 mb-1">🎉 Badge Earned!</p>
+            <p className="text-lg font-bold text-forest-700">{donorBadge}</p>
+          </div>
+        )}
         <a href={explorerUrl(txHash)} target="_blank" rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-sm text-forest-600 hover:text-forest-700 transition-colors font-body">
           View on Stellar Expert ↗
@@ -141,7 +200,6 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
       </div>
     );
   }
-
   return (
     <div className="card animate-fade-in">
       <h3 className="font-display text-lg font-semibold text-forest-900 mb-1">Make a Donation</h3>

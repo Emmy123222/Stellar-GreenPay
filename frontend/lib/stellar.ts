@@ -1,7 +1,7 @@
 /**
  * lib/stellar.ts — Stellar SDK helpers for GreenPay
  */
-import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative } from "@stellar/stellar-sdk";
+import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal } from "@stellar/stellar-sdk";
 
 const NETWORK     = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -45,6 +45,63 @@ export async function buildDonationTransaction({
     .setTimeout(60);
   if (memo) builder.addMemo(Memo.text(memo.slice(0, 28)));
   return builder.build();
+}
+
+/**
+ * Builds a Soroban contract donation transaction.
+ * Invokes the contract's donate() function which transfers XLM and records the donation on-chain.
+ */
+export async function buildContractDonationTransaction({
+  contractId,
+  tokenAddress,
+  donor,
+  projectId,
+  amount,
+  msgHash,
+}: {
+  contractId: string;
+  tokenAddress: string;
+  donor: string;
+  projectId: string;
+  amount: string;
+  msgHash: number;
+}) {
+  const source = await server.loadAccount(donor);
+  const contract = new Contract(contractId);
+
+  // Convert parameters to Soroban types
+  const donorAddress = new Address(donor);
+  const tokenAddr = new Address(tokenAddress);
+  const amountInStroops = Math.floor(parseFloat(amount) * 10_000_000);
+
+  // Build the contract invocation transaction
+  const builder = new TransactionBuilder(source, {
+    fee: "1000000", // Higher fee for contract calls
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call(
+        "donate",
+        tokenAddr.toScVal(),
+        donorAddress.toScVal(),
+        nativeToScVal(projectId, { type: "string" }),
+        nativeToScVal(amountInStroops, { type: "i128" }),
+        nativeToScVal(msgHash, { type: "u32" })
+      )
+    )
+    .setTimeout(60);
+
+  const tx = builder.build();
+
+  // Simulate to get the resource fees
+  const simulated = await rpcServer.simulateTransaction(tx);
+
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    // Prepare the transaction with simulation results
+    return rpc.assembleTransaction(tx, simulated).build();
+  } else {
+    throw new Error(`Contract simulation failed: ${JSON.stringify(simulated)}`);
+  }
 }
 
 export async function submitTransaction(signedXDR: string) {
@@ -93,6 +150,45 @@ export async function getGlobalImpactStats() {
     console.error("Failed to fetch global impact stats:", err);
     return { totalRaisedXLM: "0", totalCO2OffsetGrams: "0", donationCount: 0 };
   }
+}
+
+/**
+ * Queries the contract for donor statistics including badge tier.
+ */
+export async function getDonorStats(donorAddress: string) {
+  if (!CONTRACT_ID) {
+    return null;
+  }
+
+  const contract = new Contract(CONTRACT_ID);
+
+  try {
+    const donor = new Address(donorAddress);
+    const stats = await simulateCall(contract, "get_donor_stats", [donor.toScVal()]);
+
+    return {
+      totalDonated: Number(stats.total_donated) / 10_000_000,
+      donationCount: Number(stats.donation_count),
+      badge: stats.badge,
+      co2OffsetGrams: Number(stats.co2_offset_grams),
+    };
+  } catch (err) {
+    console.error("Failed to fetch donor stats:", err);
+    return null;
+  }
+}
+
+/**
+ * Simple djb2 hash function for donation messages.
+ * Returns a 32-bit unsigned integer hash.
+ */
+export function hashMessage(message: string): number {
+  let hash = 5381;
+  for (let i = 0; i < message.length; i++) {
+    hash = ((hash << 5) + hash) + message.charCodeAt(i);
+    hash = hash >>> 0; // Convert to unsigned 32-bit integer
+  }
+  return hash;
 }
 
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
