@@ -30,6 +30,7 @@ export interface ClimateProject {
   co2OffsetKg: number;         // estimated CO2 offset in kg
   status: ProjectStatus;
   verified: boolean;
+  onChainVerified?: boolean;
   tags: string[];
   createdAt: string;
   updatedAt: string;

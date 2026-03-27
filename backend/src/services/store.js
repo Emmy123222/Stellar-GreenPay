@@ -20,7 +20,7 @@ const seedProjects = [
     category: "Reforestation", location: "Brazil, South America",
     walletAddress: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
     goalXLM: "50000", raisedXLM: "18420", donorCount: 147,
-    co2OffsetKg: 245000, status: "active", verified: true,
+    co2OffsetKg: 245000, status: "active", verified: true, onChainVerified: true,
     tags: ["reforestation", "biodiversity", "amazon", "indigenous"],
     createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
     updatedAt: new Date().toISOString(),

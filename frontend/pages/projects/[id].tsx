@@ -92,7 +92,15 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
               <div className="flex-1">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <span className={statusClass(project.status)}>{statusLabel(project.status)}</span>
-                  {project.verified && <span className="badge-verified text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-body">✓ Verified</span>}
+                  {project.onChainVerified ? (
+                    <span className="badge-verified text-xs px-2.5 py-1 rounded-full bg-forest-100 text-forest-800 border border-forest-300 font-body font-bold shadow-sm">
+                      On-chain verified ✓
+                    </span>
+                  ) : project.verified ? (
+                    <span className="badge-verified text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-body">
+                      ✓ Verified
+                    </span>
+                  ) : null}
                   <span className="text-xs text-[#8aaa8a] bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">{project.category}</span>
                 </div>
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-forest-900">{project.name}</h1>

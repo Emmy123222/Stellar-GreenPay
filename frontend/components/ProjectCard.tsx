@@ -25,7 +25,15 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
             </div>
           </div>
           <div className="flex items-center gap-1.5">
-            {project.verified && <span className="badge-verified text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-body">✓ Verified</span>}
+            {project.onChainVerified ? (
+              <span className="badge-verified text-[10px] px-2 py-0.5 rounded-full bg-forest-100 text-forest-700 border border-forest-300 font-body font-bold shadow-sm">
+                On-chain verified ✓
+              </span>
+            ) : project.verified ? (
+              <span className="badge-verified text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-body">
+                ✓ Verified
+              </span>
+            ) : null}
             {isComplete ? (
               <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 font-body font-semibold">✅ Fully Funded</span>
             ) : (
