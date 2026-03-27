@@ -23,6 +23,7 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [loading,   setLoading]   = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
 
   useEffect(() => {
     if (!id) return;
@@ -41,6 +42,34 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
     } else {
       setCopyState('error');
       setTimeout(() => setCopyState('idle'), 2000);
+    }
+  };
+
+  const handleShare = async () => {
+    if (!project) return;
+
+    const shareData = {
+      title: `${project.name} - Stellar GreenPay`,
+      text: `Support ${project.name} on Stellar GreenPay - ${project.description.slice(0, 100)}...`,
+      url: window.location.href,
+    };
+
+    // Try Web Share API first (mobile)
+    if (navigator.share && /mobile|android|iphone|ipad/i.test(navigator.userAgent)) {
+      try {
+        await navigator.share(shareData);
+        return;
+      } catch (err) {
+        // User cancelled or share failed, fall back to clipboard
+        if ((err as Error).name === 'AbortError') return;
+      }
+    }
+
+    // Fallback to clipboard copy
+    const success = await copyToClipboard(window.location.href);
+    if (success) {
+      setShareState('copied');
+      setTimeout(() => setShareState('idle'), 2000);
     }
   };
 
@@ -102,6 +131,13 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
                     </span>
                   ) : null}
                   <span className="text-xs text-[#8aaa8a] bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">{project.category}</span>
+                  <button
+                    onClick={handleShare}
+                    className="btn-secondary text-xs py-1 px-3 ml-auto"
+                    title="Share this project"
+                  >
+                    {shareState === 'copied' ? '✓ Link copied!' : 'Share 🌍'}
+                  </button>
                 </div>
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-forest-900">{project.name}</h1>
                 <p className="text-[#5a7a5a] text-sm mt-1 font-body">📍 {project.location}</p>
