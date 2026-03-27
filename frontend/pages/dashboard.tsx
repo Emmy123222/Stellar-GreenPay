@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
+import EditProfileForm from "@/components/EditProfileForm";
 import { fetchProfile, fetchDonorHistory } from "@/lib/api";
 import { getXLMBalance } from "@/lib/stellar";
 import { formatXLM, formatCO2, timeAgo, shortenAddress, badgeEmoji, badgeLabel } from "@/utils/format";
@@ -66,25 +67,32 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
           { icon: "🌍", label: "Projects Supported", value: projectsCount.toString() },
           { icon: "💰", label: "XLM Balance",        value: balance ? formatXLM(balance) : "—" },
         ].map(stat => (
-          <div key={stat.label} className="card text-center shadow-sm">
+          <div key={stat.label} className="card text-center shadow-sm border border-forest-100/50">
             <p className="text-2xl mb-2">{stat.icon}</p>
             <p className="font-display font-bold text-forest-900 text-lg leading-tight">{loading ? "..." : stat.value}</p>
-            <p className="text-xs text-[#8aaa8a] mt-1 font-body">{stat.label}</p>
+            <p className="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
           </div>
         ))}
       </div>
 
+      {/* Profile Edit */}
+      <div className="mb-8">
+        <EditProfileForm publicKey={publicKey} />
+      </div>
+
       {/* Badges */}
       {profile?.badges && profile.badges.length > 0 && (
-        <div className="card mb-8">
-          <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">Your Impact Badges</h2>
+        <div className="card mb-8 shadow-sm border border-forest-100/50">
+          <h2 className="font-display text-lg font-semibold text-forest-900 mb-4 flex items-center gap-2">
+            <span>🏆</span> Your Impact Badges
+          </h2>
           <div className="flex flex-wrap gap-4">
             {profile.badges.map((badge, i) => (
-              <div key={i} className="flex items-center gap-3 bg-forest-50 rounded-xl px-4 py-3 border border-forest-200">
+              <div key={i} className="flex items-center gap-3 bg-forest-50/50 rounded-xl px-4 py-3 border border-forest-200/50 hover:bg-forest-50 transition-colors">
                 <span className="text-3xl">{badgeEmoji(badge.tier)}</span>
                 <div>
                   <p className="font-semibold text-forest-900 text-sm font-body">{badgeLabel(badge.tier)}</p>
-                  <p className="text-xs text-[#8aaa8a] font-body">Earned {timeAgo(badge.earnedAt)}</p>
+                  <p className="text-[10px] text-[#8aaa8a] font-body uppercase tracking-widest font-bold opacity-80">Earned {timeAgo(badge.earnedAt)}</p>
                 </div>
               </div>
             ))}
@@ -93,8 +101,10 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       )}
 
       {/* Donation history */}
-      <div className="card">
-        <h2 className="font-display text-lg font-semibold text-forest-900 mb-5">Donation History</h2>
+      <div className="card shadow-sm border border-forest-100/50">
+        <h2 className="font-display text-lg font-semibold text-forest-900 mb-5 flex items-center gap-2">
+          <span>📜</span> Donation History
+        </h2>
         {loading ? (
           <div className="space-y-3">
             {[1,2,3].map(i => <div key={i} className="h-16 bg-forest-50 rounded-xl animate-pulse"/>)}
@@ -108,17 +118,17 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         ) : (
           <div className="space-y-2">
             {donations.map(d => (
-              <div key={d.id} className="flex items-center gap-4 p-4 rounded-xl bg-forest-50 hover:bg-forest-100 transition-colors">
-                <div className="w-10 h-10 rounded-full bg-forest-200 flex items-center justify-center text-lg flex-shrink-0">🌱</div>
+              <div key={d.id} className="flex items-center gap-4 p-4 rounded-xl bg-forest-50/50 hover:bg-forest-50 transition-colors border border-transparent hover:border-forest-100/50">
+                <div className="w-10 h-10 rounded-full bg-forest-100 flex items-center justify-center text-lg flex-shrink-0">🌱</div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-forest-900 font-body">Project donation</p>
                   {d.message && <p className="text-xs text-[#5a7a5a] italic font-body truncate">"{d.message}"</p>}
-                  <p className="text-xs text-[#8aaa8a] font-body">{timeAgo(d.createdAt)}</p>
+                  <p className="text-[10px] text-[#8aaa8a] font-body uppercase tracking-wider font-bold opacity-70">{timeAgo(d.createdAt)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="font-mono font-semibold text-forest-700 text-sm">{formatXLM(d.amountXLM)}</p>
+                  <p className="font-mono font-semibold text-forest-700 text-sm">{formatXLM(d.amountXLM || "0")}</p>
                   <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-forest-500 hover:text-forest-700 font-body">View tx ↗</a>
+                    className="text-[10px] text-forest-500 hover:text-forest-700 font-bold uppercase tracking-widest transition-colors">View tx ↗</a>
                 </div>
               </div>
             ))}
@@ -128,3 +138,4 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
     </div>
   );
 }
+
