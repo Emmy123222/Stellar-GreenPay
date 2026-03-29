@@ -103,3 +103,18 @@ export interface DonatePageProps {
   project: DonateProject | null;
   presetAmount: number | null;
 }
+
+export type EscrowJobStatus = "draft" | "in_escrow" | "completed";
+
+export interface EscrowJob {
+  id: string;
+  title: string;
+  description: string;
+  clientPublicKey: string;
+  freelancerPublicKey: string;
+  amountEscrowXlm: string;
+  status: EscrowJobStatus;
+  releaseTransactionHash?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}

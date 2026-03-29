@@ -1,0 +1,25 @@
+[package]
+name = "escrow-contract"
+version = "0.1.0"
+edition = "2021"
+description = "Soroban escrow — client-funded jobs and release_escrow to freelancer"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = "21.7.7"
+
+[dev-dependencies]
+soroban-sdk = { version = "21.7.7", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
