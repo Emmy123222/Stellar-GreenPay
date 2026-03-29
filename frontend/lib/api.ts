@@ -8,6 +8,7 @@ import type {
   DonorProfile,
   ProjectUpdate,
   LeaderboardEntry,
+  EscrowJob,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -104,7 +105,36 @@ export async function fetchLeaderboard(limit = 20) {
   return data.data;
 }
 
-// ── Project Updates ───────────────────────────────────────────────────────────
+// ── Jobs (escrow) ───────────────────────────────────────────────────────────
+export async function fetchJobs() {
+  const { data } = await api.get<{ success: boolean; data: EscrowJob[] }>(
+    "/api/jobs",
+  );
+  return data.data;
+}
+
+export async function fetchJob(id: string) {
+  const { data } = await api.get<{ success: boolean; data: EscrowJob }>(
+    `/api/jobs/${id}`,
+  );
+  return data.data;
+}
+
+/**
+ * Mark job completed after on-chain release_escrow succeeds (stores release tx hash).
+ */
+export async function completeJobRelease(
+  jobId: string,
+  releaseTransactionHash: string,
+) {
+  const { data } = await api.patch<{ success: boolean; data: EscrowJob }>(
+    `/api/jobs/${jobId}/release`,
+    { releaseTransactionHash },
+  );
+  return data.data;
+}
+
+// ── Project Updates ─────────────────────────────────────────────
 export async function fetchProjectUpdates(projectId: string) {
   const { data } = await api.get<{ success: boolean; data: ProjectUpdate[] }>(
     `/api/updates/${projectId}`,

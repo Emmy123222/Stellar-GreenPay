@@ -95,6 +95,22 @@ const seedProjectUpdates = [
   },
 ];
 
+/** Sample escrow job — `id` must match the on-chain `job_id` passed to create_job when funding. */
+const seedJobs = [
+  {
+    id: "c47ac10b-58cc-4372-a567-0e02b2c3d479",
+    title: "Climate dashboard UI",
+    description:
+      "Build a responsive analytics dashboard for our NGO. Funds are held in escrow until you approve the delivered work.",
+    clientPublicKey: "GBVNQON4MFVGJXK5WT7VQJJZXFVHZJB6BHFWJCW7OF5BLNGOLZJQHIY",
+    freelancerPublicKey: "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGLEWZE5BGYTG2XTGQBC3VP",
+    amountEscrowXlm: "50.0000000",
+    status: "in_escrow",
+    createdAt: new Date(now - 3 * 86400000).toISOString(),
+    updatedAt: new Date(now).toISOString(),
+  },
+];
+
 const BADGE_THRESHOLDS = [
   { tier: "earth", min: 2000 },
   { tier: "forest", min: 500 },
@@ -180,12 +196,29 @@ function mapProjectUpdateRow(row) {
   };
 }
 
+function mapJobRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    clientPublicKey: row.client_public_key,
+    freelancerPublicKey: row.freelancer_public_key,
+    amountEscrowXlm: row.amount_escrow_xlm?.toString() || "0",
+    status: row.status,
+    releaseTransactionHash: row.release_transaction_hash || null,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+  };
+}
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
+  seedJobs,
   computeBadges,
   mapProjectRow,
   mapDonationRow,
   mapProfileRow,
   mapProjectUpdateRow,
+  mapJobRow,
 };

@@ -3,7 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const pool = require("./pool");
-const { seedProjects, seedProjectUpdates } = require("../services/store");
+const { seedProjects, seedProjectUpdates, seedJobs } = require("../services/store");
 
 async function runMigrations() {
   const client = await pool.connect();
@@ -54,6 +54,27 @@ async function runMigrations() {
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO NOTHING`,
         [update.id, update.projectId, update.title, update.body, update.createdAt],
+      );
+    }
+
+    for (const job of seedJobs) {
+      await client.query(
+        `INSERT INTO jobs (
+          id, title, description, client_public_key, freelancer_public_key,
+          amount_escrow_xlm, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT (id) DO NOTHING`,
+        [
+          job.id,
+          job.title,
+          job.description,
+          job.clientPublicKey,
+          job.freelancerPublicKey,
+          job.amountEscrowXlm,
+          job.status,
+          job.createdAt,
+          job.updatedAt,
+        ],
       );
     }
 

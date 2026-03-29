@@ -47,3 +47,16 @@ CREATE TABLE IF NOT EXISTS project_updates (
   body TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+  id UUID PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL,
+  client_public_key TEXT NOT NULL,
+  freelancer_public_key TEXT NOT NULL,
+  amount_escrow_xlm NUMERIC(20, 7) NOT NULL,
+  status TEXT NOT NULL DEFAULT 'in_escrow',
+  release_transaction_hash TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

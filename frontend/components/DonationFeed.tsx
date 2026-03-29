@@ -70,7 +70,7 @@ export default function DonationFeed({ projectId, refreshKey = 0 }: DonationFeed
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-forest-900 text-sm font-body">{shortenAddress(d.donorAddress, 5)}</span>
-              <span className="font-mono font-bold text-forest-600 text-sm">{formatXLM(d.amountXLM)}</span>
+              <span className="font-mono font-bold text-forest-600 text-sm">{formatXLM(d.amountXLM ?? d.amount ?? "0")}</span>
             </div>
             {d.message && <p className="text-xs text-[#5a7a5a] mt-0.5 italic font-body">"{d.message}"</p>}
             <div className="flex items-center gap-2 mt-1">

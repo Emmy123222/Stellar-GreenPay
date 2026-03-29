@@ -1,7 +1,7 @@
 /**
  * lib/stellar.ts — Stellar SDK helpers for GreenPay
  */
-import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal } from "@stellar/stellar-sdk";
+import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
 
 const NETWORK     = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -11,6 +11,9 @@ export const NETWORK_PASSPHRASE = NETWORK === "mainnet" ? Networks.PUBLIC : Netw
 export const server = new Horizon.Server(HORIZON_URL);
 export const rpcServer = new rpc.Server(RPC_URL);
 export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || "";
+
+/** Soroban escrow contract (deploy `contracts/escrow-contract`). */
+export const ESCROW_CONTRACT_ID = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID || "";
 
 export async function getXLMBalance(publicKey: string): Promise<string> {
   try {
@@ -100,17 +103,116 @@ export async function buildContractDonationTransaction({
     // Prepare the transaction with simulation results
     return rpc.assembleTransaction(tx, simulated).build();
   } else {
-    throw new Error(`Contract simulation failed: ${JSON.stringify(simulated)}`);
+    throw formatSimulationFailure(simulated);
   }
+}
+
+/**
+ * Builds a Soroban transaction that calls `release_escrow(client, job_id)` on the escrow contract.
+ * The client account must match the job’s client and must have funded this job via `create_job` on-chain.
+ */
+export async function buildReleaseEscrowTransaction({
+  contractId,
+  jobId,
+  clientAddress,
+}: {
+  contractId: string;
+  jobId: string;
+  clientAddress: string;
+}) {
+  if (!contractId.trim()) {
+    throw new Error("Escrow contract is not configured (set NEXT_PUBLIC_ESCROW_CONTRACT_ID).");
+  }
+  const source = await server.loadAccount(clientAddress);
+  const contract = new Contract(contractId);
+  const clientAddr = new Address(clientAddress);
+  const tx = new TransactionBuilder(source, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call(
+        "release_escrow",
+        clientAddr.toScVal(),
+        nativeToScVal(jobId, { type: "string" }),
+      ),
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    return rpc.assembleTransaction(tx, simulated).build();
+  }
+  throw formatSimulationFailure(simulated);
+}
+
+/** Maps Soroban simulation errors to short, user-facing messages. */
+export function formatSimulationFailure(simulated: unknown): Error {
+  const raw = JSON.stringify(simulated);
+  if (/underfunded|insufficient/i.test(raw) && /balance|fee|Fund/i.test(raw)) {
+    return new Error(
+      "Insufficient XLM to pay Soroban fees or complete the release. Add test XLM to this account.",
+    );
+  }
+  if (raw.includes("Job not found")) {
+    return new Error(
+      "This job ID is not on the escrow contract. Fund it first with create_job using the same job ID.",
+    );
+  }
+  if (raw.includes("Only the client can release")) {
+    return new Error("Connect the client wallet — only the client can release escrow.");
+  }
+  if (raw.includes("Already released")) {
+    return new Error("This escrow was already released on-chain.");
+  }
+  if (raw.includes("HostError") || raw.includes("VmValidation")) {
+    return new Error(
+      "The contract rejected this call. Check network (testnet/mainnet) and contract ID.",
+    );
+  }
+  return new Error(
+    "Could not simulate release_escrow. Verify NEXT_PUBLIC_ESCROW_CONTRACT_ID and that the job exists on-chain.",
+  );
+}
+
+/** Maps Horizon submission errors to user-friendly text. */
+export function formatTransactionError(err: unknown): string {
+  const e = err as {
+    response?: {
+      data?: {
+        extras?: { result_codes?: { transaction?: string; operations?: string[] } };
+        detail?: string;
+      };
+    };
+    message?: string;
+  };
+  const codes = e?.response?.data?.extras?.result_codes;
+  const ops = (codes?.operations ?? []).join(" ");
+  const txc = codes?.transaction ?? "";
+  const blob = `${txc} ${ops}`.toLowerCase();
+  if (blob.includes("underfunded") || blob.includes("op_underfunded")) {
+    return "Insufficient XLM balance for network fees or the payment.";
+  }
+  if (blob.includes("insufficient_fee") || blob.includes("tx_insufficient_fee")) {
+    return "Network fee too low. Wait and try again, or use a higher fee.";
+  }
+  if (blob.includes("bad_auth") || blob.includes("op_bad_auth")) {
+    return "Transaction was not authorized. Use Freighter with the client account.";
+  }
+  if (e?.response?.data?.detail && typeof e.response.data.detail === "string") {
+    return e.response.data.detail;
+  }
+  const msg = e?.message || String(err);
+  return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;
 }
 
 export async function submitTransaction(signedXDR: string) {
   const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
-  try { return await server.submitTransaction(tx); }
-  catch (err: unknown) {
-    const e = err as { response?: { data?: { extras?: { result_codes?: unknown } } } };
-    if (e?.response?.data?.extras?.result_codes) throw new Error(`Transaction failed: ${JSON.stringify(e.response.data.extras.result_codes)}`);
-    throw err;
+  try {
+    return await server.submitTransaction(tx);
+  } catch (err: unknown) {
+    throw new Error(formatTransactionError(err));
   }
 }
 
@@ -193,7 +295,7 @@ export function hashMessage(message: string): number {
 
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
   // We use a dummy account for simulation
-  const dummyAccount = new Horizon.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
+  const dummyAccount = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
   const tx = new TransactionBuilder(dummyAccount, { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
     .addOperation(contract.call(method, ...args))
     .setTimeout(30)
