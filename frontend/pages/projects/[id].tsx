@@ -7,7 +7,7 @@ import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
-import { fetchProject, fetchProjectUpdates } from "@/lib/api";
+import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import type { ClimateProject, ProjectUpdate } from "@/utils/types";
@@ -24,6 +24,9 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [refreshKey, setRefreshKey] = useState(0);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
+  const [subEmail, setSubEmail] = useState("");
+  const [subState, setSubState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [subError, setSubError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -73,8 +76,27 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
     }
   };
 
-  if (loading || !project) return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
+  const handleSubscribe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!project || !subEmail) return;
+    setSubState('loading');
+    setSubError(null);
+    try {
+      await subscribeToProject({
+        projectId: project.id,
+        email: subEmail,
+        donorAddress: publicKey || undefined,
+      });
+      setSubState('success');
+      setSubEmail("");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setSubError(msg || "Could not subscribe. Try again.");
+      setSubState('error');
+    }
+  };
+
+  if (loading || !project) return (    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
       <div className="h-8 bg-forest-200 rounded w-2/3 mb-4" />
       <div className="card space-y-4">
         {[1, 2, 3].map(i => <div key={i} className="h-4 bg-forest-100 rounded" />)}
@@ -300,6 +322,40 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
             >
               📱 Generate Donation QR
             </Link>
+          </div>
+
+          {/* Subscribe card */}
+          <div className="card bg-forest-50 border-forest-200">
+            <p className="font-display font-semibold text-forest-900 mb-1">Get project updates 🔔</p>
+            <p className="text-xs text-[#5a7a5a] mb-3 font-body">
+              Receive an email when this project posts new updates.
+            </p>
+            {subState === 'success' ? (
+              <p className="text-sm text-green-700 font-body text-center py-2">
+                ✓ You're subscribed!
+              </p>
+            ) : (
+              <form onSubmit={handleSubscribe} className="space-y-2">
+                <input
+                  type="email"
+                  required
+                  placeholder="your@email.com"
+                  value={subEmail}
+                  onChange={(e) => setSubEmail(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-forest-200 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400 font-body"
+                />
+                {subError && (
+                  <p className="text-xs text-red-600 font-body">{subError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={subState === 'loading'}
+                  className="btn-primary text-sm py-2 px-4 w-full disabled:opacity-60"
+                >
+                  {subState === 'loading' ? 'Subscribing…' : 'Subscribe'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>

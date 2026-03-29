@@ -21,7 +21,7 @@ app.use(express.json({ limit: "20kb" }));
 const origins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(o => o.trim());
 app.use(cors({
   origin: (origin, cb) => (!origin || origins.includes(origin)) ? cb(null, true) : cb(new Error("CORS blocked")),
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "PATCH"],
 }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
@@ -30,8 +30,9 @@ app.use("/api/projects",  require("./routes/projects"));
 app.use("/api/donations", require("./routes/donations"));
 app.use("/api/profiles",  require("./routes/profiles"));
 app.use("/api/leaderboard", require("./routes/leaderboard"));
-app.use("/api/updates",   require("./routes/updates"));
-app.use("/api/jobs",      require("./routes/jobs"));
+app.use("/api/updates",        require("./routes/updates"));
+app.use("/api/subscriptions",  require("./routes/subscriptions"));
+app.use("/api/jobs",           require("./routes/jobs"));
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 app.use((err, req, res, next) => {

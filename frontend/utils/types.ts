@@ -63,6 +63,16 @@ export interface DonorProfile {
 
 export type BadgeTier = "seedling" | "tree" | "forest" | "earth";
 
+export interface FreelancerProfile {
+  publicKey: string;
+  displayName?: string;
+  bio?: string;
+  skills: string[];
+  completedJobs: number;
+  totalEarnedXLM: string;
+  createdAt: string;
+}
+
 export interface DonorBadge {
   tier: BadgeTier;
   earnedAt: string;

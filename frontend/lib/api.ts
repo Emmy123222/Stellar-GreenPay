@@ -6,6 +6,7 @@ import type {
   ClimateProject,
   Donation,
   DonorProfile,
+  FreelancerProfile,
   ProjectUpdate,
   LeaderboardEntry,
   EscrowJob,
@@ -86,6 +87,13 @@ export async function fetchProfile(publicKey: string) {
   return data.data;
 }
 
+export async function fetchFreelancerProfile(publicKey: string) {
+  const { data } = await api.get<{ success: boolean; data: FreelancerProfile }>(
+    `/api/profiles/${publicKey}`,
+  );
+  return data.data;
+}
+
 export async function upsertProfile(
   payload: Partial<DonorProfile> & { publicKey: string },
 ) {
@@ -140,4 +148,24 @@ export async function fetchProjectUpdates(projectId: string) {
     `/api/updates/${projectId}`,
   );
   return data.data;
+}
+
+// ── Subscriptions ────────────────────────────────────────────────
+export async function subscribeToProject(payload: {
+  projectId: string;
+  email: string;
+  donorAddress?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; message: string }>(
+    "/api/subscriptions",
+    payload,
+  );
+  return data;
+}
+
+export async function fetchSubscriberCount(projectId: string) {
+  const { data } = await api.get<{ success: boolean; count: number }>(
+    `/api/subscriptions/${projectId}/count`,
+  );
+  return data.count;
 }

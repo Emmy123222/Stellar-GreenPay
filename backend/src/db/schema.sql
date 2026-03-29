@@ -48,6 +48,15 @@ CREATE TABLE IF NOT EXISTS project_updates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS project_subscriptions (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  donor_address TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(project_id, email)
+);
+
 CREATE TABLE IF NOT EXISTS jobs (
   id UUID PRIMARY KEY,
   title TEXT NOT NULL,
