@@ -3,14 +3,16 @@
  */
 import { useState, useEffect } from "react";
 import { fetchLeaderboard } from "@/lib/api";
-import { formatXLM, shortenAddress, badgeEmoji } from "@/utils/format";
+import { formatXLM, formatUSDEquivalent, shortenAddress, badgeEmoji } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
+import { useXlmPrice } from "@/lib/priceContext";
 import type { LeaderboardEntry } from "@/utils/types";
 
 export default function LeaderboardTable({ limit = 20 }: { limit?: number }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
+  const xlmUsd = useXlmPrice();
 
   useEffect(() => {
     fetchLeaderboard(limit)
@@ -82,6 +84,11 @@ export default function LeaderboardTable({ limit = 20 }: { limit?: number }) {
             <p className="font-mono font-semibold text-forest-600 text-sm">
               {formatXLM(entry.totalDonatedXLM)}
             </p>
+            {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+              <p className="text-[11px] text-[#8aaa8a] font-body">
+                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+              </p>
+            )}
             <p className="text-xs text-[#8aaa8a] font-body">donated</p>
           </div>
         </div>
