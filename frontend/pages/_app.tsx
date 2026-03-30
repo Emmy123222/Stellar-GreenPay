@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import Head from "next/head";
 import { Toaster } from "sonner";
 import Navbar from "@/components/Navbar";
+import { PriceProvider } from "@/lib/priceContext";
 import { connectWallet, getConnectedPublicKey } from "@/lib/wallet";
 import "@/styles/globals.css";
 

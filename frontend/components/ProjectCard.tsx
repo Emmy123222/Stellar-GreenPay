@@ -3,11 +3,13 @@
  */
 import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
-import { formatXLM, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { useXlmPrice } from "@/lib/priceContext";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
   const isComplete = pct >= 100;
+  const xlmUsd = useXlmPrice();
 
   return (
     <Link href={`/projects/${project.id}`}>
@@ -59,8 +61,18 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           ) : (
             <>
               <div className="flex justify-between text-xs text-[#8aaa8a] mb-1.5 font-body">
-                <span>{formatXLM(project.raisedXLM)} raised</span>
-                <span>{pct}% of {formatXLM(project.goalXLM)}</span>
+                <div>
+                  <span>{formatXLM(project.raisedXLM)} raised</span>
+                  {formatUSDEquivalent(project.raisedXLM, xlmUsd) && (
+                    <span className="block text-[10px] text-[#aac0aa]">{formatUSDEquivalent(project.raisedXLM, xlmUsd)}</span>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span>{pct}% of {formatXLM(project.goalXLM)}</span>
+                  {formatUSDEquivalent(project.goalXLM, xlmUsd) && (
+                    <span className="block text-[10px] text-[#aac0aa]">{formatUSDEquivalent(project.goalXLM, xlmUsd)}</span>
+                  )}
+                </div>
               </div>
               <div className="progress-bar">
                 <div className={pct >= 100 ? "progress-fill progress-fill-complete" : "progress-fill"} style={{ width: `${Math.min(pct, 100)}%` }} />

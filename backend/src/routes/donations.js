@@ -19,13 +19,16 @@ function validateTxHash(h) {
 }
 
 // POST /api/donations — record a donation after on-chain tx
-router.post("/", donationLimiter, async (req, res, next) => {
-  const client = await pool.connect();
+async function recordDonation(req, res, next) {
+  let client;
   let inTransaction = false;
+
   try {
     const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
     validateKey(donorAddress);
     validateTxHash(transactionHash);
+
+    client = await pool.connect();
 
     const projectResult = await client.query("SELECT id FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
@@ -119,12 +122,14 @@ router.post("/", donationLimiter, async (req, res, next) => {
     inTransaction = false;
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
-    if (inTransaction) await client.query("ROLLBACK");
+    if (inTransaction && client) await client.query("ROLLBACK");
     next(e);
   } finally {
-    client.release();
+    if (client) client.release();
   }
-});
+}
+
+router.post("/", donationLimiter, recordDonation);
 
 // GET /api/donations/project/:id
 router.get("/project/:projectId", async (req, res, next) => {
@@ -172,3 +177,4 @@ router.get("/donor/:publicKey", async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.recordDonation = recordDonation;
