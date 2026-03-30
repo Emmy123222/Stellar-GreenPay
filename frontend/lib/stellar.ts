@@ -293,6 +293,48 @@ export function hashMessage(message: string): number {
   return hash;
 }
 
+/**
+ * Stream real-time payments to a wallet address using Horizon SSE.
+ * Returns a cleanup function to close the stream.
+ */
+export function streamProjectPayments(
+  walletAddress: string,
+  onPayment: (payment: {
+    id: string;
+    from: string;
+    amount: string;
+    asset: string;
+    createdAt: string;
+    transactionHash: string;
+  }) => void,
+  cursor?: string,
+): () => void {
+  const builder = server
+    .payments()
+    .forAccount(walletAddress)
+    .order("asc")
+    .cursor(cursor || "now");
+
+  const closeStream = builder.stream({
+    onmessage: (record: any) => {
+      if (record.type !== "payment" && record.type !== "create_account") return;
+      onPayment({
+        id: record.id,
+        from: record.from || record.funder || record.source_account,
+        amount: record.amount || record.starting_balance || "0",
+        asset: record.asset_code || "XLM",
+        createdAt: record.created_at,
+        transactionHash: record.transaction_hash,
+      });
+    },
+    onerror: (err: any) => {
+      console.error("Horizon SSE stream error:", err);
+    },
+  });
+
+  return closeStream;
+}
+
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
   // We use a dummy account for simulation
   const dummyAccount = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");

@@ -285,7 +285,7 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
           {/* Donation feed */}
           <div className="card">
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">Recent Donations</h2>
-            <DonationFeed projectId={project.id} refreshKey={refreshKey} />
+            <DonationFeed projectId={project.id} walletAddress={project.walletAddress} refreshKey={refreshKey} />
           </div>
         </div>
 
