@@ -10,6 +10,14 @@ export function formatXLM(amount: string | number, decimals = 2): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: decimals })} XLM`;
 }
 
+export function formatUSDEquivalent(xlmAmount: string | number, price: number | null): string | null {
+  if (price === null) return null;
+  const n = typeof xlmAmount === "string" ? parseFloat(xlmAmount) : xlmAmount;
+  if (isNaN(n)) return null;
+  const usd = n * price;
+  return `≈ $${usd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD`;
+}
+
 export function formatCO2(kg: number): string {
   if (kg >= 1_000_000) return `${(kg / 1_000_000).toFixed(1)}M kg CO₂`;
   if (kg >= 1_000) return `${(kg / 1_000).toFixed(1)}k kg CO₂`;
