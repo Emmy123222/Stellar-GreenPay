@@ -215,6 +215,7 @@ module.exports = {
   seedProjects,
   seedProjectUpdates,
   seedJobs,
+  BADGE_THRESHOLDS,
   computeBadges,
   mapProjectRow,
   mapDonationRow,
