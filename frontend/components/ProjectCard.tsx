@@ -4,6 +4,7 @@
 import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
 import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
@@ -52,32 +53,31 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           {project.description}
         </p>
 
-        {/* Progress bar */}
+        {/* Progress */}
         <div className="mb-4">
           {isComplete ? (
             <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-2 rounded-lg text-center text-sm font-semibold shadow-sm">
               ✅ Fully Funded
             </div>
           ) : (
-            <>
-              <div className="flex justify-between text-xs text-[#8aaa8a] mb-1.5 font-body">
+            <div className="flex items-center gap-3">
+              <CircularProgress percentage={pct} size={48} strokeWidth={4} />
+              <div className="flex-1 flex justify-between text-xs text-[#8aaa8a] font-body">
                 <div>
-                  <span>{formatXLM(project.raisedXLM)} raised</span>
+                  <span className="font-semibold text-forest-700 block mb-0.5">{formatXLM(project.raisedXLM)}</span>
                   {formatUSDEquivalent(project.raisedXLM, xlmUsd) && (
-                    <span className="block text-[10px] text-[#aac0aa]">{formatUSDEquivalent(project.raisedXLM, xlmUsd)}</span>
+                    <span className="block text-[10px] text-[#aac0aa]">raised ({formatUSDEquivalent(project.raisedXLM, xlmUsd)})</span>
                   )}
+                  {!formatUSDEquivalent(project.raisedXLM, xlmUsd) && <span>raised</span>}
                 </div>
                 <div className="text-right">
-                  <span>{pct}% of {formatXLM(project.goalXLM)}</span>
+                  <span className="block mb-0.5">Goal: {formatXLM(project.goalXLM)}</span>
                   {formatUSDEquivalent(project.goalXLM, xlmUsd) && (
                     <span className="block text-[10px] text-[#aac0aa]">{formatUSDEquivalent(project.goalXLM, xlmUsd)}</span>
                   )}
                 </div>
               </div>
-              <div className="progress-bar">
-                <div className={pct >= 100 ? "progress-fill progress-fill-complete" : "progress-fill"} style={{ width: `${Math.min(pct, 100)}%` }} />
-              </div>
-            </>
+            </div>
           )}
         </div>
 
