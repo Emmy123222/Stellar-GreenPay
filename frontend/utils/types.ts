@@ -28,6 +28,7 @@ export interface ClimateProject {
   raisedXLM: string;           // total raised so far
   donorCount: number;
   co2OffsetKg: number;         // estimated CO2 offset in kg
+  co2_per_xlm: number;         // CO2 offset per XLM donated
   status: ProjectStatus;
   verified: boolean;
   onChainVerified?: boolean;
