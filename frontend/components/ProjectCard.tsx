@@ -109,6 +109,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
             Donate →
           </span>
         </div>
+        </div>
       </Link>
 
       {/* Wishlist Toggle */}

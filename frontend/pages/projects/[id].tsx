@@ -7,10 +7,12 @@ import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount } from "@/lib/api";
+import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
-import type { ClimateProject, ProjectUpdate } from "@/utils/types";
+import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
+import type { ClimateProject, ProjectCampaign, ProjectUpdate } from "@/utils/types";
 import { useWishlist } from "@/hooks/useWishlist";
 
 interface ProjectDetailProps { publicKey: string | null; onConnect: (pk: string) => void; }
@@ -29,8 +31,20 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [subState, setSubState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [subError, setSubError] = useState<string | null>(null);
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
+  const [showMonthlySetup, setShowMonthlySetup] = useState(false);
+  const [countdownNow, setCountdownNow] = useState(Date.now());
+  const [campaignForm, setCampaignForm] = useState({
+    title: "",
+    goalXLM: "",
+    deadline: "",
+    description: "",
+  });
+  const [campaignState, setCampaignState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+  const [campaignError, setCampaignError] = useState<string | null>(null);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
+  const prefillAmount = typeof router.query.amount === "string" ? router.query.amount : undefined;
+  const monthlySubId = typeof router.query.monthlySubId === "string" ? router.query.monthlySubId : null;
 
   useEffect(() => {
     if (!id) return;
@@ -44,6 +58,11 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
     if (!id) return;
     fetchSubscriberCount(id as string).then(setSubscriberCount).catch(() => null);
   }, [id]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleCopyWallet = async () => {
     if (!project) return;
@@ -106,6 +125,25 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
     }
   };
 
+  const handleCreateCampaign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!project) return;
+    setCampaignState('saving');
+    setCampaignError(null);
+    try {
+      await createProjectCampaign(project.id, campaignForm);
+      const updatedProject = await fetchProject(project.id);
+      setProject(updatedProject);
+      setCampaignForm({ title: "", goalXLM: "", deadline: "", description: "" });
+      setCampaignState('success');
+      window.setTimeout(() => setCampaignState('idle'), 2000);
+    } catch (err: unknown) {
+      const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      setCampaignError(message || "Could not create campaign.");
+      setCampaignState('error');
+    }
+  };
+
   if (loading || !project) return (    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
       <div className="h-8 bg-forest-200 rounded w-2/3 mb-4" />
       <div className="card space-y-4">
@@ -116,6 +154,11 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
 
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
   const isComplete = pct >= 100;
+  const campaigns = project.campaigns || [];
+  const activeCampaign = project.activeCampaign || campaigns.find((campaign) => campaign.active) || null;
+  const completedCampaigns = campaigns.filter((campaign) => campaign.completed);
+
+  const countdownText = activeCampaign ? formatCountdown(activeCampaign.deadline, countdownNow) : null;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
@@ -138,6 +181,32 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
       <Link href="/projects" className="inline-flex items-center gap-1 text-sm text-[#5a7a5a] hover:text-forest-700 transition-colors mb-6 font-body">
         ← Back to Projects
       </Link>
+
+      {activeCampaign && (
+        <div className="card mb-6 border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest font-bold text-amber-700 font-body mb-1">Active Campaign</p>
+              <h2 className="font-display text-xl font-semibold text-amber-900">{activeCampaign.title}</h2>
+              {activeCampaign.description && (
+                <p className="text-sm text-amber-800 font-body mt-1">{activeCampaign.description}</p>
+              )}
+            </div>
+            <p className="text-xs px-3 py-1 rounded-full bg-amber-100 border border-amber-200 text-amber-800 font-body">
+              Ends in {countdownText}
+            </p>
+          </div>
+          <div className="mt-4">
+            <div className="flex justify-between text-xs mb-1 font-body text-amber-800">
+              <span>{formatXLM(activeCampaign.raisedXLM)} raised</span>
+              <span>{activeCampaign.progressPercent}% of {formatXLM(activeCampaign.goalXLM)}</span>
+            </div>
+            <div className="progress-bar h-2.5">
+              <div className="progress-fill" style={{ width: `${Math.min(activeCampaign.progressPercent, 100)}%` }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-3 gap-6">
 
@@ -286,6 +355,80 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
             )}
           </div>
 
+          {completedCampaigns.length > 0 && (
+            <div className="card">
+              <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">Campaign History</h2>
+              <div className="space-y-3">
+                {completedCampaigns.map((campaign: ProjectCampaign) => (
+                  <div key={campaign.id} className="rounded-xl border border-forest-200 bg-forest-50 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <p className="font-semibold text-forest-900 font-body">{campaign.title}</p>
+                      <span className="text-xs px-2 py-1 rounded-full bg-forest-100 border border-forest-200 text-forest-700 font-body">
+                        Completed
+                      </span>
+                    </div>
+                    <p className="text-xs text-[#5a7a5a] font-body mb-2">
+                      Ended {new Date(campaign.deadline).toLocaleDateString()}
+                    </p>
+                    <div className="flex justify-between text-xs mb-1 font-body">
+                      <span>{formatXLM(campaign.raisedXLM)} raised</span>
+                      <span>{campaign.progressPercent}% of {formatXLM(campaign.goalXLM)}</span>
+                    </div>
+                    <div className="progress-bar h-2">
+                      <div className="progress-fill progress-fill-complete" style={{ width: `${Math.min(campaign.progressPercent, 100)}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="card bg-forest-50 border-forest-200">
+            <h2 className="font-display text-lg font-semibold text-forest-900 mb-2">Campaign Creator</h2>
+            <p className="text-xs text-[#5a7a5a] font-body mb-4">
+              Project admins can launch a time-limited campaign with a custom goal and deadline.
+            </p>
+            <form onSubmit={handleCreateCampaign} className="space-y-3">
+              <input
+                type="text"
+                required
+                placeholder="Campaign title"
+                value={campaignForm.title}
+                onChange={(e) => setCampaignForm((prev) => ({ ...prev, title: e.target.value }))}
+                className="input-field"
+              />
+              <div className="grid sm:grid-cols-2 gap-3">
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="1"
+                  placeholder="Goal (XLM)"
+                  value={campaignForm.goalXLM}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, goalXLM: e.target.value }))}
+                  className="input-field"
+                />
+                <input
+                  type="datetime-local"
+                  required
+                  value={campaignForm.deadline}
+                  onChange={(e) => setCampaignForm((prev) => ({ ...prev, deadline: e.target.value }))}
+                  className="input-field"
+                />
+              </div>
+              <textarea
+                placeholder="Description (optional)"
+                value={campaignForm.description}
+                onChange={(e) => setCampaignForm((prev) => ({ ...prev, description: e.target.value }))}
+                className="input-field min-h-24"
+              />
+              {campaignError && <p className="text-xs text-red-600 font-body">{campaignError}</p>}
+              <button type="submit" disabled={campaignState === 'saving'} className="btn-primary text-sm py-2 px-4">
+                {campaignState === 'saving' ? "Saving..." : campaignState === 'success' ? "Campaign Created" : "Create Campaign"}
+              </button>
+            </form>
+          </div>
+
           {/* Project updates */}
           {updates.length > 0 && (
             <div className="card">
@@ -313,11 +456,26 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
 
         {/* ── Sidebar ─────────────────────────────────────────────────── */}
         <div className="space-y-4">
+          <button
+            type="button"
+            onClick={() => setShowMonthlySetup(true)}
+            className="btn-secondary w-full text-sm py-2.5 px-4"
+          >
+            Give Monthly
+          </button>
+
           {publicKey ? (
             <DonateForm
               project={project}
               publicKey={publicKey}
+              initialAmount={prefillAmount}
               onSuccess={() => {
+                if (monthlySubId && prefillAmount) {
+                  const parsedPrefillAmount = Number.parseFloat(prefillAmount);
+                  if (Number.isFinite(parsedPrefillAmount) && parsedPrefillAmount > 0) {
+                    markMonthlySubscriptionPaid(monthlySubId, parsedPrefillAmount.toFixed(7));
+                  }
+                }
                 setRefreshKey(k => k + 1);
                 setTimeout(() => fetchProject(project.id).then(setProject), 2000);
               }}
@@ -386,6 +544,28 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
           </div>
         </div>
       </div>
+
+      {showMonthlySetup && (
+        <MonthlyGivingSetup
+          projectId={project.id}
+          projectName={project.name}
+          onClose={() => setShowMonthlySetup(false)}
+        />
+      )}
     </div>
   );
+}
+
+function formatCountdown(deadline: string, nowMs: number) {
+  const deltaMs = new Date(deadline).getTime() - nowMs;
+  if (deltaMs <= 0) return "0h 0m 0s";
+
+  const totalSeconds = Math.floor(deltaMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  return `${hours}h ${minutes}m ${seconds}s`;
 }
