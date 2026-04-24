@@ -7,7 +7,7 @@ import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
-import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import type { ClimateProject, ProjectUpdate } from "@/utils/types";
@@ -28,6 +28,7 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [subEmail, setSubEmail] = useState("");
   const [subState, setSubState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [subError, setSubError] = useState<string | null>(null);
+  const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
 
@@ -37,6 +38,11 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
       .then(([p, u]) => { setProject(p); setUpdates(u); })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
+    fetchSubscriberCount(id as string).then(setSubscriberCount).catch(() => null);
   }, [id]);
 
   const handleCopyWallet = async () => {
@@ -92,6 +98,7 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
       });
       setSubState('success');
       setSubEmail("");
+      setSubscriberCount(c => (c !== null ? c + 1 : null));
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
       setSubError(msg || "Could not subscribe. Try again.");
@@ -345,9 +352,14 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
             <p className="text-xs text-[#5a7a5a] mb-3 font-body">
               Receive an email when this project posts new updates.
             </p>
+            {subscriberCount !== null && (
+              <p className="text-xs text-[#8aaa8a] font-body mb-3">
+                📬 {subscriberCount.toLocaleString()} {subscriberCount === 1 ? "subscriber" : "subscribers"}
+              </p>
+            )}
             {subState === 'success' ? (
-              <p className="text-sm text-green-700 font-body text-center py-2">
-                ✓ You're subscribed!
+              <p className="text-sm text-green-700 font-body text-center py-2 font-semibold">
+                ✓ Thank you for subscribing!
               </p>
             ) : (
               <form onSubmit={handleSubscribe} className="space-y-2">

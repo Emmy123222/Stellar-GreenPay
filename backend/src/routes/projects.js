@@ -22,6 +22,40 @@ const VALID_CATEGORIES = [
   "Other",
 ];
 
+/**
+ * GET /api/projects/featured
+ * Returns the project with the highest donorCount (active projects only).
+ * Result is cached in memory for 24 hours.
+ */
+let featuredCache = null;
+let featuredCacheExpiry = 0;
+
+router.get("/featured", async (req, res, next) => {
+  try {
+    const now = Date.now();
+    if (featuredCache && now < featuredCacheExpiry) {
+      return res.json({ success: true, data: featuredCache });
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE status = 'active'
+       ORDER BY donor_count DESC, raised_xlm DESC
+       LIMIT 1`,
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "No featured project found" });
+    }
+
+    featuredCache = mapProjectRow(result.rows[0]);
+    featuredCacheExpiry = now + 24 * 60 * 60 * 1000; // 24 hours
+    res.json({ success: true, data: featuredCache });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/", async (req, res, next) => {
   try {
     const { category, status, verified, search, limit = 50 } = req.query;
