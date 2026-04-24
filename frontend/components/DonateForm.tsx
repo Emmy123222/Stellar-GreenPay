@@ -13,6 +13,7 @@ interface DonateFormProps {
   project: ClimateProject;
   publicKey: string;
   initialAmount?: string;
+  initialMessage?: string;
   onSuccess?: () => void;
 }
 
@@ -21,7 +22,7 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
-export default function DonateForm({ project, publicKey, initialAmount, onSuccess }: DonateFormProps) {
+export default function DonateForm({ project, publicKey, initialAmount, initialMessage, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState("");
   const [message, setMessage] = useState("");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
@@ -37,6 +38,11 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
     if (!initialAmount) return;
     setAmount(initialAmount);
   }, [initialAmount]);
+
+  useEffect(() => {
+    if (!initialMessage) return;
+    setMessage(initialMessage);
+  }, [initialMessage]);
 
   useEffect(() => {
     let mounted = true;
@@ -310,7 +316,7 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
           {step === "building"   && <><Spinner />Building transaction...</>}
           {step === "signing"    && <><Spinner />Sign in Freighter...</>}
           {step === "submitting" && <><Spinner />Submitting...</>}
-          {step === "recording"  && <><Spinner />Recording on-chain...</>}
+          {step === "recording"  && <>Done</>}
           {step === "idle"       && <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`) : currency}</>}
           {step === "error"      && "Retry"}
         </button>

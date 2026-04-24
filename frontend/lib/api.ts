@@ -167,6 +167,19 @@ export async function fetchProjectUpdates(projectId: string) {
   return data.data;
 }
 
+export async function createProjectUpdate(payload: {
+  projectId: string;
+  title: string;
+  body: string;
+  adminKey?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: ProjectUpdate }>(
+    "/api/updates",
+    payload,
+  );
+  return data.data;
+}
+
 // ── Subscriptions ────────────────────────────────────────────────
 export async function subscribeToProject(payload: {
   projectId: string;
