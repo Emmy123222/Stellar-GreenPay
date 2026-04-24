@@ -212,3 +212,16 @@ export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
     return null;
   }
 }
+
+// ── Category Stats ───────────────────────────────────────────────
+export interface CategoryStats {
+  category: string;
+  count: number;
+}
+
+export async function fetchCategoryStats(): Promise<CategoryStats[]> {
+  const { data } = await api.get<{ success: boolean; data: CategoryStats[] }>(
+    "/api/stats/categories",
+  );
+  return data.data;
+}
