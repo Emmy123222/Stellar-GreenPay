@@ -2,8 +2,9 @@
  * pages/index.tsx — GreenPay landing page
  */
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import WalletConnect from "@/components/WalletConnect";
+import { useCountUp } from "@/hooks/useCountUp";
 
 interface HomeProps { publicKey: string | null; onConnect: (pk: string) => void; }
 
@@ -15,9 +16,10 @@ const FEATURES = [
 ];
 
 const IMPACT_STATS = [
-  { value: "0%", label: "Platform fees" },
-  { value: "3–5s", label: "Settlement" },
-  { value: "~$0", label: "Transaction cost" },
+  { value: 0, suffix: "%", label: "Platform fees", duration: 1500 },
+  { value: 100, prefix: ">", suffix: "%", label: "Direct to Project", duration: 2000 },
+  { value: 5000, suffix: "+", label: "Monthly Donors", duration: 2500 },
+  { value: 250, suffix: "k", label: "CO₂ Offset (kg)", duration: 3000 },
 ];
 
 const CATEGORIES = [
@@ -73,12 +75,9 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
         </div>
 
         {/* ── Stats ───────────────────────────────────────────────────── */}
-        <div className="grid grid-cols-3 gap-px bg-forest-200 rounded-2xl overflow-hidden border border-forest-200 mb-20 shadow-sm">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-forest-200 rounded-2xl overflow-hidden border border-forest-200 mb-20 shadow-sm">
           {IMPACT_STATS.map((s) => (
-            <div key={s.label} className="bg-white text-center py-8 px-4">
-              <div className="font-display text-4xl font-bold text-gradient-green mb-1">{s.value}</div>
-              <div className="text-[#5a7a5a] text-sm font-body">{s.label}</div>
-            </div>
+            <StatItem key={s.label} stat={s} />
           ))}
         </div>
 
@@ -159,6 +158,19 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+function StatItem({ stat }: { stat: any }) {
+  const { count, elementRef } = useCountUp(stat.value, stat.duration);
+  return (
+    <div ref={elementRef} className="bg-white text-center py-10 px-4">
+      <div className="font-display text-4xl font-bold text-gradient-green mb-1">
+        {stat.prefix}{count.toLocaleString()}{stat.suffix}
+      </div>
+      <div className="text-[#5a7a5a] text-sm font-body uppercase tracking-widest font-bold opacity-60">
+        {stat.label}
+      </div>
     </div>
   );
 }
