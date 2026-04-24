@@ -7,24 +7,9 @@ import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
-import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
-import {
-  fetchProject,
-  fetchProjectUpdates,
-  subscribeToProject,
-  fetchSubscriberCount,
-  createProjectCampaign,
-} from "@/lib/api";
-import {
-  formatXLM,
-  formatCO2,
-  progressPercent,
-  timeAgo,
-  statusClass,
-  statusLabel,
-  CATEGORY_ICONS,
-  copyToClipboard,
-} from "@/utils/format";
+import CircularProgress from "@/components/CircularProgress";
+import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
@@ -798,26 +783,13 @@ export default function ProjectDetail({
                   🎉 Goal Reached!
                 </div>
               ) : (
-                <>
-                  <div className="flex justify-between text-sm mb-2 font-body">
-                    <span className="font-semibold text-forest-700">
-                      {formatXLM(project.raisedXLM)} raised
-                    </span>
-                    <span className="text-[#5a7a5a]">
-                      {pct}% of {formatXLM(project.goalXLM)} goal
-                    </span>
+                <div className="flex items-center gap-5">
+                  <CircularProgress percentage={pct} size={64} strokeWidth={6} />
+                  <div className="flex-1">
+                    <p className="font-semibold text-forest-800 text-lg">{formatXLM(project.raisedXLM)} raised</p>
+                    <p className="text-[#5a7a5a] text-sm font-body mt-0.5">towards {formatXLM(project.goalXLM)} goal</p>
                   </div>
-                  <div className="progress-bar h-3">
-                    <div
-                      className={
-                        pct >= 100
-                          ? "progress-fill progress-fill-complete"
-                          : "progress-fill"
-                      }
-                      style={{ width: `${Math.min(pct, 100)}%` }}
-                    />
-                  </div>
-                </>
+                </div>
               )}
             </div>
 
