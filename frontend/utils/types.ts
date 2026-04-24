@@ -41,6 +41,8 @@ export interface ClimateProject {
   status: ProjectStatus;
   verified: boolean;
   onChainVerified?: boolean;
+  contractRegisteredAt?: number | null;
+  totalRaisedOnChain?: string;
   tags: string[];
   createdAt: string;
   updatedAt: string;

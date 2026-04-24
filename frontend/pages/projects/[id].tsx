@@ -6,6 +6,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
+import ToastNotification, { type ToastItem } from "@/components/ToastNotification";
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
@@ -15,6 +16,7 @@ import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } fro
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
   ClimateProject,
+  Donation,
   ProjectCampaign,
   ProjectUpdate,
 } from "@/utils/types";
@@ -71,10 +73,15 @@ export default function ProjectDetail({
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([fetchProject(id as string), fetchProjectUpdates(id as string)])
-      .then(([p, u]) => {
+    Promise.all([
+      fetchProject(id as string),
+      fetchProjectUpdates(id as string),
+      fetchProjectDonationMessages(id as string, 10),
+    ])
+      .then(([p, u, messages]) => {
         setProject(p);
         setUpdates(u);
+        setMessageWall(messages);
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
@@ -649,6 +656,10 @@ export default function ProjectDetail({
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+      <ToastNotification
+        toasts={toasts}
+        onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}
+      />
       {isComplete && (
         <div className="celebration-overlay">
           {Array.from({ length: 50 }).map((_, i) => (
@@ -1136,6 +1147,17 @@ export default function ProjectDetail({
               projectId={project.id}
               walletAddress={project.walletAddress}
               refreshKey={refreshKey}
+              onNewDonation={(d) => {
+                setToasts((prev) => [
+                  ...prev,
+                  {
+                    id: `${d.id}`,
+                    title: "New donation received",
+                    description: `${shortenAddress(d.donorAddress)} just donated ${formatXLM(d.amountXLM || d.amount || "0")}`,
+                    createdAt: Date.now(),
+                  },
+                ]);
+              }}
             />
           </div>
 
@@ -1268,6 +1290,9 @@ export default function ProjectDetail({
                   }
                 }
                 setRefreshKey((k) => k + 1);
+                fetchProjectDonationMessages(project.id, 10)
+                  .then(setMessageWall)
+                  .catch(() => {});
                 setTimeout(
                   () => fetchProject(project.id).then(setProject),
                   2000,

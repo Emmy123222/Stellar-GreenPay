@@ -6,16 +6,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchProjectDonations } from "@/lib/api";
 import { formatXLM, timeAgo, shortenAddress } from "@/utils/format";
 import { explorerUrl, streamProjectPayments } from "@/lib/stellar";
-import { toast } from "sonner";
 import type { Donation } from "@/utils/types";
 
 interface DonationFeedProps {
   projectId: string;
   walletAddress?: string;
   refreshKey?: number;
+  onNewDonation?: (donation: Donation) => void;
 }
 
-export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 }: DonationFeedProps) {
+export default function DonationFeed({ projectId, walletAddress, refreshKey = 0, onNewDonation }: DonationFeedProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -72,13 +72,10 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 
       });
     }, 2000);
 
-    toast("New donation just arrived! 🌱", {
-      description: `${shortenAddress(payment.from)} donated ${formatXLM(payment.amount)}`,
-      duration: 4000,
-    });
+    onNewDonation?.(newDonation);
 
     latestIdRef.current = payment.id;
-  }, [projectId]);
+  }, [projectId, onNewDonation]);
 
   // Start SSE stream once initial data is loaded
   useEffect(() => {
