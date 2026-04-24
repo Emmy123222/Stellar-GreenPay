@@ -7,13 +7,30 @@ import ProjectCard, { ProjectCardSkeleton } from "@/components/ProjectCard";
 import { fetchProjects } from "@/lib/api";
 import { PROJECT_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
+import { useAutocomplete } from "@/hooks/useAutocomplete";
 import clsx from "clsx";
 
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
+  
+  const searchRef = useRef<HTMLDivElement>(null);
+  
+  const {
+    query: search,
+    setQuery: setSearch,
+    results: autocompleteResults,
+    isOpen: isAutocompleteOpen,
+    setIsOpen: setIsAutocompleteOpen,
+    activeIndex,
+    handleKeyDown
+  } = useAutocomplete<ClimateProject>(
+    async (q) => {
+      const data = await fetchProjects({ search: q, limit: 5 });
+      return data;
+    }
+  );
 
   const category = (router.query.category as string) || "";
   const status = (router.query.status as string) || "active";
@@ -22,10 +39,21 @@ export default function ProjectsPage() {
 
   // Initialize search from URL query parameter
   useEffect(() => {
-    if (searchQuery) {
+    if (searchQuery && !search) {
       setSearch(searchQuery);
     }
   }, [searchQuery]);
+
+  // Click outside listener for autocomplete
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setIsAutocompleteOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Debounced search effect
   useEffect(() => {
@@ -61,18 +89,27 @@ export default function ProjectsPage() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       setSearch(value);
-      // Update URL with search query
-      router.push(
-        {
-          pathname: "/projects",
-          query: { ...router.query, search: value || undefined },
-        },
-        undefined,
-        { shallow: true },
-      );
+      
+      // Update URL with search query (debounced would be better but keeping simple for now)
+      const timer = setTimeout(() => {
+        router.push(
+          {
+            pathname: "/projects",
+            query: { ...router.query, search: value || undefined },
+          },
+          undefined,
+          { shallow: true },
+        );
+      }, 500);
+      return () => clearTimeout(timer);
     },
-    [router, router.query],
+    [router, router.query, setSearch],
   );
+
+  const handleSelectProject = (project: ClimateProject) => {
+    setIsAutocompleteOpen(false);
+    router.push(`/projects/${project.id}`);
+  };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
@@ -91,17 +128,49 @@ export default function ProjectsPage() {
       </div>
 
       {/* Search */}
-      <div className="relative mb-6">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8aaa8a]">
+      <div className="relative mb-6" ref={searchRef}>
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8aaa8a] z-10">
           🔍
         </span>
         <input
           type="text"
           value={search}
           onChange={handleSearchChange}
+          onKeyDown={(e) => {
+            handleKeyDown(e);
+            if (e.key === 'Enter' && activeIndex >= 0) {
+              handleSelectProject(autocompleteResults[activeIndex]);
+            }
+          }}
+          onFocus={() => search.length >= 2 && setIsAutocompleteOpen(true)}
           placeholder="Search projects by name, location, or keyword..."
-          className="input-field pl-10"
+          className="input-field pl-10 relative z-10"
         />
+
+        {/* Autocomplete Dropdown */}
+        {isAutocompleteOpen && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-forest-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in">
+            {autocompleteResults.map((p, i) => (
+              <div
+                key={p.id}
+                onClick={() => handleSelectProject(p)}
+                className={clsx(
+                  "flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors border-b border-forest-50 last:border-0",
+                  i === activeIndex ? "bg-forest-100" : "hover:bg-forest-50"
+                )}
+              >
+                <div className="w-8 h-8 rounded-lg bg-forest-100 flex items-center justify-center text-lg flex-shrink-0">
+                  {CATEGORY_ICONS[p.category] || "🌿"}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-forest-900 truncate">{p.name}</p>
+                  <p className="text-xs text-[#8aaa8a] font-body truncate">{p.location} · {p.category}</p>
+                </div>
+                <div className="text-xs font-bold text-forest-500 uppercase tracking-widest opacity-40">View →</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-6">

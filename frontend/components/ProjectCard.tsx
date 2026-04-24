@@ -5,15 +5,19 @@ import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
 import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
 import { useXlmPrice } from "@/lib/priceContext";
+import { useWishlist } from "@/hooks/useWishlist";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
   const isComplete = pct >= 100;
   const xlmUsd = useXlmPrice();
+  const { toggleWishlist, isInWishlist } = useWishlist();
+  const isWishlisted = isInWishlist(project.id);
 
   return (
-    <Link href={`/projects/${project.id}`}>
-      <div className="card-hover group animate-fade-in flex flex-col h-full">
+    <div className="relative group">
+      <Link href={`/projects/${project.id}`}>
+        <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
 
         {/* Category icon + badges */}
         <div className="flex items-center justify-between mb-4">
@@ -105,8 +109,30 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
             Donate →
           </span>
         </div>
-      </div>
-    </Link>
+      </Link>
+
+      {/* Wishlist Toggle */}
+      <button
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleWishlist(project.id);
+        }}
+        className={`absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
+          ${isWishlisted 
+            ? 'bg-red-50 text-red-500 border-red-200 opacity-100' 
+            : 'bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100'}`}
+        aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+      >
+        <svg 
+          className={`w-5 h-5 transition-all duration-300 ${isWishlisted ? 'fill-current' : 'fill-none'}`} 
+          stroke="currentColor" 
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+        </svg>
+      </button>
+    </div>
   );
 }
 

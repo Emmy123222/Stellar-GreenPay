@@ -11,6 +11,7 @@ import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import type { ClimateProject, ProjectUpdate } from "@/utils/types";
+import { useWishlist } from "@/hooks/useWishlist";
 
 interface ProjectDetailProps { publicKey: string | null; onConnect: (pk: string) => void; }
 
@@ -27,6 +28,8 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
   const [subEmail, setSubEmail] = useState("");
   const [subState, setSubState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [subError, setSubError] = useState<string | null>(null);
+
+  const { toggleWishlist, isInWishlist } = useWishlist();
 
   useEffect(() => {
     if (!id) return;
@@ -159,6 +162,18 @@ export default function ProjectDetail({ publicKey, onConnect }: ProjectDetailPro
                     title="Share this project"
                   >
                     {shareState === 'copied' ? '✓ Link copied!' : 'Share 🌍'}
+                  </button>
+                  <button
+                    onClick={() => toggleWishlist(project.id)}
+                    className={`p-2 rounded-lg border transition-all duration-300 transform active:scale-90 
+                      ${isInWishlist(project.id) 
+                        ? 'bg-red-50 text-red-500 border-red-200' 
+                        : 'bg-forest-50 text-forest-300 border-forest-200 hover:text-red-400 hover:border-red-200'}`}
+                    title={isInWishlist(project.id) ? "Remove from wishlist" : "Add to wishlist"}
+                  >
+                    <svg className={`w-5 h-5 ${isInWishlist(project.id) ? 'fill-current' : 'fill-none'}`} stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
                   </button>
                 </div>
                 <h1 className="font-display text-2xl sm:text-3xl font-bold text-forest-900">{project.name}</h1>
