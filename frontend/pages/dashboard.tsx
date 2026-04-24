@@ -7,7 +7,7 @@ import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
 import ProjectCard from "@/components/ProjectCard";
 import { fetchProfile, fetchDonorHistory, fetchProjects } from "@/lib/api";
-import { getXLMBalance } from "@/lib/stellar";
+import { getXLMBalance, getFriendBotFunding, NETWORK } from "@/lib/stellar";
 import { formatXLM, formatCO2, timeAgo, shortenAddress, badgeEmoji, badgeLabel, calculateStreak } from "@/utils/format";
 import { explorerUrl } from "@/lib/stellar";
 import type { DonorProfile, Donation, ClimateProject } from "@/utils/types";
@@ -22,6 +22,9 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [loading,   setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState<'impact' | 'saved'>('impact');
   const [savedProjects, setSavedProjects] = useState<ClimateProject[]>([]);
+  const [isUnfunded, setIsUnfunded] = useState(false);
+  const [friendbotState, setFriendbotState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [friendbotError, setFrienbotError] = useState<string | null>(null);
   const { wishlist } = useWishlist();
 
   useEffect(() => {
@@ -29,13 +32,16 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
     Promise.all([
       fetchProfile(publicKey).catch(() => null),
       fetchDonorHistory(publicKey),
-      getXLMBalance(publicKey),
+      getXLMBalance(publicKey).catch(() => { setIsUnfunded(true); return null; }),
       fetchProjects(),
     ])
       .then(([p, d, b, allProjects]) => { 
         setProfile(p); 
         setDonations(d); 
-        setBalance(b);
+        if (b !== null) {
+          setBalance(b);
+          setIsUnfunded(false);
+        }
         setSavedProjects(allProjects.filter(proj => wishlist.includes(proj.id)));
       })
       .catch(console.error)
@@ -43,6 +49,21 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   }, [publicKey, wishlist]);
 
   const streak = calculateStreak(donations);
+  
+  const handleFriendbot = async () => {
+    if (!publicKey) return;
+    setFriendbotState('loading');
+    setFrienbotError(null);
+    try {
+      const newBalance = await getFriendBotFunding(publicKey);
+      setBalance(newBalance);
+      setIsUnfunded(false);
+      setFriendbotState('success');
+    } catch (err: unknown) {
+      setFrienbotError((err as Error).message || "Funding failed. Try again.");
+      setFriendbotState('error');
+    }
+  };
   
   // Persistence for longest streak
   useEffect(() => {
@@ -81,6 +102,38 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         </div>
         <Link href="/projects" className="btn-primary text-sm py-2.5 px-5 flex-shrink-0">🌱 Donate Now</Link>
       </div>
+
+      {/* Testnet Friendbot funding card — testnet only, shown when account is unfunded */}
+      {NETWORK === "testnet" && isUnfunded && (
+        <div className="card mb-6 bg-amber-50 border-amber-200 shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+            <div className="text-3xl">🚰</div>
+            <div className="flex-1">
+              <h2 className="font-display font-bold text-amber-900 text-base mb-1">
+                Your testnet wallet has no XLM
+              </h2>
+              <p className="text-amber-700 text-sm font-body">
+                Fund it instantly with Stellar Friendbot to start donating on testnet.
+              </p>
+              {friendbotState === 'success' && (
+                <p className="text-green-700 text-sm font-body mt-1 font-semibold">
+                  ✓ Funded! Your wallet received 10,000 XLM testnet tokens.
+                </p>
+              )}
+              {friendbotState === 'error' && friendbotError && (
+                <p className="text-red-600 text-sm font-body mt-1">{friendbotError}</p>
+              )}
+            </div>
+            <button
+              onClick={handleFriendbot}
+              disabled={friendbotState === 'loading' || friendbotState === 'success'}
+              className="btn-primary text-sm py-2.5 px-5 flex-shrink-0 disabled:opacity-60"
+            >
+              {friendbotState === 'loading' ? 'Funding…' : friendbotState === 'success' ? '✓ Funded!' : '💧 Fund My Testnet Wallet'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

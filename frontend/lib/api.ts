@@ -169,3 +169,29 @@ export async function fetchSubscriberCount(projectId: string) {
   );
   return data.count;
 }
+
+// ── Global Stats ─────────────────────────────────────────────────
+export interface GlobalStats {
+  totalDonations: number;
+  totalXLMRaised: string;
+  totalCO2OffsetKg: number;
+}
+
+export async function fetchGlobalStats(): Promise<GlobalStats> {
+  const { data } = await api.get<{ success: boolean; data: GlobalStats }>(
+    "/api/stats/global",
+  );
+  return data.data;
+}
+
+// ── Featured Project ─────────────────────────────────────────────
+export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
+  try {
+    const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
+      "/api/projects/featured",
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}

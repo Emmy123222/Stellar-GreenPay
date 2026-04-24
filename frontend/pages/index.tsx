@@ -2,9 +2,13 @@
  * pages/index.tsx — GreenPay landing page
  */
 import Link from "next/link";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import WalletConnect from "@/components/WalletConnect";
 import { useCountUp } from "@/hooks/useCountUp";
+import { fetchGlobalStats, fetchFeaturedProject } from "@/lib/api";
+import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
+import type { GlobalStats } from "@/lib/api";
+import type { ClimateProject } from "@/utils/types";
 
 interface HomeProps { publicKey: string | null; onConnect: (pk: string) => void; }
 
@@ -33,6 +37,13 @@ const CATEGORIES = [
 
 export default function Home({ publicKey, onConnect }: HomeProps) {
   const [showConnect, setShowConnect] = useState(false);
+  const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
+  const [featuredProject, setFeaturedProject] = useState<ClimateProject | null>(null);
+
+  useEffect(() => {
+    fetchGlobalStats().then(setGlobalStats).catch(() => null);
+    fetchFeaturedProject().then(setFeaturedProject).catch(() => null);
+  }, []);
 
   return (
     <div className="relative overflow-hidden">
@@ -80,6 +91,16 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
             <StatItem key={s.label} stat={s} />
           ))}
         </div>
+
+        {/* ── Global CO2 Offset Ticker ────────────────────────────── */}
+        {globalStats !== null && (
+          <CO2OffsetTicker stats={globalStats} />
+        )}
+
+        {/* ── Featured Project Spotlight ──────────────────────────── */}
+        {featuredProject !== null && (
+          <FeaturedProjectCard project={featuredProject} />
+        )}
 
         {/* ── Features ────────────────────────────────────────────────── */}
         <div className="mb-20">
@@ -161,6 +182,95 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
     </div>
   );
 }
+function FeaturedProjectCard({ project }: { project: ClimateProject }) {
+  const pct = progressPercent(project.raisedXLM, project.goalXLM);
+  return (
+    <div className="mb-20">
+      <div className="text-center mb-8">
+        <h2 className="font-display text-3xl font-bold text-forest-900 mb-2">⭐ Featured Project</h2>
+        <p className="text-[#5a7a5a] font-body">The project making the biggest impact right now</p>
+      </div>
+      <div className="card border-forest-200 shadow-lg hover:shadow-green transition-all p-6 sm:p-8">
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <span className="text-xs font-semibold bg-amber-100 text-amber-800 px-3 py-1 rounded-full border border-amber-200 font-body">
+                🏆 Most Donors
+              </span>
+              <span className="text-xs text-[#8aaa8a] bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
+                {project.category}
+              </span>
+            </div>
+            <h3 className="font-display text-2xl font-bold text-forest-900 mb-2">{project.name}</h3>
+            <p className="text-[#5a7a5a] text-sm leading-relaxed font-body mb-4 line-clamp-3">
+              {project.description}
+            </p>
+            <div className="flex flex-wrap gap-4 text-sm mb-5">
+              <span className="flex items-center gap-1 text-forest-700 font-body">
+                👥 <strong>{project.donorCount.toLocaleString()}</strong> donors
+              </span>
+              <span className="flex items-center gap-1 text-forest-700 font-body">
+                ♻️ <strong>{formatCO2(project.co2OffsetKg)}</strong> offset
+              </span>
+              <span className="flex items-center gap-1 text-[#5a7a5a] font-body">
+                📍 {project.location}
+              </span>
+            </div>
+            {/* Progress bar */}
+            <div className="mb-2">
+              <div className="flex justify-between text-xs mb-1 font-body">
+                <span className="font-semibold text-forest-700">{formatXLM(project.raisedXLM)} raised</span>
+                <span className="text-[#5a7a5a]">{pct}% of {formatXLM(project.goalXLM)}</span>
+              </div>
+              <div className="progress-bar h-2.5">
+                <div
+                  className={pct >= 100 ? "progress-fill progress-fill-complete" : "progress-fill"}
+                  style={{ width: `${Math.min(pct, 100)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col justify-center gap-3 md:w-48">
+            <Link
+              href={`/projects/${project.id}`}
+              className="btn-primary text-base py-3 px-6 text-center"
+            >
+              🌍 Donate Now
+            </Link>
+            <Link
+              href={`/projects/${project.id}`}
+              className="btn-secondary text-sm py-2.5 px-4 text-center"
+            >
+              View Project →
+            </Link>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CO2OffsetTicker({ stats }: { stats: GlobalStats }) {
+  const { count, elementRef } = useCountUp(stats.totalCO2OffsetKg, 2500);
+  return (
+    <div
+      ref={elementRef}
+      className="card mb-20 bg-gradient-to-br from-forest-900 to-forest-700 border-none text-white text-center py-10 shadow-xl"
+    >
+      <p className="text-3xl mb-2">🍃</p>
+      <div className="font-display text-5xl sm:text-6xl font-bold text-white mb-2">
+        {formatCO2(count)}
+      </div>
+      <p className="text-forest-200 text-sm font-body uppercase tracking-widest font-bold opacity-80">
+        Total CO₂ Offset Across All Donations
+      </p>
+      <p className="text-forest-300 text-xs font-body mt-2">
+        {stats.totalDonations.toLocaleString()} donations · {parseFloat(stats.totalXLMRaised).toLocaleString()} XLM raised
+      </p>
+    </div>
+  );
+}
+
 function StatItem({ stat }: { stat: any }) {
   const { count, elementRef } = useCountUp(stat.value, stat.duration);
   return (

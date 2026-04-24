@@ -3,7 +3,7 @@
  */
 import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
 
-const NETWORK     = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
+export const NETWORK = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const RPC_URL     = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
 
@@ -23,6 +23,31 @@ export async function getXLMBalance(publicKey: string): Promise<string> {
   } catch {
     throw new Error("Account not found or not funded.");
   }
+}
+
+/**
+ * Funds a testnet account via Stellar Friendbot.
+ * Returns the credited XLM balance after funding.
+ * Only works on testnet — throws on mainnet.
+ */
+export async function getFriendBotFunding(publicKey: string): Promise<string> {
+  if (NETWORK === "mainnet") {
+    throw new Error("Friendbot is only available on testnet.");
+  }
+  const response = await fetch(
+    `https://friendbot.stellar.org?addr=${encodeURIComponent(publicKey)}`,
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    // A 400 with "createAccountAlreadyExist" means it was already funded
+    if (response.status === 400 && body.includes("createAccountAlreadyExist")) {
+      throw new Error("Account is already funded.");
+    }
+    throw new Error(`Friendbot request failed (${response.status}).`);
+  }
+  // Wait briefly for Horizon to process the account creation
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return getXLMBalance(publicKey);
 }
 
 export async function getAssetBalance(publicKey: string, assetCode: string, assetIssuer: string): Promise<string | null> {
