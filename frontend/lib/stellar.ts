@@ -3,7 +3,7 @@
  */
 import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
 
-const NETWORK     = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
+export const NETWORK = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const RPC_URL     = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
 
@@ -23,6 +23,31 @@ export async function getXLMBalance(publicKey: string): Promise<string> {
   } catch {
     throw new Error("Account not found or not funded.");
   }
+}
+
+/**
+ * Funds a testnet account via Stellar Friendbot.
+ * Returns the credited XLM balance after funding.
+ * Only works on testnet — throws on mainnet.
+ */
+export async function getFriendBotFunding(publicKey: string): Promise<string> {
+  if (NETWORK === "mainnet") {
+    throw new Error("Friendbot is only available on testnet.");
+  }
+  const response = await fetch(
+    `https://friendbot.stellar.org?addr=${encodeURIComponent(publicKey)}`,
+  );
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    // A 400 with "createAccountAlreadyExist" means it was already funded
+    if (response.status === 400 && body.includes("createAccountAlreadyExist")) {
+      throw new Error("Account is already funded.");
+    }
+    throw new Error(`Friendbot request failed (${response.status}).`);
+  }
+  // Wait briefly for Horizon to process the account creation
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return getXLMBalance(publicKey);
 }
 
 export async function getAssetBalance(publicKey: string, assetCode: string, assetIssuer: string): Promise<string | null> {
@@ -331,6 +356,67 @@ export function streamProjectPayments(
       console.error("Horizon SSE stream error:", err);
     },
   });
+
+  return closeStream;
+}
+
+/**
+ * Stream global XLM donations and map destination accounts to known projects.
+ * Returns a cleanup function to close the Horizon SSE stream.
+ */
+export function streamGlobalProjectDonations(
+  projects: Array<{ id: string; name: string; walletAddress: string }>,
+  onDonation: (donation: {
+    id: string;
+    projectId: string;
+    projectName: string;
+    amountXLM: string;
+    from: string;
+    createdAt: string;
+    transactionHash: string;
+  }) => void,
+  cursor?: string,
+): () => void {
+  const projectByWallet = new Map(
+    projects.map((project) => [project.walletAddress.toUpperCase(), project]),
+  );
+
+  const closeStream = server
+    .payments()
+    .cursor(cursor || "now")
+    .stream({
+      onmessage: (record: any) => {
+        if (record.type !== "payment" && record.type !== "create_account") return;
+        const destination = String(
+          record.to || record.account || record.destination || "",
+        ).toUpperCase();
+        if (!destination || !projectByWallet.has(destination)) return;
+
+        const project = projectByWallet.get(destination);
+        if (!project) return;
+
+        const isNativeXLM =
+          record.asset_type === "native" || !record.asset_type || record.asset_code === "XLM";
+        if (!isNativeXLM) return;
+
+        const amountRaw = record.amount || record.starting_balance || "0";
+        const amount = Number.parseFloat(amountRaw);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+
+        onDonation({
+          id: String(record.id),
+          projectId: project.id,
+          projectName: project.name,
+          amountXLM: amount.toFixed(7),
+          from: record.from || record.funder || record.source_account || "Unknown",
+          createdAt: record.created_at || new Date().toISOString(),
+          transactionHash: record.transaction_hash || "",
+        });
+      },
+      onerror: (err: any) => {
+        console.error("Global Horizon stream error:", err);
+      },
+    });
 
   return closeStream;
 }

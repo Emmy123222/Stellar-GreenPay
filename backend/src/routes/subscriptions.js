@@ -27,12 +27,17 @@ router.post("/", async (req, res, next) => {
     const proj = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
     if (!proj.rows[0]) return res.status(404).json({ error: "Project not found" });
 
-    await pool.query(
+    const insertResult = await pool.query(
       `INSERT INTO project_subscriptions (id, project_id, email, donor_address)
        VALUES ($1, $2, $3, $4)
-       ON CONFLICT (project_id, email) DO NOTHING`,
+       ON CONFLICT (project_id, email) DO NOTHING
+       RETURNING id`,
       [uuidv4(), projectId, email.toLowerCase().trim(), donorAddress || null],
     );
+
+    if (insertResult.rowCount === 0) {
+      return res.status(409).json({ error: "Already subscribed with this email." });
+    }
 
     res.status(201).json({ success: true, message: "Subscribed successfully" });
   } catch (e) {

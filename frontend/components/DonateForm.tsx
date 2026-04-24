@@ -6,12 +6,13 @@ import { useState, useEffect } from "react";
 import { buildDonationTransaction, buildContractDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { recordDonation } from "@/lib/api";
-import { formatXLM } from "@/utils/format";
+import { formatXLM, formatCO2 } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 interface DonateFormProps {
   project: ClimateProject;
   publicKey: string;
+  initialAmount?: string;
   onSuccess?: () => void;
 }
 
@@ -20,7 +21,7 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
-export default function DonateForm({ project, publicKey, onSuccess }: DonateFormProps) {
+export default function DonateForm({ project, publicKey, initialAmount, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState("");
   const [message, setMessage] = useState("");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
@@ -31,6 +32,11 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialAmount) return;
+    setAmount(initialAmount);
+  }, [initialAmount]);
 
   useEffect(() => {
     let mounted = true;
@@ -66,6 +72,14 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
 
   const amountNum = parseFloat(amount);
   const isValid   = !isNaN(amountNum) && amountNum >= 1;
+
+  // Calculate CO₂ impact for XLM donations
+  const co2Impact = currency === "XLM" && amount && !isNaN(amountNum) && project.co2_per_xlm
+    ? (amountNum * project.co2_per_xlm) / 1000 // Convert to kg
+    : 0;
+
+  // Calculate tree equivalent (rough estimate: 1 tree absorbs ~22kg CO₂ per year)
+  const treeEquivalent = co2Impact > 0 ? Math.round(co2Impact / 22) : 0;
 
     const charCount = message.length;
 
@@ -239,6 +253,20 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
             placeholder="Or enter custom amount..." min="1" step="1"
             className="input-field" />
           {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
+          
+          {/* CO₂ Impact Calculator */}
+          {currency === "XLM" && amount && !isNaN(amountNum) && co2Impact > 0 && (
+            <div className="mt-3 p-3 bg-forest-50 border border-forest-200 rounded-xl">
+              <p className="text-sm font-medium text-forest-900 mb-1">
+                🌱 Your donation will offset approximately <span className="font-bold text-forest-700">{formatCO2(co2Impact)}</span>
+              </p>
+              {treeEquivalent > 0 && (
+                <p className="text-xs text-forest-600 mt-1">
+                  That is equivalent to planting about <span className="font-semibold">{treeEquivalent} {treeEquivalent === 1 ? 'tree' : 'trees'}</span>
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Message */}
