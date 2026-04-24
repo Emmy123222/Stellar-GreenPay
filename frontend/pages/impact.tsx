@@ -1,32 +1,29 @@
 /**
  * pages/impact.tsx
- * Global Impact Dashboard — Querying live data from Soroban and backend API.
+ * Global Impact Dashboard — Querying aggregated data from backend API.
  */
 import { useEffect, useState } from "react";
 import Head from "next/head";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import DonationTicker from "@/components/DonationTicker";
-import { getGlobalImpactStats } from "@/lib/stellar";
-import { fetchProjects, fetchLeaderboard } from "@/lib/api";
-import { shortenAddress } from "@/utils/format";
-import type { ClimateProject, LeaderboardEntry } from "@/utils/types";
+import { fetchImpactGlobal, fetchLeaderboard } from "@/lib/api";
+import { formatCO2, formatXLM, shortenAddress } from "@/utils/format";
+import type { LeaderboardEntry } from "@/utils/types";
+import type { ImpactGlobalStats } from "@/lib/api";
 
 export default function ImpactPage() {
-  const [stats, setStats] = useState({ totalRaisedXLM: "0", totalCO2OffsetGrams: "0", donationCount: 0 });
-  const [projectCount, setProjectCount] = useState(0);
+  const [stats, setStats] = useState<ImpactGlobalStats | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [impactStats, projects, topDonors] = await Promise.all([
-          getGlobalImpactStats(),
-          fetchProjects({ limit: 100 }),
+        const [impactStats, topDonors] = await Promise.all([
+          fetchImpactGlobal(),
           fetchLeaderboard(3),
         ]);
         setStats(impactStats);
-        setProjectCount(projects.length);
         setLeaderboard(topDonors);
       } catch (err) {
         console.error("Failed to load impact data:", err);
@@ -60,31 +57,62 @@ export default function ImpactPage() {
         {/* Global Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
           <StatCard
-            label="XLM Raised"
+            label="XLM Donated"
             icon="✨"
-            value={stats.totalRaisedXLM}
+            value={stats?.totalDonationsXLM ?? "0"}
             unit="XLM"
             isLoading={isLoading}
           />
           <StatCard
             label="CO₂ Offset"
             icon="🌿"
-            value={(Number(stats.totalCO2OffsetGrams) / 1000).toLocaleString()}
+            value={stats?.co2OffsetKg ?? 0}
             unit="Kg"
             isLoading={isLoading}
+            formatter={(val) => formatCO2(Math.floor(val))}
           />
           <StatCard
-            label="Total Donations"
+            label="Unique Donors"
             icon="💝"
-            value={stats.donationCount}
+            value={stats?.donorCount ?? 0}
             isLoading={isLoading}
           />
           <StatCard
-            label="Verified Projects"
+            label="Trees Equivalent"
             icon="🏗️"
-            value={projectCount}
+            value={stats?.treesEquivalent ?? 0}
             isLoading={isLoading}
           />
+        </div>
+
+        {/* Category Breakdown */}
+        <div className="bg-white rounded-3xl border border-forest-100 shadow-sm p-8 mb-16">
+          <h2 className="text-2xl font-display font-bold text-forest-900 mb-6 flex items-center gap-2">
+            📊 Impact by Category
+          </h2>
+          {stats?.breakdownByCategory?.length ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {stats.breakdownByCategory.map((row) => (
+                <div
+                  key={row.category}
+                  className="flex items-center justify-between rounded-2xl border border-forest-100 bg-forest-50/40 p-5"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-forest-900 truncate">{row.category}</p>
+                    <p className="text-xs text-forest-600 mt-1">
+                      {row.donorCount} donor{row.donorCount !== 1 ? "s" : ""} • {formatCO2(row.co2OffsetKg)}
+                    </p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-mono font-semibold text-forest-700">{formatXLM(row.totalDonationsXLM)}</p>
+                    <p className="text-[11px] text-forest-500">donated</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-forest-500 text-sm">No category breakdown available yet.</p>
+          )}
         </div>
 
         {/* Leaderboard Section */}
@@ -129,7 +157,21 @@ export default function ImpactPage() {
   );
 }
 
-function StatCard({ label, icon, value, unit, isLoading }: { label: string; icon: string; value: string | number; unit?: string; isLoading: boolean }) {
+function StatCard({
+  label,
+  icon,
+  value,
+  unit,
+  isLoading,
+  formatter,
+}: {
+  label: string;
+  icon: string;
+  value: string | number;
+  unit?: string;
+  isLoading: boolean;
+  formatter?: (val: number) => string;
+}) {
   return (
     <div className="bg-white p-8 rounded-3xl border border-forest-100 shadow-sm hover:shadow-md transition-shadow relative group">
       <div className="w-12 h-12 rounded-2xl bg-forest-50 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform">
@@ -138,7 +180,7 @@ function StatCard({ label, icon, value, unit, isLoading }: { label: string; icon
       <p className="text-forest-500 font-medium text-sm uppercase tracking-wider mb-2">{label}</p>
       <div className="text-4xl font-display font-bold text-forest-900 flex items-baseline gap-1.5">
         {!isLoading ? (
-          <AnimatedNumber value={value} />
+          <AnimatedNumber value={value} formatter={formatter} />
         ) : (
           <span className="w-24 h-8 bg-forest-50 animate-pulse rounded" />
         )}

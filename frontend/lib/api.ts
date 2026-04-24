@@ -225,3 +225,51 @@ export async function fetchCategoryStats(): Promise<CategoryStats[]> {
   );
   return data.data;
 }
+
+// ── Impact Aggregation ───────────────────────────────────────────────────────
+export interface ImpactProjectStats {
+  totalDonationsXLM: string;
+  donorCount: number;
+  co2OffsetKg: number;
+  treesEquivalent: number;
+  uniqueCountries: number;
+}
+
+export interface ImpactCategoryBreakdownItem {
+  category: string;
+  totalDonationsXLM: string;
+  donorCount: number;
+  co2OffsetKg: number;
+}
+
+export interface ImpactGlobalStats extends ImpactProjectStats {
+  breakdownByCategory: ImpactCategoryBreakdownItem[];
+}
+
+export interface ImpactDonorStats {
+  totalDonatedXLM: string;
+  co2OffsetKg: number;
+  projectsSupported: number;
+  topCategory: string | null;
+}
+
+export async function fetchImpactProject(projectId: string): Promise<ImpactProjectStats> {
+  const { data } = await api.get<{ success: boolean; data: ImpactProjectStats }>(
+    `/api/impact/project/${projectId}`,
+  );
+  return data.data;
+}
+
+export async function fetchImpactGlobal(): Promise<ImpactGlobalStats> {
+  const { data } = await api.get<{ success: boolean; data: ImpactGlobalStats }>(
+    "/api/impact/global",
+  );
+  return data.data;
+}
+
+export async function fetchImpactDonor(publicKey: string): Promise<ImpactDonorStats> {
+  const { data } = await api.get<{ success: boolean; data: ImpactDonorStats }>(
+    `/api/impact/donor/${publicKey}`,
+  );
+  return data.data;
+}
