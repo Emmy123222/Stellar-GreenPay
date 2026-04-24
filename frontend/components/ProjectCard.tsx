@@ -85,10 +85,10 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           )}
         </div>
 
-        {/* Stats row */}
-        <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]">
-          <div className="flex items-center gap-3 text-xs text-[#5a7a5a] font-body">
-            <span>👥 {project.donorCount} donors</span>
+	        {/* Stats row */}
+	        <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]">
+	          <div className="flex items-center gap-3 text-xs text-[#5a7a5a] font-body">
+	            <span>👥 {project.donorCount} donors</span>
             <span className="flex items-center gap-1">
               ♻️ {formatCO2(project.co2OffsetKg)}
               <span className="tooltip" onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}>
@@ -105,12 +105,12 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
               </span>
             </span>
           </div>
-          <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">
-            Donate →
-          </span>
-        </div>
-        </div>
-      </Link>
+	          <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">
+	            Donate →
+	          </span>
+	        </div>
+	      </div>
+	      </Link>
 
       {/* Wishlist Toggle */}
       <button
