@@ -1,5 +1,11 @@
 /**
  * lib/stellar.ts — Stellar SDK helpers for GreenPay
+ *
+ * Utilities for interacting with the Stellar network (Horizon) and Soroban (RPC)
+ * from the frontend.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon
+ * @see https://soroban.stellar.org/docs
  */
 import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
 
@@ -15,6 +21,15 @@ export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || "";
 /** Soroban escrow contract (deploy `contracts/escrow-contract`). */
 export const ESCROW_CONTRACT_ID = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID || "";
 
+/**
+ * Fetch an account's native XLM balance using Horizon.
+ *
+ * @param publicKey - Stellar account public key.
+ * @returns XLM balance as a string (decimal).
+ * @throws If the account does not exist, is not funded, or Horizon is unreachable.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon/api-reference/resources/accounts
+ */
 export async function getXLMBalance(publicKey: string): Promise<string> {
   try {
     const account = await server.loadAccount(publicKey);
@@ -29,6 +44,12 @@ export async function getXLMBalance(publicKey: string): Promise<string> {
  * Funds a testnet account via Stellar Friendbot.
  * Returns the credited XLM balance after funding.
  * Only works on testnet — throws on mainnet.
+ *
+ * @param publicKey - Stellar account public key to fund.
+ * @returns The account's XLM balance after funding.
+ * @throws If called on mainnet, the request fails, or the account is already funded.
+ *
+ * @see https://friendbot.stellar.org
  */
 export async function getFriendBotFunding(publicKey: string): Promise<string> {
   if (NETWORK === "mainnet") {
@@ -50,6 +71,15 @@ export async function getFriendBotFunding(publicKey: string): Promise<string> {
   return getXLMBalance(publicKey);
 }
 
+/**
+ * Fetch a non-native asset balance (e.g., USDC) for an account.
+ *
+ * @param publicKey - Stellar account public key.
+ * @param assetCode - Asset code (e.g., "USDC").
+ * @param assetIssuer - Issuer account public key.
+ * @returns Balance string, or `null` when the trustline is missing.
+ * @throws If the account does not exist, is not funded, or Horizon is unreachable.
+ */
 export async function getAssetBalance(publicKey: string, assetCode: string, assetIssuer: string): Promise<string | null> {
   try {
     const account = await server.loadAccount(publicKey);
@@ -62,6 +92,29 @@ export async function getAssetBalance(publicKey: string, assetCode: string, asse
   }
 }
 
+/**
+ * Build an unsigned payment transaction for a donation (native XLM or a custom asset).
+ *
+ * @param params - Transaction builder parameters.
+ * @param params.fromPublicKey - Source account public key (donor).
+ * @param params.toPublicKey - Destination account public key (project).
+ * @param params.amount - Amount as a decimal string.
+ * @param params.memo - Optional text memo (trimmed to 28 chars).
+ * @param params.asset - Optional asset. Omit to send native XLM.
+ * @returns Unsigned Stellar transaction ready to be signed by the wallet.
+ * @throws If Horizon fails to load the source account or parameters are invalid.
+ *
+ * @example
+ * const tx = await buildDonationTransaction({
+ *   fromPublicKey: "G...DONOR...",
+ *   toPublicKey: "G...PROJECT...",
+ *   amount: "5",
+ *   memo: "GreenPay donation",
+ * });
+ * // Sign and submit with your wallet provider.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon/api-reference/resources/accounts
+ */
 export async function buildDonationTransaction({
   fromPublicKey, toPublicKey, amount, memo, asset,
 }: { fromPublicKey: string; toPublicKey: string; amount: string; memo?: string; asset?: { code: string; issuer?: string } }) {
@@ -78,6 +131,18 @@ export async function buildDonationTransaction({
 /**
  * Builds a Soroban contract donation transaction.
  * Invokes the contract's donate() function which transfers XLM and records the donation on-chain.
+ *
+ * @param params - Contract call parameters.
+ * @param params.contractId - Target Soroban contract id.
+ * @param params.tokenAddress - Token contract address (for token-based donations).
+ * @param params.donor - Donor Stellar public key.
+ * @param params.projectId - Project id (string) recorded by the contract.
+ * @param params.amount - Amount as a decimal string in XLM units.
+ * @param params.msgHash - Message hash (u32) recorded by the contract.
+ * @returns Unsigned assembled transaction ready to be signed by the wallet.
+ * @throws If simulation fails, the account is unfunded, or the contract rejects the call.
+ *
+ * @see https://soroban.stellar.org/docs
  */
 export async function buildContractDonationTransaction({
   contractId,
@@ -135,6 +200,13 @@ export async function buildContractDonationTransaction({
 /**
  * Builds a Soroban transaction that calls `release_escrow(client, job_id)` on the escrow contract.
  * The client account must match the job’s client and must have funded this job via `create_job` on-chain.
+ *
+ * @param params - Escrow release parameters.
+ * @param params.contractId - Escrow contract id.
+ * @param params.jobId - Job id used when the job was created on-chain.
+ * @param params.clientAddress - Client (payer) Stellar public key.
+ * @returns Unsigned assembled transaction ready to be signed by the wallet.
+ * @throws If the escrow contract is not configured, simulation fails, or the contract rejects the call.
  */
 export async function buildReleaseEscrowTransaction({
   contractId,
@@ -173,6 +245,13 @@ export async function buildReleaseEscrowTransaction({
 }
 
 /** Maps Soroban simulation errors to short, user-facing messages. */
+/**
+ * Convert a Soroban simulation result into a user-friendly `Error`.
+ *
+ * @param simulated - RPC simulation response (success or failure).
+ * @returns An `Error` describing the likely cause.
+ * @throws Never; this function always returns an `Error` instance.
+ */
 export function formatSimulationFailure(simulated: unknown): Error {
   const raw = JSON.stringify(simulated);
   if (/underfunded|insufficient/i.test(raw) && /balance|fee|Fund/i.test(raw)) {
@@ -202,6 +281,13 @@ export function formatSimulationFailure(simulated: unknown): Error {
 }
 
 /** Maps Horizon submission errors to user-friendly text. */
+/**
+ * Convert a Horizon submission error into a short user-facing message.
+ *
+ * @param err - Error thrown by `server.submitTransaction`.
+ * @returns Friendly error text.
+ * @throws Never; this function always returns a string.
+ */
 export function formatTransactionError(err: unknown): string {
   const e = err as {
     response?: {
@@ -232,6 +318,13 @@ export function formatTransactionError(err: unknown): string {
   return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;
 }
 
+/**
+ * Submit a signed transaction XDR to Horizon.
+ *
+ * @param signedXDR - Signed transaction XDR (base64).
+ * @returns Horizon submission response.
+ * @throws If Horizon rejects the transaction; the error message is formatted for display.
+ */
 export async function submitTransaction(signedXDR: string) {
   const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
   try {
@@ -241,16 +334,44 @@ export async function submitTransaction(signedXDR: string) {
   }
 }
 
-export function isValidStellarAddress(a: string): boolean { return /^G[A-Z0-9]{55}$/.test(a); }
+/**
+ * Validate a Stellar account public key (G...).
+ *
+ * @param a - Candidate public key string.
+ * @returns `true` if the string matches the basic public-key format.
+ * @throws Never.
+ */
+export function isValidStellarAddress(a: string): boolean {
+  return /^G[A-Z0-9]{55}$/.test(a);
+}
+
+/**
+ * Build a Stellar Expert transaction URL for the current network.
+ *
+ * @param hash - Transaction hash.
+ * @returns Explorer URL.
+ * @throws Never.
+ */
 export function explorerUrl(hash: string): string {
   return `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}/tx/${hash}`;
 }
+
+/**
+ * Build a Stellar Expert account URL for the current network.
+ *
+ * @param addr - Account public key.
+ * @returns Explorer URL.
+ * @throws Never.
+ */
 export function accountUrl(addr: string): string {
   return `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}/account/${addr}`;
 }
 
 /**
  * Queries the Soroban contract for global impact metrics.
+ *
+ * @returns Global impact metrics. Returns zeroed values when the contract is not configured or on errors.
+ * @throws Never; errors are caught and converted to zeroed values.
  */
 export async function getGlobalImpactStats() {
   if (!CONTRACT_ID) {
@@ -281,6 +402,10 @@ export async function getGlobalImpactStats() {
 
 /**
  * Queries the contract for donor statistics including badge tier.
+ *
+ * @param donorAddress - Donor Stellar public key.
+ * @returns Donor stats, or `null` when the contract is not configured or on errors.
+ * @throws Never; errors are caught and converted to `null`.
  */
 export async function getDonorStats(donorAddress: string) {
   if (!CONTRACT_ID) {
@@ -308,6 +433,10 @@ export async function getDonorStats(donorAddress: string) {
 /**
  * Simple djb2 hash function for donation messages.
  * Returns a 32-bit unsigned integer hash.
+ *
+ * @param message - Message to hash.
+ * @returns Unsigned 32-bit hash.
+ * @throws Never.
  */
 export function hashMessage(message: string): number {
   let hash = 5381;
@@ -321,6 +450,12 @@ export function hashMessage(message: string): number {
 /**
  * Stream real-time payments to a wallet address using Horizon SSE.
  * Returns a cleanup function to close the stream.
+ *
+ * @param walletAddress - Account to stream payments for.
+ * @param onPayment - Callback invoked for each matching payment event.
+ * @param cursor - Optional cursor value; defaults to "now".
+ * @returns Cleanup function to stop streaming.
+ * @throws Never; stream errors are surfaced via the Horizon SDK `onerror` callback.
  */
 export function streamProjectPayments(
   walletAddress: string,

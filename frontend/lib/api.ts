@@ -1,5 +1,9 @@
 /**
  * lib/api.ts — Backend HTTP client
+ *
+ * Typed helper functions for calling the GreenPay backend from the Next.js app.
+ * Each function maps closely to a backend route and returns the unwrapped `data`
+ * payload from the API response.
  */
 import axios from "axios";
 import type {
@@ -20,13 +24,24 @@ const api = axios.create({
 });
 
 // ── Projects ──────────────────────────────────────────────────────────────────
+/**
+ * Fetch a list of climate projects from the backend.
+ *
+ * @param params - Optional server-side filters.
+ * @returns A list of projects matching the query.
+ * @throws If the request fails (network error, timeout, or non-2xx response).
+ *
+ * @example
+ * const projects = await fetchProjects({ verified: true, limit: 12 });
+ * console.log("projects:", projects.length);
+ */
 export async function fetchProjects(params?: {
   category?: string;
   status?: string;
   verified?: boolean;
   search?: string;
   limit?: number;
-}) {
+}): Promise<ClimateProject[]> {
   const { data } = await api.get<{ success: boolean; data: ClimateProject[] }>(
     "/api/projects",
     { params },
@@ -34,6 +49,13 @@ export async function fetchProjects(params?: {
   return data.data;
 }
 
+/**
+ * Fetch a single project by its id.
+ *
+ * @param id - Project id.
+ * @returns The project.
+ * @throws If the request fails (including 404s for missing projects).
+ */
 export async function fetchProject(id: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
@@ -58,6 +80,23 @@ export async function createProjectCampaign(
 }
 
 // ── Donations ─────────────────────────────────────────────────────────────────
+/**
+ * Persist a completed donation in the backend after the on-chain transaction succeeds.
+ *
+ * @param payload - Donation details, including the on-chain transaction hash.
+ * @returns The stored donation record.
+ * @throws If the request fails or validation is rejected by the backend.
+ *
+ * @example
+ * await recordDonation({
+ *   projectId: "project_123",
+ *   donorAddress: "G...YOUR_PUBLIC_KEY...",
+ *   amountXLM: "10",
+ *   currency: "XLM",
+ *   message: "Keep it up!",
+ *   transactionHash: "abc123deadbeef",
+ * });
+ */
 export async function recordDonation(payload: {
   projectId: string;
   donorAddress: string;
@@ -74,6 +113,15 @@ export async function recordDonation(payload: {
   return data.data;
 }
 
+/**
+ * Fetch donations for a project using cursor pagination.
+ *
+ * @param projectId - Project id.
+ * @param limit - Maximum number of donations to return (default: 20).
+ * @param cursor - Optional cursor from a previous call.
+ * @returns Donations page and a cursor for the next page (or `null` when done).
+ * @throws If the request fails.
+ */
 export async function fetchProjectDonations(
   projectId: string,
   limit = 20,
@@ -89,6 +137,13 @@ export async function fetchProjectDonations(
   return { donations: data.data, nextCursor: data.nextCursor };
 }
 
+/**
+ * Fetch all donations made by a donor.
+ *
+ * @param publicKey - Donor Stellar public key.
+ * @returns Donation history.
+ * @throws If the request fails.
+ */
 export async function fetchDonorHistory(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: Donation[] }>(
     `/api/donations/donor/${publicKey}`,
@@ -97,6 +152,13 @@ export async function fetchDonorHistory(publicKey: string) {
 }
 
 // ── Profiles ──────────────────────────────────────────────────────────────────
+/**
+ * Fetch a donor profile by public key.
+ *
+ * @param publicKey - Donor Stellar public key.
+ * @returns Donor profile.
+ * @throws If the request fails.
+ */
 export async function fetchProfile(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: DonorProfile }>(
     `/api/profiles/${publicKey}`,
@@ -104,6 +166,13 @@ export async function fetchProfile(publicKey: string) {
   return data.data;
 }
 
+/**
+ * Fetch a freelancer profile by public key.
+ *
+ * @param publicKey - Freelancer Stellar public key.
+ * @returns Freelancer profile.
+ * @throws If the request fails.
+ */
 export async function fetchFreelancerProfile(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: FreelancerProfile }>(
     `/api/profiles/${publicKey}`,
@@ -111,6 +180,13 @@ export async function fetchFreelancerProfile(publicKey: string) {
   return data.data;
 }
 
+/**
+ * Create or update a donor profile.
+ *
+ * @param payload - Profile fields to upsert.
+ * @returns The upserted profile.
+ * @throws If the request fails or validation is rejected by the backend.
+ */
 export async function upsertProfile(
   payload: Partial<DonorProfile> & { publicKey: string },
 ) {
@@ -122,6 +198,13 @@ export async function upsertProfile(
 }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
+/**
+ * Fetch top donors.
+ *
+ * @param limit - Maximum number of entries to return (default: 20).
+ * @returns Leaderboard entries.
+ * @throws If the request fails.
+ */
 export async function fetchLeaderboard(limit = 20) {
   const { data } = await api.get<{
     success: boolean;
@@ -131,6 +214,12 @@ export async function fetchLeaderboard(limit = 20) {
 }
 
 // ── Jobs (escrow) ───────────────────────────────────────────────────────────
+/**
+ * Fetch all escrow jobs.
+ *
+ * @returns List of jobs.
+ * @throws If the request fails.
+ */
 export async function fetchJobs() {
   const { data } = await api.get<{ success: boolean; data: EscrowJob[] }>(
     "/api/jobs",
@@ -138,6 +227,13 @@ export async function fetchJobs() {
   return data.data;
 }
 
+/**
+ * Fetch a single escrow job by id.
+ *
+ * @param id - Job id.
+ * @returns The job.
+ * @throws If the request fails (including 404s for missing jobs).
+ */
 export async function fetchJob(id: string) {
   const { data } = await api.get<{ success: boolean; data: EscrowJob }>(
     `/api/jobs/${id}`,
@@ -147,6 +243,11 @@ export async function fetchJob(id: string) {
 
 /**
  * Mark job completed after on-chain release_escrow succeeds (stores release tx hash).
+ *
+ * @param jobId - Job id.
+ * @param releaseTransactionHash - Hash of the on-chain release transaction.
+ * @returns Updated job record.
+ * @throws If the request fails or the backend rejects the update.
  */
 export async function completeJobRelease(
   jobId: string,
@@ -160,6 +261,13 @@ export async function completeJobRelease(
 }
 
 // ── Project Updates ─────────────────────────────────────────────
+/**
+ * Fetch updates for a project.
+ *
+ * @param projectId - Project id.
+ * @returns List of updates.
+ * @throws If the request fails.
+ */
 export async function fetchProjectUpdates(projectId: string) {
   const { data } = await api.get<{ success: boolean; data: ProjectUpdate[] }>(
     `/api/updates/${projectId}`,
@@ -168,6 +276,13 @@ export async function fetchProjectUpdates(projectId: string) {
 }
 
 // ── Subscriptions ────────────────────────────────────────────────
+/**
+ * Subscribe an email (and optionally a donor address) to a project's updates.
+ *
+ * @param payload - Subscription payload.
+ * @returns Backend response including a success flag and message.
+ * @throws If the request fails or validation is rejected by the backend.
+ */
 export async function subscribeToProject(payload: {
   projectId: string;
   email: string;
@@ -180,6 +295,13 @@ export async function subscribeToProject(payload: {
   return data;
 }
 
+/**
+ * Fetch the number of subscribers for a project.
+ *
+ * @param projectId - Project id.
+ * @returns Subscriber count.
+ * @throws If the request fails.
+ */
 export async function fetchSubscriberCount(projectId: string) {
   const { data } = await api.get<{ success: boolean; count: number }>(
     `/api/subscriptions/${projectId}/count`,
@@ -194,6 +316,12 @@ export interface GlobalStats {
   totalCO2OffsetKg: number;
 }
 
+/**
+ * Fetch global platform statistics.
+ *
+ * @returns Global statistics object.
+ * @throws If the request fails.
+ */
 export async function fetchGlobalStats(): Promise<GlobalStats> {
   const { data } = await api.get<{ success: boolean; data: GlobalStats }>(
     "/api/stats/global",
@@ -202,6 +330,12 @@ export async function fetchGlobalStats(): Promise<GlobalStats> {
 }
 
 // ── Featured Project ─────────────────────────────────────────────
+/**
+ * Fetch the featured project, if one is configured by the backend.
+ *
+ * @returns The featured project, or `null` if none exists or the request fails.
+ * @throws Never; backend errors are caught and converted to `null`.
+ */
 export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
   try {
     const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
