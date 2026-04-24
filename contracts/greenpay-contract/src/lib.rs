@@ -74,6 +74,15 @@ pub struct DonorStats {
     pub co2_offset_grams: i128,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ImpactNFT {
+    pub owner:              Address,
+    pub tier:               BadgeTier,
+    pub total_donated:      i128,
+    pub minted_at_ledger:   u32,
+}
+
 /// A community voting proposal to verify a project.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -91,6 +100,7 @@ pub enum DataKey {
     Project(String),
     ProjectCount,
     DonorStats(Address),
+    ImpactNFT(Address, BadgeTier),
     DonationCount,
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
@@ -203,11 +213,27 @@ impl GreenPayContract {
             .get(&DataKey::DonorStats(donor.clone()))
             .unwrap_or(DonorStats { total_donated: 0, donation_count: 0,
                 badge: BadgeTier::None, co2_offset_grams: 0 });
+
+        let prev_badge = donor_stats.badge.clone();
         donor_stats.total_donated    += amount;
         donor_stats.donation_count   += 1;
         donor_stats.badge             = calculate_badge(donor_stats.total_donated);
         donor_stats.co2_offset_grams += (amount / STROOP) * project.co2_per_xlm as i128;
         env.storage().instance().set(&DataKey::DonorStats(donor.clone()), &donor_stats);
+
+        // Auto-mint an Impact NFT when a donor reaches a new badge tier.
+        if donor_stats.badge != BadgeTier::None && donor_stats.badge != prev_badge {
+            if !env.storage().instance().has(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone())) {
+                let nft = ImpactNFT {
+                    owner: donor.clone(),
+                    tier: donor_stats.badge.clone(),
+                    total_donated: donor_stats.total_donated,
+                    minted_at_ledger: env.ledger().sequence(),
+                };
+                env.storage().instance().set(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone()), &nft);
+                env.events().publish((symbol_short!("nft_mint"), donor.clone()), donor_stats.badge.clone());
+            }
+        }
 
         let _donation = DonationRecord {
             donor: donor.clone(), project: project_id.clone(),
@@ -271,8 +297,38 @@ impl GreenPayContract {
 
     // ─── Placeholders ─────────────────────────────────────────────────────────
 
-    pub fn mint_impact_nft(_env: Env, _donor: Address, _tier: BadgeTier) {
-        panic!("Impact NFT minting coming in v1.3 — see ROADMAP.md");
+    pub fn mint_impact_nft(env: Env, donor: Address, tier: BadgeTier) {
+        donor.require_auth();
+        if tier == BadgeTier::None { panic!("Cannot mint NFT for None tier"); }
+
+        let stats: DonorStats = env.storage().instance()
+            .get(&DataKey::DonorStats(donor.clone()))
+            .unwrap_or(DonorStats { total_donated: 0, donation_count: 0,
+                badge: BadgeTier::None, co2_offset_grams: 0 });
+        if stats.badge == BadgeTier::None {
+            panic!("No badge tier reached yet");
+        }
+        if stats.badge != tier {
+            panic!("Tier does not match donor's current badge");
+        }
+
+        let key = DataKey::ImpactNFT(donor.clone(), tier.clone());
+        if env.storage().instance().has(&key) {
+            panic!("NFT already minted for this tier");
+        }
+
+        let nft = ImpactNFT {
+            owner: donor.clone(),
+            tier: tier.clone(),
+            total_donated: stats.total_donated,
+            minted_at_ledger: env.ledger().sequence(),
+        };
+        env.storage().instance().set(&key, &nft);
+        env.events().publish((symbol_short!("nft_mint"), donor), tier);
+    }
+
+    pub fn has_nft(env: Env, donor: Address, tier: BadgeTier) -> bool {
+        env.storage().instance().has(&DataKey::ImpactNFT(donor, tier))
     }
 
     // ─── Governance ───────────────────────────────────────────────────────────

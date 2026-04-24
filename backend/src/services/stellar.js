@@ -16,7 +16,7 @@ const rpcServer = new rpc.Server(RPC_URL);
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 
 async function getOnChainProject(projectId) {
-  if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
+  if (!CONTRACT_ID) return null;
   
   const contract = new Contract(CONTRACT_ID);
   const dummyAccount = new Horizon.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
@@ -26,7 +26,12 @@ async function getOnChainProject(projectId) {
     .setTimeout(30)
     .build();
 
-  const result = await rpcServer.simulateTransaction(tx);
+  let result;
+  try {
+    result = await rpcServer.simulateTransaction(tx);
+  } catch {
+    return null;
+  }
 
   if (rpc.Api.isSimulationSuccess(result)) {
     return scValToNative(result.result.retval);

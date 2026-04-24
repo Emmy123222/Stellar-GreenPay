@@ -6,14 +6,16 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
+import ToastNotification, { type ToastItem } from "@/components/ToastNotification";
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
-import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
+import { fetchProject, fetchProjectDonationMessages, fetchProjectUpdates, fetchSubscriberCount, subscribeToProject } from "@/lib/api";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
   ClimateProject,
+  Donation,
   ProjectCampaign,
   ProjectUpdate,
 } from "@/utils/types";
@@ -54,6 +56,8 @@ export default function ProjectDetail({
     "idle" | "saving" | "success" | "error"
   >("idle");
   const [campaignError, setCampaignError] = useState<string | null>(null);
+  const [messageWall, setMessageWall] = useState<Donation[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -65,10 +69,15 @@ export default function ProjectDetail({
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([fetchProject(id as string), fetchProjectUpdates(id as string)])
-      .then(([p, u]) => {
+    Promise.all([
+      fetchProject(id as string),
+      fetchProjectUpdates(id as string),
+      fetchProjectDonationMessages(id as string, 10),
+    ])
+      .then(([p, u, messages]) => {
         setProject(p);
         setUpdates(u);
+        setMessageWall(messages);
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
@@ -634,6 +643,10 @@ export default function ProjectDetail({
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+      <ToastNotification
+        toasts={toasts}
+        onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}
+      />
       {isComplete && (
         <div className="celebration-overlay">
           {Array.from({ length: 50 }).map((_, i) => (
@@ -1123,7 +1136,59 @@ export default function ProjectDetail({
               projectId={project.id}
               walletAddress={project.walletAddress}
               refreshKey={refreshKey}
+              onNewDonation={(d) => {
+                setToasts((prev) => [
+                  ...prev,
+                  {
+                    id: `${d.id}`,
+                    title: "New donation received",
+                    description: `${shortenAddress(d.donorAddress)} just donated ${formatXLM(d.amountXLM || d.amount || "0")}`,
+                    createdAt: Date.now(),
+                  },
+                ]);
+              }}
             />
+          </div>
+
+          {/* Message wall */}
+          <div className="card">
+            <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
+              Message Wall
+            </h2>
+            {messageWall.length === 0 ? (
+              <p className="text-sm text-[#5a7a5a] font-body py-4 text-center">
+                No messages yet — leave one with your donation. 🍃
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {messageWall.slice(0, 10).map((m) => (
+                  <div
+                    key={m.id}
+                    className="p-3 rounded-xl border border-forest-100 bg-forest-50"
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-base">🍃</span>
+                        <span className="text-sm font-semibold text-forest-900 font-body truncate">
+                          {shortenAddress(m.donorAddress, 5)}
+                        </span>
+                      </div>
+                      <span className="text-xs text-forest-700 font-mono font-bold whitespace-nowrap">
+                        {formatXLM(m.amountXLM || m.amount || "0")}
+                      </span>
+                    </div>
+                    {m.message && (
+                      <p className="text-sm text-[#5a7a5a] font-body italic leading-relaxed">
+                        “{m.message}”
+                      </p>
+                    )}
+                    <div className="mt-2 text-xs text-[#8aaa8a] font-body">
+                      {timeAgo(m.createdAt)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -1196,6 +1261,9 @@ export default function ProjectDetail({
                   }
                 }
                 setRefreshKey((k) => k + 1);
+                fetchProjectDonationMessages(project.id, 10)
+                  .then(setMessageWall)
+                  .catch(() => {});
                 setTimeout(
                   () => fetchProject(project.id).then(setProject),
                   2000,

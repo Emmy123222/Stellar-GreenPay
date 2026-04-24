@@ -132,6 +132,25 @@ async function recordDonation(req, res, next) {
 router.post("/", donationLimiter, recordDonation);
 
 // GET /api/donations/project/:id
+router.get("/project/:projectId/messages", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const result = await pool.query(
+      `SELECT *
+       FROM donations
+       WHERE project_id = $1
+         AND message IS NOT NULL
+         AND length(trim(message)) > 0
+       ORDER BY amount DESC, created_at DESC
+       LIMIT $2`,
+      [req.params.projectId, limit],
+    );
+    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/project/:projectId", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);

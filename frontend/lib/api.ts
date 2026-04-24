@@ -89,6 +89,14 @@ export async function fetchProjectDonations(
   return { donations: data.data, nextCursor: data.nextCursor };
 }
 
+export async function fetchProjectDonationMessages(projectId: string, limit = 10) {
+  const { data } = await api.get<{ success: boolean; data: Donation[] }>(
+    `/api/donations/project/${projectId}/messages`,
+    { params: { limit } },
+  );
+  return data.data;
+}
+
 export async function fetchDonorHistory(publicKey: string) {
   const { data } = await api.get<{ success: boolean; data: Donation[] }>(
     `/api/donations/donor/${publicKey}`,

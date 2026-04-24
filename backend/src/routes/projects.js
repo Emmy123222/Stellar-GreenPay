@@ -158,13 +158,44 @@ router.get("/", async (req, res, next) => {
  */
 router.get("/:id/verify", async (req, res) => {
   try {
-    const onChainProject = await getOnChainProject(req.params.id);
-    if (!onChainProject) {
-      return res.status(404).json({ success: false, error: "Project not found on-chain" });
-    }
-    res.json({ success: true, data: onChainProject });
+    const projectId = req.params.id;
+    const onChainProject = await getOnChainProject(projectId);
+
+    const stroopsToXlm = (stroops) => {
+      if (stroops === null || stroops === undefined) return "0.0000000";
+      let value;
+      try {
+        value = typeof stroops === "bigint" ? stroops : BigInt(stroops);
+      } catch {
+        return "0.0000000";
+      }
+      const negative = value < 0n;
+      if (negative) value = -value;
+      const whole = value / 10000000n;
+      const frac = value % 10000000n;
+      const fracStr = frac.toString().padStart(7, "0");
+      return `${negative ? "-" : ""}${whole.toString()}.${fracStr}`;
+    };
+
+    res.json({
+      success: true,
+      data: {
+        projectId,
+        onChainVerified: Boolean(onChainProject),
+        contractRegisteredAt: onChainProject ? Number(onChainProject.registered_at) : null,
+        totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
+      },
+    });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    res.json({
+      success: true,
+      data: {
+        projectId: req.params.id,
+        onChainVerified: false,
+        contractRegisteredAt: null,
+        totalRaisedOnChain: "0.0000000",
+      },
+    });
   }
 });
 
@@ -284,10 +315,30 @@ router.get("/:id", async (req, res, next) => {
     const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
     if (!projectResult.rows[0]) return res.status(404).json({ error: "Project not found" });
     const campaigns = await fetchCampaignsForProject(req.params.id);
+    const onChainProject = await getOnChainProject(req.params.id);
+    const stroopsToXlm = (stroops) => {
+      if (stroops === null || stroops === undefined) return "0.0000000";
+      let value;
+      try {
+        value = typeof stroops === "bigint" ? stroops : BigInt(stroops);
+      } catch {
+        return "0.0000000";
+      }
+      const negative = value < 0n;
+      if (negative) value = -value;
+      const whole = value / 10000000n;
+      const frac = value % 10000000n;
+      const fracStr = frac.toString().padStart(7, "0");
+      return `${negative ? "-" : ""}${whole.toString()}.${fracStr}`;
+    };
+
     res.json({
       success: true,
       data: {
         ...mapProjectRow(projectResult.rows[0]),
+        onChainVerified: Boolean(onChainProject) || Boolean(projectResult.rows[0].on_chain_verified),
+        contractRegisteredAt: onChainProject ? Number(onChainProject.registered_at) : null,
+        totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
       },

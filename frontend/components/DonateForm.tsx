@@ -203,7 +203,7 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
-            <p className="text-sm font-semibold text-forest-900 mb-1">🎉 Badge Earned!</p>
+            <p className="text-sm font-semibold text-forest-900 mb-1">🎉 Congrats! You earned a new badge!</p>
             <p className="text-lg font-bold text-forest-700">{donorBadge}</p>
           </div>
         )}
