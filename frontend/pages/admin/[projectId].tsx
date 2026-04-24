@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import { createProjectUpdate, fetchProject, fetchProjectDonations } from "@/lib/api";
+import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
 
@@ -43,6 +44,11 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [postingState, setPostingState] = useState<"idle" | "posting" | "success" | "error">("idle");
   const [postingError, setPostingError] = useState<string | null>(null);
 
+  const [milestones, setMilestones] = useState<any[]>([]);
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState("");
+  const [newMilestonePercentage, setNewMilestonePercentage] = useState<number>(25);
+  const [milestoneActionState, setMilestoneActionState] = useState<"idle" | "loading" | "success" | "error">("idle");
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
     setLoading(true);
@@ -51,10 +57,12 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     Promise.all([
       fetchProject(projectId),
       fetchProjectDonations(projectId, 200).then((r) => r.donations),
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${projectId}/milestones`).then(r => r.json()),
     ])
-      .then(([p, d]) => {
+      .then(([p, d, m]) => {
         setProject(p);
         setDonations(d);
+        setMilestones(m.data || []);
       })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
       .finally(() => setLoading(false));
@@ -125,6 +133,62 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     } catch (e: unknown) {
       setPostingError((e as Error).message || "Failed to post update");
       setPostingState("error");
+    }
+  };
+
+  const addMilestone = async () => {
+    if (!project || !newMilestoneTitle.trim()) return;
+    setMilestoneActionState("loading");
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${project.id}/milestones`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: newMilestoneTitle.trim(), percentage: newMilestonePercentage }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add milestone");
+      setMilestones([...milestones, data.data].sort((a, b) => a.percentage - b.percentage));
+      setNewMilestoneTitle("");
+      setMilestoneActionState("success");
+      setTimeout(() => setMilestoneActionState("idle"), 2000);
+    } catch (e: any) {
+      alert(e.message);
+      setMilestoneActionState("error");
+    }
+  };
+
+  const recordMilestoneOnChain = async (milestone: any) => {
+    if (!publicKey) return;
+    setMilestoneActionState("loading");
+    try {
+      // 1. Build & Sign transaction
+      const tx = await buildMilestoneTransaction({
+        publicKey,
+        milestoneTitle: milestone.title,
+      });
+      
+      // Since we are in a browser, we'd normally use Freighter to sign.
+      // For this demo, we'll assume the user signs via their wallet extension.
+      const { signedXDR } = await (window as any).stellarWallets.signTransaction(tx.toXDR());
+      
+      // 2. Submit to Stellar
+      const result = await submitTransaction(signedXDR);
+      
+      // 3. Update backend
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${project?.id}/milestones/${milestone.id}/reach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionHash: result.hash }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update milestone status");
+      
+      setMilestones(milestones.map(m => m.id === milestone.id ? data.data : m));
+      setMilestoneActionState("success");
+      setTimeout(() => setMilestoneActionState("idle"), 2000);
+    } catch (e: any) {
+      alert(e.message);
+      setMilestoneActionState("error");
     }
   };
 
@@ -228,6 +292,93 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <p className="text-xs text-[#8aaa8a] mt-3 font-body">
           Weekly totals based on recent donation history (up to 200 donations loaded).
         </p>
+      </div>
+
+      <div className="card mb-8">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-4">Project Milestones</h2>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            {milestones.length === 0 ? (
+              <p className="text-sm text-[#5a7a5a] font-body">No milestones defined yet.</p>
+            ) : (
+              milestones.map((m) => {
+                const reached = project.raisedXLM >= (parseFloat(project.goalXLM) * m.percentage / 100);
+                return (
+                  <div key={m.id} className={`p-4 rounded-xl border ${m.reachedAt ? 'bg-emerald-50 border-emerald-100' : 'bg-white border-forest-100'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${m.reachedAt ? 'bg-emerald-500 text-white' : 'bg-forest-100 text-forest-700'}`}>
+                          {m.percentage}%
+                        </div>
+                        <div>
+                          <p className="font-semibold text-forest-900 font-body">{m.title}</p>
+                          {m.reachedAt && <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-widest">Reached {timeAgo(m.reachedAt)}</p>}
+                        </div>
+                      </div>
+                      {reached && !m.reachedAt && (
+                        <button
+                          onClick={() => recordMilestoneOnChain(m)}
+                          disabled={milestoneActionState === "loading"}
+                          className="btn-primary text-xs py-1.5 px-3"
+                        >
+                          Record On-Chain
+                        </button>
+                      )}
+                      {m.transactionHash && (
+                        <a
+                          href={`https://stellar.expert/explorer/testnet/tx/${m.transactionHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] text-emerald-600 hover:underline font-bold uppercase tracking-widest"
+                        >
+                          View Proof ↗
+                        </a>
+                      )}
+                    </div>
+                    <div className="w-full bg-forest-100 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-1000 ${m.reachedAt ? 'bg-emerald-500' : reached ? 'bg-amber-400' : 'bg-forest-300'}`}
+                        style={{ width: `${Math.min(100, (project.raisedXLM / (parseFloat(project.goalXLM) * m.percentage / 100)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="bg-forest-50 p-5 rounded-2xl border border-forest-100">
+            <h3 className="text-sm font-bold text-forest-900 mb-3 uppercase tracking-wider opacity-60">Add Milestone</h3>
+            <div className="space-y-3">
+              <input
+                value={newMilestoneTitle}
+                onChange={(e) => setNewMilestoneTitle(e.target.value)}
+                placeholder="e.g. 25% Funded"
+                className="input-field bg-white"
+              />
+              <div>
+                <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">Percentage of goal</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={newMilestonePercentage}
+                    onChange={(e) => setNewMilestonePercentage(parseInt(e.target.value))}
+                    className="flex-1 accent-forest-600"
+                  />
+                  <span className="text-sm font-bold text-forest-900 w-8">{newMilestonePercentage}%</span>
+                </div>
+              </div>
+              <button
+                onClick={addMilestone}
+                disabled={milestoneActionState === "loading" || !newMilestoneTitle.trim()}
+                className="btn-primary w-full text-sm py-2 disabled:opacity-50"
+              >
+                {milestoneActionState === "loading" ? "Adding..." : "Add Milestone"}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

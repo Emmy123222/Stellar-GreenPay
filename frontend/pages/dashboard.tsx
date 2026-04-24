@@ -7,6 +7,7 @@ import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
 import ProjectCard from "@/components/ProjectCard";
 import ImpactCertificate from "@/components/ImpactCertificate";
+import ProjectRating from "@/components/ProjectRating";
 import { fetchProfile, fetchDonorHistory, fetchProjects } from "@/lib/api";
 import { getDueMonthlySubscriptions } from "@/lib/monthlyGiving";
 import { getXLMBalance, getFriendBotFunding, NETWORK } from "@/lib/stellar";
@@ -31,6 +32,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [dueSubscriptions, setDueSubscriptions] = useState<MonthlySubscription[]>([]);
   const { wishlist } = useWishlist();
   const [showCertificate, setShowCertificate] = useState(false);
+  const [pendingRating, setPendingRating] = useState<{ id: string, name: string } | null>(null);
 
   useEffect(() => {
     if (!publicKey) return;
@@ -49,6 +51,15 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         }
         setAllProjects(allProjects);
         setSavedProjects(allProjects.filter(proj => wishlist.includes(proj.id)));
+        
+        // Fetch pending rating
+        return fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/ratings/pending?donorAddress=${publicKey}`);
+      })
+      .then(r => r?.json())
+      .then(res => {
+        if (res?.success && res.data) {
+          setPendingRating(res.data);
+        }
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -158,6 +169,16 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+
+      {pendingRating && publicKey && (
+        <ProjectRating
+          projectId={pendingRating.id}
+          projectName={pendingRating.name}
+          donorAddress={publicKey}
+          onSuccess={() => setPendingRating(null)}
+          onCancel={() => setPendingRating(null)}
+        />
+      )}
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
