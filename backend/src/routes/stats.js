@@ -4,8 +4,8 @@
  */
 "use strict";
 const express = require("express");
-const router  = express.Router();
-const pool    = require("../db/pool");
+const router = express.Router();
+const pool = require("../db/pool");
 
 // GET /api/stats/global
 router.get("/global", async (req, res, next) => {
@@ -24,10 +24,32 @@ router.get("/global", async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        totalDonations:  row.totalDonations,
-        totalXLMRaised:  parseFloat(row.totalXLMRaised).toFixed(7),
+        totalDonations: row.totalDonations,
+        totalXLMRaised: parseFloat(row.totalXLMRaised).toFixed(7),
         totalCO2OffsetKg: row.totalCO2OffsetKg,
       },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/stats/categories — project count per category
+router.get("/categories", async (req, res, next) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        category,
+        COUNT(*)::int AS count
+      FROM projects
+      WHERE status = 'active'
+      GROUP BY category
+      ORDER BY count DESC, category ASC
+    `);
+
+    res.json({
+      success: true,
+      data: result.rows,
     });
   } catch (e) {
     next(e);
