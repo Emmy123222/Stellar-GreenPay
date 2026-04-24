@@ -211,6 +211,29 @@ function mapJobRow(row) {
   };
 }
 
+function mapProjectMilestoneRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    percentage: row.percentage,
+    title: row.title,
+    reachedAt: toIso(row.reached_at),
+    transactionHash: row.transaction_hash,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+function mapProjectRatingRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    donorAddress: row.donor_address,
+    rating: row.rating,
+    review: row.review,
+    createdAt: toIso(row.created_at),
+  };
+}
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
@@ -222,4 +245,6 @@ module.exports = {
   mapProfileRow,
   mapProjectUpdateRow,
   mapJobRow,
+  mapProjectMilestoneRow,
+  mapProjectRatingRow,
 };

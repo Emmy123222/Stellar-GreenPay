@@ -172,6 +172,35 @@ export async function buildReleaseEscrowTransaction({
   throw formatSimulationFailure(simulated);
 }
 
+/**
+ * Builds a small memo transaction to record a milestone on-chain.
+ * Sends a tiny amount (0.00001 XLM) to the source account itself (circular payment).
+ */
+export async function buildMilestoneTransaction({
+  publicKey,
+  milestoneTitle,
+}: {
+  publicKey: string;
+  milestoneTitle: string;
+}) {
+  const source = await server.loadAccount(publicKey);
+  const builder = new TransactionBuilder(source, {
+    fee: "100",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.payment({
+        destination: publicKey,
+        asset: Asset.native(),
+        amount: "0.00001",
+      }),
+    )
+    .addMemo(Memo.text(`Milestone: ${milestoneTitle.slice(0, 17)}`))
+    .setTimeout(60);
+
+  return builder.build();
+}
+
 /** Maps Soroban simulation errors to short, user-facing messages. */
 export function formatSimulationFailure(simulated: unknown): Error {
   const raw = JSON.stringify(simulated);

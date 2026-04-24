@@ -6,7 +6,7 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
-const { mapProjectRow } = require("../services/store");
+const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 
@@ -254,6 +254,53 @@ router.get("/:id/campaigns", async (req, res, next) => {
   }
 });
 
+router.get("/:id/milestones", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
+      [req.params.id],
+    );
+    res.json({ success: true, data: result.rows.map(mapProjectMilestoneRow) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post("/:id/milestones", async (req, res, next) => {
+  try {
+    const { title, percentage } = req.body;
+    if (!title || typeof percentage !== "number") {
+      return res.status(400).json({ error: "title and percentage (number) are required" });
+    }
+    const result = await pool.query(
+      `INSERT INTO project_milestones (id, project_id, title, percentage)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [uuid(), req.params.id, title, percentage],
+    );
+    res.status(201).json({ success: true, data: mapProjectMilestoneRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
+  try {
+    const { transactionHash } = req.body;
+    const result = await pool.query(
+      `UPDATE project_milestones
+       SET reached_at = NOW(), transaction_hash = $1
+       WHERE id = $2 AND project_id = $3
+       RETURNING *`,
+      [transactionHash || null, req.params.milestoneId, req.params.id],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Milestone not found" });
+    res.json({ success: true, data: mapProjectMilestoneRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
@@ -316,6 +363,19 @@ router.get("/:id", async (req, res, next) => {
     if (!projectResult.rows[0]) return res.status(404).json({ error: "Project not found" });
     const campaigns = await fetchCampaignsForProject(req.params.id);
     const onChainProject = await getOnChainProject(req.params.id);
+
+    // Fetch average rating
+    const ratingResult = await pool.query(
+      "SELECT AVG(rating) as avg_rating, COUNT(*) as count FROM project_ratings WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    // Fetch milestones
+    const milestoneResult = await pool.query(
+      "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
+      [req.params.id],
+    );
+
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
       let value;
@@ -341,6 +401,9 @@ router.get("/:id", async (req, res, next) => {
         totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
+        averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
+        ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
       },
     });
   } catch (e) {

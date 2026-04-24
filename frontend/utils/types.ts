@@ -48,6 +48,22 @@ export interface ClimateProject {
   updatedAt: string;
   campaigns?: ProjectCampaign[];
   activeCampaign?: ProjectCampaign | null;
+  averageRating?: number;
+  ratingCount?: number;
+  milestones?: ProjectMilestone[];
+}
+
+/**
+ * A project milestone representing progress towards a goal.
+ */
+export interface ProjectMilestone {
+  id: string;
+  projectId: string;
+  percentage: number;
+  title: string;
+  reachedAt?: string | null;
+  transactionHash?: string | null;
+  createdAt: string;
 }
 
 /**
