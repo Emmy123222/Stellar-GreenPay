@@ -4,6 +4,7 @@
 "use strict";
 const express = require("express");
 const router = express.Router();
+const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { mapProjectRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
@@ -21,6 +22,88 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+
+/**
+ * GET /api/projects/featured
+ * Returns the project with the highest donorCount (active projects only).
+ * Result is cached in memory for 24 hours.
+ */
+let featuredCache = null;
+let featuredCacheExpiry = 0;
+
+function mapCampaignRow(row) {
+  const now = Date.now();
+  const goalXLM = Number.parseFloat(row.goal_xlm?.toString() || "0");
+  const raisedXLM = Number.parseFloat(row.raised_xlm?.toString() || "0");
+  const deadlineMs = new Date(row.deadline).getTime();
+  const completed = raisedXLM >= goalXLM || now >= deadlineMs;
+  const progressPercent = goalXLM > 0 ? Math.min(Math.round((raisedXLM / goalXLM) * 100), 100) : 0;
+
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    description: row.description || "",
+    goalXLM: row.goal_xlm?.toString() || "0",
+    raisedXLM: raisedXLM.toFixed(7),
+    deadline: new Date(row.deadline).toISOString(),
+    progressPercent,
+    completed,
+    active: !completed,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+async function fetchCampaignsForProject(projectId) {
+  const result = await pool.query(
+    `SELECT c.*,
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN d.currency = 'XLM' THEN d.amount_xlm
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS raised_xlm
+     FROM project_campaigns c
+     LEFT JOIN donations d
+       ON d.project_id = c.project_id
+      AND d.created_at >= c.created_at
+      AND d.created_at <= c.deadline
+     WHERE c.project_id = $1
+     GROUP BY c.id
+     ORDER BY c.created_at DESC`,
+    [projectId],
+  );
+  return result.rows.map(mapCampaignRow);
+}
+
+router.get("/featured", async (req, res, next) => {
+  try {
+    const now = Date.now();
+    if (featuredCache && now < featuredCacheExpiry) {
+      return res.json({ success: true, data: featuredCache });
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE status = 'active'
+       ORDER BY donor_count DESC, raised_xlm DESC
+       LIMIT 1`,
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "No featured project found" });
+    }
+
+    featuredCache = mapProjectRow(result.rows[0]);
+    featuredCacheExpiry = now + 24 * 60 * 60 * 1000; // 24 hours
+    res.json({ success: true, data: featuredCache });
+  } catch (e) {
+    next(e);
+  }
+});
 
 router.get("/", async (req, res, next) => {
   try {
@@ -85,6 +168,61 @@ router.get("/:id/verify", async (req, res) => {
   }
 });
 
+router.post("/:id/campaigns", async (req, res, next) => {
+  try {
+    const { title, goalXLM, deadline, description } = req.body || {};
+    const trimmedTitle = typeof title === "string" ? title.trim() : "";
+    const trimmedDescription = typeof description === "string" ? description.trim() : "";
+    const goal = Number.parseFloat(goalXLM);
+    const deadlineDate = new Date(deadline);
+
+    if (trimmedTitle.length < 3 || trimmedTitle.length > 120) {
+      return res.status(400).json({ error: "title must be between 3 and 120 characters" });
+    }
+    if (!Number.isFinite(goal) || goal <= 0) {
+      return res.status(400).json({ error: "goalXLM must be a positive number" });
+    }
+    if (!deadline || Number.isNaN(deadlineDate.getTime())) {
+      return res.status(400).json({ error: "deadline must be a valid ISO date string" });
+    }
+    if (deadlineDate.getTime() <= Date.now()) {
+      return res.status(400).json({ error: "deadline must be in the future" });
+    }
+    if (trimmedDescription.length > 500) {
+      return res.status(400).json({ error: "description must be 500 characters or fewer" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO project_campaigns (id, project_id, title, description, goal_xlm, deadline, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       RETURNING *, 0::numeric AS raised_xlm`,
+      [uuid(), req.params.id, trimmedTitle, trimmedDescription || null, goal.toFixed(7), deadlineDate.toISOString()],
+    );
+
+    res.status(201).json({ success: true, data: mapCampaignRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get("/:id/campaigns", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    const campaigns = await fetchCampaignsForProject(req.params.id);
+    res.json({ success: true, data: campaigns });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
@@ -143,9 +281,17 @@ router.post("/admin/confirm", async (req, res) => {
 
 router.get("/:id", async (req, res, next) => {
   try {
-    const result = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
-    if (!result.rows[0]) return res.status(404).json({ error: "Project not found" });
-    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+    const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) return res.status(404).json({ error: "Project not found" });
+    const campaigns = await fetchCampaignsForProject(req.params.id);
+    res.json({
+      success: true,
+      data: {
+        ...mapProjectRow(projectResult.rows[0]),
+        campaigns,
+        activeCampaign: campaigns.find((campaign) => campaign.active) || null,
+      },
+    });
   } catch (e) {
     next(e);
   }

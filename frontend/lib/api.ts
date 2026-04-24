@@ -10,6 +10,7 @@ import type {
   ProjectUpdate,
   LeaderboardEntry,
   EscrowJob,
+  ProjectCampaign,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -36,6 +37,22 @@ export async function fetchProjects(params?: {
 export async function fetchProject(id: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
+  );
+  return data.data;
+}
+
+export async function createProjectCampaign(
+  projectId: string,
+  payload: {
+    title: string;
+    goalXLM: string;
+    deadline: string;
+    description?: string;
+  },
+) {
+  const { data } = await api.post<{ success: boolean; data: ProjectCampaign }>(
+    `/api/projects/${projectId}/campaigns`,
+    payload,
   );
   return data.data;
 }
@@ -168,4 +185,43 @@ export async function fetchSubscriberCount(projectId: string) {
     `/api/subscriptions/${projectId}/count`,
   );
   return data.count;
+}
+
+// ── Global Stats ─────────────────────────────────────────────────
+export interface GlobalStats {
+  totalDonations: number;
+  totalXLMRaised: string;
+  totalCO2OffsetKg: number;
+}
+
+export async function fetchGlobalStats(): Promise<GlobalStats> {
+  const { data } = await api.get<{ success: boolean; data: GlobalStats }>(
+    "/api/stats/global",
+  );
+  return data.data;
+}
+
+// ── Featured Project ─────────────────────────────────────────────
+export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
+  try {
+    const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
+      "/api/projects/featured",
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
+// ── Category Stats ───────────────────────────────────────────────
+export interface CategoryStats {
+  category: string;
+  count: number;
+}
+
+export async function fetchCategoryStats(): Promise<CategoryStats[]> {
+  const { data } = await api.get<{ success: boolean; data: CategoryStats[] }>(
+    "/api/stats/categories",
+  );
+  return data.data;
 }

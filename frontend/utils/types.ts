@@ -28,12 +28,29 @@ export interface ClimateProject {
   raisedXLM: string;           // total raised so far
   donorCount: number;
   co2OffsetKg: number;         // estimated CO2 offset in kg
+  co2_per_xlm: number;         // CO2 offset per XLM donated
   status: ProjectStatus;
   verified: boolean;
   onChainVerified?: boolean;
   tags: string[];
   createdAt: string;
   updatedAt: string;
+  campaigns?: ProjectCampaign[];
+  activeCampaign?: ProjectCampaign | null;
+}
+
+export interface ProjectCampaign {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  goalXLM: string;
+  raisedXLM: string;
+  deadline: string;
+  progressPercent: number;
+  completed: boolean;
+  active: boolean;
+  createdAt: string;
 }
 
 export interface Donation {
@@ -127,4 +144,23 @@ export interface EscrowJob {
   releaseTransactionHash?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MonthlyDonationHistoryItem {
+  paidAt: string;
+  amountXLM: string;
+}
+
+export interface MonthlySubscription {
+  id: string;
+  projectId: string;
+  projectName: string;
+  amountXLM: string;
+  startDate: string;
+  durationMonths: number | null;
+  nextDueDate: string;
+  remainingMonths: number | null;
+  status: "active" | "completed";
+  createdAt: string;
+  history: MonthlyDonationHistoryItem[];
 }
