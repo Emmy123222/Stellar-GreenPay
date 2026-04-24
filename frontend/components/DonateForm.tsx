@@ -12,6 +12,7 @@ import type { ClimateProject } from "@/utils/types";
 interface DonateFormProps {
   project: ClimateProject;
   publicKey: string;
+  initialAmount?: string;
   onSuccess?: () => void;
 }
 
@@ -20,7 +21,7 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
-export default function DonateForm({ project, publicKey, onSuccess }: DonateFormProps) {
+export default function DonateForm({ project, publicKey, initialAmount, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState("");
   const [message, setMessage] = useState("");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
@@ -31,6 +32,11 @@ export default function DonateForm({ project, publicKey, onSuccess }: DonateForm
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialAmount) return;
+    setAmount(initialAmount);
+  }, [initialAmount]);
 
   useEffect(() => {
     let mounted = true;

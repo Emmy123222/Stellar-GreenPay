@@ -7,10 +7,11 @@ import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
 import ProjectCard from "@/components/ProjectCard";
 import { fetchProfile, fetchDonorHistory, fetchProjects } from "@/lib/api";
+import { getDueMonthlySubscriptions } from "@/lib/monthlyGiving";
 import { getXLMBalance, getFriendBotFunding, NETWORK } from "@/lib/stellar";
 import { formatXLM, formatCO2, timeAgo, shortenAddress, badgeEmoji, badgeLabel, calculateStreak } from "@/utils/format";
 import { explorerUrl } from "@/lib/stellar";
-import type { DonorProfile, Donation, ClimateProject } from "@/utils/types";
+import type { DonorProfile, Donation, ClimateProject, MonthlySubscription } from "@/utils/types";
 import { useWishlist } from "@/hooks/useWishlist";
 
 interface DashboardProps { publicKey: string | null; onConnect: (pk: string) => void; }
@@ -25,6 +26,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [friendbotState, setFriendbotState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [friendbotError, setFrienbotError] = useState<string | null>(null);
+  const [dueSubscriptions, setDueSubscriptions] = useState<MonthlySubscription[]>([]);
   const { wishlist } = useWishlist();
 
   useEffect(() => {
@@ -47,6 +49,11 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [publicKey, wishlist]);
+
+  useEffect(() => {
+    if (!publicKey) return;
+    setDueSubscriptions(getDueMonthlySubscriptions());
+  }, [publicKey]);
 
   const streak = calculateStreak(donations);
   
@@ -102,6 +109,27 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         </div>
         <Link href="/projects" className="btn-primary text-sm py-2.5 px-5 flex-shrink-0">🌱 Donate Now</Link>
       </div>
+
+      {dueSubscriptions.length > 0 && (
+        <div className="card mb-6 border-amber-200 bg-amber-50">
+          <h2 className="font-display text-lg font-semibold text-amber-900 mb-2">Monthly Giving Due Today</h2>
+          <div className="space-y-2">
+            {dueSubscriptions.map((subscription) => (
+              <div key={subscription.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                <p className="text-sm text-amber-900 font-body">
+                  {subscription.projectName}: {formatXLM(subscription.amountXLM)}
+                </p>
+                <Link
+                  href={`/projects/${subscription.projectId}?amount=${encodeURIComponent(subscription.amountXLM)}&monthlySubId=${encodeURIComponent(subscription.id)}`}
+                  className="btn-primary text-xs py-1.5 px-3 inline-flex items-center justify-center"
+                >
+                  Pay Now
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Testnet Friendbot funding card — testnet only, shown when account is unfunded */}
       {NETWORK === "testnet" && isUnfunded && (

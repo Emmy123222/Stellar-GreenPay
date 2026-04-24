@@ -360,6 +360,67 @@ export function streamProjectPayments(
   return closeStream;
 }
 
+/**
+ * Stream global XLM donations and map destination accounts to known projects.
+ * Returns a cleanup function to close the Horizon SSE stream.
+ */
+export function streamGlobalProjectDonations(
+  projects: Array<{ id: string; name: string; walletAddress: string }>,
+  onDonation: (donation: {
+    id: string;
+    projectId: string;
+    projectName: string;
+    amountXLM: string;
+    from: string;
+    createdAt: string;
+    transactionHash: string;
+  }) => void,
+  cursor?: string,
+): () => void {
+  const projectByWallet = new Map(
+    projects.map((project) => [project.walletAddress.toUpperCase(), project]),
+  );
+
+  const closeStream = server
+    .payments()
+    .cursor(cursor || "now")
+    .stream({
+      onmessage: (record: any) => {
+        if (record.type !== "payment" && record.type !== "create_account") return;
+        const destination = String(
+          record.to || record.account || record.destination || "",
+        ).toUpperCase();
+        if (!destination || !projectByWallet.has(destination)) return;
+
+        const project = projectByWallet.get(destination);
+        if (!project) return;
+
+        const isNativeXLM =
+          record.asset_type === "native" || !record.asset_type || record.asset_code === "XLM";
+        if (!isNativeXLM) return;
+
+        const amountRaw = record.amount || record.starting_balance || "0";
+        const amount = Number.parseFloat(amountRaw);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+
+        onDonation({
+          id: String(record.id),
+          projectId: project.id,
+          projectName: project.name,
+          amountXLM: amount.toFixed(7),
+          from: record.from || record.funder || record.source_account || "Unknown",
+          createdAt: record.created_at || new Date().toISOString(),
+          transactionHash: record.transaction_hash || "",
+        });
+      },
+      onerror: (err: any) => {
+        console.error("Global Horizon stream error:", err);
+      },
+    });
+
+  return closeStream;
+}
+
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
   // We use a dummy account for simulation
   const dummyAccount = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");

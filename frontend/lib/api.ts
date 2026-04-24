@@ -10,6 +10,7 @@ import type {
   ProjectUpdate,
   LeaderboardEntry,
   EscrowJob,
+  ProjectCampaign,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -36,6 +37,22 @@ export async function fetchProjects(params?: {
 export async function fetchProject(id: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
+  );
+  return data.data;
+}
+
+export async function createProjectCampaign(
+  projectId: string,
+  payload: {
+    title: string;
+    goalXLM: string;
+    deadline: string;
+    description?: string;
+  },
+) {
+  const { data } = await api.post<{ success: boolean; data: ProjectCampaign }>(
+    `/api/projects/${projectId}/campaigns`,
+    payload,
   );
   return data.data;
 }

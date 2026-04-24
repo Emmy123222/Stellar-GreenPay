@@ -5,12 +5,21 @@ import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import WalletConnect from "@/components/WalletConnect";
 import { useCountUp } from "@/hooks/useCountUp";
-import { fetchGlobalStats, fetchFeaturedProject } from "@/lib/api";
+import { fetchGlobalStats, fetchFeaturedProject, fetchProjects } from "@/lib/api";
+import { streamGlobalProjectDonations } from "@/lib/stellar";
 import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
 import type { GlobalStats } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
 
 interface HomeProps { publicKey: string | null; onConnect: (pk: string) => void; }
+
+interface LiveDonationTickerItem {
+  id: string;
+  projectId: string;
+  projectName: string;
+  amountXLM: string;
+  createdAt: string;
+}
 
 const FEATURES = [
   { icon: "🔗", title: "Direct to Project", desc: "Your XLM goes straight to the project wallet — no platform takes a cut." },
@@ -39,11 +48,60 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
   const [showConnect, setShowConnect] = useState(false);
   const [globalStats, setGlobalStats] = useState<GlobalStats | null>(null);
   const [featuredProject, setFeaturedProject] = useState<ClimateProject | null>(null);
+  const [liveDonations, setLiveDonations] = useState<LiveDonationTickerItem[]>([]);
+  const [tickerIndex, setTickerIndex] = useState(0);
 
   useEffect(() => {
+    let closeStream: (() => void) | null = null;
+    let isMounted = true;
+
     fetchGlobalStats().then(setGlobalStats).catch(() => null);
     fetchFeaturedProject().then(setFeaturedProject).catch(() => null);
+
+    fetchProjects({ limit: 100 })
+      .then((projects) => {
+        if (!isMounted || projects.length === 0) return;
+        closeStream = streamGlobalProjectDonations(
+          projects.map((project) => ({
+            id: project.id,
+            name: project.name,
+            walletAddress: project.walletAddress,
+          })),
+          (donation) => {
+            setLiveDonations((prev) => [
+              {
+                id: donation.id,
+                projectId: donation.projectId,
+                projectName: donation.projectName,
+                amountXLM: donation.amountXLM,
+                createdAt: donation.createdAt,
+              },
+              ...prev.filter((item) => item.id !== donation.id),
+            ].slice(0, 10));
+          },
+        );
+      })
+      .catch(() => null);
+
+    return () => {
+      isMounted = false;
+      if (closeStream) closeStream();
+    };
   }, []);
+
+  useEffect(() => {
+    if (liveDonations.length <= 1) return;
+    const timer = window.setInterval(() => {
+      setTickerIndex((current) => (current + 1) % liveDonations.length);
+    }, 3500);
+    return () => window.clearInterval(timer);
+  }, [liveDonations.length]);
+
+  useEffect(() => {
+    if (tickerIndex >= liveDonations.length) {
+      setTickerIndex(0);
+    }
+  }, [liveDonations.length, tickerIndex]);
 
   return (
     <div className="relative overflow-hidden">
@@ -179,6 +237,39 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
           </div>
         </div>
       )}
+
+      <LiveDonationTicker
+        donations={liveDonations}
+        activeIndex={tickerIndex}
+      />
+    </div>
+  );
+}
+
+function LiveDonationTicker({
+  donations,
+  activeIndex,
+}: {
+  donations: LiveDonationTickerItem[];
+  activeIndex: number;
+}) {
+  if (donations.length === 0) return null;
+  const item = donations[activeIndex];
+
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2">
+      <div className="max-w-6xl mx-auto flex items-center gap-3 text-sm text-white font-body">
+        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          Live donations
+        </span>
+        <p key={item.id} className="animate-slide-up">
+          just donated <strong>{formatXLM(item.amountXLM)}</strong> to{" "}
+          <Link href={`/projects/${item.projectId}`} className="text-emerald-300 hover:text-emerald-200">
+            {item.projectName}
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }
