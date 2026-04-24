@@ -87,3 +87,64 @@ export const CATEGORY_ICONS: Record<string, string> = {
   "Sustainable Agriculture": "🌾",
   "Other": "🌿",
 };
+
+export function calculateStreak(donations: { createdAt: string }[]): { current: number; longest: number } {
+  if (donations.length === 0) return { current: 0, longest: 0 };
+
+  // Group by month (YYYY-MM)
+  const months = Array.from(new Set(donations.map(d => {
+    const date = new Date(d.createdAt);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  }))).sort().reverse(); // Newest first
+
+  if (months.length === 0) return { current: 0, longest: 0 };
+
+  let currentStreak = 0;
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  
+  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastMonthStr = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+
+  // Check if donor donated this month or last month to maintain current streak
+  if (months[0] === currentMonth || months[0] === lastMonthStr) {
+    let checkDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    if (months[0] !== currentMonth) {
+       checkDate.setMonth(checkDate.getMonth() - 1);
+    }
+    
+    for (let i = 0; i < months.length; i++) {
+      const mStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}`;
+      if (months.includes(mStr)) {
+        currentStreak++;
+        checkDate.setMonth(checkDate.getMonth() - 1);
+      } else {
+        break;
+      }
+    }
+  }
+
+  // Calculate longest streak
+  let longest = 0;
+  let tempStreak = 0;
+  const allMonths = [...months].reverse(); // Oldest first
+  
+  for (let i = 0; i < allMonths.length; i++) {
+    if (i === 0) {
+      tempStreak = 1;
+    } else {
+      const prevDate = new Date(allMonths[i-1] + '-01');
+      const currDate = new Date(allMonths[i] + '-01');
+      const diff = (currDate.getFullYear() - prevDate.getFullYear()) * 12 + (currDate.getMonth() - prevDate.getMonth());
+      
+      if (diff === 1) {
+        tempStreak++;
+      } else {
+        tempStreak = 1;
+      }
+    }
+    longest = Math.max(longest, tempStreak);
+  }
+
+  return { current: currentStreak, longest };
+}
