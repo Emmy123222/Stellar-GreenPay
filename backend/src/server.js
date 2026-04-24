@@ -34,6 +34,7 @@ app.use("/api/updates",        require("./routes/updates"));
 app.use("/api/subscriptions",  require("./routes/subscriptions"));
 app.use("/api/jobs",           require("./routes/jobs"));
 app.use("/api/stats",          require("./routes/stats"));
+app.use("/api/impact",         require("./routes/impact"));
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 app.use((err, req, res, next) => {

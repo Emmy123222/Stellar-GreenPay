@@ -9,9 +9,10 @@ import DonationFeed from "@/components/DonationFeed";
 import ToastNotification, { type ToastItem } from "@/components/ToastNotification";
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
-import { fetchProject, fetchProjectDonationMessages, fetchProjectUpdates, fetchSubscriberCount, subscribeToProject } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
-import { accountUrl } from "@/lib/stellar";
+import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign } from "@/lib/api";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
+import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
   ClimateProject,
@@ -45,6 +46,7 @@ export default function ProjectDetail({
   const [subError, setSubError] = useState<string | null>(null);
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
   const [showMonthlySetup, setShowMonthlySetup] = useState(false);
+  const [subEmail, setSubEmail] = useState("");
   const [countdownNow, setCountdownNow] = useState(Date.now());
   const [campaignForm, setCampaignForm] = useState({
     title: "",
@@ -56,8 +58,8 @@ export default function ProjectDetail({
     "idle" | "saving" | "success" | "error"
   >("idle");
   const [campaignError, setCampaignError] = useState<string | null>(null);
-  const [messageWall, setMessageWall] = useState<Donation[]>([]);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [discussion, setDiscussion] = useState<ProjectDiscussionMessage[]>([]);
+  const [discussionLoading, setDiscussionLoading] = useState(false);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -66,6 +68,8 @@ export default function ProjectDetail({
     typeof router.query.monthlySubId === "string"
       ? router.query.monthlySubId
       : null;
+  const prefillReplyMemo =
+    typeof router.query.replyMemo === "string" ? router.query.replyMemo : undefined;
 
   useEffect(() => {
     if (!id) return;
@@ -82,6 +86,15 @@ export default function ProjectDetail({
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!project) return;
+    setDiscussionLoading(true);
+    fetchProjectDiscussion(project.walletAddress, 50)
+      .then(setDiscussion)
+      .catch(() => setDiscussion([]))
+      .finally(() => setDiscussionLoading(false));
+  }, [project?.walletAddress]);
 
   useEffect(() => {
     if (!id) return;
@@ -957,9 +970,7 @@ export default function ProjectDetail({
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-3">
               About this Project
             </h2>
-            <p className="text-[#5a7a5a] leading-relaxed text-sm whitespace-pre-wrap font-body">
-              {project.description}
-            </p>
+            <DescriptionAccordion description={project.description} />
             {project.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4">
                 {project.tags.map((tag) => (
@@ -1150,43 +1161,60 @@ export default function ProjectDetail({
             />
           </div>
 
-          {/* Message wall */}
+          {/* Donor discussion (on-chain memos) */}
           <div className="card">
-            <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
-              Message Wall
-            </h2>
-            {messageWall.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] font-body py-4 text-center">
-                No messages yet — leave one with your donation. 🍃
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h2 className="font-display text-lg font-semibold text-forest-900">
+                Donor Discussion
+              </h2>
+              <span className="text-xs text-[#8aaa8a] font-body">On-chain memos</span>
+            </div>
+            <p className="text-xs text-[#5a7a5a] font-body mb-4">
+              Discuss by donating — messages are Stellar transaction memos from real donations.
+            </p>
+
+            {discussionLoading ? (
+              <p className="text-sm text-[#5a7a5a] font-body">Loading discussion…</p>
+            ) : discussion.length === 0 ? (
+              <p className="text-sm text-[#5a7a5a] font-body">
+                No memo messages yet. Be the first to leave a message with your donation.
               </p>
             ) : (
               <div className="space-y-3">
-                {messageWall.slice(0, 10).map((m) => (
-                  <div
-                    key={m.id}
-                    className="p-3 rounded-xl border border-forest-100 bg-forest-50"
-                  >
-                    <div className="flex items-center justify-between gap-3 mb-1">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-base">🍃</span>
-                        <span className="text-sm font-semibold text-forest-900 font-body truncate">
-                          {shortenAddress(m.donorAddress, 5)}
-                        </span>
+                {discussion.slice(-50).map((m) => {
+                  const suggested = `Reply to ${m.from.slice(0, 6)}…: `;
+                  const replyMemo = suggested.length <= 100 ? suggested : suggested.slice(0, 100);
+                  return (
+                    <div key={m.id} className="p-3 rounded-xl border border-forest-100 bg-white">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div className="text-xs text-[#8aaa8a] font-body">
+                          <a
+                            href={accountUrl(m.from)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-semibold text-forest-700 hover:underline"
+                          >
+                            {m.from.slice(0, 6)}…{m.from.slice(-6)}
+                          </a>
+                          <span className="mx-2">•</span>
+                          <span className="font-semibold text-forest-900">{formatXLM(m.amount, 2)}</span>
+                          <span className="mx-2">•</span>
+                          <span>{timeAgo(m.createdAt)}</span>
+                        </div>
+                        <button
+                          onClick={() => router.push({ pathname: router.pathname, query: { ...router.query, replyMemo } })}
+                          className="text-xs font-semibold text-forest-700 hover:underline self-start sm:self-auto"
+                          title="Reply by donating with a pre-filled memo"
+                        >
+                          Reply via donation
+                        </button>
                       </div>
-                      <span className="text-xs text-forest-700 font-mono font-bold whitespace-nowrap">
-                        {formatXLM(m.amountXLM || m.amount || "0")}
-                      </span>
-                    </div>
-                    {m.message && (
-                      <p className="text-sm text-[#5a7a5a] font-body italic leading-relaxed">
-                        “{m.message}”
+                      <p className="mt-2 text-sm text-forest-900 font-body leading-relaxed">
+                        {m.memo}
                       </p>
-                    )}
-                    <div className="mt-2 text-xs text-[#8aaa8a] font-body">
-                      {timeAgo(m.createdAt)}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1247,6 +1275,7 @@ export default function ProjectDetail({
               project={project}
               publicKey={publicKey}
               initialAmount={prefillAmount}
+              initialMessage={prefillReplyMemo}
               onSuccess={() => {
                 if (monthlySubId && prefillAmount) {
                   const parsedPrefillAmount = Number.parseFloat(prefillAmount);

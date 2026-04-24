@@ -6,6 +6,7 @@ import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
 import ProjectCard from "@/components/ProjectCard";
+import ImpactCertificate from "@/components/ImpactCertificate";
 import { fetchProfile, fetchDonorHistory, fetchProjects } from "@/lib/api";
 import { getDueMonthlySubscriptions } from "@/lib/monthlyGiving";
 import { getXLMBalance, getFriendBotFunding, NETWORK } from "@/lib/stellar";
@@ -23,11 +24,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [loading,   setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState<'impact' | 'saved'>('impact');
   const [savedProjects, setSavedProjects] = useState<ClimateProject[]>([]);
+  const [allProjects, setAllProjects] = useState<ClimateProject[]>([]);
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [friendbotState, setFriendbotState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [friendbotError, setFrienbotError] = useState<string | null>(null);
   const [dueSubscriptions, setDueSubscriptions] = useState<MonthlySubscription[]>([]);
   const { wishlist } = useWishlist();
+  const [showCertificate, setShowCertificate] = useState(false);
 
   useEffect(() => {
     if (!publicKey) return;
@@ -44,6 +47,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
           setBalance(b);
           setIsUnfunded(false);
         }
+        setAllProjects(allProjects);
         setSavedProjects(allProjects.filter(proj => wishlist.includes(proj.id)));
       })
       .catch(console.error)
@@ -95,6 +99,62 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const totalDonated  = profile?.totalDonatedXLM || "0";
   const co2Estimate   = Math.round(parseFloat(totalDonated) * 12); // rough estimate
   const projectsCount = profile?.projectsSupported || 0;
+
+  const topBadgeTier = profile?.badges?.length ? profile.badges[0].tier : null;
+  const supportedProjects = Array.from(
+    new Map(
+      donations.map((d) => [d.projectId, d.projectId]),
+    ).values(),
+  )
+    .slice(0, 50)
+    .map((projectId) => {
+      const p = allProjects.find((sp) => sp.id === projectId);
+      return p ? { id: p.id, name: p.name } : { id: projectId, name: projectId };
+    });
+
+  const handlePrintCertificate = () => {
+    const el = document.getElementById("impact-certificate");
+    if (!el) return;
+    const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
+    if (!w) return;
+    w.document.open();
+    w.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>Impact Certificate</title>
+          <link rel="preconnect" href="https://fonts.googleapis.com">
+          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+          <link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;600;700&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; padding: 24px; font-family: Nunito, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f0f7f0; }
+            @media print { body { background: #fff; padding: 0; } }
+            .font-display { font-family: Lora, serif; }
+          </style>
+        </head>
+        <body>
+          <div class="font-display"></div>
+          ${el.outerHTML}
+          <script>
+            window.onload = () => { window.focus(); window.print(); };
+          </script>
+        </body>
+      </html>
+    `);
+    w.document.close();
+  };
+
+  const handleShareCertificate = () => {
+    const text = `I just got my Stellar GreenPay impact certificate: ${formatCO2(co2Estimate)} offset from ${formatXLM(totalDonated)} donated.`;
+    const url = typeof window !== "undefined" ? window.location.href : "https://stellar-greenpay.app";
+    window.open(
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+      "_blank",
+    );
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
@@ -200,6 +260,51 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
 
       {activeTab === 'impact' ? (
         <div className="space-y-8 animate-slide-up">
+          {/* Certificate */}
+          <div className="card">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="font-display text-xl font-bold text-forest-900">Your Impact Certificate</h2>
+                <p className="text-sm text-[#5a7a5a] font-body mt-1">
+                  Download a PDF-ready certificate or share it on social media.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => setShowCertificate((v) => !v)}
+                  className="btn-primary text-sm py-2.5 px-5"
+                >
+                  {showCertificate ? "Hide" : "Preview"}
+                </button>
+                <button
+                  onClick={handlePrintCertificate}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all"
+                >
+                  Download Certificate
+                </button>
+                <button
+                  onClick={handleShareCertificate}
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-white hover:bg-forest-50 transition-all"
+                >
+                  Share to Twitter
+                </button>
+              </div>
+            </div>
+
+            {showCertificate && (
+              <div className="mt-6">
+                <ImpactCertificate
+                  donorAddress={publicKey}
+                  donorName={profile?.displayName || null}
+                  totalDonatedXLM={totalDonated}
+                  totalCO2OffsetKg={co2Estimate}
+                  badgeTier={topBadgeTier}
+                  projectsSupported={supportedProjects}
+                />
+              </div>
+            )}
+          </div>
+
           {/* Streak Section */}
           <div className="card bg-gradient-to-br from-forest-900 to-forest-800 text-white border-none shadow-xl">
             <div className="flex flex-col md:flex-row items-center justify-between gap-6">
@@ -324,4 +429,3 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
     </div>
   );
 }
-

@@ -421,6 +421,88 @@ export function streamGlobalProjectDonations(
   return closeStream;
 }
 
+export interface ProjectDiscussionMessage {
+  id: string;
+  from: string;
+  amount: string;
+  memo: string;
+  createdAt: string;
+  transactionHash: string;
+}
+
+/**
+ * Fetches recent donation memos for a project's wallet address by reading Horizon payment
+ * history and joining it with the transaction memo.
+ *
+ * Notes:
+ * - Only text memos are supported (memo_type === "text").
+ * - Memo length on Stellar is limited; DonateForm caps to 100 chars for UX but on-chain
+ *   the memo will be truncated by wallets/SDKs if too long.
+ */
+export async function fetchProjectDiscussion(
+  walletAddress: string,
+  limit = 50,
+): Promise<ProjectDiscussionMessage[]> {
+  const payments = await server
+    .payments()
+    .forAccount(walletAddress)
+    .order("desc")
+    .limit(limit)
+    .call();
+
+  const rows = (payments?.records ?? []) as any[];
+  const donationPayments = rows.filter(
+    (r) =>
+      (r.type === "payment" || r.type === "create_account") &&
+      typeof r.transaction_hash === "string" &&
+      r.transaction_hash,
+  );
+
+  const txHashes = Array.from(
+    new Set(donationPayments.map((p) => p.transaction_hash as string)),
+  ).slice(0, limit);
+
+  const txMemoByHash = new Map<string, string>();
+  const txCreatedAtByHash = new Map<string, string>();
+
+  const txResults = await Promise.allSettled(
+    txHashes.map(async (h) => {
+      const tx = await server.transactions().transaction(h).call();
+      const memoType = (tx as any).memo_type as string | undefined;
+      const memo = (tx as any).memo as string | undefined;
+      const createdAt = (tx as any).created_at as string | undefined;
+      if (memoType === "text" && memo && createdAt) {
+        txMemoByHash.set(h, memo);
+        txCreatedAtByHash.set(h, createdAt);
+      }
+    }),
+  );
+  // Avoid unused lint warnings in some configs
+  void txResults;
+
+  const messages: ProjectDiscussionMessage[] = donationPayments
+    .map((p) => {
+      const hash = p.transaction_hash as string;
+      const memo = txMemoByHash.get(hash);
+      const createdAt = txCreatedAtByHash.get(hash) || p.created_at;
+      if (!memo || !createdAt) return null;
+      return {
+        id: `${p.id}`,
+        from: p.from || p.funder || p.source_account,
+        amount: p.amount || p.starting_balance || "0",
+        memo,
+        createdAt,
+        transactionHash: hash,
+      };
+    })
+    .filter(Boolean) as ProjectDiscussionMessage[];
+
+  // Chronological feed (oldest → newest)
+  messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  return messages;
+}
+
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
   // We use a dummy account for simulation
   const dummyAccount = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
