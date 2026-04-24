@@ -8,6 +8,7 @@ import DonateForm from "@/components/DonateForm";
 import DonationFeed from "@/components/DonationFeed";
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
+import DescriptionAccordion from "@/components/DescriptionAccordion";
 import { fetchProject, fetchProjectUpdates, subscribeToProject } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
@@ -944,9 +945,7 @@ export default function ProjectDetail({
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-3">
               About this Project
             </h2>
-            <p className="text-[#5a7a5a] leading-relaxed text-sm whitespace-pre-wrap font-body">
-              {project.description}
-            </p>
+            <DescriptionAccordion description={project.description} />
             {project.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 mt-4">
                 {project.tags.map((tag) => (
