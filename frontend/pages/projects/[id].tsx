@@ -38,10 +38,8 @@ export default function ProjectDetail({
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const [shareState, setShareState] = useState<'idle' | 'copied'>('idle');
   const [shareCount, setShareCount] = useState<number>(0);
-  const [subEmail, setSubEmail] = useState("");
-  const [subState, setSubState] = useState<
-    "idle" | "loading" | "success" | "error"
-  >("idle");
+  const [calcAmount, setCalcAmount] = useState<string>("50");
+  const [subState, setSubState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [subError, setSubError] = useState<string | null>(null);
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
   const [showMonthlySetup, setShowMonthlySetup] = useState(false);
@@ -623,6 +621,17 @@ export default function ProjectDetail({
     ? formatCountdown(activeCampaign.deadline, countdownNow)
     : null;
 
+  const calcAmountNum = parseFloat(calcAmount) || 0;
+  const estimatedCO2 = calcAmountNum * (project.co2OffsetKg || 0);
+  const treesEquivalent = estimatedCO2 / 22;
+  
+  let analogy = "";
+  if (treesEquivalent === 0) analogy = "Enter an amount to see your impact!";
+  else if (treesEquivalent < 1) analogy = "A tiny sprout of change! 🌱";
+  else if (treesEquivalent < 10) analogy = "A small grove taking root! 🌳";
+  else if (treesEquivalent < 50) analogy = "A growing mini-forest! 🌲";
+  else analogy = "A massive impact for our planet! 🌍";
+
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
       {isComplete && (
@@ -1120,13 +1129,53 @@ export default function ProjectDetail({
 
         {/* ── Sidebar ─────────────────────────────────────────────────── */}
         <div className="space-y-4">
-          <button
-            type="button"
-            onClick={() => setShowMonthlySetup(true)}
-            className="btn-secondary w-full text-sm py-2.5 px-4"
-          >
-            Give Monthly
-          </button>
+          
+          {/* Impact Calculator */}
+          <div className="card bg-forest-50 border-forest-200">
+            <h3 className="font-display font-semibold text-forest-900 mb-2">Impact Calculator</h3>
+            <p className="text-xs text-[#5a7a5a] mb-3 font-body">See what your donation can achieve before you give.</p>
+            
+            <div className="flex flex-wrap gap-2 mb-3">
+              {["10", "25", "50", "100", "250"].map(p => (
+                <button
+                  key={p}
+                  onClick={() => setCalcAmount(p)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                    calcAmount === p ? "bg-forest-600 text-white border-forest-600 shadow-sm" : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
+                  }`}
+                >
+                  {p} XLM
+                </button>
+              ))}
+            </div>
+            
+            <div className="mb-4">
+              <input
+                type="number"
+                value={calcAmount}
+                onChange={(e) => setCalcAmount(e.target.value)}
+                placeholder="Custom amount"
+                min="0"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-forest-200 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400 font-body placeholder:text-forest-300"
+              />
+            </div>
+            
+            {calcAmountNum > 0 && (
+              <div className="p-3 bg-white rounded-lg border border-forest-100 shadow-sm animate-fade-in">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-lg">♻️</span>
+                  <span className="font-semibold text-forest-800 text-sm font-body">{formatCO2(estimatedCO2)} offset</span>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">🌳</span>
+                  <span className="font-semibold text-forest-800 text-sm font-body">~{treesEquivalent.toFixed(1)} trees/year</span>
+                </div>
+                <div className="pt-2 border-t border-forest-50 text-center">
+                  <span className="text-xs text-forest-600 font-medium italic font-body">{analogy}</span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {publicKey ? (
             <DonateForm
