@@ -48,18 +48,20 @@ function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: s
   );
 }
 
-export default function LeaderboardTable({ limit = 20 }: { limit?: number }) {
+export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "month" | "year" }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const xlmUsd = useXlmPrice();
 
   useEffect(() => {
-    fetchLeaderboard(limit)
+    setLoading(true);
+    setError(null);
+    fetchLeaderboard(limit, period)
       .then(setEntries)
       .catch(() => setError("Could not load leaderboard."))
       .finally(() => setLoading(false));
-  }, [limit]);
+  }, [limit, period]);
 
   if (loading) return (
     <div className="space-y-2">

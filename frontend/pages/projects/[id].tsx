@@ -10,7 +10,7 @@ import ToastNotification, { type ToastItem } from "@/components/ToastNotificatio
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign } from "@/lib/api";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
@@ -60,6 +60,7 @@ export default function ProjectDetail({
   const [campaignError, setCampaignError] = useState<string | null>(null);
   const [discussion, setDiscussion] = useState<ProjectDiscussionMessage[]>([]);
   const [discussionLoading, setDiscussionLoading] = useState(false);
+  const [matches, setMatches] = useState<any[]>([]);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -77,11 +78,13 @@ export default function ProjectDetail({
       fetchProject(id as string),
       fetchProjectUpdates(id as string),
       fetchProjectDonationMessages(id as string, 10),
+      fetchProjectMatches(id as string),
     ])
-      .then(([p, u, messages]) => {
+      .then(([p, u, messages, m]) => {
         setProject(p);
         setUpdates(u);
         setMessageWall(messages);
+        setMatches(m);
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
@@ -746,6 +749,27 @@ export default function ProjectDetail({
                 }}
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {matches.length > 0 && (
+        <div className="card mb-6 border-green-200 bg-gradient-to-r from-green-50 to-emerald-50">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest font-bold text-green-700 font-body mb-1">
+                Donation Matching Active
+              </p>
+              <h2 className="font-display text-xl font-semibold text-green-900">
+                Your donation will be matched up to {matches[0].multiplier}x!
+              </h2>
+              <p className="text-sm text-green-800 font-body mt-2">
+                Remaining capacity: {formatXLM(matches[0].remainingXLM)}
+              </p>
+            </div>
+            <p className="text-xs px-3 py-1 rounded-full bg-green-100 border border-green-200 text-green-800 font-body">
+              {new Date(matches[0].expiresAt).toLocaleDateString()}
+            </p>
           </div>
         </div>
       )}
