@@ -149,6 +149,10 @@ function mapProjectRow(row) {
     verified: row.verified,
     onChainVerified: row.on_chain_verified,
     tags: row.tags || [],
+    aiSummary:            row.ai_summary || null,
+    aiSummaryGeneratedAt: row.ai_summary_generated_at ? toIso(row.ai_summary_generated_at) : null,
+    aiSummaryModel:       row.ai_summary_model || null,
+    aiSummarySourceHash:  row.ai_summary_source_hash || null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };

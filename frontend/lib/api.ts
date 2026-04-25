@@ -41,6 +41,30 @@ export async function fetchProject(id: string) {
   return data.data;
 }
 
+export interface AISummaryResponse {
+  aiSummary: string;
+  aiSummaryGeneratedAt: string;
+  aiSummaryModel: string;
+  aiSummarySourceHash: string;
+}
+
+/**
+ * Trigger backend AI-summary generation for a project. Server-side this is
+ * gated to the project owner (caller's `adminAddress` must equal the
+ * project's wallet address), so this should only be called from the admin
+ * "Refresh summary" path.
+ */
+export async function generateProjectSummary(
+  projectId: string,
+  adminAddress: string,
+): Promise<AISummaryResponse> {
+  const { data } = await api.post<{ success: boolean; data: AISummaryResponse }>(
+    `/api/projects/${projectId}/generate-summary`,
+    { adminAddress },
+  );
+  return data.data;
+}
+
 export async function createProjectCampaign(
   projectId: string,
   payload: {

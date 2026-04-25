@@ -17,6 +17,16 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- AI summary cache: filled on demand by POST /api/projects/:id/generate-summary,
+-- read by GET /api/projects/:id and rendered as a highlighted card on the
+-- project detail page. ai_summary_source_hash stores a SHA-256 of the
+-- description that produced the summary so the UI can show a "needs refresh"
+-- hint when the description has been edited since.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary             TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model        TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
+
 CREATE TABLE IF NOT EXISTS donations (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
