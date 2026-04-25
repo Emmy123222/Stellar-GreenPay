@@ -57,6 +57,25 @@ export async function createProjectCampaign(
   return data.data;
 }
 
+// ── Matching ──────────────────────────────────────────────────────────────────
+export async function fetchProjectMatches(projectId: string) {
+  const { data } = await api.get<{
+    success: boolean;
+    data: Array<{
+      id: string;
+      projectId: string;
+      matcherAddress: string;
+      capXLM: string;
+      multiplier: number;
+      matchedXLM: string;
+      remainingXLM: string;
+      expiresAt: string;
+      createdAt: string;
+    }>;
+  }>(`/api/projects/${projectId}/matching`);
+  return data.data;
+}
+
 // ── Donations ─────────────────────────────────────────────────────────────────
 export async function recordDonation(payload: {
   projectId: string;
@@ -130,11 +149,11 @@ export async function upsertProfile(
 }
 
 // ── Leaderboard ───────────────────────────────────────────────────────────────
-export async function fetchLeaderboard(limit = 20) {
+export async function fetchLeaderboard(limit = 20, period = "all") {
   const { data } = await api.get<{
     success: boolean;
     data: LeaderboardEntry[];
-  }>("/api/leaderboard", { params: { limit } });
+  }>("/api/leaderboard", { params: { limit, period } });
   return data.data;
 }
 

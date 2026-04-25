@@ -411,4 +411,83 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
+router.post("/:id/matching", async (req, res, next) => {
+  try {
+    const { matcherAddress, capXLM, multiplier, expiresAt } = req.body || {};
+
+    if (!matcherAddress || typeof matcherAddress !== "string") {
+      return res.status(400).json({ error: "matcherAddress is required" });
+    }
+    if (!capXLM || isNaN(Number.parseFloat(capXLM)) || Number.parseFloat(capXLM) <= 0) {
+      return res.status(400).json({ error: "capXLM must be a positive number" });
+    }
+    if (!multiplier || typeof multiplier !== "number" || multiplier < 1) {
+      return res.status(400).json({ error: "multiplier must be >= 1" });
+    }
+    if (!expiresAt || Number.isNaN(new Date(expiresAt).getTime())) {
+      return res.status(400).json({ error: "expiresAt must be a valid ISO date string" });
+    }
+    if (new Date(expiresAt).getTime() <= Date.now()) {
+      return res.status(400).json({ error: "expiresAt must be in the future" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO donation_matches (id, project_id, matcher_address, cap_xlm, multiplier, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, project_id, matcher_address, cap_xlm, multiplier, matched_xlm, expires_at, created_at`,
+      [uuid(), req.params.id, matcherAddress, Number.parseFloat(capXLM).toFixed(7), multiplier, new Date(expiresAt).toISOString()],
+    );
+
+    const row = result.rows[0];
+    res.status(201).json({
+      success: true,
+      data: {
+        id: row.id,
+        projectId: row.project_id,
+        matcherAddress: row.matcher_address,
+        capXLM: row.cap_xlm?.toString() || "0",
+        multiplier: row.multiplier,
+        matchedXLM: row.matched_xlm?.toString() || "0",
+        expiresAt: new Date(row.expires_at).toISOString(),
+        createdAt: new Date(row.created_at).toISOString(),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.get("/:id/matching", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, project_id, matcher_address, cap_xlm, multiplier, matched_xlm, expires_at, created_at
+       FROM donation_matches
+       WHERE project_id = $1 AND expires_at > NOW()
+       ORDER BY created_at DESC`,
+      [req.params.id],
+    );
+
+    const matches = result.rows.map(row => ({
+      id: row.id,
+      projectId: row.project_id,
+      matcherAddress: row.matcher_address,
+      capXLM: row.cap_xlm?.toString() || "0",
+      multiplier: row.multiplier,
+      matchedXLM: row.matched_xlm?.toString() || "0",
+      remainingXLM: (Number.parseFloat(row.cap_xlm) - Number.parseFloat(row.matched_xlm)).toFixed(7),
+      expiresAt: new Date(row.expires_at).toISOString(),
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
+    res.json({ success: true, data: matches });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

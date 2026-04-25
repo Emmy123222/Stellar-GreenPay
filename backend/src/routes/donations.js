@@ -65,6 +65,48 @@ async function recordDonation(req, res, next) {
       ],
     );
 
+    // Check for active matching offers
+    if (currency === "XLM") {
+      const matchesResult = await client.query(
+        `SELECT id, matcher_address, cap_xlm, matched_xlm, multiplier
+         FROM donation_matches
+         WHERE project_id = $1 AND expires_at > NOW()`,
+        [projectId],
+      );
+
+      for (const match of matchesResult.rows) {
+        const matchedXlm = Number.parseFloat(match.matched_xlm || "0");
+        const capXlm = Number.parseFloat(match.cap_xlm);
+        const remaining = capXlm - matchedXlm;
+
+        if (remaining > 0) {
+          const matchAmount = Math.min(parsedAmount * match.multiplier, remaining);
+
+          await client.query(
+            `INSERT INTO donations (
+              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            [
+              uuid(),
+              projectId,
+              match.matcher_address,
+              matchAmount,
+              matchAmount,
+              "XLM",
+              `Matching donation for donation from ${donorAddress}`,
+              `match-${transactionHash}-${match.id}`,
+            ],
+          );
+
+          await client.query(
+            `UPDATE donation_matches SET matched_xlm = matched_xlm + $1 WHERE id = $2`,
+            [matchAmount, match.id],
+          );
+        }
+      }
+    }
+
     // Update project totals
     await client.query(
       `UPDATE projects
