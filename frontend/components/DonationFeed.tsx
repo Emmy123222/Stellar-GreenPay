@@ -152,7 +152,14 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-forest-900 text-sm font-body">{shortenAddress(d.donorAddress, 5)}</span>
-              <span className="font-mono font-bold text-forest-600 text-sm">{formatXLM(d.amountXLM || d.amount || "0")}</span>
+              <span className="font-mono font-bold text-forest-600 text-sm">
+                {d.currency === "USDC" ? `$${parseFloat(d.amount || "0").toFixed(2)} USDC` : formatXLM(d.amountXLM || d.amount || "0")}
+              </span>
+              {d.isMatched && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-body font-semibold">
+                  Matched!
+                </span>
+              )}
               {newIds.has(d.id) && (
                 <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-body font-semibold">
                   NEW
