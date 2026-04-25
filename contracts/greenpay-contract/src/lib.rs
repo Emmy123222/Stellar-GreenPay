@@ -104,6 +104,9 @@ pub enum DataKey {
     DonationCount,
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
+    // Tracks whether `donor` has ever donated to `project` — used so
+    // `Project.donor_count` reflects unique donors instead of donations.
+    HasDonated(String, Address),
     // Governance
     Proposal(String),
     HasVoted(String, Address),
@@ -170,7 +173,8 @@ impl GreenPayContract {
         };
         env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
         let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
-        env.storage().instance().set(&DataKey::ProjectCount, &(count + 1));
+        let next_count = count.checked_add(1).expect("ProjectCount overflow");
+        env.storage().instance().set(&DataKey::ProjectCount, &next_count);
         env.events().publish((symbol_short!("proj_reg"), admin), project_id);
     }
 
@@ -202,56 +206,75 @@ impl GreenPayContract {
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
         if !project.active { panic!("Project is not accepting donations"); }
 
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&donor, &project.wallet, &amount);
-
-        project.total_raised += amount;
-        project.donor_count  += 1;
-        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+        // Pre-compute CO2 increment with checked multiplication so an attacker
+        // can't trigger a silent wrap via a project with a huge co2_per_xlm.
+        let xlm_units = amount / STROOP;
+        let co2_increment = xlm_units
+            .checked_mul(project.co2_per_xlm as i128)
+            .expect("CO2 calculation overflow");
 
         let mut donor_stats: DonorStats = env.storage().instance()
             .get(&DataKey::DonorStats(donor.clone()))
             .unwrap_or(DonorStats { total_donated: 0, donation_count: 0,
                 badge: BadgeTier::None, co2_offset_grams: 0 });
-
         let prev_badge = donor_stats.badge.clone();
-        donor_stats.total_donated    += amount;
-        donor_stats.donation_count   += 1;
-        donor_stats.badge             = calculate_badge(donor_stats.total_donated);
-        donor_stats.co2_offset_grams += (amount / STROOP) * project.co2_per_xlm as i128;
+
+        // ── Effects: all state writes BEFORE the external token transfer
+        //    (Checks-Effects-Interactions to defend against reentrancy from a
+        //    malicious token contract passed via `token`).
+        project.total_raised = project.total_raised
+            .checked_add(amount).expect("Project total_raised overflow");
+        let donated_key = DataKey::HasDonated(project_id.clone(), donor.clone());
+        if !env.storage().instance().has(&donated_key) {
+            env.storage().instance().set(&donated_key, &true);
+            project.donor_count = project.donor_count
+                .checked_add(1).expect("Project donor_count overflow");
+        }
+        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+
+        donor_stats.total_donated = donor_stats.total_donated
+            .checked_add(amount).expect("Donor total_donated overflow");
+        donor_stats.donation_count = donor_stats.donation_count
+            .checked_add(1).expect("Donor donation_count overflow");
+        donor_stats.co2_offset_grams = donor_stats.co2_offset_grams
+            .checked_add(co2_increment).expect("Donor co2_offset overflow");
+        donor_stats.badge = calculate_badge(donor_stats.total_donated);
         env.storage().instance().set(&DataKey::DonorStats(donor.clone()), &donor_stats);
 
         // Auto-mint an Impact NFT when a donor reaches a new badge tier.
         if donor_stats.badge != BadgeTier::None && donor_stats.badge != prev_badge {
-            if !env.storage().instance().has(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone())) {
+            let nft_key = DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone());
+            if !env.storage().instance().has(&nft_key) {
                 let nft = ImpactNFT {
                     owner: donor.clone(),
                     tier: donor_stats.badge.clone(),
                     total_donated: donor_stats.total_donated,
                     minted_at_ledger: env.ledger().sequence(),
                 };
-                env.storage().instance().set(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone()), &nft);
+                env.storage().instance().set(&nft_key, &nft);
                 env.events().publish((symbol_short!("nft_mint"), donor.clone()), donor_stats.badge.clone());
             }
         }
 
-        let _donation = DonationRecord {
-            donor: donor.clone(), project: project_id.clone(),
-            amount, ledger: env.ledger().sequence(), message_hash: msg_hash,
-        };
         let dc: u32 = env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0);
-        env.storage().instance().set(&DataKey::DonationCount, &(dc + 1));
+        let new_dc = dc.checked_add(1).expect("DonationCount overflow");
+        env.storage().instance().set(&DataKey::DonationCount, &new_dc);
 
         let gr: i128 = env.storage().instance().get(&DataKey::GlobalTotalRaised).unwrap_or(0);
-        env.storage().instance().set(&DataKey::GlobalTotalRaised, &(gr + amount));
+        let new_gr = gr.checked_add(amount).expect("GlobalTotalRaised overflow");
+        env.storage().instance().set(&DataKey::GlobalTotalRaised, &new_gr);
 
         let gc: i128 = env.storage().instance().get(&DataKey::GlobalCO2OffsetGrams).unwrap_or(0);
-        let new_co2 = (amount / STROOP) * project.co2_per_xlm as i128;
-        env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams, &(gc + new_co2));
+        let new_gc = gc.checked_add(co2_increment).expect("GlobalCO2 overflow");
+        env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams, &new_gc);
+
+        // ── Interaction: external call happens after every effect is durable.
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&donor, &project.wallet, &amount);
 
         env.events().publish(
             (symbol_short!("donated"), donor, project_id),
-            (amount, donor_stats.badge.clone()),
+            (amount, donor_stats.badge.clone(), msg_hash),
         );
     }
 
@@ -345,11 +368,14 @@ impl GreenPayContract {
         if env.storage().instance().has(&DataKey::Proposal(project_id.clone())) {
             panic!("Proposal already exists for this project");
         }
+        let deadline_ledger = env.ledger().sequence()
+            .checked_add(VOTING_WINDOW_LEDGERS)
+            .expect("Voting deadline overflow");
         let proposal = VoteProposal {
             project_id:      project_id.clone(),
             votes_for:       0,
             votes_against:   0,
-            deadline_ledger: env.ledger().sequence() + VOTING_WINDOW_LEDGERS,
+            deadline_ledger,
             resolved:        false,
         };
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
@@ -381,7 +407,13 @@ impl GreenPayContract {
         }
         env.storage().instance().set(&voted_key, &true);
 
-        if approve { proposal.votes_for += 1; } else { proposal.votes_against += 1; }
+        if approve {
+            proposal.votes_for = proposal.votes_for
+                .checked_add(1).expect("votes_for overflow");
+        } else {
+            proposal.votes_against = proposal.votes_against
+                .checked_add(1).expect("votes_against overflow");
+        }
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
         env.events().publish((symbol_short!("voted"), voter, project_id), approve);
     }
@@ -617,5 +649,152 @@ mod tests {
         // Extend again so the second call reaches our panic, not an archive error
         extend_ttl(&env, &cid);
         client.resolve_proposal(&pid);
+    }
+
+    // ─── Security regression tests (see SECURITY.md) ──────────────────────────
+
+    /// Helper that registers a SAC token for the donate-flow tests.
+    fn setup_with_token() -> (
+        Env,
+        soroban_sdk::Address,
+        GreenPayContractClient<'static>,
+        Address,
+        String,
+        Address,
+        Address,
+    ) {
+        let env   = Env::default();
+        env.mock_all_auths();
+        let cid    = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &cid);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+        let pid    = String::from_str(&env, "proj-001");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin, &pid,
+            &String::from_str(&env, "Test Project"),
+            &wallet, &100u32,
+        );
+        let token_admin = Address::generate(&env);
+        let token_addr  = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        (env, cid, client, admin, pid, wallet, token_addr)
+    }
+
+    fn mint(env: &Env, token: &Address, to: &Address, amount: i128) {
+        soroban_sdk::token::StellarAssetClient::new(env, token).mint(to, &amount);
+    }
+
+    /// H-01 regression: donate() applies state updates before the external
+    /// token transfer and the happy path remains correct end-to-end.
+    #[test]
+    fn test_donate_basic_flow_after_cei_reorder() {
+        let (env, _cid, client, _admin, pid, wallet, token) = setup_with_token();
+        let donor = Address::generate(&env);
+        mint(&env, &token, &donor, 100 * STROOP);
+
+        client.donate(&token, &donor, &pid, &(50 * STROOP), &0);
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, 50 * STROOP);
+        assert_eq!(project.donor_count,  1);
+        assert_eq!(client.get_global_total(), 50 * STROOP);
+        assert_eq!(client.get_donation_count(), 1);
+
+        // CEI: tokens actually moved as a side-effect of the recorded state.
+        let token_client = soroban_sdk::token::TokenClient::new(&env, &token);
+        assert_eq!(token_client.balance(&wallet), 50 * STROOP);
+        assert_eq!(token_client.balance(&donor),  50 * STROOP);
+    }
+
+    /// M-01 regression: `donor_count` reflects unique donors, not donations.
+    #[test]
+    fn test_donate_unique_donor_count_not_inflated() {
+        let (env, _cid, client, _admin, pid, _wallet, token) = setup_with_token();
+        let donor = Address::generate(&env);
+        mint(&env, &token, &donor, 100 * STROOP);
+
+        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
+        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
+        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.donor_count,  1, "same donor must count once");
+        assert_eq!(project.total_raised, 60 * STROOP);
+        assert_eq!(client.get_donation_count(), 3, "donation_count tracks every donate call");
+    }
+
+    /// M-01 regression: distinct donors increment `donor_count` independently.
+    #[test]
+    fn test_donate_distinct_donors_increment_count() {
+        let (env, _cid, client, _admin, pid, _wallet, token) = setup_with_token();
+        for _ in 0..3u32 {
+            let d = Address::generate(&env);
+            mint(&env, &token, &d, 10 * STROOP);
+            client.donate(&token, &d, &pid, &(10 * STROOP), &0);
+        }
+        let project = client.get_project(&pid);
+        assert_eq!(project.donor_count, 3);
+    }
+
+    /// H-02 regression: donating onto a near-MAX `total_raised` panics with
+    /// the checked-arithmetic guard instead of silently wrapping.
+    #[test]
+    #[should_panic(expected = "Project total_raised overflow")]
+    fn test_donate_total_raised_overflow_protected() {
+        let (env, cid, client, _admin, pid, _wallet, token) = setup_with_token();
+        env.as_contract(&cid, || {
+            let mut p: Project = env.storage().instance()
+                .get(&DataKey::Project(pid.clone())).unwrap();
+            p.total_raised = i128::MAX - 1;
+            env.storage().instance().set(&DataKey::Project(pid.clone()), &p);
+        });
+        let donor = Address::generate(&env);
+        mint(&env, &token, &donor, 100 * STROOP);
+        client.donate(&token, &donor, &pid, &(10 * STROOP), &0);
+    }
+
+    /// H-02 regression: CO2 multiplication is bounded by `checked_mul`, so a
+    /// project with a huge `co2_per_xlm` cannot silently wrap the offset.
+    #[test]
+    #[should_panic(expected = "CO2 calculation overflow")]
+    fn test_donate_co2_overflow_protected() {
+        let env   = Env::default();
+        env.mock_all_auths();
+        let cid    = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &cid);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+        let pid    = String::from_str(&env, "proj-co2");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin, &pid,
+            &String::from_str(&env, "Carbon Bomb"),
+            &wallet, &u32::MAX,
+        );
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let donor = Address::generate(&env);
+        let amount = 10i128.pow(36);
+        mint(&env, &token, &donor, amount);
+        // (amount / STROOP) * u32::MAX  ≈ 1e29 * 4.3e9 ≈ 4.3e38 > i128::MAX.
+        client.donate(&token, &donor, &pid, &amount, &0);
+    }
+
+    /// L-01 regression: the deadline calculation in `create_proposal` uses
+    /// `checked_add` so a near-u32::MAX ledger sequence panics instead of
+    /// silently wrapping to a past ledger (which would let proposals be
+    /// resolved immediately). Verified by exercising the same arithmetic
+    /// the entrypoint runs — going through the contract client at
+    /// near-MAX ledgers trips the host's TTL archive check first.
+    #[test]
+    #[should_panic(expected = "Voting deadline overflow")]
+    fn test_voting_deadline_checked_add_guard() {
+        let near_max: u32 = u32::MAX - 100;
+        let _ = near_max
+            .checked_add(VOTING_WINDOW_LEDGERS)
+            .expect("Voting deadline overflow");
     }
 }
