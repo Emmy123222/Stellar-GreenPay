@@ -2,12 +2,14 @@
  * src/routes/projects.js
  */
 "use strict";
+const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
+const { generateProjectSummary } = require("../services/claude");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 
 const VALID_STATUSES = ["active", "completed", "paused"];
@@ -404,6 +406,86 @@ router.get("/:id", async (req, res, next) => {
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0].count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/generate-summary
+ *
+ * Generates (or regenerates) a 3-sentence donor-facing impact summary using
+ * the Claude API and caches it on the project record. Body:
+ *
+ *   { adminAddress: "G..." }   // must equal projects.wallet_address
+ *
+ * Mirrors the admin-page convention (`isOwner = publicKey === walletAddress`)
+ * so only the project owner can spend Anthropic API credits on their project.
+ *
+ * Response: { success: true, data: { aiSummary, aiSummaryGeneratedAt,
+ *                                    aiSummaryModel, aiSummarySourceHash } }
+ */
+router.post("/:id/generate-summary", async (req, res, next) => {
+  try {
+    const { adminAddress } = req.body || {};
+    if (!adminAddress || typeof adminAddress !== "string") {
+      return res.status(400).json({ error: "adminAddress is required" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id, name, category, description, wallet_address FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    const project = projectResult.rows[0];
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.wallet_address !== adminAddress) {
+      return res.status(403).json({ error: "Only the project owner can generate a summary" });
+    }
+
+    let summaryResult;
+    try {
+      summaryResult = await generateProjectSummary({
+        name: project.name,
+        category: project.category,
+        description: project.description,
+      });
+    } catch (err) {
+      if (err.code === "MISSING_API_KEY") {
+        return res.status(503).json({ error: "AI summary feature is not configured on this server" });
+      }
+      // Surface upstream Anthropic errors with their HTTP status when available
+      // so the client can distinguish 429 (rate-limited) from 5xx (retry later).
+      const status = err.status && Number.isInteger(err.status) ? err.status : 502;
+      return res.status(status).json({ error: err.message || "Failed to generate summary" });
+    }
+
+    const sourceHash = crypto
+      .createHash("sha256")
+      .update(project.description || "")
+      .digest("hex");
+
+    const updated = await pool.query(
+      `UPDATE projects
+          SET ai_summary              = $1,
+              ai_summary_generated_at = NOW(),
+              ai_summary_model        = $2,
+              ai_summary_source_hash  = $3,
+              updated_at              = NOW()
+        WHERE id = $4
+        RETURNING ai_summary, ai_summary_generated_at, ai_summary_model, ai_summary_source_hash`,
+      [summaryResult.summary, summaryResult.model, sourceHash, req.params.id],
+    );
+
+    const row = updated.rows[0];
+    res.json({
+      success: true,
+      data: {
+        aiSummary:            row.ai_summary,
+        aiSummaryGeneratedAt: new Date(row.ai_summary_generated_at).toISOString(),
+        aiSummaryModel:       row.ai_summary_model,
+        aiSummarySourceHash:  row.ai_summary_source_hash,
       },
     });
   } catch (e) {

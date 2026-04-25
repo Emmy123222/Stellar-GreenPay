@@ -302,7 +302,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
               <p className="text-sm text-[#5a7a5a] font-body">No milestones defined yet.</p>
             ) : (
               milestones.map((m) => {
-                const reached = project.raisedXLM >= (parseFloat(project.goalXLM) * m.percentage / 100);
+                const reached = parseFloat(project.raisedXLM) >= (parseFloat(project.goalXLM) * m.percentage / 100);
                 return (
                   <div key={m.id} className={`p-4 rounded-xl border ${m.reachedAt ? 'bg-emerald-50 border-emerald-100' : 'bg-white border-forest-100'}`}>
                     <div className="flex items-center justify-between mb-2">
@@ -338,7 +338,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <div className="w-full bg-forest-100 h-1.5 rounded-full overflow-hidden">
                       <div 
                         className={`h-full transition-all duration-1000 ${m.reachedAt ? 'bg-emerald-500' : reached ? 'bg-amber-400' : 'bg-forest-300'}`}
-                        style={{ width: `${Math.min(100, (project.raisedXLM / (parseFloat(project.goalXLM) * m.percentage / 100)) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (parseFloat(project.raisedXLM) / (parseFloat(project.goalXLM) * m.percentage / 100)) * 100)}%` }}
                       />
                     </div>
                   </div>

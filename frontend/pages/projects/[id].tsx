@@ -10,8 +10,9 @@ import ToastNotification, { type ToastItem } from "@/components/ToastNotificatio
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
+import DescriptionAccordion from "@/components/DescriptionAccordion";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary } from "@/lib/api";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
@@ -61,6 +62,9 @@ export default function ProjectDetail({
   const [discussion, setDiscussion] = useState<ProjectDiscussionMessage[]>([]);
   const [discussionLoading, setDiscussionLoading] = useState(false);
   const [matches, setMatches] = useState<any[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [aiSummaryState, setAiSummaryState] = useState<"idle" | "loading" | "error">("idle");
+  const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -77,13 +81,11 @@ export default function ProjectDetail({
     Promise.all([
       fetchProject(id as string),
       fetchProjectUpdates(id as string),
-      fetchProjectDonationMessages(id as string, 10),
       fetchProjectMatches(id as string),
     ])
-      .then(([p, u, messages, m]) => {
+      .then(([p, u, m]) => {
         setProject(p);
         setUpdates(u);
-        setMessageWall(messages);
         setMatches(m);
       })
       .catch(() => router.push("/projects"))
@@ -998,6 +1000,73 @@ export default function ProjectDetail({
             </div>
           </div>
 
+          {/* AI-generated impact summary — sits above the full description so
+              donors can decide in <30s whether to read more. The owner sees a
+              Refresh button; everyone sees the disclaimer. */}
+          {(project.aiSummary || (publicKey && publicKey === project.walletAddress)) && (
+            <div className="card border-l-4 border-forest-500 bg-forest-50/40">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg" aria-hidden="true">✨</span>
+                  <h2 className="font-display text-base font-semibold text-forest-900">
+                    Impact at a glance
+                  </h2>
+                  <span className="text-[10px] uppercase tracking-wider font-bold bg-forest-200 text-forest-800 px-2 py-0.5 rounded-full">
+                    AI Generated
+                  </span>
+                </div>
+                {publicKey && publicKey === project.walletAddress && (
+                  <button
+                    onClick={async () => {
+                      if (aiSummaryState === "loading") return;
+                      setAiSummaryState("loading");
+                      setAiSummaryError(null);
+                      try {
+                        const result = await generateProjectSummary(project.id, publicKey);
+                        setProject({ ...project, ...result });
+                        setAiSummaryState("idle");
+                      } catch (err: unknown) {
+                        const msg = err instanceof Error ? err.message : "Failed to generate summary";
+                        setAiSummaryError(msg);
+                        setAiSummaryState("error");
+                      }
+                    }}
+                    disabled={aiSummaryState === "loading"}
+                    className="text-xs font-semibold text-forest-700 hover:text-forest-900 disabled:opacity-50 disabled:cursor-not-allowed font-body"
+                  >
+                    {aiSummaryState === "loading"
+                      ? "Generating…"
+                      : project.aiSummary
+                        ? "Refresh summary"
+                        : "Generate summary"}
+                  </button>
+                )}
+              </div>
+
+              {project.aiSummary ? (
+                <p className="text-sm text-forest-900/90 leading-relaxed font-body">
+                  {project.aiSummary}
+                </p>
+              ) : (
+                <p className="text-sm text-[#5a7a5a] italic font-body">
+                  No AI summary yet. Click &ldquo;Generate summary&rdquo; to create one for donors.
+                </p>
+              )}
+
+              {aiSummaryError && (
+                <p className="mt-2 text-xs text-red-600 font-body">{aiSummaryError}</p>
+              )}
+
+              <p className="mt-3 text-[11px] text-[#7a9a7a] font-body leading-snug">
+                AI-generated from this project&rsquo;s description. May contain
+                inaccuracies — read the full description below before donating.
+                {project.aiSummaryGeneratedAt && (
+                  <> Generated {timeAgo(project.aiSummaryGeneratedAt)}.</>
+                )}
+              </p>
+            </div>
+          )}
+
           {/* Description */}
           <div className="card">
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-3">
@@ -1365,9 +1434,6 @@ export default function ProjectDetail({
                   }
                 }
                 setRefreshKey((k) => k + 1);
-                fetchProjectDonationMessages(project.id, 10)
-                  .then(setMessageWall)
-                  .catch(() => {});
                 setTimeout(
                   () => fetchProject(project.id).then(setProject),
                   2000,

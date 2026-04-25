@@ -51,6 +51,15 @@ export interface ClimateProject {
   averageRating?: number;
   ratingCount?: number;
   milestones?: ProjectMilestone[];
+  // Cached AI-generated impact summary (populated by
+  // POST /api/projects/:id/generate-summary). Null until the project owner
+  // generates one. `aiSummarySourceHash` is a SHA-256 of the description at
+  // generation time so the UI can surface a "needs refresh" hint when the
+  // description has been edited since.
+  aiSummary?: string | null;
+  aiSummaryGeneratedAt?: string | null;
+  aiSummaryModel?: string | null;
+  aiSummarySourceHash?: string | null;
 }
 
 /**
