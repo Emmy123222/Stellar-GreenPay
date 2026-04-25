@@ -108,6 +108,9 @@ export interface Donation {
   createdAt: string;
   // On-chain contract data
   contractRecordId?: string;
+  // Matching status
+  isMatched?: boolean;
+  matchedBy?: string;
 }
 
 /**

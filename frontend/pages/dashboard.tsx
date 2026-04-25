@@ -419,7 +419,9 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                       <p className="text-[10px] text-[#8aaa8a] font-body uppercase tracking-wider font-bold opacity-70">{timeAgo(d.createdAt)}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="font-mono font-semibold text-forest-700 text-sm">{formatXLM(d.amountXLM || "0")}</p>
+                      <p className="font-mono font-semibold text-forest-700 text-sm">
+                        {d.currency === "USDC" ? `$${parseFloat(d.amount || "0").toFixed(2)} USDC` : formatXLM(d.amountXLM || "0")}
+                      </p>
                       <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
                         className="text-[10px] text-forest-500 hover:text-forest-700 font-bold uppercase tracking-widest transition-colors">View tx ↗</a>
                     </div>
