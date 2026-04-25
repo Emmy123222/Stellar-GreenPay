@@ -10,6 +10,7 @@ const morgan    = require("morgan");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 const { runMigrations } = require("./db/migrate");
+const { startTurretsServer } = require("./services/turrets");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -45,9 +46,17 @@ app.use((err, req, res, next) => {
 
 async function startServer() {
   await runMigrations();
+  
+  // Start the main API server
   app.listen(PORT, () => {
     console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
   });
+
+  // Start the Turrets server for donation matching (if enabled)
+  if (process.env.ENABLE_TURRETS === "true") {
+    const turretsPort = process.env.TURRETS_PORT || 3001;
+    startTurretsServer(turretsPort);
+  }
 }
 
 startServer().catch((err) => {
