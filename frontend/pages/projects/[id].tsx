@@ -10,8 +10,9 @@ import ToastNotification, { type ToastItem } from "@/components/ToastNotificatio
 import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
+import DescriptionAccordion from "@/components/DescriptionAccordion";
 import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard } from "@/utils/format";
+import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
@@ -61,6 +62,7 @@ export default function ProjectDetail({
   const [discussion, setDiscussion] = useState<ProjectDiscussionMessage[]>([]);
   const [discussionLoading, setDiscussionLoading] = useState(false);
   const [matches, setMatches] = useState<any[]>([]);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -77,13 +79,11 @@ export default function ProjectDetail({
     Promise.all([
       fetchProject(id as string),
       fetchProjectUpdates(id as string),
-      fetchProjectDonationMessages(id as string, 10),
       fetchProjectMatches(id as string),
     ])
-      .then(([p, u, messages, m]) => {
+      .then(([p, u, m]) => {
         setProject(p);
         setUpdates(u);
-        setMessageWall(messages);
         setMatches(m);
       })
       .catch(() => router.push("/projects"))
@@ -1365,9 +1365,6 @@ export default function ProjectDetail({
                   }
                 }
                 setRefreshKey((k) => k + 1);
-                fetchProjectDonationMessages(project.id, 10)
-                  .then(setMessageWall)
-                  .catch(() => {});
                 setTimeout(
                   () => fetchProject(project.id).then(setProject),
                   2000,
