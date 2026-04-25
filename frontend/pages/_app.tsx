@@ -11,6 +11,16 @@ export default function App({ Component, pageProps }: AppProps) {
   const [publicKey, setPublicKey] = useState<string | null>(null);
 
   useEffect(() => {
+    // Test seam: e2e tests inject a public key via window.addInitScript
+    // so the wallet-gated UI renders without driving the real Freighter
+    // postMessage handshake. Untouched in production.
+    const testPk = (typeof window !== "undefined"
+      ? (window as unknown as { __test_publicKey__?: unknown }).__test_publicKey__
+      : undefined);
+    if (typeof testPk === "string" && testPk.length > 0) {
+      setPublicKey(testPk);
+      return;
+    }
     getConnectedPublicKey().then(pk => { if (pk) setPublicKey(pk); });
   }, []);
 

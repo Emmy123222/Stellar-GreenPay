@@ -230,10 +230,10 @@ function EndpointCard({ endpoint }: { endpoint: ApiEndpoint }) {
       });
 
       const path = endpoint.path.replace(":id", "featured").replace(":projectId", "1");
-      const res = await api[endpoint.method.toLowerCase() as keyof typeof api](
-        path,
-        endpoint.example?.request,
-      );
+      const method = endpoint.method.toLowerCase() as "get" | "post" | "put" | "delete" | "patch";
+      const res = method === "get" || method === "delete"
+        ? await api[method](path)
+        : await api[method](path, endpoint.example?.request);
       setResponse(res.data);
     } catch (err: any) {
       setError(err.message || "Failed to fetch");
