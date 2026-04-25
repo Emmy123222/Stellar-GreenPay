@@ -104,6 +104,9 @@ pub enum DataKey {
     DonationCount,
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
+    // Tracks whether `donor` has ever donated to `project` — used so
+    // `Project.donor_count` reflects unique donors instead of donations.
+    HasDonated(String, Address),
     // Governance
     Proposal(String),
     HasVoted(String, Address),
@@ -177,7 +180,8 @@ impl GreenPayContract {
         };
         env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
         let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
-        env.storage().instance().set(&DataKey::ProjectCount, &(count + 1));
+        let next_count = count.checked_add(1).expect("ProjectCount overflow");
+        env.storage().instance().set(&DataKey::ProjectCount, &next_count);
         env.events().publish((symbol_short!("proj_reg"), admin), project_id);
     }
 
@@ -209,56 +213,75 @@ impl GreenPayContract {
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
         if !project.active { panic!("Project is not accepting donations"); }
 
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&donor, &project.wallet, &amount);
-
-        project.total_raised += amount;
-        project.donor_count  += 1;
-        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+        // Pre-compute CO2 increment with checked multiplication so an attacker
+        // can't trigger a silent wrap via a project with a huge co2_per_xlm.
+        let xlm_units = amount / STROOP;
+        let co2_increment = xlm_units
+            .checked_mul(project.co2_per_xlm as i128)
+            .expect("CO2 calculation overflow");
 
         let mut donor_stats: DonorStats = env.storage().instance()
             .get(&DataKey::DonorStats(donor.clone()))
             .unwrap_or(DonorStats { total_donated: 0, donation_count: 0,
                 badge: BadgeTier::None, co2_offset_grams: 0 });
-
         let prev_badge = donor_stats.badge.clone();
-        donor_stats.total_donated    += amount;
-        donor_stats.donation_count   += 1;
-        donor_stats.badge             = calculate_badge(donor_stats.total_donated);
-        donor_stats.co2_offset_grams += (amount / STROOP) * project.co2_per_xlm as i128;
+
+        // ── Effects: all state writes BEFORE the external token transfer
+        //    (Checks-Effects-Interactions to defend against reentrancy from a
+        //    malicious token contract passed via `token`).
+        project.total_raised = project.total_raised
+            .checked_add(amount).expect("Project total_raised overflow");
+        let donated_key = DataKey::HasDonated(project_id.clone(), donor.clone());
+        if !env.storage().instance().has(&donated_key) {
+            env.storage().instance().set(&donated_key, &true);
+            project.donor_count = project.donor_count
+                .checked_add(1).expect("Project donor_count overflow");
+        }
+        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+
+        donor_stats.total_donated = donor_stats.total_donated
+            .checked_add(amount).expect("Donor total_donated overflow");
+        donor_stats.donation_count = donor_stats.donation_count
+            .checked_add(1).expect("Donor donation_count overflow");
+        donor_stats.co2_offset_grams = donor_stats.co2_offset_grams
+            .checked_add(co2_increment).expect("Donor co2_offset overflow");
+        donor_stats.badge = calculate_badge(donor_stats.total_donated);
         env.storage().instance().set(&DataKey::DonorStats(donor.clone()), &donor_stats);
 
         // Auto-mint an Impact NFT when a donor reaches a new badge tier.
         if donor_stats.badge != BadgeTier::None && donor_stats.badge != prev_badge {
-            if !env.storage().instance().has(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone())) {
+            let nft_key = DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone());
+            if !env.storage().instance().has(&nft_key) {
                 let nft = ImpactNFT {
                     owner: donor.clone(),
                     tier: donor_stats.badge.clone(),
                     total_donated: donor_stats.total_donated,
                     minted_at_ledger: env.ledger().sequence(),
                 };
-                env.storage().instance().set(&DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone()), &nft);
+                env.storage().instance().set(&nft_key, &nft);
                 env.events().publish((symbol_short!("nft_mint"), donor.clone()), donor_stats.badge.clone());
             }
         }
 
-        let _donation = DonationRecord {
-            donor: donor.clone(), project: project_id.clone(),
-            amount, ledger: env.ledger().sequence(), message_hash: msg_hash,
-        };
         let dc: u32 = env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0);
-        env.storage().instance().set(&DataKey::DonationCount, &(dc + 1));
+        let new_dc = dc.checked_add(1).expect("DonationCount overflow");
+        env.storage().instance().set(&DataKey::DonationCount, &new_dc);
 
         let gr: i128 = env.storage().instance().get(&DataKey::GlobalTotalRaised).unwrap_or(0);
-        env.storage().instance().set(&DataKey::GlobalTotalRaised, &(gr + amount));
+        let new_gr = gr.checked_add(amount).expect("GlobalTotalRaised overflow");
+        env.storage().instance().set(&DataKey::GlobalTotalRaised, &new_gr);
 
         let gc: i128 = env.storage().instance().get(&DataKey::GlobalCO2OffsetGrams).unwrap_or(0);
-        let new_co2 = (amount / STROOP) * project.co2_per_xlm as i128;
-        env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams, &(gc + new_co2));
+        let new_gc = gc.checked_add(co2_increment).expect("GlobalCO2 overflow");
+        env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams, &new_gc);
+
+        // ── Interaction: external call happens after every effect is durable.
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&donor, &project.wallet, &amount);
 
         env.events().publish(
             (symbol_short!("donated"), donor, project_id),
-            (amount, donor_stats.badge.clone()),
+            (amount, donor_stats.badge.clone(), msg_hash),
         );
     }
 
@@ -414,7 +437,13 @@ impl GreenPayContract {
         }
         env.storage().instance().set(&voted_key, &true);
 
-        if approve { proposal.votes_for += 1; } else { proposal.votes_against += 1; }
+        if approve {
+            proposal.votes_for = proposal.votes_for
+                .checked_add(1).expect("votes_for overflow");
+        } else {
+            proposal.votes_against = proposal.votes_against
+                .checked_add(1).expect("votes_against overflow");
+        }
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
         env.events().publish((symbol_short!("voted"), voter, project_id), approve);
     }
