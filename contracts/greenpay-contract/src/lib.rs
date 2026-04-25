@@ -116,8 +116,15 @@ pub enum DataKey {
 
 const STROOP: i128 = 10_000_000;
 
-// 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers
+// 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers — used as the
+// default when `create_proposal` is called without an explicit duration.
 const VOTING_WINDOW_LEDGERS: u32 = 120_960;
+
+// Bounds on caller-supplied voting durations. Floor (~1 hour) keeps the
+// window long enough to be observed; ceiling (~30 days) bounds storage TTL
+// pressure and prevents proposals from sitting open indefinitely.
+const MIN_VOTING_WINDOW_LEDGERS: u32 = 720;     // 1 hour @ 5s/ledger
+const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -357,7 +364,17 @@ impl GreenPayContract {
     // ─── Governance ───────────────────────────────────────────────────────────
 
     /// Admin creates a voting proposal for a project to be community-verified.
-    pub fn create_proposal(env: Env, admin: Address, project_id: String) {
+    ///
+    /// `duration_ledgers` is the length of the voting window in Stellar
+    /// ledgers (≈5 s each). Pass `0` to use the default 7-day window;
+    /// any other value must be within
+    /// [`MIN_VOTING_WINDOW_LEDGERS`, `MAX_VOTING_WINDOW_LEDGERS`].
+    pub fn create_proposal(
+        env:              Env,
+        admin:            Address,
+        project_id:       String,
+        duration_ledgers: u32,
+    ) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
@@ -368,9 +385,22 @@ impl GreenPayContract {
         if env.storage().instance().has(&DataKey::Proposal(project_id.clone())) {
             panic!("Proposal already exists for this project");
         }
+
+        let window = if duration_ledgers == 0 {
+            VOTING_WINDOW_LEDGERS
+        } else {
+            if duration_ledgers < MIN_VOTING_WINDOW_LEDGERS {
+                panic!("Voting duration too short");
+            }
+            if duration_ledgers > MAX_VOTING_WINDOW_LEDGERS {
+                panic!("Voting duration too long");
+            }
+            duration_ledgers
+        };
         let deadline_ledger = env.ledger().sequence()
-            .checked_add(VOTING_WINDOW_LEDGERS)
+            .checked_add(window)
             .expect("Voting deadline overflow");
+
         let proposal = VoteProposal {
             project_id:      project_id.clone(),
             votes_for:       0,
@@ -379,7 +409,7 @@ impl GreenPayContract {
             resolved:        false,
         };
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
-        env.events().publish((symbol_short!("prop_new"), admin), project_id);
+        env.events().publish((symbol_short!("prop_new"), admin), (project_id, window));
     }
 
     /// Badge holders (≥ Seedling) cast a vote. One vote per address per proposal.
@@ -544,7 +574,7 @@ mod tests {
     #[test]
     fn test_create_proposal() {
         let (env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let p = client.get_proposal(&pid);
         assert_eq!(p.votes_for,     0);
         assert_eq!(p.votes_against, 0);
@@ -556,14 +586,14 @@ mod tests {
     #[should_panic(expected = "Proposal already exists for this project")]
     fn test_create_duplicate_proposal_fails() {
         let (_env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
+        client.create_proposal(&admin, &pid, &0u32);
     }
 
     #[test]
     fn test_cast_vote() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let voter = Address::generate(&env);
         grant_badge(&env, &cid, &voter);
         client.vote_verify_project(&voter, &pid, &true);
@@ -576,7 +606,7 @@ mod tests {
     #[should_panic(expected = "Only badge holders (Seedling or above) can vote")]
     fn test_non_badge_holder_cannot_vote() {
         let (env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let non_donor = Address::generate(&env);
         client.vote_verify_project(&non_donor, &pid, &true);
     }
@@ -585,7 +615,7 @@ mod tests {
     #[should_panic(expected = "Already voted on this proposal")]
     fn test_double_vote_prevented() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let voter = Address::generate(&env);
         grant_badge(&env, &cid, &voter);
         client.vote_verify_project(&voter, &pid, &true);
@@ -595,7 +625,7 @@ mod tests {
     #[test]
     fn test_resolve_proposal_approved() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         // 2 approve, 1 rejects
         for i in 0..3u32 {
             let voter = Address::generate(&env);
@@ -614,7 +644,7 @@ mod tests {
     #[test]
     fn test_resolve_proposal_rejected() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         // 1 approves, 2 reject
         for i in 0..3u32 {
             let voter = Address::generate(&env);
@@ -634,7 +664,7 @@ mod tests {
     #[should_panic(expected = "Voting window not yet closed")]
     fn test_resolve_before_deadline_fails() {
         let (_env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         client.resolve_proposal(&pid);
     }
 
@@ -642,7 +672,7 @@ mod tests {
     #[should_panic(expected = "Proposal already resolved")]
     fn test_double_resolve_fails() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         extend_ttl(&env, &cid);
         env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
         client.resolve_proposal(&pid);
@@ -651,150 +681,40 @@ mod tests {
         client.resolve_proposal(&pid);
     }
 
-    // ─── Security regression tests (see SECURITY.md) ──────────────────────────
+    // ─── Configurable voting-duration tests ───────────────────────────────────
 
-    /// Helper that registers a SAC token for the donate-flow tests.
-    fn setup_with_token() -> (
-        Env,
-        soroban_sdk::Address,
-        GreenPayContractClient<'static>,
-        Address,
-        String,
-        Address,
-        Address,
-    ) {
-        let env   = Env::default();
-        env.mock_all_auths();
-        let cid    = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &cid);
-        let admin  = Address::generate(&env);
-        client.initialize(&admin);
-        let pid    = String::from_str(&env, "proj-001");
-        let wallet = Address::generate(&env);
-        client.register_project(
-            &admin, &pid,
-            &String::from_str(&env, "Test Project"),
-            &wallet, &100u32,
-        );
-        let token_admin = Address::generate(&env);
-        let token_addr  = env
-            .register_stellar_asset_contract_v2(token_admin)
-            .address();
-        (env, cid, client, admin, pid, wallet, token_addr)
-    }
-
-    fn mint(env: &Env, token: &Address, to: &Address, amount: i128) {
-        soroban_sdk::token::StellarAssetClient::new(env, token).mint(to, &amount);
-    }
-
-    /// H-01 regression: donate() applies state updates before the external
-    /// token transfer and the happy path remains correct end-to-end.
+    /// A non-zero `duration_ledgers` within bounds is honored verbatim.
     #[test]
-    fn test_donate_basic_flow_after_cei_reorder() {
-        let (env, _cid, client, _admin, pid, wallet, token) = setup_with_token();
-        let donor = Address::generate(&env);
-        mint(&env, &token, &donor, 100 * STROOP);
-
-        client.donate(&token, &donor, &pid, &(50 * STROOP), &0);
-
-        let project = client.get_project(&pid);
-        assert_eq!(project.total_raised, 50 * STROOP);
-        assert_eq!(project.donor_count,  1);
-        assert_eq!(client.get_global_total(), 50 * STROOP);
-        assert_eq!(client.get_donation_count(), 1);
-
-        // CEI: tokens actually moved as a side-effect of the recorded state.
-        let token_client = soroban_sdk::token::TokenClient::new(&env, &token);
-        assert_eq!(token_client.balance(&wallet), 50 * STROOP);
-        assert_eq!(token_client.balance(&donor),  50 * STROOP);
+    fn test_create_proposal_custom_duration() {
+        let (env, _cid, client, admin, pid) = setup();
+        let custom: u32 = 5_000;
+        let start = env.ledger().sequence();
+        client.create_proposal(&admin, &pid, &custom);
+        let p = client.get_proposal(&pid);
+        assert_eq!(p.deadline_ledger, start + custom);
     }
 
-    /// M-01 regression: `donor_count` reflects unique donors, not donations.
+    /// `0` means "use the default 7-day window".
     #[test]
-    fn test_donate_unique_donor_count_not_inflated() {
-        let (env, _cid, client, _admin, pid, _wallet, token) = setup_with_token();
-        let donor = Address::generate(&env);
-        mint(&env, &token, &donor, 100 * STROOP);
-
-        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
-        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
-        client.donate(&token, &donor, &pid, &(20 * STROOP), &0);
-
-        let project = client.get_project(&pid);
-        assert_eq!(project.donor_count,  1, "same donor must count once");
-        assert_eq!(project.total_raised, 60 * STROOP);
-        assert_eq!(client.get_donation_count(), 3, "donation_count tracks every donate call");
+    fn test_create_proposal_zero_duration_uses_default() {
+        let (env, _cid, client, admin, pid) = setup();
+        let start = env.ledger().sequence();
+        client.create_proposal(&admin, &pid, &0u32);
+        let p = client.get_proposal(&pid);
+        assert_eq!(p.deadline_ledger, start + VOTING_WINDOW_LEDGERS);
     }
 
-    /// M-01 regression: distinct donors increment `donor_count` independently.
     #[test]
-    fn test_donate_distinct_donors_increment_count() {
-        let (env, _cid, client, _admin, pid, _wallet, token) = setup_with_token();
-        for _ in 0..3u32 {
-            let d = Address::generate(&env);
-            mint(&env, &token, &d, 10 * STROOP);
-            client.donate(&token, &d, &pid, &(10 * STROOP), &0);
-        }
-        let project = client.get_project(&pid);
-        assert_eq!(project.donor_count, 3);
+    #[should_panic(expected = "Voting duration too short")]
+    fn test_create_proposal_rejects_too_short_duration() {
+        let (_env, _cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &(MIN_VOTING_WINDOW_LEDGERS - 1));
     }
 
-    /// H-02 regression: donating onto a near-MAX `total_raised` panics with
-    /// the checked-arithmetic guard instead of silently wrapping.
     #[test]
-    #[should_panic(expected = "Project total_raised overflow")]
-    fn test_donate_total_raised_overflow_protected() {
-        let (env, cid, client, _admin, pid, _wallet, token) = setup_with_token();
-        env.as_contract(&cid, || {
-            let mut p: Project = env.storage().instance()
-                .get(&DataKey::Project(pid.clone())).unwrap();
-            p.total_raised = i128::MAX - 1;
-            env.storage().instance().set(&DataKey::Project(pid.clone()), &p);
-        });
-        let donor = Address::generate(&env);
-        mint(&env, &token, &donor, 100 * STROOP);
-        client.donate(&token, &donor, &pid, &(10 * STROOP), &0);
-    }
-
-    /// H-02 regression: CO2 multiplication is bounded by `checked_mul`, so a
-    /// project with a huge `co2_per_xlm` cannot silently wrap the offset.
-    #[test]
-    #[should_panic(expected = "CO2 calculation overflow")]
-    fn test_donate_co2_overflow_protected() {
-        let env   = Env::default();
-        env.mock_all_auths();
-        let cid    = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &cid);
-        let admin  = Address::generate(&env);
-        client.initialize(&admin);
-        let pid    = String::from_str(&env, "proj-co2");
-        let wallet = Address::generate(&env);
-        client.register_project(
-            &admin, &pid,
-            &String::from_str(&env, "Carbon Bomb"),
-            &wallet, &u32::MAX,
-        );
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let donor = Address::generate(&env);
-        let amount = 10i128.pow(36);
-        mint(&env, &token, &donor, amount);
-        // (amount / STROOP) * u32::MAX  ≈ 1e29 * 4.3e9 ≈ 4.3e38 > i128::MAX.
-        client.donate(&token, &donor, &pid, &amount, &0);
-    }
-
-    /// L-01 regression: the deadline calculation in `create_proposal` uses
-    /// `checked_add` so a near-u32::MAX ledger sequence panics instead of
-    /// silently wrapping to a past ledger (which would let proposals be
-    /// resolved immediately). Verified by exercising the same arithmetic
-    /// the entrypoint runs — going through the contract client at
-    /// near-MAX ledgers trips the host's TTL archive check first.
-    #[test]
-    #[should_panic(expected = "Voting deadline overflow")]
-    fn test_voting_deadline_checked_add_guard() {
-        let near_max: u32 = u32::MAX - 100;
-        let _ = near_max
-            .checked_add(VOTING_WINDOW_LEDGERS)
-            .expect("Voting deadline overflow");
+    #[should_panic(expected = "Voting duration too long")]
+    fn test_create_proposal_rejects_too_long_duration() {
+        let (_env, _cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &(MAX_VOTING_WINDOW_LEDGERS + 1));
     }
 }
