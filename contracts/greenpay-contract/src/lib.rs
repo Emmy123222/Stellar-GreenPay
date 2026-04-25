@@ -113,8 +113,15 @@ pub enum DataKey {
 
 const STROOP: i128 = 10_000_000;
 
-// 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers
+// 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers — used as the
+// default when `create_proposal` is called without an explicit duration.
 const VOTING_WINDOW_LEDGERS: u32 = 120_960;
+
+// Bounds on caller-supplied voting durations. Floor (~1 hour) keeps the
+// window long enough to be observed; ceiling (~30 days) bounds storage TTL
+// pressure and prevents proposals from sitting open indefinitely.
+const MIN_VOTING_WINDOW_LEDGERS: u32 = 720;     // 1 hour @ 5s/ledger
+const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -334,7 +341,17 @@ impl GreenPayContract {
     // ─── Governance ───────────────────────────────────────────────────────────
 
     /// Admin creates a voting proposal for a project to be community-verified.
-    pub fn create_proposal(env: Env, admin: Address, project_id: String) {
+    ///
+    /// `duration_ledgers` is the length of the voting window in Stellar
+    /// ledgers (≈5 s each). Pass `0` to use the default 7-day window;
+    /// any other value must be within
+    /// [`MIN_VOTING_WINDOW_LEDGERS`, `MAX_VOTING_WINDOW_LEDGERS`].
+    pub fn create_proposal(
+        env:              Env,
+        admin:            Address,
+        project_id:       String,
+        duration_ledgers: u32,
+    ) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
@@ -345,15 +362,31 @@ impl GreenPayContract {
         if env.storage().instance().has(&DataKey::Proposal(project_id.clone())) {
             panic!("Proposal already exists for this project");
         }
+
+        let window = if duration_ledgers == 0 {
+            VOTING_WINDOW_LEDGERS
+        } else {
+            if duration_ledgers < MIN_VOTING_WINDOW_LEDGERS {
+                panic!("Voting duration too short");
+            }
+            if duration_ledgers > MAX_VOTING_WINDOW_LEDGERS {
+                panic!("Voting duration too long");
+            }
+            duration_ledgers
+        };
+        let deadline_ledger = env.ledger().sequence()
+            .checked_add(window)
+            .expect("Voting deadline overflow");
+
         let proposal = VoteProposal {
             project_id:      project_id.clone(),
             votes_for:       0,
             votes_against:   0,
-            deadline_ledger: env.ledger().sequence() + VOTING_WINDOW_LEDGERS,
+            deadline_ledger,
             resolved:        false,
         };
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
-        env.events().publish((symbol_short!("prop_new"), admin), project_id);
+        env.events().publish((symbol_short!("prop_new"), admin), (project_id, window));
     }
 
     /// Badge holders (≥ Seedling) cast a vote. One vote per address per proposal.
@@ -512,7 +545,7 @@ mod tests {
     #[test]
     fn test_create_proposal() {
         let (env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let p = client.get_proposal(&pid);
         assert_eq!(p.votes_for,     0);
         assert_eq!(p.votes_against, 0);
@@ -524,14 +557,14 @@ mod tests {
     #[should_panic(expected = "Proposal already exists for this project")]
     fn test_create_duplicate_proposal_fails() {
         let (_env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
+        client.create_proposal(&admin, &pid, &0u32);
     }
 
     #[test]
     fn test_cast_vote() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let voter = Address::generate(&env);
         grant_badge(&env, &cid, &voter);
         client.vote_verify_project(&voter, &pid, &true);
@@ -544,7 +577,7 @@ mod tests {
     #[should_panic(expected = "Only badge holders (Seedling or above) can vote")]
     fn test_non_badge_holder_cannot_vote() {
         let (env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let non_donor = Address::generate(&env);
         client.vote_verify_project(&non_donor, &pid, &true);
     }
@@ -553,7 +586,7 @@ mod tests {
     #[should_panic(expected = "Already voted on this proposal")]
     fn test_double_vote_prevented() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         let voter = Address::generate(&env);
         grant_badge(&env, &cid, &voter);
         client.vote_verify_project(&voter, &pid, &true);
@@ -563,7 +596,7 @@ mod tests {
     #[test]
     fn test_resolve_proposal_approved() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         // 2 approve, 1 rejects
         for i in 0..3u32 {
             let voter = Address::generate(&env);
@@ -582,7 +615,7 @@ mod tests {
     #[test]
     fn test_resolve_proposal_rejected() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         // 1 approves, 2 reject
         for i in 0..3u32 {
             let voter = Address::generate(&env);
@@ -602,7 +635,7 @@ mod tests {
     #[should_panic(expected = "Voting window not yet closed")]
     fn test_resolve_before_deadline_fails() {
         let (_env, _cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         client.resolve_proposal(&pid);
     }
 
@@ -610,12 +643,49 @@ mod tests {
     #[should_panic(expected = "Proposal already resolved")]
     fn test_double_resolve_fails() {
         let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid);
+        client.create_proposal(&admin, &pid, &0u32);
         extend_ttl(&env, &cid);
         env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
         client.resolve_proposal(&pid);
         // Extend again so the second call reaches our panic, not an archive error
         extend_ttl(&env, &cid);
         client.resolve_proposal(&pid);
+    }
+
+    // ─── Configurable voting-duration tests ───────────────────────────────────
+
+    /// A non-zero `duration_ledgers` within bounds is honored verbatim.
+    #[test]
+    fn test_create_proposal_custom_duration() {
+        let (env, _cid, client, admin, pid) = setup();
+        let custom: u32 = 5_000;
+        let start = env.ledger().sequence();
+        client.create_proposal(&admin, &pid, &custom);
+        let p = client.get_proposal(&pid);
+        assert_eq!(p.deadline_ledger, start + custom);
+    }
+
+    /// `0` means "use the default 7-day window".
+    #[test]
+    fn test_create_proposal_zero_duration_uses_default() {
+        let (env, _cid, client, admin, pid) = setup();
+        let start = env.ledger().sequence();
+        client.create_proposal(&admin, &pid, &0u32);
+        let p = client.get_proposal(&pid);
+        assert_eq!(p.deadline_ledger, start + VOTING_WINDOW_LEDGERS);
+    }
+
+    #[test]
+    #[should_panic(expected = "Voting duration too short")]
+    fn test_create_proposal_rejects_too_short_duration() {
+        let (_env, _cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &(MIN_VOTING_WINDOW_LEDGERS - 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "Voting duration too long")]
+    fn test_create_proposal_rejects_too_long_duration() {
+        let (_env, _cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &(MAX_VOTING_WINDOW_LEDGERS + 1));
     }
 }
