@@ -1,0 +1,17 @@
+{
+  "name": "greenpay-extension",
+  "version": "1.0.0",
+  "description": "Quickly donate to GreenPay projects via Chrome Extension",
+  "scripts": {
+    "build": "esbuild src/popup.ts --bundle --outfile=dist/popup.js",
+    "watch": "esbuild src/popup.ts --bundle --outfile=dist/popup.js --watch",
+    "package": "npm run build && powershell Compress-Archive -Path manifest.json, popup.html, popup.css, dist/ -DestinationPath greenpay-extension.zip -Force"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "^2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.0",
+    "typescript": "^5.0.0"
+  }
+}

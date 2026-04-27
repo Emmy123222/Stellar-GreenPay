@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GreenPay</title>
+  <link rel="stylesheet" href="popup.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="glass-panel">
+      <div class="header-top">
+        <h1 class="logo">🌿 GreenPay</h1>
+        <button id="connect-btn" class="btn glow-btn">Connect Wallet</button>
+      </div>
+      <div id="wallet-info" class="wallet-info hidden">
+        <div class="address-badge">
+          <span class="dot online"></span>
+          <span id="wallet-address">--</span>
+        </div>
+        <h2 id="wallet-balance" class="balance-text">0.00 XLM</h2>
+      </div>
+    </header>
+
+    <!-- Top Projects -->
+    <main>
+      <div class="section-header">
+        <h3>Top Saved Projects</h3>
+        <span class="badge">3</span>
+      </div>
+      <ul id="project-list" class="project-list">
+        <!-- Skeleton Loader -->
+        <li class="glass-panel project-item skeleton">
+          <div class="skeleton-avatar"></div>
+          <div class="skeleton-lines">
+            <div class="skeleton-line sh"></div>
+            <div class="skeleton-line sl"></div>
+          </div>
+        </li>
+      </ul>
+
+      <!-- Quick Donate -->
+      <section class="glass-panel donate-section">
+        <h3>Quick Donate</h3>
+        <p class="subtitle">Support your active project directly.</p>
+        <div class="preset-amounts">
+          <button class="btn preset-btn" data-amount="1">1 XLM</button>
+          <button class="btn preset-btn" data-amount="5">5 XLM</button>
+          <button class="btn preset-btn" data-amount="10">10 XLM</button>
+        </div>
+        <div class="custom-donate">
+          <div class="input-wrapper">
+            <input type="number" id="custom-amount-input" placeholder="Custom" min="0.1" step="0.1">
+            <span class="currency">XLM</span>
+          </div>
+          <button id="donate-submit" class="btn donate-btn" disabled>Donate</button>
+        </div>
+        <div id="status-message" class="status-message"></div>
+      </section>
+    </main>
+  </div>
+  <script src="dist/popup.js"></script>
+</body>
+</html>
