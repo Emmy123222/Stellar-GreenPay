@@ -11,9 +11,13 @@ const rateLimit = require("express-rate-limit");
 require("dotenv").config();
 const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
+const http = require("http");
+const { Server } = require("socket.io");
+const { startIndexer } = require("./services/indexerService");
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+const server = http.createServer(app);
 
 app.use(helmet());
 app.use(morgan("dev"));
@@ -24,6 +28,13 @@ app.use(cors({
   origin: (origin, cb) => (!origin || origins.includes(origin)) ? cb(null, true) : cb(new Error("CORS blocked")),
   methods: ["GET", "POST", "PATCH"],
 }));
+
+const io = new Server(server, {
+  cors: {
+    origin: origins,
+    methods: ["GET", "POST"]
+  }
+});
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
 app.use("/health",        require("./routes/health"));
@@ -47,8 +58,11 @@ app.use((err, req, res, next) => {
 async function startServer() {
   await runMigrations();
   
+  // Start the indexer service
+  startIndexer(io).catch(err => console.error("[Indexer Error]", err.message));
+
   // Start the main API server
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
   });
 
