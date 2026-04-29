@@ -6,25 +6,33 @@ import { useEffect, useState } from "react";
 import Head from "next/head";
 import AnimatedNumber from "@/components/AnimatedNumber";
 import DonationTicker from "@/components/DonationTicker";
-import { fetchImpactGlobal, fetchLeaderboard } from "@/lib/api";
+import WorldMap from "@/components/WorldMap";
+import { fetchImpactGlobal, fetchLeaderboard, fetchProjects } from "@/lib/api";
+import { getGlobalImpactStats } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress } from "@/utils/format";
 import type { LeaderboardEntry } from "@/utils/types";
 import type { ImpactGlobalStats } from "@/lib/api";
 
 export default function ImpactPage() {
   const [stats, setStats] = useState<ImpactGlobalStats | null>(null);
+  const [sorobanStats, setSorobanStats] = useState<{ totalRaisedXLM: string; totalCO2OffsetGrams: string; donationCount: number } | null>(null);
+  const [projectCount, setProjectCount] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function loadData() {
       try {
-        const [impactStats, topDonors] = await Promise.all([
+        const [impactStats, topDonors, sorobanData, allProjects] = await Promise.all([
           fetchImpactGlobal(),
           fetchLeaderboard(3),
+          getGlobalImpactStats(),
+          fetchProjects(),
         ]);
         setStats(impactStats);
         setLeaderboard(topDonors);
+        setSorobanStats(sorobanData);
+        setProjectCount(allProjects.length);
       } catch (err) {
         console.error("Failed to load impact data:", err);
       } finally {
@@ -55,18 +63,18 @@ export default function ImpactPage() {
         </div>
 
         {/* Global Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-16">
           <StatCard
             label="XLM Donated"
             icon="✨"
-            value={stats?.totalDonationsXLM ?? "0"}
+            value={sorobanStats?.totalRaisedXLM ?? "0"}
             unit="XLM"
             isLoading={isLoading}
           />
           <StatCard
             label="CO₂ Offset"
             icon="🌿"
-            value={stats?.co2OffsetKg ?? 0}
+            value={sorobanStats ? Number(sorobanStats.totalCO2OffsetGrams) / 1000 : 0}
             unit="Kg"
             isLoading={isLoading}
             formatter={(val) => formatCO2(Math.floor(val))}
@@ -78,11 +86,25 @@ export default function ImpactPage() {
             isLoading={isLoading}
           />
           <StatCard
+            label="Projects"
+            icon="🌍"
+            value={projectCount}
+            isLoading={isLoading}
+          />
+          <StatCard
             label="Trees Equivalent"
-            icon="🏗️"
+            icon="🌲"
             value={stats?.treesEquivalent ?? 0}
             isLoading={isLoading}
           />
+        </div>
+
+        {/* Interactive World Map Section */}
+        <div className="bg-white rounded-3xl border border-forest-100 shadow-sm p-8 mb-16">
+          <h2 className="text-2xl font-display font-bold text-forest-900 mb-6 flex items-center gap-2">
+            🗺️ Global Reach
+          </h2>
+          <WorldMap />
         </div>
 
         {/* Category Breakdown */}
