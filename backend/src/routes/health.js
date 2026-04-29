@@ -4,5 +4,13 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
-router.get("/", (req, res) => res.json({ status: "ok", service: "stellar-greenpay-api", network: process.env.STELLAR_NETWORK || "testnet", timestamp: new Date().toISOString() }));
+const indexerService = require("../services/indexerService");
+
+router.get("/", (req, res) => res.json({ 
+  status: "ok", 
+  service: "stellar-greenpay-api", 
+  network: process.env.STELLAR_NETWORK || "testnet", 
+  timestamp: new Date().toISOString(),
+  indexer: indexerService.getStatus()
+}));
 module.exports = router;
