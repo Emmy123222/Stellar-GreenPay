@@ -10,7 +10,7 @@ const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
-const { generateProjectSummary } = require("../services/claude");
+const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 
 const VALID_STATUSES = ["active", "completed", "paused"];
@@ -492,57 +492,23 @@ router.post("/:id/generate-summary", async (req, res, next) => {
       return res.status(403).json({ error: "Only the project owner can generate a summary" });
     }
 
-    let summaryResult;
-    try {
-      summaryResult = await generateProjectSummary({
-        name: project.name,
-        category: project.category,
-        description: project.description,
-      });
-    } catch (err) {
-      if (err.code === "MISSING_API_KEY") {
-        return res.status(503).json({ error: "AI summary feature is not configured on this server" });
-      }
-      const status = err.status && Number.isInteger(err.status) ? err.status : 502;
-      return res.status(status).json({ error: err.message || "Failed to generate summary" });
-    }
-
-    const sourceHash = crypto
-      .createHash("sha256")
-      .update(project.description || "")
-      .digest("hex");
-
-    const updated = await pool.query(
-      `UPDATE projects
-          SET ai_summary              = $1,
-              ai_summary_generated_at = NOW(),
-              ai_summary_model        = $2,
-              ai_summary_source_hash  = $3,
-              updated_at              = NOW()
-        WHERE id = $4
-        RETURNING ai_summary, ai_summary_generated_at, ai_summary_model, ai_summary_source_hash`,
-      [summaryResult.summary, summaryResult.model, sourceHash, req.params.id],
-    );
+    await enqueueAISummary(req.params.id, {
+      name: project.name,
+      category: project.category,
+      description: project.description,
+      adminAddress,
+    });
 
     logAdminAction({
       actor: adminAddress,
-      action: "project.summary.generate",
+      action: "project.summary.enqueued",
       targetType: "project",
       targetId: req.params.id,
-      metadata: { model: summaryResult.model },
+      metadata: {},
       ipAddress: req.ip,
     });
 
-    const row = updated.rows[0];
-    res.json({
-      success: true,
-      data: {
-        aiSummary:            row.ai_summary,
-        aiSummaryGeneratedAt: new Date(row.ai_summary_generated_at).toISOString(),
-        aiSummaryModel:       row.ai_summary_model,
-        aiSummarySourceHash:  row.ai_summary_source_hash,
-      },
-    });
+    res.status(202).json({ success: true, data: { status: "queued" } });
   } catch (e) {
     next(e);
   }

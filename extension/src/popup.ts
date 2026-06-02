@@ -66,11 +66,13 @@ interface ProjectResult {
   id: string;
   name: string;
   category: string;
+  walletAddress?: string;
 }
 
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let activeDropdownIndex = -1;
 let dropdownItems: HTMLLIElement[] = [];
+let selectedProjectId: string | null = null;
 
 function debounce(fn: () => void, ms: number) {
   if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
@@ -101,7 +103,15 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
     `;
     li.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      window.open(`https://stellar-greenpay.app/projects/${p.id}`, '_blank');
+      const destInput = document.getElementById('destination') as HTMLInputElement | null;
+      const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
+      if (p.walletAddress && destInput) {
+        destInput.value = p.walletAddress;
+        selectedProjectId = p.id;
+      }
+      if (searchInput) {
+        searchInput.value = p.name;
+      }
       dropdown.classList.add('hidden');
     });
     dropdown.appendChild(li);
@@ -137,6 +147,7 @@ function initProjectSearch() {
 
   input.addEventListener('input', () => {
     const q = input.value.trim();
+    selectedProjectId = null; // user is typing a new search, clear prior selection
     if (q.length < 2) {
       dropdown.classList.add('hidden');
       return;
@@ -171,6 +182,44 @@ function initProjectSearch() {
   input.addEventListener('blur', () => {
     setTimeout(() => dropdown.classList.add('hidden'), 150);
   });
+}
+
+// --- Record donation on backend with exponential-backoff retry ---
+
+async function recordDonation(params: {
+  projectId: string;
+  donorAddress: string;
+  amountXLM: string;
+  currency: string;
+  transactionHash: string;
+  message?: string;
+}): Promise<void> {
+  // 4 attempts with increasing delays: immediate, 500 ms, 1 000 ms, 2 000 ms
+  const delays = [0, 500, 1000, 2000];
+  let lastError: Error | null = null;
+
+  for (let i = 0; i < delays.length; i++) {
+    if (i > 0) await new Promise<void>((r) => setTimeout(r, delays[i]));
+    try {
+      const res = await fetch(`${API_BASE}/api/donations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (res.ok) return;
+      // 4xx = client error (bad data); retrying won't help
+      if (res.status >= 400 && res.status < 500) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err: any) {
+      // Re-throw immediately on client errors
+      if (err.message?.startsWith('HTTP 4')) throw err;
+      lastError = err;
+    }
+  }
+
+  throw lastError ?? new Error('Failed to record donation after retries');
 }
 
 // --- UI wiring ---
@@ -225,7 +274,29 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus('Submitting to Horizon testnet…');
       const txHash = await submitTransaction(signedXdr);
 
-      setStatus(`Donation successful! TX: ${txHash.slice(0, 12)}…`);
+      // Capture and reset before the async recording call to prevent double-submit
+      const capturedProjectId = selectedProjectId;
+      selectedProjectId = null;
+
+      if (capturedProjectId) {
+        setStatus('Recording donation…');
+        try {
+          await recordDonation({
+            projectId: capturedProjectId,
+            donorAddress: sourceAddress,
+            amountXLM: amount,
+            currency: 'XLM',
+            transactionHash: txHash,
+            message: memo || undefined,
+          });
+          setStatus(`Donation successful! TX: ${txHash.slice(0, 12)}… (recorded)`);
+        } catch {
+          // The Stellar tx succeeded — don't fail the UX because recording failed
+          setStatus(`Donation successful! TX: ${txHash.slice(0, 12)}… (record failed, tx succeeded)`);
+        }
+      } else {
+        setStatus(`Donation successful! TX: ${txHash.slice(0, 12)}…`);
+      }
     } catch (err: any) {
       const detail =
         err?.response?.data?.extras?.result_codes?.transaction ??

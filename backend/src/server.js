@@ -80,7 +80,10 @@ app.use((err, req, res, next) => {
 
 async function startServer() {
   await runMigrations();
-  
+
+  const { start: startSummaryQueue } = require("./services/summaryQueue");
+  await startSummaryQueue(io);
+
   // Start the indexer service
   startIndexer(io).catch(err => console.error("[Indexer Error]", err.message));
 

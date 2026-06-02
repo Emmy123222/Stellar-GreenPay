@@ -36,6 +36,17 @@ npm run android
 npm start
 ```
 
+## Expo Go Preview
+
+Preview builds are generated automatically on every push to `main` via EAS Build.
+
+[![Open in Expo Go](https://img.shields.io/badge/Expo%20Go-Scan%20QR-000?logo=expo)](https://expo.dev/@OWNER/stellar-greenpay)
+
+> Replace `OWNER` with your Expo account username. Add `EXPO_TOKEN` as a GitHub Actions repository secret (Settings → Secrets and variables → Actions) before the first build.
+
+- **Android**: APK (direct install, no Play Store needed)
+- **iOS**: Simulator build (`.app` bundle, not a signed IPA)
+
 ## Shared API Client
 
 The mobile app shares the API client logic with the web frontend. The API functions are located in `lib/api.ts` and are imported from the shared package.
