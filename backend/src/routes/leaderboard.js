@@ -11,25 +11,27 @@ router.get("/", async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const period = req.query.period || "all";
 
-    let dateFilter = "";
+    let query = `
+      SELECT p.public_key, p.display_name, p.badges,
+             COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
+             COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported
+      FROM profiles p
+      LEFT JOIN donations d ON p.public_key = d.donor_address
+    `;
+
     if (period === "month") {
-      dateFilter = "AND d.created_at >= NOW() - INTERVAL '30 days'";
+      query += " AND d.created_at >= NOW() - INTERVAL '30 days' ";
     } else if (period === "year") {
-      dateFilter = "AND d.created_at >= NOW() - INTERVAL '1 year'";
+      query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
     }
 
-    const result = await pool.query(
-      `SELECT p.public_key, p.display_name, p.badges,
-              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
-              COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported
-       FROM profiles p
-       LEFT JOIN donations d ON p.public_key = d.donor_address
-       ${dateFilter}
-       GROUP BY p.public_key, p.display_name, p.badges
-       ORDER BY total_donated_xlm DESC
-       LIMIT $1`,
-      [limit],
-    );
+    query += `
+      GROUP BY p.public_key, p.display_name, p.badges
+      ORDER BY total_donated_xlm DESC
+      LIMIT $1
+    `;
+
+    const result = await pool.query(query, [limit]);
     const entries = result.rows.map((p, i) => ({
       rank: i + 1,
       publicKey: p.public_key,

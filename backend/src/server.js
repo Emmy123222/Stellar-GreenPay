@@ -4,7 +4,6 @@
 "use strict";
 
 const express   = require("express");
-const cors      = require("cors");
 const cookieParser = require("cookie-parser");
 const csurf     = require("csurf");
 const helmet    = require("helmet");
@@ -46,13 +45,6 @@ app.use(csurf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 }));
 
-const origins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(o => o.trim());
-app.use(cors({
-  origin: (origin, cb) => (!origin || origins.includes(origin)) ? cb(null, true) : cb(new Error("CORS blocked")),
-  credentials: true,
-  methods: ["GET", "POST", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "X-CSRF-Token"],
-}));
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
 
@@ -66,10 +58,6 @@ const io = new Server(server, {
 app.set("io", io);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-app.get("/api/csrf-token", (req, res) => {
-  res.json({ success: true, csrfToken: req.csrfToken() });
-});
-
 app.use("/health",        require("./routes/health"));
 app.use("/api/projects",  require("./routes/projects"));
 app.use("/api/donations", require("./routes/donations"));
@@ -81,7 +69,7 @@ app.use("/api/jobs",           require("./routes/jobs"));
 app.use("/api/stats",          require("./routes/stats"));
 app.use("/api/impact",         require("./routes/impact"));
 app.use("/api/ratings",        require("./routes/ratings"));
-app.use("/api/notifications",  require("./routes/notifications"));
+app.use("/api/admin",          require("./routes/admin"));
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 app.use((err, req, res, next) => {

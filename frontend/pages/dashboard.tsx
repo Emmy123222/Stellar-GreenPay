@@ -53,7 +53,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         setSavedProjects(allProjects.filter(proj => wishlist.includes(proj.id)));
         
         // Fetch pending rating
-        return fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/ratings/pending?donorAddress=${publicKey}`);
+        return fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/ratings/pending?donorAddress=${publicKey}`);
       })
       .then(r => r?.json())
       .then(res => {

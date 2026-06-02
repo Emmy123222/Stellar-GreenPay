@@ -66,7 +66,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     Promise.all([
       fetchProject(projectId),
       fetchProjectDonations(projectId, 200).then((r) => r.donations),
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${projectId}/milestones`).then(r => r.json()),
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/projects/${projectId}/milestones`).then(r => r.json()),
       fetchProjectMatches(projectId).catch(() => []),
     ])
       .then(([p, d, m, mt]) => {
@@ -151,7 +151,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     if (!project || !newMilestoneTitle.trim()) return;
     setMilestoneActionState("loading");
     try {
-      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${project.id}/milestones`, {
+      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/projects/${project.id}/milestones`, {
         method: "POST",
         body: JSON.stringify({ title: newMilestoneTitle.trim(), percentage: newMilestonePercentage }),
       });
@@ -185,7 +185,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       const result = await submitTransaction(signedXDR);
       
       // 3. Update backend
-      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/projects/${project?.id}/milestones/${milestone.id}/reach`, {
+      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/projects/${project?.id}/milestones/${milestone.id}/reach`, {
         method: "POST",
         body: JSON.stringify({ transactionHash: result.hash }),
       });

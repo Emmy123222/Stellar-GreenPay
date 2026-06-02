@@ -140,14 +140,14 @@ router.get("/", async (req, res, next) => {
     }
 
     values.push(Math.min(Number.parseInt(limit, 10) || 50, 100));
-    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
-    const result = await pool.query(
-      `SELECT * FROM projects ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT $${values.length}`,
-      values,
-    );
+    let query = "SELECT * FROM projects ";
+    if (where.length) {
+      query += "WHERE " + where.join(" AND ") + " ";
+    }
+    query += "ORDER BY created_at DESC LIMIT $" + values.length;
+
+    const result = await pool.query(query, values);
 
     res.json({ success: true, data: result.rows.map(mapProjectRow) });
   } catch (e) {

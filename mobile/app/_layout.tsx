@@ -6,6 +6,12 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 import { ThemeProvider, themes } from './theme';
+import { useDeepLink } from '../hooks/useDeepLink';
+
+function DeepLinkHandler() {
+  useDeepLink();
+  return null;
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -14,6 +20,7 @@ export default function RootLayout() {
 
   return (
     <ThemeProvider>
+      <DeepLinkHandler />
       <StatusBar style={theme.statusBarStyle} />
       <Stack screenOptions={{
         headerStyle: { backgroundColor: theme.header },

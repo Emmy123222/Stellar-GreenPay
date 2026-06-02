@@ -23,7 +23,15 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#227239"
       },
-      "package": "com.stellargreenpay.app"
+      "package": "com.stellargreenpay.app",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [{ "scheme": "greenpay" }],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,6 +47,6 @@
         }
       ]
     ],
-    "scheme": "stellargreenpay"
+    "scheme": "greenpay"
   }
 }

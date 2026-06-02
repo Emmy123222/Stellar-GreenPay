@@ -29,6 +29,20 @@
         <h3>Top Saved Projects</h3>
         <span class="badge">3</span>
       </div>
+
+      <!-- Project Search -->
+      <div class="search-wrapper" id="search-wrapper">
+        <span class="search-icon">🔍</span>
+        <input
+          type="text"
+          id="project-search"
+          class="search-input"
+          placeholder="Search projects…"
+          autocomplete="off"
+        />
+        <ul id="search-dropdown" class="search-dropdown hidden"></ul>
+      </div>
+
       <ul id="project-list" class="project-list">
         <!-- Skeleton Loader -->
         <li class="glass-panel project-item skeleton">

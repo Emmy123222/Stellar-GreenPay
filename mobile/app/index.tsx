@@ -1,115 +1,207 @@
 /**
  * app/index.tsx
- * Home screen - featured projects and global stats
+ * Home screen — live project list fetched from /api/projects
  */
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  RefreshControl,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { useTheme } from './theme';
+import { getCachedData, setCachedData } from '../utils/cache';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-
-const CACHE_KEY_FEATURED = 'home:featured_project';
-const CACHE_KEY_STATS = 'home:global_stats';
+const CACHE_KEY_PROJECTS = 'home:projects_list';
 
 interface ClimateProject {
   id: string;
   name: string;
   description: string;
   category: string;
-  imageUrl?: string;
   goalXLM: string;
   raisedXLM: string;
   donorCount: number;
+  verified: boolean;
+  status: string;
+}
+
+function SkeletonCard({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+      <View style={[styles.skeletonLine, { width: '40%', backgroundColor: colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '70%', marginTop: 8, height: 18, backgroundColor: colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '90%', marginTop: 6, backgroundColor: colors.border }]} />
+      <View style={[styles.skeletonLine, { width: '60%', marginTop: 6, backgroundColor: colors.border }]} />
+      <View style={[styles.skeletonProgress, { backgroundColor: colors.border, marginTop: 14 }]} />
+    </View>
+  );
+}
+
+function ProjectCard({
+  project,
+  colors,
+  onPress,
+}: {
+  project: ClimateProject;
+  colors: ReturnType<typeof useTheme>['colors'];
+  onPress: () => void;
+}) {
+  const progress = (() => {
+    const r = parseFloat(project.raisedXLM);
+    const g = parseFloat(project.goalXLM);
+    if (!g || isNaN(r) || isNaN(g)) return 0;
+    return Math.min(100, Math.round((r / g) * 100));
+  })();
+
+  return (
+    <TouchableOpacity
+      style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={styles.cardHeader}>
+        <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
+        <View style={styles.badgeRow}>
+          {project.verified && (
+            <View style={[styles.verifiedBadge, { backgroundColor: colors.primary }]}>
+              <Text style={styles.verifiedText}>✓ Verified</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      <Text style={[styles.projectName, { color: colors.primaryText }]} numberOfLines={1}>
+        {project.name}
+      </Text>
+      <Text style={[styles.projectDescription, { color: colors.secondaryText }]} numberOfLines={2}>
+        {project.description}
+      </Text>
+
+      <View style={styles.progressContainer}>
+        <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+          <View style={[styles.progressFill, { width: `${progress}%`, backgroundColor: colors.primary }]} />
+        </View>
+        <View style={styles.progressRow}>
+          <Text style={[styles.progressText, { color: colors.secondaryText }]}>
+            {parseFloat(project.raisedXLM).toFixed(0)} / {parseFloat(project.goalXLM).toFixed(0)} XLM
+          </Text>
+          <Text style={[styles.donorCount, { color: colors.muted }]}>{project.donorCount} donors</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 }
 
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
-  const [featuredProject, setFeaturedProject] = useState<ClimateProject | null>(null);
-  const [globalStats, setGlobalStats] = useState({ totalDonations: 0, totalXLMRaised: '0' });
+  const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isOffline, setIsOffline] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [networkError, setNetworkError] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const loadProjects = useCallback(async (isPullRefresh = false) => {
+    if (isPullRefresh) setRefreshing(true);
+    setNetworkError(false);
 
-  const loadData = async () => {
     try {
-      const [featuredRes, statsRes] = await Promise.all([
-        axios.get(`${API_URL}/api/projects/featured`),
-        axios.get(`${API_URL}/api/stats/global`)
-      ]);
-      const featured = featuredRes.data.data;
-      const stats = statsRes.data.data;
-      setFeaturedProject(featured);
-      setGlobalStats(stats);
-      setIsOffline(false);
-      await Promise.all([
-        setCachedData(CACHE_KEY_FEATURED, featured),
-        setCachedData(CACHE_KEY_STATS, stats),
-      ]);
-    } catch (error) {
-      // Network failed — try cache
-      const [cachedFeatured, cachedStats] = await Promise.all([
-        getCachedData<ClimateProject>(CACHE_KEY_FEATURED),
-        getCachedData<{ totalDonations: number; totalXLMRaised: string }>(CACHE_KEY_STATS),
-      ]);
-      if (cachedFeatured) setFeaturedProject(cachedFeatured.data);
-      if (cachedStats) setGlobalStats(cachedStats.data);
-      if (cachedFeatured || cachedStats) setIsOffline(true);
-      else console.error('Error loading data:', error);
+      const res = await axios.get(`${API_URL}/api/projects`);
+      const data: ClimateProject[] = res.data.data ?? res.data;
+      setProjects(data);
+      await setCachedData(CACHE_KEY_PROJECTS, data);
+    } catch {
+      const cached = await getCachedData<ClimateProject[]>(CACHE_KEY_PROJECTS);
+      if (cached) {
+        setProjects(cached.data);
+      } else {
+        setNetworkError(true);
+      }
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  const renderSkeleton = () => (
+    <FlatList
+      data={[1, 2, 3, 4, 5]}
+      keyExtractor={(item: number) => String(item)}
+      renderItem={() => <SkeletonCard colors={colors} />}
+      contentContainerStyle={styles.listContent}
+      scrollEnabled={false}
+      ListHeaderComponent={<Header colors={colors} />}
+    />
+  );
 
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}> 
-        <Text style={[styles.loadingText, { color: colors.secondaryText }]}>Loading...</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {renderSkeleton()}
       </View>
     );
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}> 
-      <View style={[styles.header, { backgroundColor: colors.primary }]}> 
-        <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
-        <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <FlatList
+        data={projects}
+        keyExtractor={(item: ClimateProject) => item.id}
+        renderItem={({ item }: { item: ClimateProject }) => (
+          <ProjectCard
+            project={item}
+            colors={colors}
+            onPress={() => router.push(`/projects/${item.id}`)}
+          />
+        )}
+        contentContainerStyle={styles.listContent}
+        ListHeaderComponent={<Header colors={colors} />}
+        ListEmptyComponent={
+          networkError ? (
+            <View style={styles.errorContainer}>
+              <Text style={[styles.errorText, { color: colors.secondaryText }]}>
+                Unable to load projects. Check your connection.
+              </Text>
+              <TouchableOpacity
+                style={[styles.retryButton, { backgroundColor: colors.primary }]}
+                onPress={() => { setLoading(true); loadProjects(); }}
+              >
+                <Text style={[styles.retryText, { color: colors.buttonText }]}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={[styles.emptyText, { color: colors.muted }]}>No projects found.</Text>
+          )
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => loadProjects(true)}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+        showsVerticalScrollIndicator={false}
+      />
+    </View>
+  );
+}
 
-      <View style={[styles.statsCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
-        <Text style={[styles.statsTitle, { color: colors.muted }]}>Global Impact</Text>
-        <Text style={[styles.statsValue, { color: colors.accent }]}>{globalStats.totalDonations} donations</Text>
-        <Text style={[styles.statsSub, { color: colors.secondaryText }]}>{globalStats.totalXLMRaised} XLM raised</Text>
-      </View>
-
-      {featuredProject && (
-        <View style={[styles.featuredCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
-          <Text style={[styles.featuredTitle, { color: colors.muted }]}>Featured Project</Text>
-          <Text style={[styles.projectName, { color: colors.primaryText }]}>{featuredProject.name}</Text>
-          <Text style={[styles.projectDescription, { color: colors.secondaryText }]} numberOfLines={3}>
-            {featuredProject.description}
-          </Text>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: colors.buttonBackground }]}
-            onPress={() => router.push(`/projects/${featuredProject.id}`)}
-          >
-            <Text style={[styles.buttonText, { color: colors.buttonText }]}>View Project</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <TouchableOpacity
-        style={[styles.browseButton, { backgroundColor: colors.inputBackground, borderColor: colors.border }]}
-        onPress={() => router.push('/projects')}
-      >
-        <Text style={[styles.browseButtonText, { color: colors.accent }]}>Browse All Projects</Text>
-      </TouchableOpacity>
-    </ScrollView>
+function Header({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+  return (
+    <View style={[styles.header, { backgroundColor: colors.primary }]}>
+      <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+      <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
+    </View>
   );
 }
 
@@ -117,101 +209,122 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  listContent: {
+    paddingBottom: 24,
+  },
   header: {
     padding: 24,
+    marginBottom: 8,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    fontFamily: 'Lora_700Bold',
   },
   subtitle: {
     fontSize: 16,
     marginTop: 4,
   },
-  loadingText: {
-    fontSize: 18,
-    textAlign: 'center',
-    marginTop: 40,
-  },
-  statsCard: {
-    margin: 16,
-    padding: 20,
+  card: {
+    marginHorizontal: 16,
+    marginBottom: 12,
     borderRadius: 12,
+    padding: 16,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
     borderWidth: 1,
   },
-  statsTitle: {
-    fontSize: 14,
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  category: {
+    fontSize: 11,
+    fontWeight: '700',
     textTransform: 'uppercase',
-    fontWeight: '600',
+    letterSpacing: 0.5,
   },
-  statsValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginTop: 8,
+  badgeRow: {
+    flexDirection: 'row',
+    gap: 4,
   },
-  statsSub: {
-    fontSize: 16,
-    marginTop: 4,
+  verifiedBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
   },
-  featuredCard: {
-    margin: 16,
-    padding: 20,
-    borderRadius: 12,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-    borderWidth: 1,
-  },
-  featuredTitle: {
-    fontSize: 14,
-    textTransform: 'uppercase',
-    fontWeight: '600',
+  verifiedText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
   },
   projectName: {
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: 'bold',
-    marginTop: 8,
+    marginBottom: 4,
   },
   projectDescription: {
-    fontSize: 14,
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  button: {
-    padding: 12,
-    borderRadius: 8,
-    marginTop: 16,
-    alignItems: 'center',
-  },
-  buttonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  browseButton: {
-    padding: 16,
-    margin: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
-  browseButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  offlineBanner: {
-    backgroundColor: '#f5a623',
-    padding: 8,
-    alignItems: 'center',
-  },
-  offlineBannerText: {
-    color: '#fff',
     fontSize: 13,
+    lineHeight: 18,
+  },
+  progressContainer: {
+    marginTop: 12,
+  },
+  progressBar: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  progressText: {
+    fontSize: 11,
+  },
+  donorCount: {
+    fontSize: 11,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    paddingTop: 48,
+    paddingHorizontal: 32,
+  },
+  errorText: {
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 22,
+  },
+  retryButton: {
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryText: {
+    fontSize: 15,
     fontWeight: '600',
+  },
+  emptyText: {
+    textAlign: 'center',
+    marginTop: 48,
+    fontSize: 15,
+  },
+  skeletonLine: {
+    height: 12,
+    borderRadius: 6,
+  },
+  skeletonProgress: {
+    height: 6,
+    borderRadius: 3,
+    width: '100%',
   },
 });

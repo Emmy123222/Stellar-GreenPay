@@ -27,7 +27,7 @@ export default function ProjectRating({ projectId, projectName, donorAddress, on
     setSubmitting(true);
     setError(null);
     try {
-      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/ratings`, {
+      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/ratings`, {
         method: "POST",
         body: JSON.stringify({ projectId, donorAddress, rating, review }),
       });

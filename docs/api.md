@@ -6,6 +6,28 @@ All responses: `{ "success": true, "data": {...} }` or `{ "error": "..." }`
 
 ---
 
+## Versioning
+
+All API routes are served under a version prefix: **`/api/v1`**. The version
+prefix lets us ship breaking changes in a future `/api/v2` without disrupting
+existing clients.
+
+**Policy**
+
+- Resource routes live under `/api/v1/<resource>` (e.g. `/api/v1/projects`).
+- `/health` is unversioned (infrastructure/liveness check).
+- New non-breaking fields may be added to a version without a bump. Breaking
+  changes (removing/renaming fields, changing semantics) introduce a new
+  version (`/api/v2`) and the previous version is supported until deprecated.
+- **Legacy redirect:** unversioned `/api/v1/*` requests are answered with a
+  `308 Permanent Redirect` to their `/api/v1/*` equivalent and carry a
+  `Deprecation: true` header plus a
+  `Link: </api/v1>; rel="successor-version"` header. The `308` status
+  preserves the HTTP method and body, so existing `POST`/`PATCH` clients keep
+  working. New clients should call `/api/v1` directly.
+
+---
+
 ## Health
 `GET /health` — Server status check.
 
@@ -15,8 +37,8 @@ All responses: `{ "success": true, "data": {...} }` or `{ "error": "..." }`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/projects` | List projects (`?category=&status=active&limit=50`) |
-| GET | `/api/projects/:id` | Get single project |
+| GET | `/api/v1/projects` | List projects (`?category=&status=active&limit=50`) |
+| GET | `/api/v1/projects/:id` | Get single project |
 
 ### Project object
 ```json
@@ -44,11 +66,11 @@ All responses: `{ "success": true, "data": {...} }` or `{ "error": "..." }`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/donations` | Record a donation after on-chain tx |
-| GET | `/api/donations/project/:id` | Donations for a project (`?limit=20`) |
-| GET | `/api/donations/donor/:publicKey` | A donor's full history |
+| POST | `/api/v1/donations` | Record a donation after on-chain tx |
+| GET | `/api/v1/donations/project/:id` | Donations for a project (`?limit=20`) |
+| GET | `/api/v1/donations/donor/:publicKey` | A donor's full history |
 
-### POST /api/donations
+### POST /api/v1/donations
 ```json
 {
   "projectId": "uuid",
@@ -67,8 +89,8 @@ Donations are **deduplicated by transactionHash** — safe to retry.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/profiles/:publicKey` | Get donor profile + badges |
-| POST | `/api/profiles` | Create or update profile |
+| GET | `/api/v1/profiles/:publicKey` | Get donor profile + badges |
+| POST | `/api/v1/profiles` | Create or update profile |
 
 ---
 
@@ -76,7 +98,7 @@ Donations are **deduplicated by transactionHash** — safe to retry.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/leaderboard` | Top donors by total XLM (`?limit=20`) |
+| GET | `/api/v1/leaderboard` | Top donors by total XLM (`?limit=20`) |
 
 ### Leaderboard entry
 ```json
@@ -96,7 +118,7 @@ Donations are **deduplicated by transactionHash** — safe to retry.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/updates/:projectId` | Updates posted by a project |
+| GET | `/api/v1/updates/:projectId` | Updates posted by a project |
 
 ---
 

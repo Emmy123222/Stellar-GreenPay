@@ -20,6 +20,16 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// All API routes are served under the versioned `/api/v1` prefix (issue #204).
+// Rewrite `/api/*` request paths to `/api/v1/*` from a single place so every
+// helper below stays on the unversioned path string.
+api.interceptors.request.use((config) => {
+  if (config.url && config.url.startsWith("/api/") && !config.url.startsWith("/api/v1/")) {
+    config.url = config.url.replace(/^\/api\//, "/api/v1/");
+  }
+  return config;
+});
+
 let csrfToken: string | null = null;
 
 async function refreshCsrfToken() {
@@ -462,6 +472,40 @@ export async function fetchImpactGlobal(): Promise<ImpactGlobalStats> {
 export async function fetchImpactDonor(publicKey: string): Promise<ImpactDonorStats> {
   const { data } = await api.get<{ success: boolean; data: ImpactDonorStats }>(
     `/api/impact/donor/${publicKey}`,
+  );
+  return data.data;
+}
+
+export interface SubmitProjectPayload {
+  name: string;
+  category: string;
+  description: string;
+  location: string;
+  goalXLM: string;
+  walletAddress: string;
+  organization: {
+    name: string;
+    website: string;
+    country: string;
+    contactEmail: string;
+  };
+  co2Methodology: {
+    name: string;
+    verificationBody: string;
+    annualTonnesCO2: string;
+    documentUrl: string;
+  };
+}
+
+export interface SubmitProjectResponse {
+  id: string;
+  reviewTimeline: string;
+}
+
+export async function submitProject(payload: SubmitProjectPayload): Promise<SubmitProjectResponse> {
+  const { data } = await api.post<{ success: boolean; data: SubmitProjectResponse }>(
+    "/api/projects",
+    payload,
   );
   return data.data;
 }

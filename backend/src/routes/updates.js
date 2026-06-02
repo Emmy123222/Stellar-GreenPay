@@ -12,52 +12,10 @@ const { mapProjectUpdateRow, mapProjectRow } = require("../services/store");
 const { sendUpdateNotifications } = require("../services/email");
 const { sendUpdatePushNotifications } = require("../services/push");
 
-// Simple admin key guard — set ADMIN_API_KEY in env; omit to disable auth in dev
-function adminOnly(req, res, next) {
-  const key = process.env.ADMIN_API_KEY;
-  if (!key) return next(); // no key configured → open in dev
-  const provided = req.headers["x-admin-key"] || req.body?.adminKey;
-  if (provided !== key) return res.status(403).json({ error: "Forbidden" });
-  next();
-}
-
-// GET /api/updates/:projectId
-router.get("/:projectId", async (req, res, next) => {
-  try {
-    const { cursor, limit = 20 } = req.query;
-    const parsedLimit = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
-
-    let query;
-    let params;
-
-    if (cursor) {
-      query = `SELECT * FROM project_updates
-               WHERE project_id = $1 AND created_at < $2
-               ORDER BY created_at DESC
-               LIMIT $3`;
-      params = [req.params.projectId, cursor, parsedLimit + 1];
-    } else {
-      query = `SELECT * FROM project_updates
-               WHERE project_id = $1
-               ORDER BY created_at DESC
-               LIMIT $2`;
-      params = [req.params.projectId, parsedLimit + 1];
-    }
-
-    const result = await pool.query(query, params);
-    const rows = result.rows;
-    const hasMore = rows.length > parsedLimit;
-    const data = rows.slice(0, parsedLimit).map(mapProjectUpdateRow);
-    const nextCursor = hasMore && data.length > 0 ? data[data.length - 1].createdAt : null;
-
-    res.json({ success: true, data, nextCursor });
-  } catch (e) {
-    next(e);
-  }
-});
+const { adminRequired } = require("../middleware/auth");
 
 // POST /api/updates  (admin only)
-router.post("/", adminOnly, async (req, res, next) => {
+router.post("/", adminRequired, async (req, res, next) => {
   try {
     const { projectId, title, body } = req.body;
 

@@ -19,7 +19,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Projects",
     method: "GET",
-    path: "/api/projects",
+    path: "/api/v1/projects",
     description: "Fetch all projects with optional filtering",
     example: {
       response: {
@@ -39,7 +39,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Projects",
     method: "GET",
-    path: "/api/projects/:id",
+    path: "/api/v1/projects/:id",
     description: "Fetch a single project by ID",
     example: {
       response: {
@@ -59,7 +59,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Projects",
     method: "POST",
-    path: "/api/projects/:id/matching",
+    path: "/api/v1/projects/:id/matching",
     description: "Create a donation matching offer",
     example: {
       request: {
@@ -85,7 +85,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Projects",
     method: "GET",
-    path: "/api/projects/:id/matching",
+    path: "/api/v1/projects/:id/matching",
     description: "Fetch active matching offers for a project",
     example: {
       response: {
@@ -106,7 +106,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Donations",
     method: "POST",
-    path: "/api/donations",
+    path: "/api/v1/donations",
     description: "Record a donation after blockchain confirmation",
     example: {
       request: {
@@ -132,7 +132,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Donations",
     method: "GET",
-    path: "/api/donations/project/:id/messages",
+    path: "/api/v1/donations/project/:id/messages",
     description: "Fetch donation messages for a project",
     example: {
       response: {
@@ -150,7 +150,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Leaderboard",
     method: "GET",
-    path: "/api/leaderboard",
+    path: "/api/v1/leaderboard",
     description: "Fetch top donors by XLM donated (supports period filtering)",
     example: {
       response: {
@@ -169,7 +169,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Profiles",
     method: "GET",
-    path: "/api/profiles/:publicKey",
+    path: "/api/v1/profiles/:publicKey",
     description: "Fetch a donor profile",
     example: {
       response: {
@@ -187,7 +187,7 @@ const endpoints: ApiEndpoint[] = [
   {
     resource: "Profiles",
     method: "POST",
-    path: "/api/profiles",
+    path: "/api/v1/profiles",
     description: "Create or update a donor profile",
     example: {
       request: {
@@ -353,7 +353,7 @@ export default function ApiDocsPage() {
         </h2>
         <div className="bg-forest-50 p-4 rounded border border-forest-200 overflow-auto">
           <pre className="text-sm text-forest-700 font-mono">{`// Fetch all projects
-const response = await fetch('http://localhost:4000/api/projects');
+const response = await fetch('http://localhost:4000/api/v1/projects');
 const { success, data } = await response.json();
 
 if (success) {
@@ -361,7 +361,7 @@ if (success) {
 }
 
 // Record a donation
-const donationRes = await fetch('http://localhost:4000/api/donations', {
+const donationRes = await fetch('http://localhost:4000/api/v1/donations', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({

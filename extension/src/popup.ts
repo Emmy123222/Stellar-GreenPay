@@ -58,6 +58,121 @@ async function submitTransaction(signedXdr: string): Promise<string> {
   return (result as any).hash;
 }
 
+// --- Project search autocomplete ---
+
+const API_BASE = 'https://api.stellar-greenpay.app';
+
+interface ProjectResult {
+  id: string;
+  name: string;
+  category: string;
+}
+
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let activeDropdownIndex = -1;
+let dropdownItems: HTMLLIElement[] = [];
+
+function debounce(fn: () => void, ms: number) {
+  if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(fn, ms);
+}
+
+function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
+  dropdown.innerHTML = '';
+  dropdownItems = [];
+  activeDropdownIndex = -1;
+
+  if (projects.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'search-no-results';
+    empty.textContent = 'No projects found';
+    dropdown.appendChild(empty);
+    dropdown.classList.remove('hidden');
+    return;
+  }
+
+  projects.forEach((p) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <div>
+        <div class="search-result-name">${escapeHtml(p.name)}</div>
+        <div class="search-result-cat">${escapeHtml(p.category)}</div>
+      </div>
+    `;
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      window.open(`https://stellar-greenpay.app/projects/${p.id}`, '_blank');
+      dropdown.classList.add('hidden');
+    });
+    dropdown.appendChild(li);
+    dropdownItems.push(li);
+  });
+
+  dropdown.classList.remove('hidden');
+}
+
+function highlightDropdownItem(index: number) {
+  dropdownItems.forEach((el, i) => {
+    el.classList.toggle('active', i === index);
+  });
+}
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function fetchProjectSearch(query: string): Promise<ProjectResult[]> {
+  const res = await fetch(`${API_BASE}/api/projects?search=${encodeURIComponent(query)}&limit=5`);
+  if (!res.ok) throw new Error('Search failed');
+  const json = await res.json();
+  return (json.data ?? json) as ProjectResult[];
+}
+
+function initProjectSearch() {
+  const input = document.getElementById('project-search') as HTMLInputElement | null;
+  const dropdown = document.getElementById('search-dropdown') as HTMLUListElement | null;
+  const wrapper = document.getElementById('search-wrapper');
+
+  if (!input || !dropdown || !wrapper) return;
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (q.length < 2) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+    debounce(async () => {
+      try {
+        const results = await fetchProjectSearch(q);
+        renderDropdown(results, dropdown);
+      } catch {
+        dropdown.classList.add('hidden');
+      }
+    }, 300);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (dropdown.classList.contains('hidden')) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeDropdownIndex = Math.min(activeDropdownIndex + 1, dropdownItems.length - 1);
+      highlightDropdownItem(activeDropdownIndex);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeDropdownIndex = Math.max(activeDropdownIndex - 1, 0);
+      highlightDropdownItem(activeDropdownIndex);
+    } else if (e.key === 'Enter' && activeDropdownIndex >= 0) {
+      dropdownItems[activeDropdownIndex]?.dispatchEvent(new MouseEvent('mousedown'));
+    } else if (e.key === 'Escape') {
+      dropdown.classList.add('hidden');
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => dropdown.classList.add('hidden'), 150);
+  });
+}
+
 // --- UI wiring ---
 
 function setStatus(message: string, isError = false) {
@@ -76,6 +191,8 @@ function setLoading(loading: boolean) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  initProjectSearch();
+
   const form = document.getElementById('donation-form');
   if (!form) return;
 

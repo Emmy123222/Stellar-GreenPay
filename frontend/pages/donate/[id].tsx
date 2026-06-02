@@ -462,7 +462,7 @@ export const getServerSideProps: GetServerSideProps<DonatePageProps> = async (ct
     process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
   try {
-    const res = await fetch(`${apiBase}/api/projects/${id}`);
+    const res = await fetch(`${apiBase}/api/v1/projects/${id}`);
     if (!res.ok) {
       return { props: { project: null, presetAmount } };
     }
