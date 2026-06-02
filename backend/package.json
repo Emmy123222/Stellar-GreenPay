@@ -4,6 +4,7 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
+    "dev:docker": "nodemon --legacy-watch --watch src src/server.js",
     "start": "node src/server.js",
     "lint": "eslint src/**/*.js",
     "test": "jest --runInBand"
