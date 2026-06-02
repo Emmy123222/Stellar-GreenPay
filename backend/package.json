@@ -6,6 +6,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "lint": "eslint src/**/*.js",
+    "docs": "typedoc --options typedoc.json",
     "test": "jest --runInBand"
   },
   "dependencies": {
@@ -26,7 +27,8 @@
     "jest": "^30.3.0",
     "nodemon": "^3.1.2",
     "socket.io-client": "^4.8.3",
-    "supertest": "^7.0.0"
+    "supertest": "^7.0.0",
+    "typedoc": "^0.28.0"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -1,0 +1,10 @@
+{
+  "entryPoints": ["src/services/**/*.js"],
+  "entryPointStrategy": "expand",
+  "out": "../docs/backend",
+  "exclude": ["**/*.test.js"],
+  "excludeExternals": true,
+  "includeVersion": false,
+  "hideGenerator": true,
+  
+}

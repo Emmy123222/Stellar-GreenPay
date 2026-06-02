@@ -39,6 +39,16 @@ async function getOnChainProject(projectId) {
   return null;
 }
 
+/**
+ * Retrieve a project's on-chain representation from the Soroban contract.
+ *
+ * @param {string} projectId - The on-chain project identifier passed to the contract.
+ * @returns {Promise<null|object>} Resolves to the native JS value returned by the contract, or `null` when
+ * the contract is not configured or the call fails.
+ * @throws {Error} When the RPC simulation fails with an unexpected error.
+ */
+// Exported below as `getOnChainProject`
+
 module.exports = {
   server,
   rpcServer,

@@ -25,5 +25,23 @@ function set(key, value, ttlMs) {
   return value;
 }
 
+/**
+ * Get a value from the in-memory TTL cache.
+ *
+ * @param {string} key - Cache key.
+ * @returns {any|null} The cached value or null if missing/expired.
+ */
+// exported as `get`
+
+/**
+ * Set a value in the in-memory TTL cache.
+ *
+ * @param {string} key - Cache key.
+ * @param {any} value - Value to cache.
+ * @param {number} ttlMs - Time-to-live in milliseconds.
+ * @returns {any} The value that was stored.
+ */
+// exported as `set`
+
 module.exports = { get, set };
 

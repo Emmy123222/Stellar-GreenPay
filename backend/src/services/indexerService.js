@@ -30,6 +30,13 @@ async function updateProjectWallets() {
 }
 
 /**
+ * Refresh the in-memory cache of active project wallet addresses.
+ *
+ * @returns {Promise<void>} Resolves after the cache is updated.
+ */
+// internal helper
+
+/**
  * Start the Stellar indexer service.
  * @param {Object} socketIo - The Socket.io server instance.
  */
@@ -68,6 +75,15 @@ async function startIndexer(socketIo) {
       }
     });
 }
+
+/**
+ * Start the Stellar indexer service which streams Horizon operations and
+ * processes project donations.
+ *
+ * @param {import('socket.io').Server} socketIo - Socket.io server instance used for websocket events.
+ * @returns {Promise<void>} Resolves when the indexer is started.
+ */
+// exported as `startIndexer`
 
 /**
  * Handle a payment to a project.
@@ -162,6 +178,15 @@ async function handleDonation(projectId, op) {
 }
 
 /**
+ * Handle a Horizon payment operation observed for a project wallet.
+ *
+ * @param {string} projectId - Internal project UUID.
+ * @param {object} op - Horizon operation object for the payment.
+ * @returns {Promise<void>} Resolves once processing (DB updates, profiles) completes.
+ */
+// internal helper
+
+/**
  * Returns the indexer status for the health endpoint.
  */
 function getStatus() {
@@ -172,6 +197,13 @@ function getStatus() {
     timestamp: new Date().toISOString()
   };
 }
+
+/**
+ * Get the current indexer status used by the health endpoint.
+ *
+ * @returns {{isRunning:boolean,lastProcessedLedger:number,projectWalletsCount:number,timestamp:string}}
+ */
+// exported as `getStatus`
 
 module.exports = {
   startIndexer,

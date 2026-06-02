@@ -145,6 +145,15 @@ async function matchDonationTxFunction(payment) {
 }
 
 /**
+ * Turrets txFunction entry point for matching donations.
+ *
+ * @param {object} payment - Payment operation object from Horizon/Turret.
+ * @returns {Promise<object>} Result describing whether matching occurred and details.
+ * @throws {Error} If internal processing fails unexpectedly.
+ */
+// exported as `matchDonationTxFunction`
+
+/**
  * Submit a matching payment transaction
  * This uses pre-signed transactions from the matcher's account
  */
@@ -211,6 +220,14 @@ async function submitMatchingPayment({
 }
 
 /**
+ * Submit a matching payment transaction for a matcher account.
+ *
+ * @param {{matcherAddress:string,projectWallet:string,amount:number,originalTxHash:string,matchId:string,projectId:string}} opts
+ * @returns {Promise<{success:boolean,txHash?:string,reason?:string,error?:string}>}
+ */
+// exported as `submitMatchingPayment`
+
+/**
  * Generate pre-signed transactions for a matcher up to a cap
  * This allows the Turret to submit transactions without needing the secret key at runtime
  */
@@ -264,6 +281,14 @@ async function generatePreSignedTransactions({
 
   return transactions;
 }
+
+/**
+ * Generate a set of pre-signed matching transactions for a matcher account.
+ *
+ * @param {{matcherAddress:string,matcherSecret:string,projectWallet:string,capXlm:number,multiplier:number,projectId:string}} opts
+ * @returns {Promise<Array<{donationAmount:number,matchAmount:number,xdr:string}>>}
+ */
+// exported as `generatePreSignedTransactions`
 
 /**
  * Start the Turrets server
@@ -330,6 +355,14 @@ function startTurretsServer(port = 3001) {
 
   return app;
 }
+
+/**
+ * Start a lightweight Turrets-compatible HTTP server exposing matching endpoints.
+ *
+ * @param {number} [port=3001] - TCP port to listen on.
+ * @returns {object} Express app instance.
+ */
+// exported as `startTurretsServer`
 
 module.exports = {
   matchDonationTxFunction,

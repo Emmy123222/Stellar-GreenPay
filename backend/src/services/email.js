@@ -46,6 +46,18 @@ async function sendUpdateNotifications({ project, update, emails }) {
   }
 }
 
+/**
+ * Send update notification emails for a project using Resend.
+ *
+ * @param {{project:object,update:object,emails:string[]}} opts
+ * @param {object} opts.project - Project object with at least `id` and `name`.
+ * @param {object} opts.update - Update object with `title` and `body`.
+ * @param {string[]} opts.emails - Array of recipient email addresses.
+ * @returns {Promise<void>} Resolves when all batches have been attempted.
+ * @throws {Error} When the Resend API returns an unexpected failure (logged and not rethrown here).
+ */
+// exported as `sendUpdateNotifications`
+
 function buildHtml({ project, update, projectUrl }) {
   return `<!DOCTYPE html>
 <html lang="en">
