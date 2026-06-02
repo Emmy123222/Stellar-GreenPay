@@ -1,0 +1,65 @@
+name: Build and Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          cd extension
+          npm install
+
+      - name: Build extension
+        run: |
+          cd extension
+          npm run build
+
+      - name: Create distribution package
+        run: |
+          cd extension
+          mkdir -p greenpay-extension
+          cp manifest.json popup.html popup.css greenpay-extension/
+          cp -r dist greenpay-extension/
+          zip -r greenpay-extension.zip greenpay-extension/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: extension/greenpay-extension.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Firefox version
+        run: |
+          cd extension
+          npm run build:firefox
+
+      - name: Create Firefox distribution
+        run: |
+          cd extension
+          mkdir -p greenpay-extension-firefox
+          cp manifest.firefox.json greenpay-extension-firefox/manifest.json
+          cp popup.html popup.css greenpay-extension-firefox/
+          cp -r dist-firefox greenpay-extension-firefox/dist
+          zip -r greenpay-extension-firefox.zip greenpay-extension-firefox/
+
+      - name: Upload Firefox artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: greenpay-extension-firefox
+          path: extension/greenpay-extension-firefox.zip

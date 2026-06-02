@@ -3,7 +3,7 @@
   "name": "GreenPay Companion",
   "version": "1.0.0",
   "description": "Support your favorite sustainable projects with a single click.",
-  "action": {
+  "browser_action": {
     "default_popup": "popup.html",
     "default_title": "GreenPay Companion"
   },
@@ -18,9 +18,15 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["dist/content-script.js"],
+      "js": ["dist-firefox/content-script.js"],
       "run_at": "document_end"
     }
   ],
-  "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md"
+  "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "greenpay@stellar-greenpay.com",
+      "strict_min_version": "120.0"
+    }
+  }
 }
