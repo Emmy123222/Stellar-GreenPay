@@ -10,6 +10,14 @@ const helmet    = require("helmet");
 const morgan    = require("morgan");
 const rateLimit = require("express-rate-limit");
 require("dotenv").config();
+const Sentry = require("@sentry/node");
+const Tracing = require("@sentry/tracing");
+
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || "",
+  tracesSampleRate: 0.1,
+  environment: process.env.NODE_ENV,
+});
 const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const http = require("http");
@@ -20,6 +28,10 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const app  = express();
 const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
+
+// Sentry request/tracing handlers (must be added before other middleware)
+app.use(Sentry.Handlers.requestHandler());
+app.use(Sentry.Handlers.tracingHandler());
 
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
@@ -72,8 +84,16 @@ app.use("/api/ratings",        require("./routes/ratings"));
 app.use("/api/admin",          require("./routes/admin"));
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
+// Sentry error handler — capture and send exceptions to Sentry
+app.use(Sentry.Handlers.errorHandler());
+
 app.use((err, req, res, next) => {
   void next;
+  try {
+    Sentry.captureException(err);
+  } catch (e) {
+    // ignore
+  }
   console.error("[Error]", err.message);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });

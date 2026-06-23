@@ -11,6 +11,8 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@sentry/node": "^7.51.0",
+    "@sentry/tracing": "^7.51.0",
     "@anthropic-ai/sdk": "^0.91.1",
     "pg-boss": "^10.1.0",
     "@stellar/stellar-sdk": "^12.0.0",
