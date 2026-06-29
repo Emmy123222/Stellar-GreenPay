@@ -86,6 +86,18 @@ pub struct ImpactNFT {
     pub minted_at_ledger:   u32,
 }
 
+/// Per-project milestone NFT awarded when a donor's cumulative donation to a
+/// single project exceeds 100 XLM. One NFT per (donor, project_id) pair.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProjectMilestoneNFT {
+    pub owner:              Address,
+    pub project_id:         String,
+    pub amount_donated:     i128,
+    pub co2_offset_grams:   i128,
+    pub minted_at_ledger:   u32,
+}
+
 /// A community voting proposal to verify a project.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -113,6 +125,10 @@ pub enum DataKey {
     // Governance
     Proposal(String),
     HasVoted(String, Address),
+    // Per-donor per-project cumulative donation total for milestone NFT gating
+    DonorProjectTotal(String, Address),
+    // Per-project milestone NFT: one per (project_id, donor) pair
+    ProjectMilestoneNFT(String, Address),
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
@@ -254,6 +270,14 @@ impl GreenPayContract {
         donor_stats.badge = calculate_badge(donor_stats.total_donated);
         env.storage().instance().set(&DataKey::DonorStats(donor.clone()), &donor_stats);
 
+        // Track per-project cumulative donations for milestone NFT eligibility.
+        let proj_total_key = DataKey::DonorProjectTotal(project_id.clone(), donor.clone());
+        let prev_proj_total: i128 = env.storage().instance().get(&proj_total_key).unwrap_or(0);
+        env.storage().instance().set(
+            &proj_total_key,
+            &prev_proj_total.checked_add(amount).expect("DonorProjectTotal overflow"),
+        );
+
         // Auto-mint an Impact NFT when a donor reaches a new badge tier.
         if donor_stats.badge != BadgeTier::None && donor_stats.badge != prev_badge {
             let nft_key = DataKey::ImpactNFT(donor.clone(), donor_stats.badge.clone());
@@ -365,6 +389,58 @@ impl GreenPayContract {
 
     pub fn has_nft(env: Env, donor: Address, tier: BadgeTier) -> bool {
         env.storage().instance().has(&DataKey::ImpactNFT(donor, tier))
+    }
+
+    // ─── Project milestone NFT (#205) ────────────────────────────────────────
+
+    /// Mint a project milestone NFT when a donor's cumulative donation to a
+    /// specific project exceeds 100 XLM. Minting is idempotent-blocked: a second
+    /// call for the same (donor, project_id) pair panics.
+    pub fn mint_project_nft(env: Env, donor: Address, project_id: String) {
+        donor.require_auth();
+
+        let project: Project = env.storage().instance()
+            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+
+        let proj_total_key = DataKey::DonorProjectTotal(project_id.clone(), donor.clone());
+        let proj_total: i128 = env.storage().instance().get(&proj_total_key).unwrap_or(0);
+
+        // 100 XLM = 100 × 10_000_000 stroops
+        if proj_total < 100 * STROOP {
+            panic!("Cumulative donation to this project has not reached 100 XLM");
+        }
+
+        let nft_key = DataKey::ProjectMilestoneNFT(project_id.clone(), donor.clone());
+        if env.storage().instance().has(&nft_key) {
+            panic!("Milestone NFT already minted for this project");
+        }
+
+        let co2_per_xlm = project.co2_per_xlm as i128;
+        let xlm_units = proj_total / STROOP;
+        let co2_offset = xlm_units.checked_mul(co2_per_xlm).expect("CO2 calculation overflow");
+
+        let nft = ProjectMilestoneNFT {
+            owner:            donor.clone(),
+            project_id:       project_id.clone(),
+            amount_donated:   proj_total,
+            co2_offset_grams: co2_offset,
+            minted_at_ledger: env.ledger().sequence(),
+        };
+        env.storage().instance().set(&nft_key, &nft);
+        env.events().publish(
+            (symbol_short!("pnft_mnt"), donor.clone()),
+            (project_id, proj_total),
+        );
+    }
+
+    pub fn has_project_nft(env: Env, donor: Address, project_id: String) -> bool {
+        env.storage().instance().has(&DataKey::ProjectMilestoneNFT(project_id, donor))
+    }
+
+    pub fn get_project_nft(env: Env, donor: Address, project_id: String) -> ProjectMilestoneNFT {
+        env.storage().instance()
+            .get(&DataKey::ProjectMilestoneNFT(project_id, donor))
+            .expect("Project milestone NFT not found")
     }
 
     // ─── Governance ───────────────────────────────────────────────────────────
@@ -562,6 +638,14 @@ impl GreenPayContract {
         let gg: i128 = env.storage().instance().get(&DataKey::GlobalCO2OffsetGrams).unwrap_or(0);
         env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams,
             &gg.checked_add(co2_increment).expect("GlobalCO2OffsetGrams overflow"));
+
+        // Track per-project cumulative donations for milestone NFT eligibility.
+        let proj_total_key = DataKey::DonorProjectTotal(project_id.clone(), donor.clone());
+        let prev_proj_total: i128 = env.storage().instance().get(&proj_total_key).unwrap_or(0);
+        env.storage().instance().set(
+            &proj_total_key,
+            &prev_proj_total.checked_add(xlm_equivalent).expect("DonorProjectTotal overflow"),
+        );
 
         let token_client = token::Client::new(&env, &usdc_token);
         let project_wallet = project.wallet;
@@ -998,4 +1082,107 @@ mod tests {
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
     }
+
+    // ─── ProjectMilestoneNFT tests (#205) ────────────────────────────────────
+
+    #[test]
+    fn test_mint_project_nft_success() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        token_client.mint(&donor, &(200 * STROOP));
+        client.donate(&token, &donor, &pid, &(101 * STROOP), &0u32);
+
+        assert!(!client.has_project_nft(&donor, &pid));
+        client.mint_project_nft(&donor, &pid);
+        assert!(client.has_project_nft(&donor, &pid));
+
+        let nft = client.get_project_nft(&donor, &pid);
+        assert_eq!(nft.owner,          donor);
+        assert_eq!(nft.project_id,     pid);
+        assert_eq!(nft.amount_donated, 101 * STROOP);
+        // co2_per_xlm for the test project is 100 grams/XLM
+        assert_eq!(nft.co2_offset_grams, 101 * 100);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cumulative donation to this project has not reached 100 XLM")]
+    fn test_mint_project_nft_below_threshold() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        token_client.mint(&donor, &(100 * STROOP));
+        client.donate(&token, &donor, &pid, &(50 * STROOP), &0u32);
+
+        client.mint_project_nft(&donor, &pid);
+    }
+
+    #[test]
+    #[should_panic(expected = "Milestone NFT already minted for this project")]
+    fn test_mint_project_nft_duplicate_prevented() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        token_client.mint(&donor, &(200 * STROOP));
+        client.donate(&token, &donor, &pid, &(101 * STROOP), &0u32);
+
+        client.mint_project_nft(&donor, &pid);
+        // Second call must panic
+        client.mint_project_nft(&donor, &pid);
+    }
+
+    #[test]
+    fn test_project_nft_independent_per_project() {
+        let (env, _cid, client, admin, pid1) = setup();
+        let pid2    = String::from_str(&env, "proj-002");
+        let wallet2 = Address::generate(&env);
+        client.register_project(
+            &admin, &pid2,
+            &String::from_str(&env, "Project 2"),
+            &wallet2, &50u32,
+        );
+
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        token_client.mint(&donor, &(300 * STROOP));
+        client.donate(&token, &donor, &pid1, &(101 * STROOP), &0u32);
+        client.donate(&token, &donor, &pid2, &(50 * STROOP),  &1u32);
+
+        client.mint_project_nft(&donor, &pid1);
+        assert!(client.has_project_nft(&donor, &pid1));
+        assert!(!client.has_project_nft(&donor, &pid2));
+    }
+
+    #[test]
+    fn test_project_nft_cumulative_across_donations() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        // Two donations summing to > 100 XLM
+        token_client.mint(&donor, &(200 * STROOP));
+        client.donate(&token, &donor, &pid, &(60 * STROOP), &0u32);
+        client.donate(&token, &donor, &pid, &(60 * STROOP), &1u32);
+
+        client.mint_project_nft(&donor, &pid);
+        assert!(client.has_project_nft(&donor, &pid));
+
+        let nft = client.get_project_nft(&donor, &pid);
+        assert_eq!(nft.amount_donated, 120 * STROOP);
+    }
 }
+
