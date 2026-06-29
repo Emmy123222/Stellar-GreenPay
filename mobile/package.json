@@ -43,7 +43,8 @@
     ],
     "moduleNameMapper": {
       "^axios$": "<rootDir>/__mocks__/axios.js",
-      "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js"
+      "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
+      "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js"
     }
   }
 }
