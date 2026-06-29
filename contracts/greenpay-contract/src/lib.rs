@@ -97,6 +97,25 @@ pub struct VoteProposal {
     pub resolved:        bool,
 }
 
+/// Aggregated platform-wide counters returned by `get_global_stats`.
+///
+/// Bundles the four values that the landing page hero section needs in a
+/// single RPC call, avoiding the four separate `get_global_total`,
+/// `get_global_co2`, `get_donation_count`, and `get_project_count` round
+/// trips that were required before this type existed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GlobalStats {
+    /// Total XLM (in stroops) donated across all projects and all currencies.
+    pub total_raised:    i128,
+    /// Cumulative CO₂ offset in grams across every donation ever recorded.
+    pub co2_offset_grams: i128,
+    /// Total number of individual donation transactions recorded on-chain.
+    pub donation_count:  u32,
+    /// Total number of climate projects registered with the contract.
+    pub project_count:   u32,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -325,6 +344,33 @@ impl GreenPayContract {
 
     pub fn get_donation_count(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0)
+    }
+
+    /// Returns all four global counters in a single contract call.
+    ///
+    /// This eliminates the four separate RPC round trips that were previously
+    /// required to populate the landing page hero section (total raised, CO₂
+    /// offset, donation count, project count).  Clients should prefer this
+    /// function over calling the individual getters when all four values are
+    /// needed at the same time.
+    ///
+    /// # Example (JavaScript SDK)
+    /// ```js
+    /// const stats = await contract.get_global_stats();
+    /// console.log(stats.total_raised, stats.co2_offset_grams,
+    ///             stats.donation_count, stats.project_count);
+    /// ```
+    pub fn get_global_stats(env: Env) -> GlobalStats {
+        GlobalStats {
+            total_raised:     env.storage().instance()
+                                  .get(&DataKey::GlobalTotalRaised).unwrap_or(0),
+            co2_offset_grams: env.storage().instance()
+                                  .get(&DataKey::GlobalCO2OffsetGrams).unwrap_or(0),
+            donation_count:   env.storage().instance()
+                                  .get(&DataKey::DonationCount).unwrap_or(0),
+            project_count:    env.storage().instance()
+                                  .get(&DataKey::ProjectCount).unwrap_or(0),
+        }
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -629,6 +675,66 @@ mod tests {
         assert_eq!(client.get_project_count(), 0);
         assert_eq!(client.get_donation_count(), 0);
         assert_eq!(client.get_global_total(), 0);
+    }
+
+    /// `get_global_stats` should return a zero-valued struct immediately after
+    /// initialization, before any projects are registered or donations made.
+    #[test]
+    fn test_get_global_stats_initial_zeros() {
+        let env    = Env::default();
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+
+        let stats = client.get_global_stats();
+        assert_eq!(stats.total_raised,     0);
+        assert_eq!(stats.co2_offset_grams, 0);
+        assert_eq!(stats.donation_count,   0);
+        assert_eq!(stats.project_count,    0);
+    }
+
+    /// `get_global_stats` should return values consistent with the individual
+    /// getters (`get_global_total`, `get_global_co2`, `get_donation_count`,
+    /// `get_project_count`) after a donation has been processed.
+    #[test]
+    fn test_get_global_stats_matches_individual_getters() {
+        let env    = Env::default();
+        env.mock_all_auths();
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+
+        // Register a project (co2_per_xlm = 200 grams per XLM)
+        let pid    = String::from_str(&env, "proj-stats");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin, &pid,
+            &String::from_str(&env, "Stats Project"),
+            &wallet, &200u32,
+        );
+
+        // Mint tokens and donate
+        let token_admin = Address::generate(&env);
+        let token       = env.register_stellar_asset_contract_v2(token_admin).address();
+        let donor       = Address::generate(&env);
+        let amount      = 50 * STROOP; // 50 XLM
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&donor, &amount);
+        client.donate(&token, &donor, &pid, &amount, &1u32);
+
+        // get_global_stats must agree with each individual getter
+        let stats = client.get_global_stats();
+        assert_eq!(stats.total_raised,     client.get_global_total());
+        assert_eq!(stats.co2_offset_grams, client.get_global_co2());
+        assert_eq!(stats.donation_count,   client.get_donation_count());
+        assert_eq!(stats.project_count,    client.get_project_count());
+
+        // Spot-check concrete values
+        assert_eq!(stats.total_raised,     amount);
+        assert_eq!(stats.co2_offset_grams, 50 * 200i128); // 10 000 g
+        assert_eq!(stats.donation_count,   1);
+        assert_eq!(stats.project_count,    1);
     }
 
     #[test]
