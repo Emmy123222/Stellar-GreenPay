@@ -2,6 +2,7 @@
  * src/routes/projects.js
  */
 "use strict";
+const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
@@ -453,6 +454,18 @@ router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
     if (!projectResult.rows[0]) return res.status(404).json({ error: "Project not found" });
+
+    const updatedAt = projectResult.rows[0].updated_at;
+    const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
+    const lastModified = new Date(updatedAt).toUTCString();
+
+    res.set("ETag", etag);
+    res.set("Last-Modified", lastModified);
+
+    if (req.headers["if-none-match"] === etag) {
+      return res.status(304).end();
+    }
+
     const campaigns = await fetchCampaignsForProject(req.params.id);
     const onChainProject = await getOnChainProject(req.params.id);
 
