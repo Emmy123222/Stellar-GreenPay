@@ -9,13 +9,24 @@ const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
-const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
+const {
+  getOnChainProject,
+  CONTRACT_ID,
+  server,
+  NETWORK_PASSPHRASE,
+} = require("../services/stellar");
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
+const PROJECT_MILESTONES_CACHE_TTL = 300; // seconds (5 minutes)
+const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
+
+function getProjectMilestonesCacheKey(projectId) {
+  return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
+}
 
 const VALID_STATUSES = ["active", "completed", "paused"];
 const VALID_CATEGORIES = [
@@ -44,7 +55,8 @@ function mapCampaignRow(row) {
   const raisedXLM = Number.parseFloat(row.raised_xlm?.toString() || "0");
   const deadlineMs = new Date(row.deadline).getTime();
   const completed = raisedXLM >= goalXLM || now >= deadlineMs;
-  const progressPercent = goalXLM > 0 ? Math.min(Math.round((raisedXLM / goalXLM) * 100), 100) : 0;
+  const progressPercent =
+    goalXLM > 0 ? Math.min(Math.round((raisedXLM / goalXLM) * 100), 100) : 0;
 
   return {
     id: row.id,
@@ -114,10 +126,26 @@ router.get("/featured", async (req, res, next) => {
 
 router.get("/", async (req, res, next) => {
   try {
-    const { category, status, verified, search, limit = 20, cursor } = req.query;
+    const {
+      category,
+      status,
+      verified,
+      search,
+      limit = 20,
+      cursor,
+    } = req.query;
     const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
 
-    const cacheKey = PROJECTS_LIST_CACHE_PREFIX + JSON.stringify({ category, status, verified, search, limit: pageSize, cursor: cursor || null });
+    const cacheKey =
+      PROJECTS_LIST_CACHE_PREFIX +
+      JSON.stringify({
+        category,
+        status,
+        verified,
+        search,
+        limit: pageSize,
+        cursor: cursor || null,
+      });
     const cached = await redis.get(cacheKey);
     if (cached) {
       return res.json(cached);
@@ -165,7 +193,9 @@ router.get("/", async (req, res, next) => {
       values.push(created_at, id);
       const caIdx = values.length - 1;
       const idIdx = values.length;
-      where.push(`(created_at < $${caIdx} OR (created_at = $${caIdx} AND id < $${idIdx}))`);
+      where.push(
+        `(created_at < $${caIdx} OR (created_at = $${caIdx} AND id < $${idIdx}))`,
+      );
     }
 
     values.push(pageSize + 1);
@@ -188,10 +218,17 @@ router.get("/", async (req, res, next) => {
     let nextCursor = null;
     if (hasMore) {
       const last = rows[pageSize - 1];
-      nextCursor = Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString("base64");
+      nextCursor = Buffer.from(
+        JSON.stringify({ created_at: last.created_at, id: last.id }),
+      ).toString("base64");
     }
 
-    const responseBody = { success: true, data, next_cursor: nextCursor, has_more: hasMore };
+    const responseBody = {
+      success: true,
+      data,
+      next_cursor: nextCursor,
+      has_more: hasMore,
+    };
     await redis.set(cacheKey, responseBody, PROJECTS_LIST_CACHE_TTL);
 
     res.json(responseBody);
@@ -206,19 +243,52 @@ router.get("/", async (req, res, next) => {
  */
 router.post("/", async (req, res, next) => {
   try {
-    const { name, description, location, category, wallet_address, goal_xlm = 0, tags = [] } = req.body || {};
+    const {
+      name,
+      description,
+      location,
+      category,
+      wallet_address,
+      goal_xlm = 0,
+      tags = [],
+    } = req.body || {};
 
-    if (!name || typeof name !== "string" || name.trim().length < 3 || name.trim().length > 120) {
-      return res.status(400).json({ error: "name must be between 3 and 120 characters" });
+    if (
+      !name ||
+      typeof name !== "string" ||
+      name.trim().length < 3 ||
+      name.trim().length > 120
+    ) {
+      return res
+        .status(400)
+        .json({ error: "name must be between 3 and 120 characters" });
     }
-    if (!description || typeof description !== "string" || description.trim().length < 10 || description.trim().length > 5000) {
-      return res.status(400).json({ error: "description must be between 10 and 5000 characters" });
+    if (
+      !description ||
+      typeof description !== "string" ||
+      description.trim().length < 10 ||
+      description.trim().length > 5000
+    ) {
+      return res
+        .status(400)
+        .json({ error: "description must be between 10 and 5000 characters" });
     }
-    if (!location || typeof location !== "string" || location.trim().length < 2 || location.trim().length > 200) {
-      return res.status(400).json({ error: "location must be between 2 and 200 characters" });
+    if (
+      !location ||
+      typeof location !== "string" ||
+      location.trim().length < 2 ||
+      location.trim().length > 200
+    ) {
+      return res
+        .status(400)
+        .json({ error: "location must be between 2 and 200 characters" });
     }
     if (!category || !VALID_CATEGORIES.includes(category)) {
-      return res.status(400).json({ error: `category must be one of: ${VALID_CATEGORIES.join(", ")}` });
+      return res
+        .status(400)
+        .json({
+          error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
+        });
     }
     if (!wallet_address || typeof wallet_address !== "string") {
       return res.status(400).json({ error: "wallet_address is required" });
@@ -229,11 +299,22 @@ router.post("/", async (req, res, next) => {
       `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [id, name.trim(), description.trim(), category, location.trim(), wallet_address, goal_xlm, tags],
+      [
+        id,
+        name.trim(),
+        description.trim(),
+        category,
+        location.trim(),
+        wallet_address,
+        goal_xlm,
+        tags,
+      ],
     );
 
     await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
-    res.status(201).json({ success: true, data: mapProjectRow(result.rows[0]) });
+    res
+      .status(201)
+      .json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
     next(e);
   }
@@ -269,8 +350,12 @@ router.get("/:id/verify", async (req, res) => {
       data: {
         projectId,
         onChainVerified: Boolean(onChainProject),
-        contractRegisteredAt: onChainProject ? Number(onChainProject.registered_at) : null,
-        totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
+        contractRegisteredAt: onChainProject
+          ? Number(onChainProject.registered_at)
+          : null,
+        totalRaisedOnChain: onChainProject
+          ? stroopsToXlm(onChainProject.total_raised)
+          : "0.0000000",
       },
     });
   } catch (err) {
@@ -290,27 +375,39 @@ router.post("/:id/campaigns", async (req, res, next) => {
   try {
     const { title, goalXLM, deadline, description } = req.body || {};
     const trimmedTitle = typeof title === "string" ? title.trim() : "";
-    const trimmedDescription = typeof description === "string" ? description.trim() : "";
+    const trimmedDescription =
+      typeof description === "string" ? description.trim() : "";
     const goal = Number.parseFloat(goalXLM);
     const deadlineDate = new Date(deadline);
 
     if (trimmedTitle.length < 3 || trimmedTitle.length > 120) {
-      return res.status(400).json({ error: "title must be between 3 and 120 characters" });
+      return res
+        .status(400)
+        .json({ error: "title must be between 3 and 120 characters" });
     }
     if (!Number.isFinite(goal) || goal <= 0) {
-      return res.status(400).json({ error: "goalXLM must be a positive number" });
+      return res
+        .status(400)
+        .json({ error: "goalXLM must be a positive number" });
     }
     if (!deadline || Number.isNaN(deadlineDate.getTime())) {
-      return res.status(400).json({ error: "deadline must be a valid ISO date string" });
+      return res
+        .status(400)
+        .json({ error: "deadline must be a valid ISO date string" });
     }
     if (deadlineDate.getTime() <= Date.now()) {
       return res.status(400).json({ error: "deadline must be in the future" });
     }
     if (trimmedDescription.length > 500) {
-      return res.status(400).json({ error: "description must be 500 characters or fewer" });
+      return res
+        .status(400)
+        .json({ error: "description must be 500 characters or fewer" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -319,7 +416,14 @@ router.post("/:id/campaigns", async (req, res, next) => {
       `INSERT INTO project_campaigns (id, project_id, title, description, goal_xlm, deadline, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW())
        RETURNING *, 0::numeric AS raised_xlm`,
-      [uuid(), req.params.id, trimmedTitle, trimmedDescription || null, goal.toFixed(7), deadlineDate.toISOString()],
+      [
+        uuid(),
+        req.params.id,
+        trimmedTitle,
+        trimmedDescription || null,
+        goal.toFixed(7),
+        deadlineDate.toISOString(),
+      ],
     );
 
     logAdminAction({
@@ -327,11 +431,18 @@ router.post("/:id/campaigns", async (req, res, next) => {
       action: "project.campaign.create",
       targetType: "project_campaign",
       targetId: result.rows[0].id,
-      metadata: { projectId: req.params.id, title: trimmedTitle, goalXLM: goal, deadline },
+      metadata: {
+        projectId: req.params.id,
+        title: trimmedTitle,
+        goalXLM: goal,
+        deadline,
+      },
       ipAddress: req.ip,
     });
 
-    res.status(201).json({ success: true, data: mapCampaignRow(result.rows[0]) });
+    res
+      .status(201)
+      .json({ success: true, data: mapCampaignRow(result.rows[0]) });
   } catch (e) {
     next(e);
   }
@@ -339,7 +450,10 @@ router.post("/:id/campaigns", async (req, res, next) => {
 
 router.get("/:id/campaigns", async (req, res, next) => {
   try {
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -352,11 +466,23 @@ router.get("/:id/campaigns", async (req, res, next) => {
 
 router.get("/:id/milestones", async (req, res, next) => {
   try {
+    const cacheKey = getProjectMilestonesCacheKey(req.params.id);
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const result = await pool.query(
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
       [req.params.id],
     );
-    res.json({ success: true, data: result.rows.map(mapProjectMilestoneRow) });
+
+    const responseBody = {
+      success: true,
+      data: result.rows.map(mapProjectMilestoneRow),
+    };
+    await redis.set(cacheKey, responseBody, PROJECT_MILESTONES_CACHE_TTL);
+    res.json(responseBody);
   } catch (e) {
     next(e);
   }
@@ -366,7 +492,9 @@ router.post("/:id/milestones", async (req, res, next) => {
   try {
     const { title, percentage } = req.body;
     if (!title || typeof percentage !== "number") {
-      return res.status(400).json({ error: "title and percentage (number) are required" });
+      return res
+        .status(400)
+        .json({ error: "title and percentage (number) are required" });
     }
     const result = await pool.query(
       `INSERT INTO project_milestones (id, project_id, title, percentage)
@@ -374,6 +502,8 @@ router.post("/:id/milestones", async (req, res, next) => {
        RETURNING *`,
       [uuid(), req.params.id, title, percentage],
     );
+
+    await redis.deletePattern(getProjectMilestonesCacheKey(req.params.id));
 
     logAdminAction({
       actor: req.body?.adminAddress || "unknown",
@@ -384,7 +514,9 @@ router.post("/:id/milestones", async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    res.status(201).json({ success: true, data: mapProjectMilestoneRow(result.rows[0]) });
+    res
+      .status(201)
+      .json({ success: true, data: mapProjectMilestoneRow(result.rows[0]) });
   } catch (e) {
     next(e);
   }
@@ -400,7 +532,10 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
        RETURNING *`,
       [transactionHash || null, req.params.milestoneId, req.params.id],
     );
-    if (!result.rows[0]) return res.status(404).json({ error: "Milestone not found" });
+    if (!result.rows[0])
+      return res.status(404).json({ error: "Milestone not found" });
+
+    await redis.deletePattern(getProjectMilestonesCacheKey(req.params.id));
 
     logAdminAction({
       actor: req.body?.adminAddress || "unknown",
@@ -425,7 +560,7 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
 router.post("/admin/register", async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
-    
+
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
     if (!adminAddress) throw new Error("adminAddress is required");
 
@@ -436,7 +571,16 @@ router.post("/admin/register", async (req, res) => {
       fee: "1000",
       networkPassphrase: NETWORK_PASSPHRASE,
     })
-      .addOperation(contract.call("register_project", adminAddress, projectId, name, wallet, parseInt(co2PerXLM)))
+      .addOperation(
+        contract.call(
+          "register_project",
+          adminAddress,
+          projectId,
+          name,
+          wallet,
+          parseInt(co2PerXLM),
+        ),
+      )
       .setTimeout(30)
       .build();
 
@@ -462,7 +606,7 @@ router.post("/admin/register", async (req, res) => {
 router.post("/admin/confirm", async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
-    
+
     const tx = await server.getTransaction(transactionHash);
     if (!tx.successful) throw new Error("Transaction failed");
 
@@ -485,7 +629,10 @@ router.post("/admin/confirm", async (req, res) => {
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, data: result.rows[0] ? mapProjectRow(result.rows[0]) : null });
+    res.json({
+      success: true,
+      data: result.rows[0] ? mapProjectRow(result.rows[0]) : null,
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -493,8 +640,12 @@ router.post("/admin/confirm", async (req, res) => {
 
 router.get("/:id", async (req, res, next) => {
   try {
-    const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
-    if (!projectResult.rows[0]) return res.status(404).json({ error: "Project not found" });
+    const projectResult = await pool.query(
+      "SELECT * FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0])
+      return res.status(404).json({ error: "Project not found" });
 
     const updatedAt = projectResult.rows[0].updated_at;
     const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
@@ -540,9 +691,15 @@ router.get("/:id", async (req, res, next) => {
       success: true,
       data: {
         ...mapProjectRow(projectResult.rows[0]),
-        onChainVerified: Boolean(onChainProject) || Boolean(projectResult.rows[0].on_chain_verified),
-        contractRegisteredAt: onChainProject ? Number(onChainProject.registered_at) : null,
-        totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
+        onChainVerified:
+          Boolean(onChainProject) ||
+          Boolean(projectResult.rows[0].on_chain_verified),
+        contractRegisteredAt: onChainProject
+          ? Number(onChainProject.registered_at)
+          : null,
+        totalRaisedOnChain: onChainProject
+          ? stroopsToXlm(onChainProject.total_raised)
+          : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
@@ -583,7 +740,9 @@ router.post("/:id/generate-summary", async (req, res, next) => {
     const project = projectResult.rows[0];
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (project.wallet_address !== adminAddress) {
-      return res.status(403).json({ error: "Only the project owner can generate a summary" });
+      return res
+        .status(403)
+        .json({ error: "Only the project owner can generate a summary" });
     }
 
     await enqueueAISummary(req.params.id, {
@@ -615,20 +774,31 @@ router.post("/:id/matching", async (req, res, next) => {
     if (!matcherAddress || typeof matcherAddress !== "string") {
       return res.status(400).json({ error: "matcherAddress is required" });
     }
-    if (!capXLM || isNaN(Number.parseFloat(capXLM)) || Number.parseFloat(capXLM) <= 0) {
-      return res.status(400).json({ error: "capXLM must be a positive number" });
+    if (
+      !capXLM ||
+      isNaN(Number.parseFloat(capXLM)) ||
+      Number.parseFloat(capXLM) <= 0
+    ) {
+      return res
+        .status(400)
+        .json({ error: "capXLM must be a positive number" });
     }
     if (!multiplier || typeof multiplier !== "number" || multiplier < 1) {
       return res.status(400).json({ error: "multiplier must be >= 1" });
     }
     if (!expiresAt || Number.isNaN(new Date(expiresAt).getTime())) {
-      return res.status(400).json({ error: "expiresAt must be a valid ISO date string" });
+      return res
+        .status(400)
+        .json({ error: "expiresAt must be a valid ISO date string" });
     }
     if (new Date(expiresAt).getTime() <= Date.now()) {
       return res.status(400).json({ error: "expiresAt must be in the future" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -637,7 +807,14 @@ router.post("/:id/matching", async (req, res, next) => {
       `INSERT INTO donation_matches (id, project_id, matcher_address, cap_xlm, multiplier, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, project_id, matcher_address, cap_xlm, multiplier, matched_xlm, expires_at, created_at`,
-      [uuid(), req.params.id, matcherAddress, Number.parseFloat(capXLM).toFixed(7), multiplier, new Date(expiresAt).toISOString()],
+      [
+        uuid(),
+        req.params.id,
+        matcherAddress,
+        Number.parseFloat(capXLM).toFixed(7),
+        multiplier,
+        new Date(expiresAt).toISOString(),
+      ],
     );
 
     logAdminAction({
@@ -678,14 +855,16 @@ router.get("/:id/matching", async (req, res, next) => {
       [req.params.id],
     );
 
-    const matches = result.rows.map(row => ({
+    const matches = result.rows.map((row) => ({
       id: row.id,
       projectId: row.project_id,
       matcherAddress: row.matcher_address,
       capXLM: row.cap_xlm?.toString() || "0",
       multiplier: row.multiplier,
       matchedXLM: row.matched_xlm?.toString() || "0",
-      remainingXLM: (Number.parseFloat(row.cap_xlm) - Number.parseFloat(row.matched_xlm)).toFixed(7),
+      remainingXLM: (
+        Number.parseFloat(row.cap_xlm) - Number.parseFloat(row.matched_xlm)
+      ).toFixed(7),
       expiresAt: new Date(row.expires_at).toISOString(),
       createdAt: new Date(row.created_at).toISOString(),
     }));
@@ -706,10 +885,15 @@ router.patch("/:id/status", async (req, res, next) => {
     const { status, reason, adminAddress } = req.body || {};
     const validStatuses = ["active", "rejected", "paused"];
     if (!status || !validStatuses.includes(status)) {
-      return res.status(400).json({ error: `status must be one of: ${validStatuses.join(", ")}` });
+      return res
+        .status(400)
+        .json({ error: `status must be one of: ${validStatuses.join(", ")}` });
     }
 
-    const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT * FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
