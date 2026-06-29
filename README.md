@@ -118,6 +118,8 @@ ALLOWED_ORIGINS=http://localhost:3000
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). All skill levels welcome!
 
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
+
 Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
 
 ### Secret Scanning
