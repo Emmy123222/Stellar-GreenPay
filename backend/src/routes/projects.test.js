@@ -148,8 +148,8 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
+    pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
-    pool.query.mockResolvedValueOnce({ rows: [] }); // ratings
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -161,6 +161,65 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValue({ rows: [] });
 
     await request(app).get("/api/projects/nonexistent").expect(404);
+  });
+});
+
+describe("GET /api/projects/:id/badge-holders", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns the list of badge-holding donors for a project", async () => {
+    const validUuid = "11111111-2222-3333-4444-555555555555";
+    pool.query.mockResolvedValueOnce({ rows: [{ id: validUuid }] });
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          donor_address: "GBADGE1",
+          badge_tier: "tree",
+          total_donated: "150.5000000",
+        },
+        {
+          donor_address: "GBADGE2",
+          badge_tier: "seedling",
+          total_donated: "20.0000000",
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${validUuid}/badge-holders`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0]).toEqual({
+      donorAddress: "GBADGE1",
+      badgeTier: "tree",
+      totalDonated: "150.5000000",
+    });
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    const validUuid = "11111111-2222-3333-4444-555555555555";
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get(`/api/projects/${validUuid}/badge-holders`)
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+  });
+
+  test("returns 404 if project ID is not a valid UUID", async () => {
+    const res = await request(app)
+      .get("/api/projects/invalid-uuid/badge-holders")
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
   });
 });
 

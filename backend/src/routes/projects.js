@@ -13,6 +13,7 @@ const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
+const { adminRequired } = require("../middleware/auth");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -422,7 +423,7 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", async (req, res) => {
+router.post("/admin/register", adminRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
     
@@ -459,7 +460,7 @@ router.post("/admin/register", async (req, res) => {
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
  */
-router.post("/admin/confirm", async (req, res) => {
+router.post("/admin/confirm", adminRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
     
@@ -736,6 +737,48 @@ router.patch("/:id/status", async (req, res, next) => {
     await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/badge-holders
+ * Returns the community of badge-holding donors for each project.
+ */
+router.get("/:id/badge-holders", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(projectId)) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT
+         d.donor_address,
+         p.badges->0->>'tier' AS badge_tier,
+         COALESCE(SUM(d.amount_xlm), 0)::numeric AS total_donated
+       FROM donations d
+       JOIN profiles p ON d.donor_address = p.public_key
+       WHERE d.project_id = $1 AND p.badges != '[]'::jsonb
+       GROUP BY d.donor_address, p.badges
+       ORDER BY total_donated DESC`,
+      [projectId]
+    );
+
+    const badgeHolders = result.rows.map(row => ({
+      donorAddress: row.donor_address,
+      badgeTier: row.badge_tier || null,
+      totalDonated: Number.parseFloat(row.total_donated || "0").toFixed(7),
+    }));
+
+    res.json({ success: true, data: badgeHolders });
   } catch (e) {
     next(e);
   }

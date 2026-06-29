@@ -23,7 +23,7 @@ function buildApp() {
   const app = express();
   app.use(express.json());
 
-  const io = { to: () => ({ emit: jest.fn() }) };
+  const io = { emit: jest.fn(), to: () => ({ emit: jest.fn() }) };
   app.set("io", io);
 
   app.use("/api/donations", donationsRouter);
@@ -82,12 +82,12 @@ describe("POST /api/donations", () => {
     createMockClient(
       { rows: [MOCK_PROJECT] },
       { rows: [] },
+      undefined,
       { rows: [MOCK_DONATION_ROW] },
-      { rows: [] },
       { rows: [] },
       undefined,
       { rows: [{ ...MOCK_DONATION_ROW, total_donated_xlm: 100 }] },
-      { rows: [] },
+      { rows: [{ count: "1" }] },
     );
 
     const res = await request(app)
