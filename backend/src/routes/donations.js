@@ -8,6 +8,7 @@ const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 function validateKey(k) {
@@ -43,6 +44,18 @@ async function recordDonation(req, res, next) {
       [transactionHash],
     );
     if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
+
+    // Verify the transaction is confirmed on-chain before recording it.
+    // Prevents a caller from inflating raised_xlm with a fake or unconfirmed tx hash.
+    let onChainTx;
+    try {
+      onChainTx = await server.getTransaction(transactionHash);
+    } catch {
+      const e = new Error("Transaction not found on Stellar"); e.status = 400; throw e;
+    }
+    if (!onChainTx || onChainTx.successful !== true) {
+      const e = new Error("Transaction not confirmed on Stellar"); e.status = 400; throw e;
+    }
 
     await client.query("BEGIN");
     inTransaction = true;

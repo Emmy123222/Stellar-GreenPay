@@ -8,6 +8,11 @@ jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 
+jest.mock("../services/stellar", () => ({
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
+
+const { server } = require("../services/stellar");
 const pool = require("../db/pool");
 const { computeBadges } = require("../services/store");
 const { recordDonation } = require("./donations");
@@ -362,6 +367,49 @@ describe("POST /api/donations", () => {
     expect(JSON.parse(profileUpsertCall[1][5])).toEqual([
       expect.objectContaining({ tier: "tree", earnedAt: expect.any(String) }),
     ]);
+  });
+
+  test("rejects a transaction that is not confirmed on Stellar", async () => {
+    server.getTransaction.mockResolvedValueOnce({ successful: false });
+    const client = createMockClient(
+      queryResult([{ id: "project-1" }]),   // SELECT project
+      queryResult([]),                         // dedup check
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("H"),
+      amountXLM: "10",
+      transactionHash: makeTxHash("9"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Transaction not confirmed on Stellar");
+    // No DB write transaction should have been opened.
+    expect(client.query).not.toHaveBeenCalledWith("BEGIN");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects a transaction hash that cannot be found on Stellar", async () => {
+    server.getTransaction.mockRejectedValueOnce(new Error("404 Not Found"));
+    const client = createMockClient(
+      queryResult([{ id: "project-1" }]),   // SELECT project
+      queryResult([]),                         // dedup check
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("I"),
+      amountXLM: "10",
+      transactionHash: makeTxHash("8"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Transaction not found on Stellar");
+    expect(client.query).not.toHaveBeenCalledWith("BEGIN");
+    expect(client.release).toHaveBeenCalledTimes(1);
   });
 
   test("rolls back the transaction if profile persistence fails after BEGIN", async () => {

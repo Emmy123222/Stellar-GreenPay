@@ -14,6 +14,10 @@ jest.mock("../services/redis", () => ({
   set: jest.fn(),
 }));
 
+jest.mock("../services/stellar", () => ({
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
+
 const pool = require("../db/pool");
 const express = require("express");
 const request = require("supertest");
