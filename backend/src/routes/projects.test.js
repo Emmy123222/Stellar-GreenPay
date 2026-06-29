@@ -32,7 +32,9 @@ function buildApp() {
   app.use(express.json());
   app.use("/api/projects", projectsRouter);
   app.use((err, _req, res, _next) => {
-    res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Internal server error" });
   });
   return app;
 }
@@ -132,6 +134,70 @@ describe("GET /api/projects", () => {
 
     const query = pool.query.mock.calls[0][0];
     expect(query).toContain("LIMIT");
+  });
+});
+
+describe("GET /api/projects/featured", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("cold cache queries DB and warm cache reuses cached result", async () => {
+    const dbSpy = jest.spyOn(pool, "query");
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    const cold = await request(app).get("/api/projects/featured").expect(200);
+    expect(cold.body.success).toBe(true);
+    expect(cold.body.data.id).toBe("proj-1");
+    expect(dbSpy).toHaveBeenCalledTimes(1);
+
+    const warm = await request(app).get("/api/projects/featured").expect(200);
+    expect(warm.body.success).toBe(true);
+    expect(warm.body.data.id).toBe("proj-1");
+    expect(dbSpy).toHaveBeenCalledTimes(1);
+
+    nowSpy.mockRestore();
+  });
+
+  test("after cache expiry queries DB again", async () => {
+    const dbSpy = jest.spyOn(pool, "query");
+    const nowSpy = jest.spyOn(Date, "now");
+
+    nowSpy.mockReturnValue(9_999_999_999_000);
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app).get("/api/projects/featured").expect(200);
+    expect(dbSpy).toHaveBeenCalledTimes(1);
+
+    nowSpy.mockReturnValue(9_999_999_999_000 + 24 * 60 * 60 * 1000 + 1);
+    const refreshedRow = {
+      ...MOCK_PROJECT_ROW,
+      id: "proj-2",
+      name: "Refreshed Project",
+    };
+    pool.query.mockResolvedValueOnce({ rows: [refreshedRow] });
+
+    const res = await request(app).get("/api/projects/featured").expect(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.id).toBe("proj-2");
+    expect(dbSpy).toHaveBeenCalledTimes(2);
+
+    nowSpy.mockRestore();
+  });
+
+  test("returns 404 when there are no active projects", async () => {
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(99_999_999_999_999);
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const res = await request(app).get("/api/projects/featured").expect(404);
+    expect(res.body).toEqual({ error: "No featured project found" });
+
+    nowSpy.mockRestore();
   });
 });
 
