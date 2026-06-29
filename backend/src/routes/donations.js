@@ -9,6 +9,7 @@ const logger = require("../logger");
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 function validateKey(k) {
@@ -122,47 +123,12 @@ async function recordDonation(req, res, next) {
       [currency === "XLM" ? parsedAmount : 0, projectId],
     );
 
-    // Update donor profile
-    const existingProfileResult = await client.query(
-      "SELECT * FROM profiles WHERE public_key = $1",
-      [donorAddress],
-    );
-    const existingProfile = existingProfileResult.rows[0];
-    const previousTotal = existingProfile
-      ? Number.parseFloat(existingProfile.total_donated_xlm || "0")
-      : 0;
-    const newTotal = currency === "XLM" ? previousTotal + parsedAmount : previousTotal;
-    const projectsSupportedResult = await client.query(
-      `SELECT COUNT(DISTINCT project_id) AS count
-       FROM donations
-       WHERE donor_address = $1`,
-      [donorAddress],
-    );
-    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
-    const badges = computeBadges(newTotal);
-
-    await client.query(
-      `INSERT INTO profiles (
-        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())
-      ON CONFLICT (public_key) DO UPDATE SET
-        total_donated_xlm = EXCLUDED.total_donated_xlm,
-        projects_supported = EXCLUDED.projects_supported,
-        badges = EXCLUDED.badges,
-        updated_at = EXCLUDED.updated_at`,
-      [
-        donorAddress,
-        existingProfile?.display_name || null,
-        existingProfile?.bio || null,
-        newTotal.toFixed(7),
-        projectsSupported,
-        JSON.stringify(badges),
-      ],
-    );
-
     await client.query("COMMIT");
     inTransaction = false;
+
+    enqueueProfileUpdate(donorAddress).catch((err) => {
+      logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
+    });
 
     (req.log || logger).info({
       event: "donation_recorded",

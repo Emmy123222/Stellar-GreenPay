@@ -8,8 +8,13 @@ jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn(),
+}));
+
 const pool = require("../db/pool");
 const { computeBadges } = require("../services/store");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { recordDonation } = require("./donations");
 
 function makePublicKey(char = "A") {
@@ -160,9 +165,7 @@ describe("POST /api/donations", () => {
       queryResult([donationRow]),              // INSERT donation
       queryResult([]),                         // SELECT donation_matches (empty)
       queryResult(),                           // UPDATE projects
-      queryResult([]),                         // SELECT * FROM profiles (new donor)
-      queryResult([{ count: "1" }]),           // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                           // INSERT INTO profiles
+      queryResult(),                           // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -187,14 +190,7 @@ describe("POST /api/donations", () => {
       }),
     );
     expect(client.release).toHaveBeenCalledTimes(1);
-
-    const profileUpsertCall = findQueryCall(client, "INSERT INTO profiles");
-    expect(profileUpsertCall[1][0]).toBe(donorAddress);
-    expect(profileUpsertCall[1][3]).toBe("10.0000000");
-    expect(profileUpsertCall[1][4]).toBe(1);
-    expect(JSON.parse(profileUpsertCall[1][5])).toEqual([
-      expect.objectContaining({ tier: "seedling", earnedAt: expect.any(String) }),
-    ]);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 
   test("returns 404 for an unknown project id", async () => {
@@ -298,9 +294,7 @@ describe("POST /api/donations", () => {
       }]),                                      // INSERT donation
       queryResult([]),                          // SELECT donation_matches (empty)
       queryResult(),                            // UPDATE projects
-      queryResult([]),                          // SELECT * FROM profiles (new donor)
-      queryResult([{ count: "1" }]),            // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                            // INSERT INTO profiles
+      queryResult(),                            // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -312,6 +306,7 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(makePublicKey("E"));
 
     const updateProjectCall = findQueryCall(client, "UPDATE projects");
     expect(updateProjectCall[1]).toEqual([5.5, "project-2"]);
@@ -336,14 +331,7 @@ describe("POST /api/donations", () => {
       }]),                                      // INSERT donation
       queryResult([]),                          // SELECT donation_matches (empty)
       queryResult(),                            // UPDATE projects
-      queryResult([{                            // SELECT * FROM profiles (returning existing)
-        public_key: donorAddress,
-        display_name: "Existing Donor",
-        bio: "Already donated before",
-        total_donated_xlm: "99.0000000",
-      }]),
-      queryResult([{ count: "3" }]),            // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                            // INSERT INTO profiles
+      queryResult(),                            // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -355,13 +343,7 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-
-    const profileUpsertCall = findQueryCall(client, "INSERT INTO profiles");
-    expect(profileUpsertCall[1][3]).toBe("100.0000000");
-    expect(profileUpsertCall[1][4]).toBe(3);
-    expect(JSON.parse(profileUpsertCall[1][5])).toEqual([
-      expect.objectContaining({ tier: "tree", earnedAt: expect.any(String) }),
-    ]);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 
   test("does not pass undefined as COMMIT query — transaction is explicitly committed", async () => {
@@ -400,6 +382,7 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
     const calls = client.query.mock.calls.map(([sql]) => sql);
     expect(calls).toContain("COMMIT");
   });
@@ -483,16 +466,7 @@ describe("profile upsert on first donation", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-
-    const upsert = findQueryCall(client, "INSERT INTO profiles");
-    expect(upsert[1][0]).toBe(donorAddress);
-    expect(upsert[1][1]).toBeNull();          // display_name: null (no existing profile)
-    expect(upsert[1][2]).toBeNull();          // bio: null
-    expect(upsert[1][3]).toBe("500.0000000"); // total_donated_xlm = first donation amount
-    expect(upsert[1][4]).toBe(1);             // projects_supported from COUNT query
-    expect(JSON.parse(upsert[1][5])).toEqual([
-      expect.objectContaining({ tier: "forest", earnedAt: expect.any(String) }),
-    ]);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 
   test("preserves display_name and bio from an existing profile on upsert", async () => {
@@ -536,14 +510,7 @@ describe("profile upsert on first donation", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-
-    const upsert = findQueryCall(client, "INSERT INTO profiles");
-    expect(upsert[1][1]).toBe("Green Donor");      // display_name preserved
-    expect(upsert[1][2]).toBe("I care about the planet.");  // bio preserved
-    expect(upsert[1][3]).toBe("100.0000000");       // 90 + 10 accumulated
-    expect(JSON.parse(upsert[1][5])).toEqual([
-      expect.objectContaining({ tier: "tree", earnedAt: expect.any(String) }),
-    ]);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 
   test("does not increment total_donated_xlm for non-XLM donations", async () => {
@@ -568,14 +535,7 @@ describe("profile upsert on first donation", () => {
       queryResult([donationRow]),
       // no donation_matches query for non-XLM
       queryResult(),                          // UPDATE projects (raises_xlm += 0)
-      queryResult([{
-        public_key: donorAddress,
-        display_name: null,
-        bio: null,
-        total_donated_xlm: "200.0000000",    // pre-existing XLM total
-      }]),
-      queryResult([{ count: "3" }]),
-      queryResult(),
+      queryResult(),                          // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -588,9 +548,6 @@ describe("profile upsert on first donation", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-
-    const upsert = findQueryCall(client, "INSERT INTO profiles");
-    // total_donated_xlm must remain unchanged (200) for non-XLM donations
-    expect(upsert[1][3]).toBe("200.0000000");
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 });

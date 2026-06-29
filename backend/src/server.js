@@ -21,6 +21,8 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const http = require("http");
 const { Server } = require("socket.io");
+const { start: startSummaryQueue } = require("./services/summaryQueue");
+const { start: startProfileQueue } = require("./services/profileQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
@@ -39,6 +41,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -113,8 +119,8 @@ app.use((err, req, res, next) => {
 async function startServer() {
   await runMigrations();
 
-  const { start: startSummaryQueue } = require("./services/summaryQueue");
   await startSummaryQueue(io);
+  await startProfileQueue(io);
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 

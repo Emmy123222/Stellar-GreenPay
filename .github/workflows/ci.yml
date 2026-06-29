@@ -106,6 +106,32 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build --workspace --target wasm32-unknown-unknown --release
 
+  helm:
+    name: Helm Chart Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v3
+        with:
+          version: latest
+      - uses: azure/setup-kubectl@v3
+        with:
+          version: latest
+      - run: helm lint helm/greenpay/
+      - run: helm template greenpay helm/greenpay/ | kubectl apply --dry-run=client -f -
+
+  gitleaks:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gitleaks
+        run: |
+          curl -sL "https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m).tar.gz" | tar xzf -
+          sudo mv gitleaks /usr/local/bin/gitleaks
+      - name: Secret scanning
+        run: gitleaks detect --config .gitleaks.toml --source . --exit-code 1
+
   zap_scan:
     name: DAST Security Scan (OWASP ZAP)
     runs-on: ubuntu-latest
