@@ -27,7 +27,7 @@ const app    = express();
 const PORT   = process.env.PORT || 4000;
 const server = http.createServer(app);
 
-// ── Swagger UI (development) ─────────────────────────────────────────────────
+// ── Swagger UI (development) ────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   const swaggerUi = require("swagger-ui-express");
   const yaml      = require("js-yaml");
@@ -64,14 +64,14 @@ const io = new Server(server, {
 app.set("io", io);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-// ── CSRF token endpoint ──────────────────────────────────────────────────────
+// ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
   res.json({ success: true, csrfToken: req.csrfToken() });
 }
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-// ── Route mounts — each router registered at /api and /api/v1 ───────────────
+// ── Route mounts — each router registered at /api and /api/v1 ─────────────────────
 const projectsRouter      = require("./routes/projects");
 const donationsRouter     = require("./routes/donations");
 const profilesRouter      = require("./routes/profiles");
@@ -90,6 +90,7 @@ function mount(path, router) {
 }
 
 app.use("/health", require("./routes/health"));
+app.use("/readiness", require("./routes/readiness"));
 mount("/api/projects",      projectsRouter);
 mount("/api/donations",     donationsRouter);
 mount("/api/profiles",      profilesRouter);
@@ -102,7 +103,7 @@ mount("/api/impact",        impactRouter);
 mount("/api/ratings",       ratingsRouter);
 mount("/api/admin",         adminRouter);
 
-app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
+app.use((req, res) => res.status(404).json({ error:  }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error("[Error]", err.message);
@@ -118,7 +119,7 @@ async function startServer() {
   startIndexer(io).catch(err => console.error("[Indexer Error]", err.message));
 
   server.listen(PORT, () => {
-    console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
+    console.log();
   });
 
   if (process.env.ENABLE_TURRETS === "true") {
