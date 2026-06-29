@@ -693,6 +693,7 @@ export default function ProjectDetail({
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
       <Head>
         <title>{ogTitle}</title>
+        <meta name="greenpay:project:id" content={project.id} />
         <meta name="description" content={ogDescription} />
         <meta property="og:type" content="website" />
         <meta property="og:title" content={ogTitle} />

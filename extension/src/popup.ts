@@ -273,6 +273,39 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   initProjectSearch();
 
+  // Check for pending context-menu donation
+  chrome.storage.local.get(['pendingDonationProjectId', 'pendingDonationAddress'], async (res) => {
+    if (res.pendingDonationProjectId) {
+      chrome.storage.local.remove('pendingDonationProjectId');
+      try {
+        const response = await fetch(`${API_BASE}/api/projects/${res.pendingDonationProjectId}`);
+        if (response.ok) {
+          const json = await response.json();
+          const projectData = json.data;
+          
+          const destInput = document.getElementById('destination') as HTMLInputElement | null;
+          const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
+          
+          if (destInput && projectData.walletAddress) {
+            destInput.value = projectData.walletAddress;
+            selectedProjectId = projectData.id;
+          }
+          if (searchInput && projectData.name) {
+            searchInput.value = projectData.name;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to pre-fill project from context menu', err);
+      }
+    } else if (res.pendingDonationAddress) {
+      chrome.storage.local.remove('pendingDonationAddress');
+      const destInput = document.getElementById('destination') as HTMLInputElement | null;
+      if (destInput) {
+        destInput.value = res.pendingDonationAddress;
+      }
+    }
+  });
+
   const form = document.getElementById('donation-form');
   if (!form) return;
 
