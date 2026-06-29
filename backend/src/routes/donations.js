@@ -5,6 +5,7 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuid } = require("uuid");
+const logger = require("../logger");
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { computeBadges, mapDonationRow } = require("../services/store");
@@ -175,6 +176,15 @@ async function recordDonation(req, res, next) {
 
     await client.query("COMMIT");
     inTransaction = false;
+
+    (req.log || logger).info({
+      event: "donation_recorded",
+      amount: parsedAmount,
+      currency,
+      project: projectId,
+      donor: donorAddress,
+      txHash: transactionHash,
+    }, "Donation recorded");
 
     const io = req.app?.get("io");
     if (io) {

@@ -412,6 +412,46 @@ describe("POST /api/donations", () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
+  test("does not pass undefined as COMMIT query — transaction is explicitly committed", async () => {
+    const donorAddress = makePublicKey("H");
+    const transactionHash = makeTxHash("1");
+    const donationRow = {
+      id: "donation-h",
+      project_id: "project-h",
+      donor_address: donorAddress,
+      amount_xlm: "50",
+      amount: "50",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-h" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-h",
+      donorAddress,
+      amountXLM: "50",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    const calls = client.query.mock.calls.map(([sql]) => sql);
+    expect(calls).toContain("COMMIT");
+  });
+
   test("rolls back the transaction if profile persistence fails after BEGIN", async () => {
     const client = createMockClient(
       queryResult([{ id: "project-4" }]),
@@ -447,5 +487,158 @@ describe("POST /api/donations", () => {
     expect(res.statusCode).toBe(500);
     expect(client.query).toHaveBeenLastCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("profile upsert on first donation", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("creates a new profile using only the first donation amount as total_donated_xlm", async () => {
+    const donorAddress = makePublicKey("P");
+    const transactionHash = makeTxHash("2");
+    const donationRow = {
+      id: "donation-p",
+      project_id: "project-p",
+      donor_address: donorAddress,
+      amount_xlm: "500",
+      amount: "500",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-p" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-p",
+      donorAddress,
+      amountXLM: "500",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+
+    const upsert = findQueryCall(client, "INSERT INTO profiles");
+    expect(upsert[1][0]).toBe(donorAddress);
+    expect(upsert[1][1]).toBeNull();          // display_name: null (no existing profile)
+    expect(upsert[1][2]).toBeNull();          // bio: null
+    expect(upsert[1][3]).toBe("500.0000000"); // total_donated_xlm = first donation amount
+    expect(upsert[1][4]).toBe(1);             // projects_supported from COUNT query
+    expect(JSON.parse(upsert[1][5])).toEqual([
+      expect.objectContaining({ tier: "forest", earnedAt: expect.any(String) }),
+    ]);
+  });
+
+  test("preserves display_name and bio from an existing profile on upsert", async () => {
+    const donorAddress = makePublicKey("Q");
+    const transactionHash = makeTxHash("3");
+    const donationRow = {
+      id: "donation-q",
+      project_id: "project-q",
+      donor_address: donorAddress,
+      amount_xlm: "10",
+      amount: "10",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-q" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([{                          // existing profile with display_name + bio
+        public_key: donorAddress,
+        display_name: "Green Donor",
+        bio: "I care about the planet.",
+        total_donated_xlm: "90.0000000",
+      }]),
+      queryResult([{ count: "2" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-q",
+      donorAddress,
+      amountXLM: "10",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+
+    const upsert = findQueryCall(client, "INSERT INTO profiles");
+    expect(upsert[1][1]).toBe("Green Donor");      // display_name preserved
+    expect(upsert[1][2]).toBe("I care about the planet.");  // bio preserved
+    expect(upsert[1][3]).toBe("100.0000000");       // 90 + 10 accumulated
+    expect(JSON.parse(upsert[1][5])).toEqual([
+      expect.objectContaining({ tier: "tree", earnedAt: expect.any(String) }),
+    ]);
+  });
+
+  test("does not increment total_donated_xlm for non-XLM donations", async () => {
+    const donorAddress = makePublicKey("R");
+    const transactionHash = makeTxHash("4");
+    const donationRow = {
+      id: "donation-r",
+      project_id: "project-r",
+      donor_address: donorAddress,
+      amount_xlm: null,
+      amount: "25",
+      currency: "USD",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-r" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      // no donation_matches query for non-XLM
+      queryResult(),                          // UPDATE projects (raises_xlm += 0)
+      queryResult([{
+        public_key: donorAddress,
+        display_name: null,
+        bio: null,
+        total_donated_xlm: "200.0000000",    // pre-existing XLM total
+      }]),
+      queryResult([{ count: "3" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-r",
+      donorAddress,
+      amount: "25",
+      currency: "USD",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+
+    const upsert = findQueryCall(client, "INSERT INTO profiles");
+    // total_donated_xlm must remain unchanged (200) for non-XLM donations
+    expect(upsert[1][3]).toBe("200.0000000");
   });
 });

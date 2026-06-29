@@ -14,8 +14,9 @@ const express      = require("express");
 const cookieParser = require("cookie-parser");
 const csurf        = require("csurf");
 const helmet       = require("helmet");
-const morgan       = require("morgan");
 const rateLimit    = require("express-rate-limit");
+const logger       = require("./logger");
+const requestLogger = require("./middleware/requestLogger");
 const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const http = require("http");
@@ -38,7 +39,7 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use(morgan("dev"));
+app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
 app.use(csurf({
@@ -105,7 +106,7 @@ mount("/api/admin",         adminRouter);
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error("[Error]", err.message);
+  logger.error({ event: "unhandled_error", err }, err.message);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
@@ -115,10 +116,10 @@ async function startServer() {
   const { start: startSummaryQueue } = require("./services/summaryQueue");
   await startSummaryQueue(io);
 
-  startIndexer(io).catch(err => console.error("[Indexer Error]", err.message));
+  startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
-    console.log(`\n  🌱 Stellar GreenPay API\n  🚀 Running at http://localhost:${PORT}\n  🌐 Network: ${process.env.STELLAR_NETWORK || "testnet"}\n`);
+    logger.info({ event: "server_start", port: PORT, network: process.env.STELLAR_NETWORK || "testnet" }, "Stellar GreenPay API running");
   });
 
   if (process.env.ENABLE_TURRETS === "true") {
@@ -129,7 +130,7 @@ async function startServer() {
 
 if (require.main === module) {
   startServer().catch((err) => {
-    console.error("[Startup Error]", err.message);
+    logger.fatal({ event: "startup_error", err }, err.message);
     process.exit(1);
   });
 }
