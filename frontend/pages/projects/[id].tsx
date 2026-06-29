@@ -13,6 +13,7 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
+import WalletAddressQRCode from "@/components/WalletAddressQRCode";
 import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
@@ -1041,6 +1042,15 @@ export default function ProjectDetail({
                   </svg>
                 )}
               </button>
+            </div>
+
+            {/* QR code — tap to reveal; lets Freighter mobile scan-to-donate
+                without copying the wallet address manually (issue #405) */}
+            <div className="mt-3">
+              <WalletAddressQRCode
+                walletAddress={project.walletAddress}
+                projectName={project.name}
+              />
             </div>
           </div>
 
