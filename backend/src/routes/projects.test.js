@@ -13,7 +13,7 @@ jest.mock("../services/redis", () => ({
 jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn(),
   CONTRACT_ID: "test-contract",
-  server: {},
+  server: { getTransaction: jest.fn() },
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
 }));
 
@@ -23,6 +23,7 @@ jest.mock("../services/summaryQueue", () => ({
 
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { server } = require("../services/stellar");
 const express = require("express");
 const request = require("supertest");
 const projectsRouter = require("./projects");
@@ -178,5 +179,46 @@ describe("POST /api/projects (admin)", () => {
       .send({ name: "Test" });
 
     expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /api/projects/admin/confirm", () => {
+  let app;
+  const transactionHash = "a".repeat(64);
+  const projectId = "proj-1";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("sets on_chain_verified and verified in DB when transaction succeeds", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+
+    const updatedRow = {
+      ...MOCK_PROJECT_ROW,
+      verified: true,
+      on_chain_verified: true,
+    };
+    pool.query.mockResolvedValue({ rows: [updatedRow] });
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .send({ transactionHash, projectId })
+      .expect(200);
+
+    expect(server.getTransaction).toHaveBeenCalledWith(transactionHash);
+
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall[0]).toContain("on_chain_verified = true");
+    expect(updateCall[0]).toContain("verified = true");
+    expect(updateCall[1]).toEqual([projectId]);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.verified).toBe(true);
+    expect(res.body.data.onChainVerified).toBe(true);
   });
 });
