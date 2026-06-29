@@ -112,6 +112,25 @@ export async function fetchProjects(params?: {
   return data.data;
 }
 
+/** Tag suggestions for browse-page autocomplete (uses project search ILIKE on tags). */
+export async function fetchTagSuggestions(query: string, limit = 8): Promise<string[]> {
+  const projects = await fetchProjects({ search: query, limit: 50 });
+  const lowerQuery = query.toLowerCase();
+  const tags = new Set<string>();
+
+  for (const project of projects) {
+    for (const tag of project.tags) {
+      if (tag.toLowerCase().includes(lowerQuery)) {
+        tags.add(tag);
+      }
+    }
+  }
+
+  return Array.from(tags)
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, limit);
+}
+
 export async function fetchProject(id: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
