@@ -27,7 +27,7 @@ mod fuzz_tests;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype,
-    token, Address, Env, symbol_short, Symbol, String, BytesN,
+    token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
@@ -55,6 +55,16 @@ pub struct Project {
     pub donor_count:   u32,
     pub active:        bool,
     pub registered_at: u32,
+}
+
+/// Input for registering a project via `batch_register_projects`.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ProjectInit {
+    pub id:          String,
+    pub name:        String,
+    pub wallet:      Address,
+    pub co2_per_xlm: u32,
 }
 
 #[contracttype]
@@ -189,6 +199,35 @@ impl GreenPayContract {
         let next_count = count.checked_add(1).expect("ProjectCount overflow");
         env.storage().instance().set(&DataKey::ProjectCount, &next_count);
         env.events().publish((symbol_short!("proj_reg"), admin), project_id);
+    }
+
+    pub fn batch_register_projects(env: Env, admin: Address, projects: Vec<ProjectInit>) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can register projects"); }
+
+        for init in projects.iter() {
+            let project_id = init.id.clone();
+            if env.storage().instance().has(&DataKey::Project(project_id.clone())) {
+                panic!("Project already registered");
+            }
+            let project = Project {
+                id: project_id.clone(),
+                name: init.name.clone(),
+                wallet: init.wallet.clone(),
+                co2_per_xlm: init.co2_per_xlm,
+                total_raised: 0,
+                donor_count: 0,
+                active: true,
+                registered_at: env.ledger().sequence(),
+            };
+            env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+            let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
+            let next_count = count.checked_add(1).expect("ProjectCount overflow");
+            env.storage().instance().set(&DataKey::ProjectCount, &next_count);
+            env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
+        }
     }
 
     pub fn deactivate_project(env: Env, admin: Address, project_id: String) {
@@ -613,7 +652,7 @@ impl GreenPayContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String};
+    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String, Vec};
     use soroban_sdk::token::StellarAssetClient;
 
     // ─── Existing tests ───────────────────────────────────────────────────────
@@ -665,6 +704,81 @@ mod tests {
         assert_eq!(calculate_badge(1999 * STROOP),   BadgeTier::Forest);
         assert_eq!(calculate_badge(2000 * STROOP),   BadgeTier::EarthGuardian);
         assert_eq!(calculate_badge(100000 * STROOP), BadgeTier::EarthGuardian);
+    }
+
+    #[test]
+    fn test_batch_register_projects() {
+        let env    = Env::default();
+        env.mock_all_auths();
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+
+        let wallet1 = Address::generate(&env);
+        let wallet2 = Address::generate(&env);
+        let wallet3 = Address::generate(&env);
+        let mut projects = Vec::new(&env);
+        projects.push_back(ProjectInit {
+            id:          String::from_str(&env, "proj-001"),
+            name:        String::from_str(&env, "Forest Restore"),
+            wallet:      wallet1.clone(),
+            co2_per_xlm: 100,
+        });
+        projects.push_back(ProjectInit {
+            id:          String::from_str(&env, "proj-002"),
+            name:        String::from_str(&env, "Ocean Cleanup"),
+            wallet:      wallet2.clone(),
+            co2_per_xlm: 200,
+        });
+        projects.push_back(ProjectInit {
+            id:          String::from_str(&env, "proj-003"),
+            name:        String::from_str(&env, "Solar Schools"),
+            wallet:      wallet3.clone(),
+            co2_per_xlm: 150,
+        });
+
+        client.batch_register_projects(&admin, &projects);
+
+        assert_eq!(client.get_project_count(), 3);
+        let p1 = client.get_project(&String::from_str(&env, "proj-001"));
+        assert_eq!(p1.name, String::from_str(&env, "Forest Restore"));
+        assert_eq!(p1.wallet, wallet1);
+        assert_eq!(p1.co2_per_xlm, 100);
+        assert!(p1.active);
+        let p2 = client.get_project(&String::from_str(&env, "proj-002"));
+        assert_eq!(p2.co2_per_xlm, 200);
+        let p3 = client.get_project(&String::from_str(&env, "proj-003"));
+        assert_eq!(p3.co2_per_xlm, 150);
+    }
+
+    #[test]
+    #[should_panic(expected = "Project already registered")]
+    fn test_batch_register_projects_duplicate_fails() {
+        let env    = Env::default();
+        env.mock_all_auths();
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
+        client.initialize(&admin);
+
+        let wallet = Address::generate(&env);
+        let pid    = String::from_str(&env, "proj-dup");
+        let mut projects = Vec::new(&env);
+        projects.push_back(ProjectInit {
+            id:          pid.clone(),
+            name:        String::from_str(&env, "First"),
+            wallet:      wallet.clone(),
+            co2_per_xlm: 100,
+        });
+        projects.push_back(ProjectInit {
+            id:          pid,
+            name:        String::from_str(&env, "Duplicate"),
+            wallet:      wallet,
+            co2_per_xlm: 50,
+        });
+
+        client.batch_register_projects(&admin, &projects);
     }
 
     // ─── Governance helpers ───────────────────────────────────────────────────
