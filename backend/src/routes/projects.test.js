@@ -13,7 +13,9 @@ jest.mock("../services/redis", () => ({
 jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn(),
   CONTRACT_ID: "test-contract",
-  server: {},
+  server: {
+    loadAccount: jest.fn(),
+  },
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
 }));
 
@@ -23,6 +25,7 @@ jest.mock("../services/summaryQueue", () => ({
 
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { server } = require("../services/stellar");
 const express = require("express");
 const request = require("supertest");
 const projectsRouter = require("./projects");
@@ -172,11 +175,28 @@ describe("POST /api/projects (admin)", () => {
     jest.clearAllMocks();
   });
 
-  test("rejects unauthenticated requests", async () => {
+  test("returns 400 when adminAddress is missing", async () => {
     const res = await request(app)
       .post("/api/projects/admin/register")
       .send({ name: "Test" });
 
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("adminAddress is required");
+  });
+
+  test("returns 400 for invalid adminAddress before loading account", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/register")
+      .send({
+        projectId: "proj-1",
+        name: "Test",
+        wallet: MOCK_PROJECT_ROW.wallet_address,
+        co2PerXLM: 10,
+        adminAddress: "not-a-stellar-address",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Invalid Stellar public key");
+    expect(server.loadAccount).not.toHaveBeenCalled();
   });
 });
