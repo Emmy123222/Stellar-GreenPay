@@ -13,6 +13,32 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
+jest.mock('../app/theme', () => ({
+  useTheme: () => ({
+    colors: {
+      background: '#ffffff',
+      surface: '#ffffff',
+      primary: '#000000',
+      accent: '#000000',
+      header: '#000000',
+      headerText: '#ffffff',
+      buttonBackground: '#000000',
+      buttonText: '#ffffff',
+      cardBorder: '#eeeeee',
+      cardShadow: '#000000',
+      primaryText: '#000000',
+      secondaryText: '#555555',
+      muted: '#888888',
+      inputBackground: '#ffffff',
+      inputBorder: '#eeeeee',
+      placeholder: '#888888',
+      border: '#dddddd',
+      statusBarStyle: 'dark',
+    },
+  }),
+}));
+
+
 import ProjectsScreen from '../app/projects/index';
 
 const MOCK_PROJECTS = [

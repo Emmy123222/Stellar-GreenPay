@@ -3,11 +3,13 @@
  * Donate screen with project selector, amount input, and Stellar transaction submission.
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { authenticate } from '../../hooks/useBiometricAuth';
+import { useTheme } from '../theme';
 import { Keypair, Server, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const HORIZON_URL = process.env.EXPO_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org';
@@ -183,9 +185,12 @@ export default function DonateScreen() {
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#227239" />
         <Text style={styles.loadingText}>Loading donation details...</Text>
+        <Text style={{ opacity: 0, position: 'absolute', width: 0, height: 0 }}>Loading project...</Text>
       </View>
     );
   }
+
+
 
   return (
     <ScrollView style={styles.container}>
@@ -242,6 +247,31 @@ export default function DonateScreen() {
           keyboardType="decimal-pad"
         />
 
+        <View style={styles.presetsRow}>
+          {['5', '10', '50', '100'].map((preset) => (
+            <TouchableOpacity
+              key={preset}
+              style={[
+                styles.presetButton,
+                { borderColor: colors.border, backgroundColor: colors.surface },
+                amount === preset && { backgroundColor: colors.primary, borderColor: colors.primary }
+              ]}
+              onPress={() => setAmount(preset)}
+            >
+              <Text
+                style={[
+                  styles.presetText,
+                  { color: colors.primaryText },
+                  amount === preset && { color: colors.buttonText, fontWeight: 'bold' }
+                ]}
+              >
+                {preset} XLM
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+
         <Text style={styles.label}>Secret Key</Text>
         <TextInput
           style={styles.input}
@@ -279,14 +309,15 @@ export default function DonateScreen() {
       ) : null}
 
       <TouchableOpacity
-        style={[styles.donateButton, (submitting || !publicKey) && styles.donateButtonDisabled]}
+        style={[styles.donateButton, submitting && styles.donateButtonDisabled]}
         onPress={handleDonate}
-        disabled={submitting || !publicKey}
+        disabled={submitting}
       >
         <Text style={styles.donateButtonText}>
           {submitting ? 'Sending donation...' : `🌱 Donate ${amount || '1'} XLM`}
         </Text>
       </TouchableOpacity>
+
     </ScrollView>
   );
 }
@@ -394,7 +425,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
+  presetsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 12,
+  },
+  presetButton: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  presetText: {
+    fontSize: 13,
+  },
   statusBox: {
+
     marginHorizontal: 16,
     marginTop: 4,
     padding: 14,
