@@ -169,6 +169,8 @@ export default function ImpactScreen() {
         onPress={handleShare}
         disabled={loading}
         style={styles.shareButton}
+        accessibilityLabel="Share your climate impact certificate"
+        accessibilityRole="button"
       >
         <Text style={styles.shareButtonText}>Share Certificate</Text>
       </TouchableOpacity>
