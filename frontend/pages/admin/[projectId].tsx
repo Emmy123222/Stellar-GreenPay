@@ -58,6 +58,44 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
   const [matches, setMatches] = useState<any[]>([]);
 
+  const [widgetAccent, setWidgetAccent] = useState("#059669");
+  const [widgetButtonText, setWidgetButtonText] = useState("Donate on GreenPay");
+  const [widgetCurrency, setWidgetCurrency] = useState<"XLM" | "USDC">("XLM");
+  const [copied, setCopied] = useState(false);
+
+  const widgetEmbedCode = useMemo(() => {
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    const params = new URLSearchParams({
+      accent: widgetAccent,
+      buttonText: widgetButtonText,
+      currency: widgetCurrency,
+    });
+    return `<iframe src="${baseUrl}/widget/${projectId}?${params}" width="360" height="420" frameborder="0" style="border:none;overflow:hidden" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  }, [widgetAccent, widgetButtonText, widgetCurrency, projectId]);
+
+  const PRESET_COLORS = [
+    "#059669", "#10b981", "#34d399", "#6ee7b7",
+    "#2563eb", "#7c3aed", "#db2777", "#dc2626",
+    "#ea580c", "#d97706", "#65a30d", "#0891b2",
+  ];
+
+  const copyEmbed = async () => {
+    try {
+      await navigator.clipboard.writeText(widgetEmbedCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = widgetEmbedCode;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
     setLoading(true);
@@ -650,6 +688,110 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Widget Builder */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Widget Builder</h2>
+        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          Customise the embeddable widget for this project and copy the embed code to paste on external sites.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Controls */}
+          <div className="space-y-5">
+            {/* Accent colour */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-2 ml-1 opacity-50">
+                Accent Colour
+              </label>
+              <div className="flex items-center gap-2 mb-2">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setWidgetAccent(c)}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${widgetAccent === c ? "border-forest-900 scale-110" : "border-transparent"}`}
+                    style={{ backgroundColor: c }}
+                    aria-label={`Select colour ${c}`}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={widgetAccent}
+                  onChange={(e) => setWidgetAccent(e.target.value)}
+                  className="w-10 h-10 rounded cursor-pointer border border-forest-200 p-0.5"
+                />
+                <span className="text-xs font-mono text-[#5a7a5a]">{widgetAccent}</span>
+              </div>
+            </div>
+
+            {/* Button text */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+                Button Text
+              </label>
+              <input
+                value={widgetButtonText}
+                onChange={(e) => setWidgetButtonText(e.target.value)}
+                className="input-field"
+                placeholder="Donate on GreenPay"
+                maxLength={60}
+              />
+            </div>
+
+            {/* Currency */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-2 ml-1 opacity-50">
+                Currency Displayed
+              </label>
+              <div className="flex gap-2">
+                {(["XLM", "USDC"] as const).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setWidgetCurrency(c)}
+                    className={`px-5 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                      widgetCurrency === c
+                        ? "bg-forest-600 text-white border-forest-600"
+                        : "bg-white text-[#5a7a5a] border-forest-200 hover:bg-forest-50"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live preview hint */}
+            <div className="p-3 rounded-xl bg-forest-50 border border-forest-100">
+              <p className="text-xs text-[#5a7a5a] font-body">
+                <span className="font-semibold">Tip:</span> The widget will display {widgetCurrency} amounts with the accent colour shown above.
+              </p>
+            </div>
+          </div>
+
+          {/* Embed code */}
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest ml-1 opacity-50">
+              Embed Code
+            </label>
+            <textarea
+              readOnly
+              value={widgetEmbedCode}
+              className="input-field font-mono text-xs min-h-[100px] resize-none bg-forest-50/50"
+              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+            />
+            <button
+              onClick={copyEmbed}
+              className={`btn-primary w-full text-sm py-2.5 transition-all ${
+                copied ? "bg-emerald-600 hover:bg-emerald-700" : ""
+              }`}
+            >
+              {copied ? "✓ Copied!" : "Copy Embed Code"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
