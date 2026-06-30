@@ -97,3 +97,18 @@ describe("Rate limiting middleware — custom window", () => {
     expect(okOnB.status).toBe(200);
   });
 });
+
+describe("Rate limiting middleware — custom limits", () => {
+  it("enforces a custom limit of 3 requests", async () => {
+    const customApp = buildApp(3, 1);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(customApp).get("/ping");
+      expect(res.status).toBe(200);
+    }
+
+    const res = await request(customApp).get("/ping");
+    expect(res.status).toBe(429);
+    expect(res.headers["retry-after"]).toBeDefined();
+  });
+});

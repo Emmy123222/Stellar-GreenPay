@@ -14,12 +14,15 @@ const express      = require("express");
 const cookieParser = require("cookie-parser");
 const csurf        = require("csurf");
 const helmet       = require("helmet");
-const morgan       = require("morgan");
 const rateLimit    = require("express-rate-limit");
+const logger       = require("./logger");
+const requestLogger = require("./middleware/requestLogger");
 const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const http = require("http");
 const { Server } = require("socket.io");
+const { start: startSummaryQueue } = require("./services/summaryQueue");
+const { start: startProfileQueue } = require("./services/profileQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
@@ -30,18 +33,23 @@ const server = http.createServer(app);
 // ── Swagger UI (development) ────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   const swaggerUi = require("swagger-ui-express");
-  const yaml      = require("js-yaml");
-  const fs        = require("fs");
-  const path      = require("path");
-  const swaggerDoc = yaml.load(fs.readFileSync(path.join(__dirname, "../../docs/openapi.yml"), "utf8"));
+  const yaml = require("js-yaml");
+  const fs = require("fs");
+  const path = require("path");
+  const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
+  const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 }
 
 app.use(helmet());
-app.use(morgan("dev"));
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
+app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
-app.use(csurf({
+const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -49,7 +57,13 @@ app.use(csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
-}));
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+    return next();
+  }
+  return csrfProtection(req, res, next);
+});
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -106,17 +120,20 @@ mount("/api/admin",         adminRouter);
 app.use((req, res) => res.status(404).json({ error:  }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error("[Error]", err.message);
+  logger.error({ event: "unhandled_error", err }, err.message);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
 async function startServer() {
   await runMigrations();
 
-  const { start: startSummaryQueue } = require("./services/summaryQueue");
   await startSummaryQueue(io);
+  await startProfileQueue(io);
 
-  startIndexer(io).catch(err => console.error("[Indexer Error]", err.message));
+  const { start: startDigestQueue } = require("./services/digestQueue");
+  await startDigestQueue();
+
+  startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
     console.log();
@@ -130,7 +147,7 @@ async function startServer() {
 
 if (require.main === module) {
   startServer().catch((err) => {
-    console.error("[Startup Error]", err.message);
+    logger.fatal({ event: "startup_error", err }, err.message);
     process.exit(1);
   });
 }

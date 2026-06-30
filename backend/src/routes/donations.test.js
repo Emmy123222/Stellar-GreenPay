@@ -8,8 +8,14 @@ jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 
+jest.mock("../services/stellar", () => ({
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
+
+const { server } = require("../services/stellar");
 const pool = require("../db/pool");
 const { computeBadges } = require("../services/store");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { recordDonation } = require("./donations");
 
 function makePublicKey(char = "A") {
@@ -160,9 +166,7 @@ describe("POST /api/donations", () => {
       queryResult([donationRow]),              // INSERT donation
       queryResult([]),                         // SELECT donation_matches (empty)
       queryResult(),                           // UPDATE projects
-      queryResult([]),                         // SELECT * FROM profiles (new donor)
-      queryResult([{ count: "1" }]),           // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                           // INSERT INTO profiles
+      queryResult(),                           // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -187,14 +191,7 @@ describe("POST /api/donations", () => {
       }),
     );
     expect(client.release).toHaveBeenCalledTimes(1);
-
-    const profileUpsertCall = findQueryCall(client, "INSERT INTO profiles");
-    expect(profileUpsertCall[1][0]).toBe(donorAddress);
-    expect(profileUpsertCall[1][3]).toBe("10.0000000");
-    expect(profileUpsertCall[1][4]).toBe(1);
-    expect(JSON.parse(profileUpsertCall[1][5])).toEqual([
-      expect.objectContaining({ tier: "seedling", earnedAt: expect.any(String) }),
-    ]);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 
   test("returns 404 for an unknown project id", async () => {
@@ -298,9 +295,7 @@ describe("POST /api/donations", () => {
       }]),                                      // INSERT donation
       queryResult([]),                          // SELECT donation_matches (empty)
       queryResult(),                            // UPDATE projects
-      queryResult([]),                          // SELECT * FROM profiles (new donor)
-      queryResult([{ count: "1" }]),            // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                            // INSERT INTO profiles
+      queryResult(),                            // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -312,6 +307,7 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(makePublicKey("E"));
 
     const updateProjectCall = findQueryCall(client, "UPDATE projects");
     expect(updateProjectCall[1]).toEqual([5.5, "project-2"]);
@@ -336,14 +332,7 @@ describe("POST /api/donations", () => {
       }]),                                      // INSERT donation
       queryResult([]),                          // SELECT donation_matches (empty)
       queryResult(),                            // UPDATE projects
-      queryResult([{                            // SELECT * FROM profiles (returning existing)
-        public_key: donorAddress,
-        display_name: "Existing Donor",
-        bio: "Already donated before",
-        total_donated_xlm: "99.0000000",
-      }]),
-      queryResult([{ count: "3" }]),            // SELECT COUNT(DISTINCT project_id)
-      queryResult(),                            // INSERT INTO profiles
+      queryResult(),                            // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -355,13 +344,91 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+  });
 
-    const profileUpsertCall = findQueryCall(client, "INSERT INTO profiles");
-    expect(profileUpsertCall[1][3]).toBe("100.0000000");
-    expect(profileUpsertCall[1][4]).toBe(3);
-    expect(JSON.parse(profileUpsertCall[1][5])).toEqual([
-      expect.objectContaining({ tier: "tree", earnedAt: expect.any(String) }),
-    ]);
+  test("rejects a transaction that is not confirmed on Stellar", async () => {
+    server.getTransaction.mockResolvedValueOnce({ successful: false });
+    const client = createMockClient(
+      queryResult([{ id: "project-1" }]),   // SELECT project
+      queryResult([]),                         // dedup check
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("H"),
+      amountXLM: "10",
+      transactionHash: makeTxHash("9"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Transaction not confirmed on Stellar");
+    // No DB write transaction should have been opened.
+    expect(client.query).not.toHaveBeenCalledWith("BEGIN");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects a transaction hash that cannot be found on Stellar", async () => {
+    server.getTransaction.mockRejectedValueOnce(new Error("404 Not Found"));
+    const client = createMockClient(
+      queryResult([{ id: "project-1" }]),   // SELECT project
+      queryResult([]),                         // dedup check
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("I"),
+      amountXLM: "10",
+      transactionHash: makeTxHash("8"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Transaction not found on Stellar");
+    expect(client.query).not.toHaveBeenCalledWith("BEGIN");
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not pass undefined as COMMIT query — transaction is explicitly committed", async () => {
+    const donorAddress = makePublicKey("H");
+    const transactionHash = makeTxHash("1");
+    const donationRow = {
+      id: "donation-h",
+      project_id: "project-h",
+      donor_address: donorAddress,
+      amount_xlm: "50",
+      amount: "50",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-h" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-h",
+      donorAddress,
+      amountXLM: "50",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+    const calls = client.query.mock.calls.map(([sql]) => sql);
+    expect(calls).toContain("COMMIT");
   });
 
   test("rolls back the transaction if profile persistence fails after BEGIN", async () => {
@@ -399,5 +466,132 @@ describe("POST /api/donations", () => {
     expect(res.statusCode).toBe(500);
     expect(client.query).toHaveBeenLastCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("profile upsert on first donation", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("creates a new profile using only the first donation amount as total_donated_xlm", async () => {
+    const donorAddress = makePublicKey("P");
+    const transactionHash = makeTxHash("2");
+    const donationRow = {
+      id: "donation-p",
+      project_id: "project-p",
+      donor_address: donorAddress,
+      amount_xlm: "500",
+      amount: "500",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-p" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-p",
+      donorAddress,
+      amountXLM: "500",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+  });
+
+  test("preserves display_name and bio from an existing profile on upsert", async () => {
+    const donorAddress = makePublicKey("Q");
+    const transactionHash = makeTxHash("3");
+    const donationRow = {
+      id: "donation-q",
+      project_id: "project-q",
+      donor_address: donorAddress,
+      amount_xlm: "10",
+      amount: "10",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-q" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult([{                          // existing profile with display_name + bio
+        public_key: donorAddress,
+        display_name: "Green Donor",
+        bio: "I care about the planet.",
+        total_donated_xlm: "90.0000000",
+      }]),
+      queryResult([{ count: "2" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-q",
+      donorAddress,
+      amountXLM: "10",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+  });
+
+  test("does not increment total_donated_xlm for non-XLM donations", async () => {
+    const donorAddress = makePublicKey("R");
+    const transactionHash = makeTxHash("4");
+    const donationRow = {
+      id: "donation-r",
+      project_id: "project-r",
+      donor_address: donorAddress,
+      amount_xlm: null,
+      amount: "25",
+      currency: "USD",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-r" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      // no donation_matches query for non-XLM
+      queryResult(),                          // UPDATE projects (raises_xlm += 0)
+      queryResult(),                          // COMMIT
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-r",
+      donorAddress,
+      amount: "25",
+      currency: "USD",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
 });

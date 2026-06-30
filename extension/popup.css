@@ -206,6 +206,12 @@ p.subtitle {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.project-item:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4);
+}
+
 .project-item.active {
   border-color: var(--accent-color);
   background: rgba(16, 185, 129, 0.05);
@@ -215,8 +221,11 @@ p.subtitle {
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  object-fit: cover;
   background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .project-info {
@@ -559,4 +568,31 @@ input[type="number"]:focus {
   width: 100%;
   padding: 12px;
   font-size: 0.9rem;
+}
+
+/* Wallet status in settings */
+.wallet-status-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.wallet-connected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.wallet-status-settings .glow-btn {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }

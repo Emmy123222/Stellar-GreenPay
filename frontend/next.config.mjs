@@ -27,6 +27,16 @@ const STELLAR_CONNECT = [
   'https://friendbot.stellar.org',
 ].join(' ')
 
+// OpenStreetMap tile subdomains used by Leaflet's TileLayer
+const LEAFLET_TILE_SOURCES = [
+  'https://a.tile.openstreetmap.org',
+  'https://b.tile.openstreetmap.org',
+  'https://c.tile.openstreetmap.org',
+].join(' ')
+
+// unpkg serves the Leaflet CSS (dynamically injected by ProjectMap.tsx)
+const UNPKG = 'https://unpkg.com'
+
 function buildStaticCsp(allowFraming = false) {
   const frameAncestors = allowFraming ? "frame-ancestors *" : "frame-ancestors 'none'"
   return [
@@ -34,9 +44,11 @@ function buildStaticCsp(allowFraming = false) {
     // Static fallback uses unsafe-inline; middleware.ts replaces this with a
     // nonce + strict-dynamic pair which achieves an A grade on csp-evaluator.
     "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    // unpkg serves the Leaflet CSS stylesheet loaded dynamically in ProjectMap.
+    `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com ${UNPKG}`,
     "font-src 'self' https://fonts.gstatic.com",
-    "img-src 'self' data: blob:",
+    // OSM tiles loaded as images; Leaflet marker icons use data: URIs.
+    `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES}`,
     `connect-src 'self' ${STELLAR_CONNECT} https://api.coingecko.com`,
     "object-src 'none'",
     "base-uri 'self'",
@@ -60,6 +72,7 @@ const nextConfig = {
         source: '/(.*)',
         headers: [
           { key: 'Content-Security-Policy', value: buildStaticCsp(false) },
+          // Security headers (Issue #472)
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
