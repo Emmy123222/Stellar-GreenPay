@@ -27,7 +27,7 @@ mod fuzz_tests;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype,
-    token, Address, Env, symbol_short, Symbol, String, BytesN,
+    token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
@@ -101,6 +101,7 @@ pub struct VoteProposal {
 pub enum DataKey {
     Admin,
     Project(String),
+    ProjectIds,
     ProjectCount,
     DonorStats(Address),
     ImpactNFT(Address, BadgeTier),
@@ -131,6 +132,10 @@ const VOTING_WINDOW_LEDGERS: u32 = 120_960;
 // pressure and prevents proposals from sitting open indefinitely.
 const MIN_VOTING_WINDOW_LEDGERS: u32 = 720;     // 1 hour @ 5s/ledger
 const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
+
+// Upper bound on co2_per_xlm at registration — prevents donate-time CO₂ overflow
+// panics and misleading impact figures from misconfigured projects.
+const MAX_CO2_PER_XLM: u32 = 100_000;
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -179,12 +184,20 @@ impl GreenPayContract {
         if env.storage().instance().has(&DataKey::Project(project_id.clone())) {
             panic!("Project already registered");
         }
+        if co2_per_xlm > MAX_CO2_PER_XLM {
+            panic!("CO2 per XLM exceeds maximum");
+        }
         let project = Project {
             id: project_id.clone(), name, wallet, co2_per_xlm,
             total_raised: 0, donor_count: 0, active: true,
             registered_at: env.ledger().sequence(),
         };
         env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+        let mut project_ids: Vec<String> = env.storage().instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or_else(|| Vec::new(&env));
+        project_ids.push_back(project_id.clone());
+        env.storage().instance().set(&DataKey::ProjectIds, &project_ids);
         let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
         let next_count = count.checked_add(1).expect("ProjectCount overflow");
         env.storage().instance().set(&DataKey::ProjectCount, &next_count);
@@ -200,6 +213,27 @@ impl GreenPayContract {
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
         project.active = false;
         env.storage().instance().set(&DataKey::Project(project_id), &project);
+    }
+
+    /// Emergency circuit breaker — deactivates every registered project at once.
+    /// Callable only by admin when a critical vulnerability requires halting
+    /// all donation processing.
+    pub fn deactivate_all_projects(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can deactivate all projects"); }
+        let project_ids: Vec<String> = env.storage().instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or_else(|| Vec::new(&env));
+        for i in 0..project_ids.len() {
+            let project_id = project_ids.get(i).unwrap();
+            let mut project: Project = env.storage().instance()
+                .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+            project.active = false;
+            env.storage().instance().set(&DataKey::Project(project_id), &project);
+        }
+        env.events().publish((symbol_short!("deact_all"),), admin);
     }
 
     // ─── Donations ────────────────────────────────────────────────────────────
@@ -935,6 +969,43 @@ mod tests {
     fn test_create_proposal_rejects_too_long_duration() {
         let (_env, _cid, client, admin, pid) = setup();
         client.create_proposal(&admin, &pid, &(MAX_VOTING_WINDOW_LEDGERS + 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "CO2 per XLM exceeds maximum")]
+    fn test_register_project_rejects_excessive_co2_per_xlm() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let pid2 = String::from_str(&env, "proj-002");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin,
+            &pid2,
+            &String::from_str(&env, "Bad Project"),
+            &wallet,
+            &(MAX_CO2_PER_XLM + 1),
+        );
+    }
+
+    #[test]
+    fn test_deactivate_all_projects() {
+        let (env, _cid, client, admin, pid1) = setup();
+        let pid2 = String::from_str(&env, "proj-002");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin,
+            &pid2,
+            &String::from_str(&env, "Second Project"),
+            &wallet,
+            &100u32,
+        );
+
+        assert!(client.get_project(&pid1).active);
+        assert!(client.get_project(&pid2).active);
+
+        client.deactivate_all_projects(&admin);
+
+        assert!(!client.get_project(&pid1).active);
+        assert!(!client.get_project(&pid2).active);
     }
 
     /// Test that voting is rejected after the deadline has passed (issue #209).

@@ -180,3 +180,34 @@ describe("POST /api/projects (admin)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("POST /api/projects/:id/generate-summary", () => {
+  let app;
+
+  const OWNER_ADDRESS = "GSEEDLING" + "A".repeat(47);
+  const OTHER_ADDRESS = "GDIFFERENT" + "B".repeat(46);
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 403 when caller is not the project owner", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: "proj-1",
+        name: "Test Project",
+        category: "Reforestation",
+        description: "A test climate project",
+        wallet_address: OWNER_ADDRESS,
+      }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/generate-summary")
+      .send({ adminAddress: OTHER_ADDRESS });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Only the project owner can generate a summary");
+  });
+});
