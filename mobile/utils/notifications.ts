@@ -175,3 +175,23 @@ export function setupNotificationListener() {
   
   return subscription;
 }
+
+/**
+ * Set up notification response listener for deep-link navigation (#483).
+ * When the user taps a push notification that contains a projectId, navigate
+ * directly to that project's detail screen.
+ *
+ * @param push - router.push function from expo-router
+ * @returns the subscription (call .remove() on cleanup)
+ */
+export function setupNotificationResponseListener(push: (path: string) => void) {
+  const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+    const data = response.notification.request.content.data as Record<string, unknown>;
+    const projectId = data?.projectId as string | undefined;
+    if (projectId) {
+      push(`/projects/${projectId}`);
+    }
+  });
+
+  return subscription;
+}
