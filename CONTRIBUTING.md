@@ -127,6 +127,10 @@ how to record baseline numbers.
 - All Stellar transactions target the **testnet** unless `NETWORK=mainnet` is
   explicitly set in the environment.
 
+### Changelog
+
+Every PR must include an update to [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section describing the change. This keeps the release history accurate and simplifies the release process.
+
 ## Testing
 
 ```bash

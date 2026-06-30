@@ -250,7 +250,7 @@ function EndpointCard({ endpoint }: { endpoint: ApiEndpoint }) {
         </span>
         <div className="flex-1">
           <p className="font-mono text-sm font-semibold text-forest-900">{endpoint.path}</p>
-          <p className="text-sm text-[#5a7a5a] mt-1">{endpoint.description}</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] mt-1">{endpoint.description}</p>
         </div>
       </div>
 
@@ -315,7 +315,7 @@ export default function ApiDocsPage() {
         <h1 className="font-display text-4xl font-bold text-forest-900 mb-3">
           API Documentation
         </h1>
-        <p className="text-[#5a7a5a] max-w-2xl font-body leading-relaxed">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] max-w-2xl font-body leading-relaxed">
           Integrate GreenPay into your application with our REST API. All responses return JSON with a <code className="bg-forest-50 px-2 py-1 rounded text-sm">success</code> field.
         </p>
       </div>

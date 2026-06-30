@@ -34,6 +34,23 @@
         </div>
 
         <div class="settings-field">
+          <label class="settings-label" for="default-amount">Default Donation Amount</label>
+          <p class="settings-hint">Pre-filled amount on the donation form.</p>
+          <div class="input-wrapper" style="position:relative;">
+            <input
+              type="number"
+              id="default-amount"
+              class="settings-input"
+              placeholder="5"
+              min="0.1"
+              step="0.1"
+              autocomplete="off"
+            />
+            <span class="currency">XLM</span>
+          </div>
+        </div>
+
+        <div class="settings-field">
           <label class="settings-label">Stellar Network</label>
           <p class="settings-hint">Choose which Stellar network to use for transactions.</p>
           <div class="network-toggle" role="group" aria-label="Stellar network">
@@ -47,6 +64,18 @@
           <span id="mainnet-warning" class="settings-warning hidden">
             Warning: Mainnet transactions use real XLM.
           </span>
+        </div>
+
+        <div class="settings-field">
+          <label class="settings-label">Connected Wallet</label>
+          <p class="settings-hint">Your Freighter wallet connection status.</p>
+          <div class="wallet-status-settings">
+            <div id="wallet-display" class="wallet-connected">
+              <span class="dot" id="wallet-dot"></span>
+              <span id="wallet-address-text">Not connected</span>
+            </div>
+            <button id="wallet-action-btn" class="btn glow-btn" type="button">Connect Wallet</button>
+          </div>
         </div>
 
         <button type="submit" id="save-btn" class="btn donate-btn save-btn">

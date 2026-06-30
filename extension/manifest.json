@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GreenPay Companion",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Support your favorite sustainable projects with a single click.",
   "action": {
     "default_popup": "popup.html",
@@ -10,8 +10,12 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
+  "background": {
+    "service_worker": "dist/background.js"
+  },
   "host_permissions": [
     "https://app.greenpay.io/*",
     "https://testnet.greenpay.io/*"
