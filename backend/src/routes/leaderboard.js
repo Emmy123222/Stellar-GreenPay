@@ -11,6 +11,8 @@ router.get("/", async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const period = req.query.period || "all";
 
+    const onlyVerified = req.query.onlyVerified === "true";
+
     let query = `
       SELECT p.public_key, p.display_name, p.badges,
              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
@@ -23,6 +25,21 @@ router.get("/", async (req, res, next) => {
       query += " AND d.created_at >= NOW() - INTERVAL '30 days' ";
     } else if (period === "year") {
       query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
+    }
+
+    if (onlyVerified) {
+      query += `
+        WHERE NOT EXISTS (
+          SELECT 1 FROM donations d2
+          JOIN projects pr ON d2.project_id = pr.id
+          WHERE d2.donor_address = p.public_key AND pr.verified = false
+        )
+        AND EXISTS (
+          SELECT 1 FROM donations d3
+          JOIN projects pr2 ON d3.project_id = pr2.id
+          WHERE d3.donor_address = p.public_key AND pr2.verified = true
+        )
+      `;
     }
 
     query += `
