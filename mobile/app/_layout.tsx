@@ -5,11 +5,33 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
+import { useEffect } from 'react';
+import { useRouter } from 'expo-router';
 import { ThemeProvider, themes } from './theme';
 import { useDeepLink } from '../hooks/useDeepLink';
+import { setupNotificationListener, setupNotificationResponseListener } from '../utils/notifications';
 
 function DeepLinkHandler() {
   useDeepLink();
+  return null;
+}
+
+function NotificationHandler() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Foreground notification display listener
+    const receivedSub = setupNotificationListener();
+
+    // Tap-on-notification → navigate to project detail (#483)
+    const responseSub = setupNotificationResponseListener((path) => router.push(path as any));
+
+    return () => {
+      receivedSub.remove();
+      responseSub.remove();
+    };
+  }, [router]);
+
   return null;
 }
 
@@ -21,6 +43,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider>
       <DeepLinkHandler />
+      <NotificationHandler />
       <StatusBar style={theme.statusBarStyle} />
       <Stack screenOptions={{
         headerStyle: { backgroundColor: theme.header },

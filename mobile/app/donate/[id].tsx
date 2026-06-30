@@ -224,6 +224,8 @@ export default function DonateScreen() {
                 project.id === selectedProjectId && styles.projectOptionActive,
               ]}
               onPress={() => setSelectedProjectId(project.id)}
+              accessibilityLabel={`Select project ${project.name}`}
+              accessibilityRole="button"
             >
               <Text
                 style={[
@@ -241,6 +243,8 @@ export default function DonateScreen() {
       {!publicKey ? (
         <TouchableOpacity style={[styles.connectButton, { backgroundColor: colors.buttonBackground }]}
           onPress={connectWallet}
+          accessibilityLabel="Connect Stellar wallet"
+          accessibilityRole="button"
         >
           <Text style={[styles.connectButtonText, { color: colors.buttonText }]}>Connect Wallet</Text>
         </TouchableOpacity>
@@ -301,6 +305,8 @@ export default function DonateScreen() {
         style={[styles.donateButton, (submitting || !publicKey) && styles.donateButtonDisabled]}
         onPress={handleDonate}
         disabled={submitting || !publicKey}
+        accessibilityLabel={submitting ? 'Sending donation' : `Donate ${amount || '1'} XLM`}
+        accessibilityRole="button"
       >
         <Text style={styles.donateButtonText}>
           {submitting ? 'Sending donation...' : `🌱 Donate ${amount || '1'} XLM`}
