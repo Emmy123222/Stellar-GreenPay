@@ -174,17 +174,17 @@ CREATE TABLE IF NOT EXISTS project_follows (
   UNIQUE(project_id, device_token_id)
 );
 
--- Community comments on project pages (v1.4)
--- Only wallets with ≥1 donation to the project may post.
--- Threaded replies are supported via parent_id (one level of nesting).
-CREATE TABLE IF NOT EXISTS project_comments (
-  id UUID PRIMARY KEY,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  parent_id UUID REFERENCES project_comments(id) ON DELETE CASCADE,
+-- Monthly leaderboard snapshots: one row per donor per month
+CREATE TABLE IF NOT EXISTS monthly_leaderboard (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  month DATE NOT NULL,                          -- first day of the month (YYYY-MM-01)
   donor_address TEXT NOT NULL,
-  message TEXT NOT NULL CHECK (char_length(message) BETWEEN 1 AND 2000),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  display_name TEXT,
+  total_xlm_that_month NUMERIC(20, 7) NOT NULL DEFAULT 0,
+  badge TEXT,                                   -- top badge tier at snapshot time
+  rank INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(month, donor_address)
 );
 
-CREATE INDEX IF NOT EXISTS idx_project_comments_project_id ON project_comments(project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_project_comments_parent_id  ON project_comments(parent_id);
+CREATE INDEX IF NOT EXISTS idx_monthly_leaderboard_month ON monthly_leaderboard (month DESC);
