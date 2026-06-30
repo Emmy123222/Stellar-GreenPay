@@ -11,6 +11,7 @@ const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { checkAndDeliverMilestones } = require("../services/webhook");
 const { z } = require("zod");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
