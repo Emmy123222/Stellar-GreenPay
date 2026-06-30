@@ -491,6 +491,101 @@ router.post("/admin/confirm", async (req, res) => {
   }
 });
 
+/**
+ * GET /api/projects/:id/ratings
+ * Returns a paginated list of individual reviews for a project.
+ */
+router.get("/:id/ratings", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const cursor = req.query.cursor;
+
+    // Verify project exists
+    const projectCheck = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [projectId]
+    );
+    if (!projectCheck.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    let whereClause = "WHERE project_id = $1";
+    const values = [projectId];
+    let valueIdx = 2;
+
+    if (cursor) {
+      const cursorDate = new Date(cursor);
+      if (isNaN(cursorDate.getTime())) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      whereClause += ` AND created_at < $${valueIdx}`;
+      values.push(cursorDate.toISOString());
+      valueIdx += 1;
+    }
+
+    // Get total count
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM project_ratings ${whereClause}`,
+      values.slice(0, cursor ? 2 : 1)
+    );
+    const total = parseInt(countResult.rows[0].count, 10);
+
+    // Fetch paginated ratings
+    let query;
+    if (cursor) {
+      query = `
+        SELECT donor_address, rating, review, created_at
+        FROM project_ratings
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${valueIdx}
+      `;
+      values.push(limit + 1);
+    } else {
+      query = `
+        SELECT donor_address, rating, review, created_at
+        FROM project_ratings
+        ${whereClause}
+        ORDER BY created_at DESC
+        LIMIT $${valueIdx} OFFSET $${valueIdx + 1}
+      `;
+      values.push(limit + 1, offset);
+    }
+
+    const result = await pool.query(query, values);
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    const dataRows = hasMore ? rows.slice(0, limit) : rows;
+
+    const data = dataRows.map((row) => ({
+      donorAddress: row.donor_address,
+      rating: row.rating,
+      review: row.review,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
+    const nextCursor = hasMore && dataRows.length > 0
+      ? dataRows[dataRows.length - 1].createdAt
+      : null;
+
+    res.json({
+      success: true,
+      data,
+      pagination: {
+        total,
+        limit,
+        offset: cursor ? 0 : offset,
+        has_more: hasMore,
+      },
+      next_cursor: nextCursor,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
@@ -545,8 +640,8 @@ router.get("/:id", async (req, res, next) => {
         totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
-        averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
-        ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        averageRating: parseFloat(ratingResult.rows[0]?.avg_rating) || 0,
+        ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
       },
     });
