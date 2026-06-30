@@ -8,6 +8,7 @@ jest.mock("../db/pool", () => ({
 jest.mock("../services/redis", () => ({
   get: jest.fn(),
   set: jest.fn(),
+  deletePattern: jest.fn(),
 }));
 
 jest.mock("../services/stellar", () => ({
@@ -61,8 +62,10 @@ describe("GET /api/projects", () => {
 
   beforeEach(() => {
     app = buildApp();
+    jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
-    jest.clearAllMocks();
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
   });
 
   test("returns projects list with default pagination", async () => {
@@ -135,13 +138,57 @@ describe("GET /api/projects", () => {
   });
 });
 
+describe("PATCH /api/projects/:id/status", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  test("invalidates cached project list entries when status changes", async () => {
+    const staleCachedResponse = { success: true, data: [{ ...MOCK_PROJECT_ROW, status: "active" }], has_more: false };
+    const updatedProject = { ...MOCK_PROJECT_ROW, status: "paused" };
+
+    let cacheEnabled = true;
+    redis.get.mockImplementation(async () => (cacheEnabled ? staleCachedResponse : null));
+    redis.deletePattern.mockImplementation(async () => {
+      cacheEnabled = false;
+    });
+
+    pool.query
+      .mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] })
+      .mockResolvedValueOnce({ rows: [updatedProject] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [updatedProject] });
+
+    const cachedRes = await request(app).get("/api/projects").expect(200);
+    expect(cachedRes.body).toEqual(staleCachedResponse);
+
+    const patchRes = await request(app).patch("/api/projects/proj-1/status").send({ status: "paused" }).expect(200);
+    expect(patchRes.body.data.status).toBe("paused");
+    expect(redis.deletePattern).toHaveBeenCalledWith("projects:list:*");
+
+    const freshRes = await request(app).get("/api/projects").expect(200);
+    expect(freshRes.body.success).toBe(true);
+    expect(freshRes.body.data[0].status).toBe("paused");
+    expect(freshRes.body.has_more).toBe(false);
+    expect(pool.query).toHaveBeenCalledTimes(4);
+  });
+});
+
 describe("GET /api/projects/:id", () => {
   let app;
 
   beforeEach(() => {
     app = buildApp();
+    jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
-    jest.clearAllMocks();
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
   });
 
   test("returns a single project", async () => {
@@ -171,7 +218,10 @@ describe("POST /api/projects (admin)", () => {
 
   beforeEach(() => {
     app = buildApp();
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
   });
 
   test("rejects unauthenticated requests", async () => {
