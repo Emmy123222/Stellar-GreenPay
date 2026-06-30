@@ -6,8 +6,10 @@ const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
+const QRCode = require("qrcode");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
+const { adminKeyRequired } = require("../middleware/auth");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const {
   getOnChainProject,
@@ -18,6 +20,7 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
+const { adminRequired } = require("../middleware/auth");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -40,6 +43,17 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
+
+const createProjectSchema = z.object({
+  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
+  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
+  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
+  category: z.enum(VALID_CATEGORIES),
+  wallet_address: z.string().min(1, "wallet_address is required"),
+  goal_xlm: z.union([z.string(), z.number()]).optional(),
+  tags: z.array(z.string()).optional().default([]),
+});
 
 /**
  * GET /api/projects/featured
@@ -98,6 +112,16 @@ async function fetchCampaignsForProject(projectId) {
   return result.rows.map(mapCampaignRow);
 }
 
+/**
+ * Return the currently featured active project.
+ *
+ * @route GET /api/projects/featured
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the featured project payload or a 404 response.
+ * @throws {Error} If the database lookup or cache update fails.
+ */
 router.get("/featured", async (req, res, next) => {
   try {
     const now = Date.now();
@@ -124,6 +148,16 @@ router.get("/featured", async (req, res, next) => {
   }
 });
 
+/**
+ * List projects with optional filtering, pagination, and search.
+ *
+ * @route GET /api/projects
+ * @param {import('express').Request} req - Express request object with query filters and pagination.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends a paginated project list.
+ * @throws {Error} If the project query or cache write fails.
+ */
 router.get("/", async (req, res, next) => {
   try {
     const {
@@ -210,6 +244,7 @@ router.get("/", async (req, res, next) => {
     // All user-controlled values (status, category, search, cursor fields) are
     // passed as parameterised $N placeholders in `values`. Dynamic WHERE clauses
     // are built only from whitelisted enum strings, so no injection surface exists.
+    // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, values);
     const rows = result.rows;
     const hasMore = rows.length > pageSize;
@@ -240,6 +275,16 @@ router.get("/", async (req, res, next) => {
 /**
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
+ */
+/**
+ * Create a new project record.
+ *
+ * @route POST /api/projects
+ * @param {import('express').Request} req - Express request with project creation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created project payload.
+ * @throws {Error} If validation or database insertion fails.
  */
 router.post("/", async (req, res, next) => {
   try {
@@ -324,6 +369,15 @@ router.post("/", async (req, res, next) => {
  * GET /api/projects/:id/verify
  * Reads the project record directly from the Soroban contract.
  */
+/**
+ * Query the on-chain verification state for a project.
+ *
+ * @route GET /api/projects/:id/verify
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>} Sends the verification status payload.
+ * @throws {Error} If the Soroban project lookup fails unexpectedly.
+ */
 router.get("/:id/verify", async (req, res) => {
   try {
     const projectId = req.params.id;
@@ -371,6 +425,16 @@ router.get("/:id/verify", async (req, res) => {
   }
 });
 
+/**
+ * Create a donation campaign for a project.
+ *
+ * @route POST /api/projects/:id/campaigns
+ * @param {import('express').Request} req - Express request with campaign details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created campaign payload.
+ * @throws {Error} If validation or database insertion fails.
+ */
 router.post("/:id/campaigns", async (req, res, next) => {
   try {
     const { title, goalXLM, deadline, description } = req.body || {};
@@ -448,6 +512,16 @@ router.post("/:id/campaigns", async (req, res, next) => {
   }
 });
 
+/**
+ * List campaigns linked to a project.
+ *
+ * @route GET /api/projects/:id/campaigns
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the list of campaigns.
+ * @throws {Error} If the lookup fails.
+ */
 router.get("/:id/campaigns", async (req, res, next) => {
   try {
     const projectResult = await pool.query(
@@ -464,6 +538,16 @@ router.get("/:id/campaigns", async (req, res, next) => {
   }
 });
 
+/**
+ * List milestones for a project.
+ *
+ * @route GET /api/projects/:id/milestones
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the milestone list.
+ * @throws {Error} If the milestone query fails.
+ */
 router.get("/:id/milestones", async (req, res, next) => {
   try {
     const cacheKey = getProjectMilestonesCacheKey(req.params.id);
@@ -488,6 +572,16 @@ router.get("/:id/milestones", async (req, res, next) => {
   }
 });
 
+/**
+ * Create a milestone for a project.
+ *
+ * @route POST /api/projects/:id/milestones
+ * @param {import('express').Request} req - Express request with milestone details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created milestone payload.
+ * @throws {Error} If validation or insertion fails.
+ */
 router.post("/:id/milestones", async (req, res, next) => {
   try {
     const { title, percentage } = req.body;
@@ -522,6 +616,16 @@ router.post("/:id/milestones", async (req, res, next) => {
   }
 });
 
+/**
+ * Mark a milestone as reached.
+ *
+ * @route POST /api/projects/:id/milestones/:milestoneId/reach
+ * @param {import('express').Request} req - Express request with milestone and project ids.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the updated milestone payload.
+ * @throws {Error} If the milestone update fails.
+ */
 router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
   try {
     const { transactionHash } = req.body;
@@ -553,16 +657,48 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/admin/pending
+ * Admin-only endpoint returning unverified active projects for review.
+ */
+router.get("/admin/pending", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'"
+    );
+    const total = countResult.rows[0].total;
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE verified = false AND status = 'active'
+       ORDER BY created_at ASC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map(mapProjectRow),
+      total
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", async (req, res) => {
+router.post("/admin/register", adminRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
 
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
-    if (!adminAddress) throw new Error("adminAddress is required");
+    if (!adminAddress) return res.status(401).json({ success: false, error: "adminAddress is required" });
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
@@ -603,7 +739,7 @@ router.post("/admin/register", async (req, res) => {
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
  */
-router.post("/admin/confirm", async (req, res) => {
+router.post("/admin/confirm", adminRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
@@ -638,6 +774,16 @@ router.post("/admin/confirm", async (req, res) => {
   }
 });
 
+/**
+ * Return a single project with its campaigns, milestones, and rating details.
+ *
+ * @route GET /api/projects/:id
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the full project details payload.
+ * @throws {Error} If the project lookup or related data fetch fails.
+ */
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query(
@@ -665,11 +811,35 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch subscriber count
+    const subscriberResult = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
+      [req.params.id],
+    );
+
     // Fetch milestones
     const milestoneResult = await pool.query(
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
       [req.params.id],
     );
+
+    // Fetch follower count and, when ?walletAddress=G... is provided, whether
+    // that wallet is currently following this project.
+    const followCountResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
+
+    let isFollowing = false;
+    const { walletAddress } = req.query;
+    if (walletAddress && typeof walletAddress === "string") {
+      const followResult = await pool.query(
+        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+        [req.params.id, walletAddress],
+      );
+      isFollowing = followResult.rowCount > 0;
+    }
 
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
@@ -702,9 +872,92 @@ router.get("/:id", async (req, res, next) => {
           : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
-        averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
-        ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        averageRating: parseFloat(ratingResult.rows[0]?.avg_rating) || 0,
+        ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
+        followCount,
+        isFollowing,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/follow
+ * Follow a project. Body: { walletAddress: "G..." }
+ * Idempotent — re-following a project that is already followed is a no-op.
+ */
+router.post("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    await pool.query(
+      `INSERT INTO project_follows (project_id, wallet_address, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: true,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/projects/:id/follow
+ * Unfollow a project. Body: { walletAddress: "G..." }
+ * Idempotent — unfollowing a project not currently followed is a no-op.
+ */
+router.delete("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    await pool.query(
+      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: false,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
       },
     });
   } catch (e) {
@@ -725,6 +978,16 @@ router.get("/:id", async (req, res, next) => {
  *
  * Response: { success: true, data: { aiSummary, aiSummaryGeneratedAt,
  *                                    aiSummaryModel, aiSummarySourceHash } }
+ */
+/**
+ * Queue an AI-generated donor-facing summary for a project.
+ *
+ * @route POST /api/projects/:id/generate-summary
+ * @param {import('express').Request} req - Express request with the owner wallet address.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the summary queue status payload.
+ * @throws {Error} If the summary queue call fails.
  */
 router.post("/:id/generate-summary", async (req, res, next) => {
   try {
@@ -767,6 +1030,16 @@ router.post("/:id/generate-summary", async (req, res, next) => {
   }
 });
 
+/**
+ * Create a new donation-matching offer for a project.
+ *
+ * @route POST /api/projects/:id/matching
+ * @param {import('express').Request} req - Express request with matching offer details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created matching offer payload.
+ * @throws {Error} If validation or persistence fails.
+ */
 router.post("/:id/matching", async (req, res, next) => {
   try {
     const { matcherAddress, capXLM, multiplier, expiresAt } = req.body || {};
@@ -845,6 +1118,16 @@ router.post("/:id/matching", async (req, res, next) => {
   }
 });
 
+/**
+ * List active donation-matching offers for a project.
+ *
+ * @route GET /api/projects/:id/matching
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the matching offers payload.
+ * @throws {Error} If the database query fails.
+ */
 router.get("/:id/matching", async (req, res, next) => {
   try {
     const result = await pool.query(
@@ -879,6 +1162,16 @@ router.get("/:id/matching", async (req, res, next) => {
  * PATCH /api/projects/:id/status
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
+ */
+/**
+ * Update the status of a project.
+ *
+ * @route PATCH /api/projects/:id/status
+ * @param {import('express').Request} req - Express request with the new status payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the updated project payload.
+ * @throws {Error} If validation or persistence fails.
  */
 router.patch("/:id/status", async (req, res, next) => {
   try {
@@ -917,7 +1210,8 @@ router.patch("/:id/status", async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
@@ -925,4 +1219,51 @@ router.patch("/:id/status", async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/projects/:id/badge-holders
+ * Returns the community of badge-holding donors for each project.
+ */
+router.get("/:id/badge-holders", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(projectId)) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT
+         d.donor_address,
+         p.badges->0->>'tier' AS badge_tier,
+         COALESCE(SUM(d.amount_xlm), 0)::numeric AS total_donated
+       FROM donations d
+       JOIN profiles p ON d.donor_address = p.public_key
+       WHERE d.project_id = $1 AND p.badges != '[]'::jsonb
+       GROUP BY d.donor_address, p.badges
+       ORDER BY total_donated DESC`,
+      [projectId]
+    );
+
+    const badgeHolders = result.rows.map(row => ({
+      donorAddress: row.donor_address,
+      badgeTier: row.badge_tier || null,
+      totalDonated: Number.parseFloat(row.total_donated || "0").toFixed(7),
+    }));
+
+    res.json({ success: true, data: badgeHolders });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
+
+// Export internal functions for testing
+if (process.env.NODE_ENV === "test") {
+  module.exports.mapCampaignRow = mapCampaignRow;
+}
