@@ -202,6 +202,29 @@ impl GreenPayContract {
         env.storage().instance().set(&DataKey::Project(project_id), &project);
     }
 
+    // ─── Admin functions ────────────────────────────────────────────────────────
+    /// Update the CO₂ per XLM rate for a project. Admin only.
+    pub fn update_project_co2_rate(
+        env: Env,
+        admin: Address,
+        project_id: String,
+        new_rate: u32,
+    ) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can update project CO₂ rate"); }
+        // Validate rate bounds: 1 to 10_000 grams CO₂ per XLM
+        if new_rate == 0 || new_rate > 10_000 { panic!("CO₂ rate must be between 1 and 10,000"); }
+        // Load project
+        let mut project: Project = env.storage().instance()
+            .get(&DataKey::Project(project_id.clone()))
+            .expect("Project not found");
+        project.co2_per_xlm = new_rate;
+        env.storage().instance().set(&DataKey::Project(project_id), &project);
+        env.events().publish((symbol_short!("proj_rate_update"), admin), (project_id, new_rate));
+    }
+
     // ─── Donations ────────────────────────────────────────────────────────────
 
     pub fn donate(
