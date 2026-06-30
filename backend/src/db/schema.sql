@@ -27,6 +27,14 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPT
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model        TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 
+-- Webhook notification support: project owners can register a URL that receives
+-- signed POSTs when donation milestones are reached.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
 CREATE TABLE IF NOT EXISTS donations (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
