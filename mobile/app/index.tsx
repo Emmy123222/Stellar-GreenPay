@@ -64,6 +64,8 @@ function ProjectCard({
       style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityLabel={`View ${project.name} project`}
+      accessibilityRole="button"
     >
       <View style={styles.cardHeader}>
         <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
@@ -175,6 +177,8 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.retryButton, { backgroundColor: colors.primary }]}
                 onPress={() => { setLoading(true); loadProjects(); }}
+                accessibilityLabel="Retry loading projects"
+                accessibilityRole="button"
               >
                 <Text style={[styles.retryText, { color: colors.buttonText }]}>Retry</Text>
               </TouchableOpacity>
