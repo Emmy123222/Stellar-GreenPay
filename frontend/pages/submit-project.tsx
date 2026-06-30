@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import { submitProject } from "@/lib/api";
+import { notifyAdmin, submitProject } from "@/lib/api";
 import { PROJECT_CATEGORIES } from "@/utils/format";
 
 type Step = "org" | "project" | "wallet" | "methodology" | "done";
@@ -24,6 +24,7 @@ interface FormData {
   co2VerificationBody: string;
   co2AnnualTonnes: string;
   co2DocumentUrl: string;
+  impactMetrics: string[];
 }
 
 const STEPS: Step[] = ["org", "project", "wallet", "methodology", "done"];
@@ -36,6 +37,11 @@ const STEP_LABELS: Record<Step, string> = {
 };
 
 const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
+const IMPACT_METRICS = [
+  { label: "CO₂ Reduction", value: "co2-reduction" },
+  { label: "Tree Planting", value: "tree-planting" },
+  { label: "Community Jobs", value: "community-jobs" },
+];
 
 function Field({
   label,
@@ -78,6 +84,7 @@ export default function SubmitProjectPage() {
     co2VerificationBody: "",
     co2AnnualTonnes: "",
     co2DocumentUrl: "",
+    impactMetrics: [],
   });
 
   const set = (field: keyof FormData) => (
@@ -85,6 +92,15 @@ export default function SubmitProjectPage() {
   ) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
     setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const toggleImpactMetric = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      impactMetrics: prev.impactMetrics.includes(value)
+        ? prev.impactMetrics.filter((metric) => metric !== value)
+        : [...prev.impactMetrics, value],
+    }));
   };
 
   function validateStep(): boolean {
@@ -154,9 +170,19 @@ export default function SubmitProjectPage() {
           annualTonnesCO2: form.co2AnnualTonnes,
           documentUrl: form.co2DocumentUrl,
         },
+        impactMetrics: form.impactMetrics,
       };
-      const { data } = await (api as any).post("/api/projects", payload);
-      setReviewTimeline(data?.data?.reviewTimeline ?? "5–10 business days");
+      const data = await submitProject(payload);
+      setReviewTimeline(data?.reviewTimeline ?? "5–10 business days");
+      try {
+        await notifyAdmin({
+          projectName: form.projectName,
+          contactEmail: form.contactEmail,
+          impactMetrics: form.impactMetrics,
+        });
+      } catch {
+        // Best-effort admin notification; the success state should still render.
+      }
       setStep("done");
     } catch (err: any) {
       const msg =
@@ -179,12 +205,12 @@ export default function SubmitProjectPage() {
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">
           Project Submitted!
         </h1>
-        <p className="text-[#5a7a5a] font-body mb-2">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-2">
           Thank you for submitting <strong>{form.projectName}</strong>.
         </p>
-        <p className="text-[#5a7a5a] font-body mb-8">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-8">
           Our team will review your submission within{" "}
-          <strong>{reviewTimeline || "5–10 business days"}</strong>. We'll contact you at{" "}
+          <strong>{reviewTimeline || "5–10 business days"}</strong>. We&apos;ll contact you at{" "}
           <strong>{form.contactEmail}</strong> with the outcome.
         </p>
         <button className="btn-primary" onClick={() => router.push("/projects")}>
@@ -199,7 +225,7 @@ export default function SubmitProjectPage() {
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         Submit Your Project
       </h1>
-      <p className="text-[#5a7a5a] font-body mb-8 text-sm">
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-8 text-sm">
         Organizations can submit climate projects for verification and funding on Stellar GreenPay.
       </p>
 
@@ -213,14 +239,14 @@ export default function SubmitProjectPage() {
                   ? "bg-emerald-600 border-emerald-600 text-white"
                   : i === stepIndex
                   ? "border-emerald-600 text-emerald-700 bg-white"
-                  : "border-forest-200 text-[#8aaa8a] bg-white"
+                  : "border-forest-200 text-[#8aaa8a] dark:text-forest-300 bg-white"
               }`}
             >
               {i < stepIndex ? "✓" : i + 1}
             </div>
             <span
               className={`text-xs font-body hidden sm:block ${
-                i === stepIndex ? "text-forest-900 font-semibold" : "text-[#8aaa8a]"
+                i === stepIndex ? "text-forest-900 font-semibold" : "text-[#8aaa8a] dark:text-forest-300"
               }`}
             >
               {STEP_LABELS[s]}
@@ -287,7 +313,7 @@ export default function SubmitProjectPage() {
         {step === "wallet" && (
           <>
             <h2 className="font-display text-xl font-bold text-forest-900">Stellar Wallet</h2>
-            <p className="text-sm text-[#5a7a5a] font-body">
+            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
               Donations will be sent directly to this Stellar address. Make sure you control it.
             </p>
             <Field label="Stellar Wallet Address *" error={fieldErrors.walletAddress}>
@@ -299,7 +325,7 @@ export default function SubmitProjectPage() {
                 spellCheck={false}
               />
             </Field>
-            <p className="text-xs text-[#8aaa8a] font-body">
+            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
               Starts with G and is 56 characters long. Testnet and mainnet addresses are both accepted.
             </p>
           </>
@@ -309,7 +335,7 @@ export default function SubmitProjectPage() {
         {step === "methodology" && (
           <>
             <h2 className="font-display text-xl font-bold text-forest-900">CO₂ Methodology</h2>
-            <p className="text-sm text-[#5a7a5a] font-body">
+            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
               Tell us how your project measures and verifies carbon reduction.
             </p>
             <Field label="Methodology Name *" error={fieldErrors.co2MethodologyName}>
@@ -323,6 +349,23 @@ export default function SubmitProjectPage() {
             </Field>
             <Field label="Supporting Document URL" error={fieldErrors.co2DocumentUrl}>
               <input className="input-field" value={form.co2DocumentUrl} onChange={set("co2DocumentUrl")} placeholder="https://…" />
+            </Field>
+
+            <Field label="Impact Metrics">
+              <div className="flex flex-col gap-2 rounded-xl border border-[rgba(34,114,57,0.12)] bg-[#f8fcf8] p-3">
+                {IMPACT_METRICS.map((metric) => (
+                  <label key={metric.value} className="flex items-center gap-2 text-sm text-[#5a7a5a]">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-[#8aaa8a] text-emerald-600 focus:ring-emerald-500"
+                      checked={form.impactMetrics.includes(metric.value)}
+                      onChange={() => toggleImpactMetric(metric.value)}
+                      aria-label={metric.label}
+                    />
+                    <span>{metric.label}</span>
+                  </label>
+                ))}
+              </div>
             </Field>
 
             {serverError && (

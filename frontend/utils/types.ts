@@ -20,7 +20,7 @@ export type ProjectCategory =
 /**
  * Lifecycle status for a project in the marketplace.
  */
-export type ProjectStatus = "active" | "completed" | "paused";
+export type ProjectStatus = "active" | "completed" | "paused" | "rejected";
 
 /**
  * A climate project listed on Stellar GreenPay.
@@ -61,6 +61,11 @@ export interface ClimateProject {
   aiSummaryGeneratedAt?: string | null;
   aiSummaryModel?: string | null;
   aiSummarySourceHash?: string | null;
+  // Follow state — populated by GET /api/projects/:id?walletAddress=G...
+  // `isFollowing` is only present (and meaningful) when a walletAddress was
+  // passed to the fetch; defaults to false when omitted.
+  followCount?: number;
+  isFollowing?: boolean;
 }
 
 /**

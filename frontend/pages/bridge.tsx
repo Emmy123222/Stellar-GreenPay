@@ -7,6 +7,8 @@ import Head from "next/head";
 import Link from "next/link";
 import { getPublicKey } from "@stellar/freighter-api";
 import { shortenAddress } from "@/utils/format";
+import { fetchProjects, recordDonation } from "@/lib/api";
+import type { ClimateProject } from "@/utils/types";
 
 const CIRCLE_BRIDGE_URL = "https://bridge.circle.com";
 
@@ -18,11 +20,26 @@ export default function BridgePage() {
   const [bridgeHistory, setBridgeHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
+  const [projects, setProjects] = useState<ClimateProject[]>([]);
+  const [selectedProject, setSelectedProject] = useState<string>("");
+  const [bridgeAmount, setBridgeAmount] = useState<string>("");
+  const [recording, setRecording] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
 
   useEffect(() => {
     loadStellarAddress();
     loadBridgeHistory();
+    loadProjects();
   }, []);
+
+  const loadProjects = async () => {
+    try {
+      const data = await fetchProjects({ status: "active", limit: 50 });
+      setProjects(data);
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  };
 
   const loadStellarAddress = async () => {
     try {
@@ -80,6 +97,54 @@ export default function BridgePage() {
       alert("Failed to connect to MetaMask");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const recordBridgeDonation = async () => {
+    if (!selectedProject || !bridgeAmount || !stellarAddress) return;
+
+    setRecording(true);
+    setRecordError(null);
+
+    try {
+      const amount = parseFloat(bridgeAmount);
+      if (isNaN(amount) || amount <= 0) {
+        throw new Error("Invalid amount");
+      }
+
+      await recordDonation({
+        projectId: selectedProject,
+        donorAddress: stellarAddress,
+        amount: amount.toFixed(2),
+        currency: "USDC",
+        message: "Donated via Circle CCTP bridge",
+        transactionHash: `bridge-${Date.now()}`,
+      });
+
+      // Update bridge history
+      const newEntry = {
+        id: Date.now(),
+        sourceChain,
+        destinationChain,
+        stellarAddress,
+        amount: bridgeAmount,
+        projectId: selectedProject,
+        timestamp: new Date().toISOString(),
+        status: "completed",
+        type: "donation",
+      };
+
+      const updatedHistory = [newEntry, ...bridgeHistory];
+      setBridgeHistory(updatedHistory);
+      localStorage.setItem("bridge_history", JSON.stringify(updatedHistory));
+
+      setBridgeAmount("");
+      setSelectedProject("");
+      alert("Bridge donation recorded successfully!");
+    } catch (err) {
+      setRecordError(err instanceof Error ? err.message : "Failed to record donation");
+    } finally {
+      setRecording(false);
     }
   };
 
@@ -145,7 +210,7 @@ export default function BridgePage() {
             <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
               Bridge USDC to Stellar
             </h1>
-            <p className="text-[#5a7a5a] font-body">
+            <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
               Transfer your Ethereum-based USDC to Stellar using Circle&apos;s Cross-Chain Transfer Protocol (CCTP)
             </p>
           </div>
@@ -271,7 +336,7 @@ export default function BridgePage() {
                   </div>
                   <div className="flex-1">
                     <h3 className="font-semibold text-forest-900 mb-1">{s.title}</h3>
-                    <p className="text-sm text-[#5a7a5a]">{s.description}</p>
+                    <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a]">{s.description}</p>
                   </div>
                 </div>
               ))}
@@ -294,6 +359,61 @@ export default function BridgePage() {
             )}
           </div>
 
+          {/* Record Bridge Donation */}
+          {stellarAddress && projects.length > 0 && (
+            <div className="card mb-6">
+              <h2 className="label mb-4">🌱 Record as Project Donation</h2>
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+                After bridging USDC, record it as a donation to a climate project.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="label">Select Project</label>
+                  <select
+                    value={selectedProject}
+                    onChange={(e) => setSelectedProject(e.target.value)}
+                    className="w-full p-3 border border-forest-200 rounded-xl bg-white"
+                  >
+                    <option value="">Choose a project...</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} — {p.category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="label">Amount (USDC)</label>
+                  <input
+                    type="number"
+                    value={bridgeAmount}
+                    onChange={(e) => setBridgeAmount(e.target.value)}
+                    placeholder="Enter amount bridged..."
+                    min="1"
+                    step="0.01"
+                    className="input-field"
+                  />
+                </div>
+
+                {recordError && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm">
+                    {recordError}
+                  </div>
+                )}
+
+                <button
+                  onClick={recordBridgeDonation}
+                  disabled={!selectedProject || !bridgeAmount || recording}
+                  className="w-full py-3 px-4 bg-forest-500 text-white rounded-xl font-semibold hover:bg-forest-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {recording ? "Recording..." : "🎯 Record Donation"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Bridge History */}
           {bridgeHistory.length > 0 && (
             <div className="card">
@@ -308,7 +428,7 @@ export default function BridgePage() {
                       <p className="text-sm font-semibold text-forest-900">
                         {entry.sourceChain} → Stellar
                       </p>
-                      <p className="text-xs text-[#5a7a5a]">
+                      <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a]">
                         {new Date(entry.timestamp).toLocaleString()}
                       </p>
                     </div>

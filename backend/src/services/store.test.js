@@ -2,6 +2,7 @@
 
 const {
   computeBadges,
+  BADGE_THRESHOLDS,
   mapProjectRow,
   mapDonationRow,
   mapProfileRow,
@@ -10,6 +11,61 @@ const {
   mapProjectMilestoneRow,
   mapProjectRatingRow,
 } = require("./store");
+
+describe("BADGE_THRESHOLDS contract spec", () => {
+  test("defines exactly four tiers: seedling, tree, forest, earth", () => {
+    const tiers = BADGE_THRESHOLDS.map((b) => b.tier);
+    expect(tiers).toEqual(expect.arrayContaining(["seedling", "tree", "forest", "earth"]));
+    expect(tiers).toHaveLength(4);
+  });
+
+  test("seedling tier requires at least 10 XLM", () => {
+    expect(BADGE_THRESHOLDS.find((b) => b.tier === "seedling").min).toBe(10);
+  });
+
+  test("tree tier requires at least 100 XLM", () => {
+    expect(BADGE_THRESHOLDS.find((b) => b.tier === "tree").min).toBe(100);
+  });
+
+  test("forest tier requires at least 500 XLM", () => {
+    expect(BADGE_THRESHOLDS.find((b) => b.tier === "forest").min).toBe(500);
+  });
+
+  test("earth guardian tier requires at least 2000 XLM", () => {
+    expect(BADGE_THRESHOLDS.find((b) => b.tier === "earth").min).toBe(2000);
+  });
+});
+
+describe("computeBadges tier threshold boundaries", () => {
+  // Exhaustive boundary coverage per issue #432: every tier threshold and the
+  // value immediately below it (to 7 decimal places — stroop-level XLM precision).
+  const tierAt = (xlm) => {
+    const earned = computeBadges(xlm);
+    return earned.length ? earned[0].tier : null;
+  };
+
+  const cases = [
+    [0, null, "0 XLM earns no badge"],
+    [9.9999999, null, "just below seedling earns no badge"],
+    [10, "seedling", "exactly 10 XLM earns seedling"],
+    [99.9999999, "seedling", "just below tree stays seedling"],
+    [100, "tree", "exactly 100 XLM earns tree"],
+    [499.9999999, "tree", "just below forest stays tree"],
+    [500, "forest", "exactly 500 XLM earns forest"],
+    [1999.9999999, "forest", "just below earth guardian stays forest"],
+    [2000, "earth", "exactly 2000 XLM earns earth guardian"],
+  ];
+
+  test.each(cases)("computeBadges(%p) → %p (%s)", (xlm, expectedTier) => {
+    expect(tierAt(xlm)).toBe(expectedTier);
+  });
+
+  test("computeBadges returns at most one (highest) tier per call", () => {
+    for (const [xlm] of cases) {
+      expect(computeBadges(xlm).length).toBeLessThanOrEqual(1);
+    }
+  });
+});
 
 describe("store utility functions", () => {
   test("computeBadges returns no badge below 10 XLM", () => {
@@ -20,8 +76,37 @@ describe("store utility functions", () => {
     expect(computeBadges(10)[0]).toMatchObject({ tier: "seedling" });
   });
 
+  test("computeBadges returns seedling at 99 XLM (just below tree threshold)", () => {
+    expect(computeBadges(99)[0]).toMatchObject({ tier: "seedling" });
+  });
+
+  test("computeBadges returns tree badge at exactly 100 XLM", () => {
+    expect(computeBadges(100)[0]).toMatchObject({ tier: "tree" });
+  });
+
+  test("computeBadges returns tree at 499 XLM (just below forest threshold)", () => {
+    expect(computeBadges(499)[0]).toMatchObject({ tier: "tree" });
+  });
+
+  test("computeBadges returns forest badge at exactly 500 XLM", () => {
+    expect(computeBadges(500)[0]).toMatchObject({ tier: "forest" });
+  });
+
+  test("computeBadges returns forest at 1999 XLM (just below earth guardian threshold)", () => {
+    expect(computeBadges(1999)[0]).toMatchObject({ tier: "forest" });
+  });
+
   test("computeBadges returns highest earned badge", () => {
     expect(computeBadges(2000)[0]).toMatchObject({ tier: "earth" });
+  });
+
+  test("computeBadges returns earth guardian well above 2000 XLM", () => {
+    expect(computeBadges(50000)[0]).toMatchObject({ tier: "earth" });
+  });
+
+  test("computeBadges earned badge includes a valid earnedAt ISO timestamp", () => {
+    const [badge] = computeBadges(10);
+    expect(badge.earnedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   test("mapProjectRow maps database project fields to API fields", () => {

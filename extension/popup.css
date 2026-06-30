@@ -206,6 +206,12 @@ p.subtitle {
   border-color: rgba(255, 255, 255, 0.2);
 }
 
+.project-item:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.4);
+}
+
 .project-item.active {
   border-color: var(--accent-color);
   background: rgba(16, 185, 129, 0.05);
@@ -215,8 +221,11 @@ p.subtitle {
   width: 40px;
   height: 40px;
   border-radius: 8px;
-  object-fit: cover;
   background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .project-info {
@@ -431,4 +440,159 @@ input[type="number"]:focus {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Header actions row */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Network badge */
+.network-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.network-badge-testnet {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.network-badge-mainnet {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-color);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* Settings icon button */
+.settings-icon-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font-size: 1rem;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.settings-icon-btn:hover {
+  opacity: 1;
+}
+
+/* Settings page */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.settings-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.settings-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 0.85rem;
+  outline: none;
+  transition: border-color 0.2s ease;
+  box-sizing: border-box;
+}
+
+.settings-input:focus {
+  border-color: var(--accent-color);
+}
+
+.settings-error {
+  font-size: 0.75rem;
+  color: var(--danger-color);
+}
+
+.settings-warning {
+  font-size: 0.75rem;
+  color: #eab308;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+/* Network toggle buttons */
+.network-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.network-btn {
+  flex: 1;
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+  padding: 9px 0;
+  font-size: 0.85rem;
+  transition: all 0.2s;
+}
+
+.network-btn-active {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-color);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.save-btn {
+  width: 100%;
+  padding: 12px;
+  font-size: 0.9rem;
+}
+
+/* Wallet status in settings */
+.wallet-status-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.wallet-connected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.wallet-status-settings .glow-btn {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }

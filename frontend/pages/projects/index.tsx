@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import ProjectCard, { ProjectCardSkeleton } from "@/components/ProjectCard";
 import ProjectComparison from "@/components/ProjectComparison";
-import { fetchProjects } from "@/lib/api";
+import { fetchProjects, fetchTagSuggestions } from "@/lib/api";
 import { PROJECT_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 import { useAutocomplete } from "@/hooks/useAutocomplete";
@@ -28,12 +28,7 @@ export default function ProjectsPage() {
     setIsOpen: setIsAutocompleteOpen,
     activeIndex,
     handleKeyDown
-  } = useAutocomplete<ClimateProject>(
-    async (q) => {
-      const data = await fetchProjects({ search: q, limit: 5 });
-      return data;
-    }
-  );
+  } = useAutocomplete<string>(fetchTagSuggestions);
 
   const category = (router.query.category as string) || "";
   const status = (router.query.status as string) || "active";
@@ -128,9 +123,17 @@ export default function ProjectsPage() {
     [router, router.query, setSearch],
   );
 
-  const handleSelectProject = (project: ClimateProject) => {
+  const handleSelectTag = (tag: string) => {
+    setSearch(tag);
     setIsAutocompleteOpen(false);
-    router.push(`/projects/${project.id}`);
+    router.push(
+      {
+        pathname: "/projects",
+        query: { ...router.query, search: tag },
+      },
+      undefined,
+      { shallow: true },
+    );
   };
 
   const toggleSelection = (projectId: string) => {
@@ -153,7 +156,7 @@ export default function ProjectsPage() {
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">
             Climate Projects
           </h1>
-          <p className="text-[#5a7a5a] text-sm font-body">
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body">
             {loading
               ? "Loading..."
               : `${projects.length} verified project${projects.length !== 1 ? "s" : ""}`}
@@ -161,9 +164,70 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      {/* Filter chips (mobile-friendly) */}
+      <div className="flex flex-wrap gap-2 mb-6 lg:hidden">
+        <button
+          onClick={() => setFilter("category", "")}
+          className={clsx(
+            "px-3 py-1.5 rounded-full text-sm font-medium border transition-all font-body",
+            !category
+              ? "bg-forest-500 text-white border-forest-500"
+              : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
+          )}
+        >
+          All
+        </button>
+        {PROJECT_CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setFilter("category", cat)}
+            className={clsx(
+              "px-3 py-1.5 rounded-full text-sm font-medium border transition-all font-body flex items-center gap-1.5",
+              category === cat
+                ? "bg-forest-500 text-white border-forest-500"
+                : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
+            )}
+          >
+            <span>{CATEGORY_ICONS[cat]}</span>
+            {cat}
+          </button>
+        ))}
+      </div>
+
+      {/* Active filter summary */}
+      {(category || status !== "active" || verified || search) && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">Active filters:</span>
+          {category && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-body">
+              {CATEGORY_ICONS[category]} {category}
+              <button onClick={() => setFilter("category", "")} className="ml-1 hover:text-forest-900">✕</button>
+            </span>
+          )}
+          {status !== "active" && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-body">
+              {status || "All"} status
+              <button onClick={() => setFilter("status", "active")} className="ml-1 hover:text-forest-900">✕</button>
+            </span>
+          )}
+          {verified && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-body">
+              ✓ Verified
+              <button onClick={() => setFilter("verified", "")} className="ml-1 hover:text-forest-900">✕</button>
+            </span>
+          )}
+          {search && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-body">
+              🔍 {search}
+              <button onClick={() => { setSearch(""); setFilter("search", ""); }} className="ml-1 hover:text-forest-900">✕</button>
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Search */}
       <div className="relative mb-6" ref={searchRef}>
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8aaa8a] z-10">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8aaa8a] dark:text-forest-300 z-10">
           🔍
         </span>
         <input
@@ -172,38 +236,44 @@ export default function ProjectsPage() {
           onChange={handleSearchChange}
           onKeyDown={(e) => {
             handleKeyDown(e);
-            if (e.key === 'Enter' && activeIndex >= 0) {
-              handleSelectProject(autocompleteResults[activeIndex]);
+            if (e.key === "Enter" && activeIndex >= 0) {
+              handleSelectTag(autocompleteResults[activeIndex]);
             }
           }}
           onFocus={() => search.length >= 2 && setIsAutocompleteOpen(true)}
-          placeholder="Search projects by name, location, or keyword..."
+          placeholder="Search projects by name, location, or tag..."
+          role="combobox"
+          aria-expanded={isAutocompleteOpen}
+          aria-autocomplete="list"
+          aria-controls="tag-autocomplete-list"
           className="input-field pl-10 relative z-10"
         />
 
-        {/* Autocomplete Dropdown */}
+        {/* Tag autocomplete dropdown */}
         {isAutocompleteOpen && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-forest-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in">
-            {autocompleteResults.map((p, i) => (
-              <div
-                key={p.id}
-                onClick={() => handleSelectProject(p)}
+          <ul
+            id="tag-autocomplete-list"
+            role="listbox"
+            className="absolute top-full left-0 right-0 mt-2 bg-white border border-forest-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in"
+          >
+            {autocompleteResults.map((tag, i) => (
+              <li
+                key={tag}
+                role="option"
+                aria-selected={i === activeIndex}
+                onClick={() => handleSelectTag(tag)}
                 className={clsx(
                   "flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors border-b border-forest-50 last:border-0",
-                  i === activeIndex ? "bg-forest-100" : "hover:bg-forest-50"
+                  i === activeIndex ? "bg-forest-100" : "hover:bg-forest-50",
                 )}
               >
-                <div className="w-8 h-8 rounded-lg bg-forest-100 flex items-center justify-center text-lg flex-shrink-0">
-                  {CATEGORY_ICONS[p.category] || "🌿"}
+                <div className="w-8 h-8 rounded-lg bg-forest-100 flex items-center justify-center text-sm font-semibold text-forest-700 flex-shrink-0">
+                  #
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-forest-900 truncate">{p.name}</p>
-                  <p className="text-xs text-[#8aaa8a] font-body truncate">{p.location} · {p.category}</p>
-                </div>
-                <div className="text-xs font-bold text-forest-500 uppercase tracking-widest opacity-40">View →</div>
-              </div>
+                <p className="text-sm font-semibold text-forest-900 truncate">{tag}</p>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
       </div>
 
@@ -225,7 +295,7 @@ export default function ProjectsPage() {
                     "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
                     status === val
                       ? "bg-forest-100 text-forest-700 font-semibold"
-                      : "text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700",
+                      : "text-[#5a7a5a] dark:text-[#8aaa8a] hover:bg-forest-50 hover:text-forest-700",
                   )}
                 >
                   {lab}
@@ -242,7 +312,7 @@ export default function ProjectsPage() {
                 "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors font-body",
                 verified
                   ? "bg-forest-100 text-forest-700"
-                  : "text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700",
+                  : "text-[#5a7a5a] dark:text-[#8aaa8a] hover:bg-forest-50 hover:text-forest-700",
               )}
             >
               {/* Toggle Switch */}
@@ -261,7 +331,7 @@ export default function ProjectsPage() {
               </div>
               <span className="flex-1 text-left">
                 ✓ Verified only{" "}
-                <span className="text-xs text-[#8aaa8a]">
+                <span className="text-xs text-[#8aaa8a] dark:text-forest-300">
                   ({projects.filter((p) => p.verified).length})
                 </span>
               </span>
@@ -277,7 +347,7 @@ export default function ProjectsPage() {
                   "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body",
                   !category
                     ? "bg-forest-100 text-forest-700 font-semibold"
-                    : "text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700",
+                    : "text-[#5a7a5a] dark:text-[#8aaa8a] hover:bg-forest-50 hover:text-forest-700",
                 )}
               >
                 All Categories
@@ -290,7 +360,7 @@ export default function ProjectsPage() {
                     "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors font-body flex items-center gap-2",
                     category === cat
                       ? "bg-forest-100 text-forest-700 font-semibold"
-                      : "text-[#5a7a5a] hover:bg-forest-50 hover:text-forest-700",
+                      : "text-[#5a7a5a] dark:text-[#8aaa8a] hover:bg-forest-50 hover:text-forest-700",
                   )}
                 >
                   <span>{CATEGORY_ICONS[cat]}</span>
@@ -330,7 +400,7 @@ export default function ProjectsPage() {
               <p className="font-display text-xl text-forest-900 mb-2">
                 {search ? `No results for "${search}"` : "No projects found"}
               </p>
-              <p className="text-[#5a7a5a] text-sm font-body">
+              <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body">
                 {search
                   ? "Try a different search"
                   : "Try adjusting your filters"}

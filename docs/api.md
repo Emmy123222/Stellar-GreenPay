@@ -37,8 +37,46 @@ existing clients.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/v1/projects` | List projects (`?category=&status=active&limit=50`) |
-| GET | `/api/v1/projects/:id` | Get single project |
+| GET | `/api/projects` | List projects with cursor pagination |
+| GET | `/api/projects/:id` | Get single project |
+
+### GET /api/projects — query parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `limit` | integer | `20` | Page size (max 100) |
+| `cursor` | string | — | Opaque cursor from `next_cursor` in a previous response |
+| `category` | string | — | Filter by category (e.g. `Reforestation`) |
+| `status` | string | — | Filter by status (`active`, `completed`, `paused`) |
+| `verified` | `true` | — | Return only verified projects |
+| `search` | string | — | Full-text search across name, description, location, tags |
+
+### Pagination
+
+The list endpoint uses **keyset (cursor) pagination** on `(created_at DESC, id DESC)`.
+The first request is made without a `cursor`. Subsequent pages pass the `next_cursor`
+value from the previous response.
+
+**First page**
+```
+GET /api/projects?limit=20&status=active
+```
+```json
+{
+  "success": true,
+  "data": [ ...20 projects... ],
+  "next_cursor": "eyJjcmVhdGVkX2F0Ij...",
+  "has_more": true
+}
+```
+
+**Next page**
+```
+GET /api/projects?limit=20&status=active&cursor=eyJjcmVhdGVkX2F0Ij...
+```
+
+When `has_more` is `false` (or `next_cursor` is `null`), you have reached the last page.
+Cursors are stable: inserting new projects does not shift pages already in flight.
 
 ### Project object
 ```json

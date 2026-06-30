@@ -2,7 +2,7 @@
  * src/services/push.js
  * Push notification service using Expo
  */
-const { Expo } = require("expo-server-sdk-node");
+const { Expo } = require("expo-server-sdk");
 const pool = require("../db/pool");
 
 // Create a new Expo SDK client

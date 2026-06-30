@@ -134,7 +134,10 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * @throws {Error} Never throws.
  */
 export function statusClass(s: ProjectStatus): string {
-  return { active: "badge-active", completed: "badge-complete", paused: "badge-paused" }[s];
+  return (
+    { active: "badge-active", completed: "badge-complete", paused: "badge-paused", rejected: "badge-paused" }[s] ??
+    "badge-paused"
+  );
 }
 
 /**
@@ -145,7 +148,9 @@ export function statusClass(s: ProjectStatus): string {
  * @throws {Error} Never throws.
  */
 export function statusLabel(s: ProjectStatus): string {
-  return { active: "Active", completed: "Completed", paused: "Paused" }[s];
+  return (
+    { active: "Active", completed: "Completed", paused: "Paused", rejected: "Rejected" }[s] ?? "Unknown"
+  );
 }
 
 /**

@@ -10,7 +10,8 @@
     "connectWallet": "Connect Wallet",
     "disconnect": "Disconnect",
     "mainnet": "Mainnet",
-    "testnet": "Testnet"
+    "testnet": "Testnet",
+    "apply": "Get Verified"
   },
   "project": {
     "about": "About this Project",
@@ -73,7 +74,7 @@
     "generateSummary": "Generate summary",
     "generating": "Generating…",
     "refreshSummary": "Refresh summary",
-    "aiSummaryPlaceholder": "No AI summary yet. Click "Generate summary" to create one for donors.",
+    "aiSummaryPlaceholder": "No AI summary yet. Click 'Generate summary' to create one for donors.",
     "aiDisclaimer": "AI-generated from this project's description. May contain inaccuracies — read the full description below before donating.",
     "generated": "Generated",
     "milestones": "Project Milestones",
@@ -127,6 +128,15 @@
     "remaining": "Remaining",
     "expires": "Expires"
   },
+  "map": {
+    "title": "Project World Map",
+    "subtitle": "{count} active projects around the globe",
+    "activeProjects": "active projects",
+    "browseAll": "Browse all projects",
+    "noProjects": "No active projects yet",
+    "noProjectsDesc": "Check back soon — new projects are verified regularly.",
+    "dataUpdated": "Data as of {time}"
+  },
   "common": {
     "loading": "Loading…",
     "error": "Error",
@@ -137,5 +147,45 @@
     "back": "Back",
     "next": "Next",
     "close": "Close"
+  },
+  "apply": {
+    "pageTitle": "Apply for Verification",
+    "pageIntro": "Climate organisations submit a verification request so the GreenPay admin team can review and stamp their project as verified on-chain.",
+    "stepOrg": "Organisation",
+    "stepProject": "Project",
+    "stepImpact": "Impact",
+    "stepDocuments": "Documents",
+    "stepReview": "Review",
+    "stepDone": "Submitted",
+    "orgName": "Organisation name",
+    "orgWebsite": "Website",
+    "orgCountry": "Country",
+    "contactEmail": "Contact email",
+    "walletAddress": "Stellar wallet address",
+    "walletHelper": "Donations will be directed to this wallet once your project is verified.",
+    "projectName": "Project name",
+    "projectCategory": "Project category",
+    "projectLocation": "Project location",
+    "projectDescription": "Short description",
+    "co2PerXLM": "Expected CO\u2082 offset (kg) per XLM donated",
+    "annualTonnes": "Expected annual CO\u2082 offset (tonnes)",
+    "notes": "Anything else the review team should know? (optional)",
+    "documentsTitle": "Supporting documents",
+    "documentsHint": "Upload PDFs, images, or spreadsheets that back up your methodology. Skip if you don't have any on hand.",
+    "uploading": "Uploading\u2026",
+    "remove": "Remove",
+    "noDocuments": "No documents attached yet.",
+    "submit": "Submit Verification Request",
+    "submitting": "Submitting\u2026",
+    "subThanks": "Thank you! Your verification request is in.",
+    "subCopy": "We'll review your submission within {timeline} and email {email} with the outcome.",
+    "backToHome": "Back to Home",
+    "storageNote": "Documents are stored using the server's configured backend (local disk by default; switches to S3 or IPFS when those env vars are set).",
+    "invalidEmail": "Enter a valid email address.",
+    "invalidWallet": "Wallet must start with G and be 56 characters long.",
+    "invalidCO2": "Enter a non-negative number.",
+    "invalidCategory": "Pick a category.",
+    "required": "Required",
+    "uploadFailed": "Upload failed. Try a smaller file (<10 MB) or a different format."
   }
 }
