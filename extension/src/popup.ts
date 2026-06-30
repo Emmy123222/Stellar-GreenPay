@@ -133,10 +133,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   applySettings(settings);
 
-  // Network badge
-  const networkBadge = document.getElementById('network-badge');
-  if (networkBadge) {
-    networkBadge.textContent = settings.network.toUpperCase();
+  // Pre-fill donation amount from saved default
+  const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;
+  if (amountInput && settings.defaultDonationAmount) {
+    amountInput.value = settings.defaultDonationAmount;
+  }
+
+  // Wire settings button
+  const settingsBtn = document.getElementById('settings-btn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      window.location.href = 'settings.html';
+    });
   }
 
   await loadAndUpdateBadge();   // Initial badge
