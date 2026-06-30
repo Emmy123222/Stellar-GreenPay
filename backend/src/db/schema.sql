@@ -120,3 +120,12 @@ CREATE TABLE IF NOT EXISTS donation_matches (
   matched_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Tracks wallets that follow a project (used for Follow button state and
+-- follower counts). A follow is uniquely scoped to (project_id, wallet_address).
+CREATE TABLE IF NOT EXISTS project_follows (
+  project_id    UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  wallet_address TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (project_id, wallet_address)
+);

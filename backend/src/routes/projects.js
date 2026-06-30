@@ -378,6 +378,24 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch follower count and, when ?walletAddress=G... is provided, whether
+    // that wallet is currently following this project.
+    const followCountResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
+
+    let isFollowing = false;
+    const { walletAddress } = req.query;
+    if (walletAddress && typeof walletAddress === "string") {
+      const followResult = await pool.query(
+        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+        [req.params.id, walletAddress],
+      );
+      isFollowing = followResult.rowCount > 0;
+    }
+
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
       let value;
@@ -406,6 +424,89 @@ router.get("/:id", async (req, res, next) => {
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0].count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
+        followCount,
+        isFollowing,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/follow
+ * Follow a project. Body: { walletAddress: "G..." }
+ * Idempotent — re-following a project that is already followed is a no-op.
+ */
+router.post("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    await pool.query(
+      `INSERT INTO project_follows (project_id, wallet_address, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: true,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/projects/:id/follow
+ * Unfollow a project. Body: { walletAddress: "G..." }
+ * Idempotent — unfollowing a project not currently followed is a no-op.
+ */
+router.delete("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    await pool.query(
+      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: false,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
       },
     });
   } catch (e) {

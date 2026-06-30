@@ -11,7 +11,7 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike, followProject, unfollowProject } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
@@ -68,6 +68,9 @@ export default function ProjectDetail({
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [aiSummaryState, setAiSummaryState] = useState<"idle" | "loading" | "error">("idle");
   const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followCount, setFollowCount] = useState(0);
+  const [followLoading, setFollowLoading] = useState(false);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -82,7 +85,7 @@ export default function ProjectDetail({
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      fetchProject(id as string),
+      fetchProject(id as string, publicKey ?? undefined),
       fetchProjectUpdates(id as string),
       fetchProjectMatches(id as string),
     ])
@@ -90,6 +93,10 @@ export default function ProjectDetail({
         setProject(p);
         setUpdates(u);
         setMatches(m);
+        // Seed follow state from the server response so the button is correct
+        // on initial load without a separate round-trip.
+        setIsFollowing(p.isFollowing ?? false);
+        setFollowCount(p.followCount ?? 0);
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
@@ -135,6 +142,22 @@ export default function ProjectDetail({
       setUpdateLikes((prev) => ({ ...prev, [updateId]: result }));
     } catch {
       // silently fail
+    }
+  };
+
+  const handleToggleFollow = async () => {
+    if (!publicKey || !project || followLoading) return;
+    setFollowLoading(true);
+    try {
+      const result = isFollowing
+        ? await unfollowProject(project.id, publicKey)
+        : await followProject(project.id, publicKey);
+      setIsFollowing(result.isFollowing);
+      setFollowCount(result.followCount);
+    } catch {
+      // silently fail — button will revert on next load
+    } finally {
+      setFollowLoading(false);
     }
   };
 
@@ -828,6 +851,25 @@ export default function ProjectDetail({
                   >
                     {shareState === "copied" ? "✓ Link copied!" : "Share 🌍"}
                   </button>
+                  {/* Follow button — visible to connected wallets only */}
+                  {publicKey && (
+                    <button
+                      onClick={handleToggleFollow}
+                      disabled={followLoading}
+                      className={`text-xs py-1 px-3 rounded-lg border font-medium transition-all duration-200 ${
+                        isFollowing
+                          ? "bg-green-50 text-green-700 border-green-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300"
+                          : "bg-forest-50 text-forest-700 border-forest-200 hover:bg-green-50 hover:text-green-700 hover:border-green-300"
+                      } ${followLoading ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title={isFollowing ? "Unfollow project" : "Follow project"}
+                    >
+                      {followLoading
+                        ? "…"
+                        : isFollowing
+                        ? `✓ Following${followCount > 0 ? ` (${followCount})` : ""}`
+                        : `Follow${followCount > 0 ? ` (${followCount})` : ""}`}
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleWishlist(project.id)}
                     className={`p-2 rounded-lg border transition-all duration-300 transform active:scale-90 
