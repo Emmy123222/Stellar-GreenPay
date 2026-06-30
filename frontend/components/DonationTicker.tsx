@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import { server } from "@/lib/stellar";
-import { shortenAddress } from "@/utils/format";
+import { shortenAddress, formatXLM } from "@/utils/format";
 
 interface TickerItem {
   id: string;
@@ -66,7 +66,9 @@ export default function DonationTicker() {
         {items.map((item) => (
           <div key={item.id} className="flex items-center gap-2 text-sm">
             <span className="text-forest-300">{shortenAddress(item.from)}</span>
-            <span className="font-mono text-emerald-400">+{item.amount} {item.asset}</span>
+            <span className="font-mono text-emerald-400">
+              +{item.asset === "XLM" ? formatXLM(item.amount) : `${parseFloat(item.amount).toFixed(2)} ${item.asset}`}
+            </span>
             <span className="text-forest-500 text-xs">{item.time}</span>
           </div>
         ))}
