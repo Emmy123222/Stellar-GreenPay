@@ -11,6 +11,8 @@
 ///   cargo test --features testutils -- fuzz
 #[cfg(all(test, feature = "testutils"))]
 mod fuzz {
+    extern crate std;
+
     use proptest::prelude::*;
     use soroban_sdk::{
         testutils::Address as _,
@@ -140,6 +142,94 @@ mod fuzz {
             // depending on contract implementation; we only assert the state
             // before the second call was not corrupted.
             prop_assert_eq!(total_before, legit);
+        }
+
+        // ── USDC fuzz cases ────────────────────────────────────────────────────
+
+        /// USDC amount near i128::MAX triggers the `checked_mul(8)` overflow guard
+        /// inside donate_usdc. Any value above i128::MAX / 8 must panic.
+        #[test]
+        fn prop_usdc_amount_near_max(usdc_amount in (i128::MAX / 8 + 1)..=i128::MAX) {
+            let (env, client, project_id, usdc_token) = setup_usdc(100u32);
+            let donor = Address::generate(&env);
+            fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+            }));
+            prop_assert!(result.is_err(), "donate_usdc should panic when usdc_amount > i128::MAX / 8");
+        }
+
+        /// USDC token address mismatch must be rejected before any state mutation.
+        /// The provided `usdc_token` does not match the stored `USDCTokenAddress`.
+        #[test]
+        fn prop_usdc_token_mismatch(amount in 1i128..=100_000_000i128) {
+            let (env, client, project_id, _usdc_token) = setup_usdc(100u32);
+            let donor = Address::generate(&env);
+            let wrong_token = Address::generate(&env);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.donate_usdc(&wrong_token, &donor, &project_id, &amount, &MSG_HASH);
+            }));
+            prop_assert!(result.is_err(), "donate_usdc should panic on token mismatch");
+        }
+
+        /// Donating USDC to a deactivated (inactive) project must be rejected.
+        /// This test sets up the environment in-line so the admin address is
+        /// available to call `deactivate_project`.
+        #[test]
+        fn prop_usdc_inactive_project(amount in 1i128..=100_000_000i128) {
+            let env = Env::default();
+            env.mock_all_auths();
+            let cid = env.register_contract(None, GreenPayContract);
+            let client = GreenPayContractClient::new(&env, &cid);
+            let admin = Address::generate(&env);
+            client.initialize(&admin);
+
+            let project_id = SorobanString::from_str(&env, "proj-inactive");
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &project_id,
+                &SorobanString::from_str(&env, "Inactive USDC Project"),
+                &wallet,
+                &100u32,
+            );
+
+            let token_admin = Address::generate(&env);
+            let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
+            client.set_usdc_token(&admin, &usdc_token);
+
+            client.deactivate_project(&admin, &project_id);
+
+            let donor = Address::generate(&env);
+            fund_usdc(&env, &usdc_token, &donor, &amount);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.donate_usdc(&usdc_token, &donor, &project_id, &amount, &MSG_HASH);
+            }));
+            prop_assert!(result.is_err(), "donate_usdc should panic when project is inactive");
+        }
+
+        /// CO₂ overflow when a project has a high `co2_per_xlm` multiplied by
+        /// a large XLM-equivalent amount.  The `checked_mul` inside
+        /// `donate_usdc` must panic before any state mutation.
+        #[test]
+        fn prop_usdc_co2_overflow(
+            usdc_amount in {
+                let min = (i128::MAX / (u32::MAX as i128)) * FUZZ_STROOP / 8 + 1;
+                let max = i128::MAX / 8;
+                min..=max
+            },
+        ) {
+            let (env, client, project_id, usdc_token) = setup_usdc(u32::MAX);
+            let donor = Address::generate(&env);
+            fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+            }));
+            prop_assert!(result.is_err(), "donate_usdc should panic on CO2 overflow");
         }
     }
 }
