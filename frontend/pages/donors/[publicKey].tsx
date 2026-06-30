@@ -10,6 +10,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState, useCallback } from "react";
 import { fetchProfile, fetchDonorHistory } from "@/lib/api";
 import type { DonorProfile, Donation, BadgeTier } from "@/utils/types";
+import { formatXLM } from "@/utils/format";
 
 // ── Badge helpers ─────────────────────────────────────────────────────────────
 
@@ -50,14 +51,6 @@ const BADGE_META: Record<
 function shortenKey(pk: string): string {
   if (!pk || pk.length < 12) return pk;
   return `${pk.slice(0, 6)}…${pk.slice(-6)}`;
-}
-
-function formatXLM(raw: string): string {
-  const n = parseFloat(raw);
-  if (isNaN(n)) return "0";
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(2)}K`;
-  return n.toFixed(2);
 }
 
 function formatDate(iso: string): string {
@@ -124,8 +117,7 @@ function DonationRow({ donation }: { donation: Donation }) {
       </div>
       <div className="flex flex-col items-end gap-0.5 shrink-0">
         <span className="font-semibold text-[#227239] font-body text-sm">
-          {formatXLM(amount)}{" "}
-          <span className="text-xs font-normal text-[#5a7a5a]">{currency}</span>
+          {currency === "XLM" ? formatXLM(amount) : `${parseFloat(amount).toFixed(2)} ${currency}`}
         </span>
         <span className="text-[10px] text-[#5a7a5a]">
           {formatDate(donation.createdAt)}
@@ -285,7 +277,7 @@ export default function DonorProfilePage() {
 
   const ogTitle = `${displayName} — Stellar GreenPay Donor`;
   const ogDescription = profile
-    ? `${displayName} has donated ${formatXLM(profile.totalDonatedXLM)} XLM to ${profile.projectsSupported} climate project${profile.projectsSupported !== 1 ? "s" : ""} on Stellar GreenPay.`
+    ? `${displayName} has donated ${formatXLM(profile.totalDonatedXLM)} to ${profile.projectsSupported} climate project${profile.projectsSupported !== 1 ? "s" : ""} on Stellar GreenPay.`
     : "View this donor's climate impact on Stellar GreenPay.";
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -344,7 +336,7 @@ export default function DonorProfilePage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <StatCard
               label="Total Donated"
-              value={`${formatXLM(profile.totalDonatedXLM)} XLM`}
+              value={formatXLM(profile.totalDonatedXLM)}
             />
             <StatCard
               label="Projects Supported"

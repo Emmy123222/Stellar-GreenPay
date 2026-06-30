@@ -88,6 +88,147 @@ let activeDropdownIndex = -1;
 let dropdownItems: HTMLLIElement[] = [];
 let selectedProjectId: string | null = null;
 
+// --- Project list keyboard navigation ---
+
+let projectListItems: HTMLLIElement[] = [];
+let activeProjectListIndex = -1;
+
+/**
+ * Render a list of projects into the #project-list element and wire up
+ * keyboard navigation (ArrowDown/Up, Enter, Escape).
+ *
+ * Keyboard contract (issue #489):
+ *   ArrowDown  — move focus to the next project item
+ *   ArrowUp    — move focus to the previous project item
+ *   Enter      — open the focused project in a new tab or trigger donation
+ *   Escape     — close the popup window
+ */
+function renderProjectList(projects: ProjectResult[]) {
+  const list = document.getElementById('project-list') as HTMLUListElement | null;
+  if (!list) return;
+
+  list.innerHTML = '';
+  projectListItems = [];
+  activeProjectListIndex = -1;
+
+  if (projects.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'glass-panel project-item';
+    empty.textContent = 'No saved projects yet.';
+    list.appendChild(empty);
+    return;
+  }
+
+  projects.forEach((p) => {
+    const li = document.createElement('li');
+    li.className = 'glass-panel project-item';
+    li.setAttribute('tabindex', '0');
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-label', `${escapeHtml(p.name)}, ${escapeHtml(p.category)}`);
+    li.innerHTML = `
+      <div class="project-avatar" aria-hidden="true">
+        <span style="font-size:20px">${getProjectEmoji(p.category)}</span>
+      </div>
+      <div class="project-info">
+        <div class="project-name">${escapeHtml(p.name)}</div>
+        <div class="project-desc">${escapeHtml(p.category)}</div>
+      </div>
+    `;
+
+    // Mouse click — select this project for donation
+    li.addEventListener('click', () => {
+      selectProjectListItem(li, p);
+    });
+
+    // Allow keyboard activation via Enter/Space
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectProjectListItem(li, p);
+      }
+    });
+
+    list.appendChild(li);
+    projectListItems.push(li);
+  });
+
+  // Update badge count
+  const badge = document.querySelector('.section-header .badge');
+  if (badge) badge.textContent = String(projects.length);
+}
+
+function selectProjectListItem(li: HTMLLIElement, p: ProjectResult) {
+  // Highlight the selected item
+  projectListItems.forEach((el) => el.classList.remove('active'));
+  li.classList.add('active');
+
+  // Pre-fill the destination address field
+  const destInput = document.getElementById('destination') as HTMLInputElement | null;
+  const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
+  if (p.walletAddress && destInput) {
+    destInput.value = p.walletAddress;
+    selectedProjectId = p.id;
+  }
+  if (searchInput) {
+    searchInput.value = p.name;
+  }
+}
+
+function highlightProjectListItem(index: number) {
+  projectListItems.forEach((el, i) => {
+    if (i === index) {
+      el.classList.add('active');
+      el.focus();
+    } else {
+      el.classList.remove('active');
+    }
+  });
+}
+
+/** Map a project category to a representative emoji. */
+function getProjectEmoji(category: string): string {
+  const map: Record<string, string> = {
+    'Reforestation': '🌳',
+    'Solar Energy': '☀️',
+    'Ocean Conservation': '🌊',
+    'Clean Water': '💧',
+    'Wildlife Protection': '🦁',
+    'Carbon Capture': '♻️',
+    'Wind Energy': '💨',
+    'Sustainable Agriculture': '🌾',
+  };
+  return map[category] ?? '🌿';
+}
+
+function initProjectListKeyNav() {
+  const list = document.getElementById('project-list') as HTMLUListElement | null;
+  if (!list) return;
+
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-label', 'Saved projects');
+
+  list.addEventListener('keydown', (e) => {
+    if (projectListItems.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeProjectListIndex = Math.min(
+        activeProjectListIndex + 1,
+        projectListItems.length - 1,
+      );
+      highlightProjectListItem(activeProjectListIndex);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeProjectListIndex = Math.max(activeProjectListIndex - 1, 0);
+      highlightProjectListItem(activeProjectListIndex);
+    } else if (e.key === 'Enter' && activeProjectListIndex >= 0) {
+      projectListItems[activeProjectListIndex]?.click();
+    } else if (e.key === 'Escape') {
+      window.close();
+    }
+  });
+}
+
 function debounce(fn: () => void, ms: number) {
   if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(fn, ms);
@@ -272,6 +413,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   initProjectSearch();
+  initProjectListKeyNav();
+
+  // Load top projects into the project list
+  try {
+    const res = await fetch(`${API_BASE}/api/projects?limit=5&sort=donors`);
+    if (res.ok) {
+      const json = await res.json();
+      const projects: ProjectResult[] = (json.data ?? json) as ProjectResult[];
+      renderProjectList(projects);
+    }
+  } catch {
+    // Silently ignore — the skeleton loader remains visible
+  }
 
   const form = document.getElementById('donation-form');
   if (!form) return;

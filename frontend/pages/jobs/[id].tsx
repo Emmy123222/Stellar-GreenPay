@@ -13,7 +13,7 @@ import {
   ESCROW_CONTRACT_ID,
 } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
-import { shortenAddress } from "@/utils/format";
+import { shortenAddress, formatXLM } from "@/utils/format";
 import type { EscrowJob } from "@/utils/types";
 
 interface JobPageProps {
@@ -193,7 +193,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
             <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
               Escrow (XLM)
             </dt>
-            <dd className="font-semibold text-forest-900">{job.amountEscrowXlm}</dd>
+            <dd className="font-semibold text-forest-900">{formatXLM(job.amountEscrowXlm)}</dd>
           </div>
           <div>
             <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
