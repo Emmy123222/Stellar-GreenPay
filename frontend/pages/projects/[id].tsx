@@ -13,7 +13,8 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike, followProject, unfollowProject } from "@/lib/api";
+import ProjectProgressBar from "@/components/ProjectProgressBar";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
@@ -954,11 +955,15 @@ export default function ProjectDetail({
                   🎉 Goal Reached!
                 </div>
               ) : (
-                <div className="flex items-center gap-5">
-                  <CircularProgress percentage={pct} size={64} strokeWidth={6} />
-                  <div className="flex-1">
-                    <p className="font-semibold text-forest-800 text-lg">{formatXLM(project.raisedXLM)} raised</p>
-                    <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body mt-0.5">towards {formatXLM(project.goalXLM)} goal</p>
+                <div className="space-y-3">
+                  <ProjectProgressBar
+                    raisedXLM={project.raisedXLM}
+                    goalXLM={project.goalXLM}
+                    className="w-full"
+                  />
+                  <div className="flex items-center justify-between text-sm text-[#5a7a5a] font-body">
+                    <span>{formatXLM(project.raisedXLM)} raised</span>
+                    <span>{Number(project.goalXLM) > 0 ? `towards ${formatXLM(project.goalXLM)} goal` : "No goal set"}</span>
                   </div>
                 </div>
               )}

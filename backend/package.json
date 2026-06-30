@@ -15,13 +15,13 @@
     "load-test": "k6 run ../scripts/load-test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.107.0",
+    "@anthropic-ai/sdk": "^0.108.0",
     "@stellar/stellar-sdk": "^12.0.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "csurf": "^1.11.0",
     "dotenv": "^17.4.2",
-    "expo-server-sdk": "^5.0.0",
+    "expo-server-sdk": "^6.1.0",
     "express": "^5.2.1",
     "express-rate-limit": "^7.3.1",
     "helmet": "^8.2.0",
@@ -34,10 +34,10 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "socket.io": "^4.8.3",
-    "swagger-jsdoc": "6.2.8",
+    "swagger-jsdoc": "6.3.0",
     "swagger-ui-express": "5.0.1",
     "uuid": "^14.0.1",
-    "zod": "^3.25.67"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^12.0.4",
