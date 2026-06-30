@@ -22,6 +22,21 @@ Stellar GreenPay is an open-source climate donation platform where donors give X
 
 ---
 
+## 🎥 Video Walkthrough
+
+[![Stellar GreenPay - Full Donation Flow](https://img.youtube.com/vi/l9O8GSNx1nk/0.jpg)](https://youtu.be/l9O8GSNx1nk)
+
+Watch a complete walkthrough of the donation flow on **Stellar Testnet**:
+
+1. **Connect** Freighter wallet
+2. **Browse** verified climate projects
+3. **Donate** XLM on-chain
+4. **View** your impact certificate
+
+> No Stellar account needed to watch — just hit play!
+
+---
+
 ## 🗂 Project Structure
 
 ```
@@ -73,6 +88,16 @@ cd backend && npm run dev
 # → http://localhost:4000
 ```
 
+### Docker Hot-Reload Development
+
+Use the development override when you want frontend and backend source edits to refresh inside Docker without rebuilding:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+The override mounts `backend/src` directly into the API container and runs Nodemon in legacy watch mode for Docker Desktop file-event reliability. It mounts the frontend workspace into the Next.js container, keeps container-owned `node_modules`/`.next` directories, and enables polling for Next/Webpack watchers.
+
 ---
 
 ## 🔑 Environment Variables
@@ -108,10 +133,19 @@ ALLOWED_ORIGINS=http://localhost:3000
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). All skill levels welcome!
 
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
+
+Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
+
+### Secret Scanning
+
+Every push and every pull request to `main` runs Gitleaks with the repo-local `.gitleaks.toml` config. Any detected secret fails CI, so keep real credentials out of source control; use `.env` files locally and GitHub encrypted secrets for CI/deployment values. The allowlist only covers generated archives, env templates, and deterministic test fixtures.
+
 ## 🗺 Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE) 
+fixed

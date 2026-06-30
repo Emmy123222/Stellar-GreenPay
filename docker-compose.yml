@@ -17,6 +17,16 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   frontend:
     build:
       context: ./frontend
@@ -27,10 +37,6 @@ services:
       - NEXT_PUBLIC_STELLAR_NETWORK=testnet
       - NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
       - NEXT_PUBLIC_API_URL=http://localhost:4000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     depends_on:
       - backend
     command: npm run dev
@@ -48,11 +54,11 @@ services:
       - HORIZON_URL=https://horizon-testnet.stellar.org
       - ALLOWED_ORIGINS=http://localhost:3000
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/greenpay
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - REDIS_URL=redis://redis:6379
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     command: npm run dev
 

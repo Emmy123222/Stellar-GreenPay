@@ -129,6 +129,21 @@ function computeBadges(totalXLM) {
   return earned;
 }
 
+/**
+ * Compute badge tiers for a donor based on cumulative donated XLM.
+ *
+ * @param {number} totalXLM - Total donated XLM for the donor.
+ * @returns {Array<{tier:string,earnedAt:string}>} Array of earned badge objects (may be empty).
+ */
+// exported as `computeBadges`
+
+/**
+ * Convert a value (date-like) to an ISO timestamp string or null.
+ *
+ * @param {string|number|Date|null|undefined} value - Value representing a date/time.
+ * @returns {string|null} ISO formatted timestamp or null when input is falsy.
+ */
+// internal helper (`toIso`) exported via module.exports mapping where used
 function toIso(value) {
   return value ? new Date(value).toISOString() : null;
 }
@@ -146,13 +161,27 @@ function mapProjectRow(row) {
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
     status: row.status,
+    rejectionReason: row.rejection_reason || null,
     verified: row.verified,
     onChainVerified: row.on_chain_verified,
     tags: row.tags || [],
+    aiSummary:            row.ai_summary || null,
+    aiSummaryGeneratedAt: row.ai_summary_generated_at ? toIso(row.ai_summary_generated_at) : null,
+    aiSummaryModel:       row.ai_summary_model || null,
+    aiSummarySourceHash:  row.ai_summary_source_hash || null,
+    webhookUrl: row.webhook_url || null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
 }
+
+/**
+ * Map a database project row to the public API shape.
+ *
+ * @param {object} row - Database row for a project.
+ * @returns {object} Public-facing project object.
+ */
+// exported as `mapProjectRow`
 
 function mapDonationRow(row) {
   const data = {
@@ -173,6 +202,14 @@ function mapDonationRow(row) {
   return data;
 }
 
+/**
+ * Map a donation row from the DB to the client-friendly shape.
+ *
+ * @param {object} row - Database donation row.
+ * @returns {object} Mapped donation object with `amountXLM` when available.
+ */
+// exported as `mapDonationRow`
+
 function mapProfileRow(row) {
   return {
     publicKey: row.public_key,
@@ -186,6 +223,14 @@ function mapProfileRow(row) {
   };
 }
 
+/**
+ * Map a profile database row to the public API profile object.
+ *
+ * @param {object} row - Database profile row.
+ * @returns {object} Mapped profile object.
+ */
+// exported as `mapProfileRow`
+
 function mapProjectUpdateRow(row) {
   return {
     id: row.id,
@@ -195,6 +240,14 @@ function mapProjectUpdateRow(row) {
     createdAt: toIso(row.created_at),
   };
 }
+
+/**
+ * Map a project update row to the public update shape.
+ *
+ * @param {object} row - Database project update row.
+ * @returns {object} Mapped update object.
+ */
+// exported as `mapProjectUpdateRow`
 
 function mapJobRow(row) {
   return {
@@ -211,6 +264,53 @@ function mapJobRow(row) {
   };
 }
 
+/**
+ * Map an escrow job row to the public job shape.
+ *
+ * @param {object} row - Database job row.
+ * @returns {object} Mapped job object.
+ */
+// exported as `mapJobRow`
+
+function mapProjectMilestoneRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    percentage: row.percentage,
+    title: row.title,
+    reachedAt: toIso(row.reached_at),
+    transactionHash: row.transaction_hash,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+/**
+ * Map a project milestone row to a public milestone object.
+ *
+ * @param {object} row - DB milestone row.
+ * @returns {object} Mapped milestone object.
+ */
+// exported as `mapProjectMilestoneRow`
+
+function mapProjectRatingRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    donorAddress: row.donor_address,
+    rating: row.rating,
+    review: row.review,
+    createdAt: toIso(row.created_at),
+  };
+}
+
+/**
+ * Map a project rating row to the client-facing rating object.
+ *
+ * @param {object} row - Database rating row.
+ * @returns {object} Mapped rating object.
+ */
+// exported as `mapProjectRatingRow`
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
@@ -222,4 +322,6 @@ module.exports = {
   mapProfileRow,
   mapProjectUpdateRow,
   mapJobRow,
+  mapProjectMilestoneRow,
+  mapProjectRatingRow,
 };

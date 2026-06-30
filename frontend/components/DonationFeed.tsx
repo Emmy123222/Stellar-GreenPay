@@ -6,16 +6,16 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchProjectDonations } from "@/lib/api";
 import { formatXLM, timeAgo, shortenAddress } from "@/utils/format";
 import { explorerUrl, streamProjectPayments } from "@/lib/stellar";
-import { toast } from "sonner";
 import type { Donation } from "@/utils/types";
 
 interface DonationFeedProps {
   projectId: string;
   walletAddress?: string;
   refreshKey?: number;
+  onNewDonation?: (donation: Donation) => void;
 }
 
-export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 }: DonationFeedProps) {
+export default function DonationFeed({ projectId, walletAddress, refreshKey = 0, onNewDonation }: DonationFeedProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -72,13 +72,10 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 
       });
     }, 2000);
 
-    toast("New donation just arrived! 🌱", {
-      description: `${shortenAddress(payment.from)} donated ${formatXLM(payment.amount)}`,
-      duration: 4000,
-    });
+    onNewDonation?.(newDonation);
 
     latestIdRef.current = payment.id;
-  }, [projectId]);
+  }, [projectId, onNewDonation]);
 
   // Start SSE stream once initial data is loaded
   useEffect(() => {
@@ -128,7 +125,7 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 
           Listening for live donations…
         </div>
       )}
-      <p className="text-center text-[#5a7a5a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
+      <p className="text-center text-[#5a7a5a] dark:text-[#8aaa8a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
     </div>
   );
 
@@ -155,16 +152,23 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-forest-900 text-sm font-body">{shortenAddress(d.donorAddress, 5)}</span>
-              <span className="font-mono font-bold text-forest-600 text-sm">{formatXLM(d.amountXLM || d.amount || "0")}</span>
+              <span className="font-mono font-bold text-forest-600 text-sm">
+                {d.currency === "USDC" ? `$${parseFloat(d.amount || "0").toFixed(2)} USDC` : formatXLM(d.amountXLM || d.amount || "0")}
+              </span>
+              {d.isMatched && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full font-body font-semibold">
+                  Matched!
+                </span>
+              )}
               {newIds.has(d.id) && (
                 <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-body font-semibold">
                   NEW
                 </span>
               )}
             </div>
-            {d.message && <p className="text-xs text-[#5a7a5a] mt-0.5 italic font-body">"{d.message}"</p>}
+            {d.message && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-0.5 italic font-body">&quot;{d.message}&quot;</p>}
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-[#8aaa8a] font-body">{timeAgo(d.createdAt)}</span>
+              <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</span>
               <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
                 className="text-xs text-forest-500 hover:text-forest-700 transition-colors font-body">
                 View tx ↗

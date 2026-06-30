@@ -1,0 +1,1900 @@
+openapi: 3.0.3
+info:
+  title: Stellar GreenPay API
+  version: 1.0.0
+  description: |
+    REST API for the Stellar GreenPay climate donation platform.
+    Every donation is recorded on the Stellar blockchain via Soroban smart contracts.
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:4000
+    description: Local development
+
+tags:
+  - name: Health
+  - name: Projects
+  - name: Donations
+  - name: Profiles
+  - name: Leaderboard
+  - name: Updates
+  - name: Subscriptions
+  - name: Jobs
+  - name: Stats
+  - name: Impact
+  - name: Ratings
+  - name: Admin
+
+components:
+  schemas:
+    Success:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [Reforestation, Solar Energy, Ocean Conservation, Clean Water, Wildlife Protection, Carbon Capture, Wind Energy, Sustainable Agriculture, Other]
+        status:
+          type: string
+          enum: [active, completed, paused, rejected]
+        location:
+          type: string
+        walletAddress:
+          type: string
+        raisedXLM:
+          type: string
+        donorCount:
+          type: integer
+        co2OffsetKg:
+          type: number
+        verified:
+          type: boolean
+        onChainVerified:
+          type: boolean
+        tags:
+          type: array
+          items:
+            type: string
+        aiSummary:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Campaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        goalXLM:
+          type: string
+        raisedXLM:
+          type: string
+        deadline:
+          type: string
+          format: date-time
+        progressPercent:
+          type: integer
+        completed:
+          type: boolean
+        active:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    Milestone:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        percentage:
+          type: number
+        reachedAt:
+          type: string
+          format: date-time
+          nullable: true
+        transactionHash:
+          type: string
+          nullable: true
+
+    DonationMatch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        matcherAddress:
+          type: string
+        capXLM:
+          type: string
+        multiplier:
+          type: number
+        matchedXLM:
+          type: string
+        remainingXLM:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    Donation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        donorAddress:
+          type: string
+        amountXLM:
+          type: string
+          nullable: true
+        amount:
+          type: string
+        currency:
+          type: string
+          example: XLM
+        message:
+          type: string
+          nullable: true
+        transactionHash:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Profile:
+      type: object
+      properties:
+        publicKey:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        totalDonatedXLM:
+          type: string
+        projectsSupported:
+          type: integer
+        badges:
+          type: array
+          items:
+            type: object
+            properties:
+              tier:
+                type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        publicKey:
+          type: string
+        displayName:
+          type: string
+          nullable: true
+        totalDonatedXLM:
+          type: string
+        projectsSupported:
+          type: integer
+        topBadge:
+          type: string
+          nullable: true
+
+    ProjectUpdate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, in_escrow, completed]
+        releaseTransactionHash:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Rating:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        projectId:
+          type: string
+          format: uuid
+        donorAddress:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        review:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        actor:
+          type: string
+        action:
+          type: string
+        targetType:
+          type: string
+        targetId:
+          type: string
+        metadata:
+          type: object
+        ipAddress:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+  parameters:
+    projectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    publicKey:
+      name: publicKey
+      in: path
+      required: true
+      schema:
+        type: string
+        example: GABC...XYZ
+
+  headers:
+    AdminKey:
+      description: Admin API key (only required when ADMIN_API_KEY env var is set)
+      schema:
+        type: string
+
+paths:
+  # ── Health ──────────────────────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                  network:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  indexer:
+                    type: object
+
+  # ── Projects ─────────────────────────────────────────────────────────────────
+  /api/projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [Reforestation, Solar Energy, Ocean Conservation, Clean Water, Wildlife Protection, Carbon Capture, Wind Energy, Sustainable Agriculture, Other]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, completed, paused]
+        - name: verified
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 100
+      responses:
+        '200':
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Project'
+
+  /api/projects/featured:
+    get:
+      tags: [Projects]
+      summary: Get featured project
+      operationId: getFeaturedProject
+      description: Returns the active project with the highest donor count. Cached for 24 hours.
+      responses:
+        '200':
+          description: Featured project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+        '404':
+          description: No featured project found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/admin/register:
+    post:
+      tags: [Projects]
+      summary: Build on-chain project registration XDR
+      operationId: adminRegisterProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, name, wallet, co2PerXLM, adminAddress]
+              properties:
+                projectId:
+                  type: string
+                name:
+                  type: string
+                wallet:
+                  type: string
+                co2PerXLM:
+                  type: integer
+                adminAddress:
+                  type: string
+      responses:
+        '200':
+          description: XDR for admin to sign
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  xdr:
+                    type: string
+        '500':
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/admin/confirm:
+    post:
+      tags: [Projects]
+      summary: Confirm on-chain project registration
+      operationId: adminConfirmProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionHash, projectId]
+              properties:
+                transactionHash:
+                  type: string
+                projectId:
+                  type: string
+      responses:
+        '200':
+          description: Project updated as verified
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+
+  /api/projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project by ID
+      operationId: getProject
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Project detail with campaigns, milestones, ratings
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        allOf:
+                          - $ref: '#/components/schemas/Project'
+                          - type: object
+                            properties:
+                              campaigns:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/Campaign'
+                              activeCampaign:
+                                $ref: '#/components/schemas/Campaign'
+                                nullable: true
+                              averageRating:
+                                type: number
+                              ratingCount:
+                                type: integer
+                              milestones:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/Milestone'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/status:
+    patch:
+      tags: [Projects]
+      summary: Update project status
+      operationId: updateProjectStatus
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [active, rejected, paused]
+                reason:
+                  type: string
+                adminAddress:
+                  type: string
+      responses:
+        '200':
+          description: Updated project
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Project'
+        '400':
+          description: Invalid status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/verify:
+    get:
+      tags: [Projects]
+      summary: Verify project on-chain
+      operationId: verifyProject
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: On-chain verification result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          projectId:
+                            type: string
+                          onChainVerified:
+                            type: boolean
+                          contractRegisteredAt:
+                            type: integer
+                            nullable: true
+                          totalRaisedOnChain:
+                            type: string
+
+  /api/projects/{id}/campaigns:
+    get:
+      tags: [Projects]
+      summary: List campaigns for a project
+      operationId: listProjectCampaigns
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags: [Projects]
+      summary: Create a campaign for a project
+      operationId: createProjectCampaign
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, goalXLM, deadline]
+              properties:
+                title:
+                  type: string
+                  minLength: 3
+                  maxLength: 120
+                goalXLM:
+                  type: number
+                  example: 1000.0
+                deadline:
+                  type: string
+                  format: date-time
+                description:
+                  type: string
+                  maxLength: 500
+                adminAddress:
+                  type: string
+      responses:
+        '201':
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Campaign'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/milestones:
+    get:
+      tags: [Projects]
+      summary: List milestones for a project
+      operationId: listProjectMilestones
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: List of milestones
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Milestone'
+    post:
+      tags: [Projects]
+      summary: Create a milestone for a project
+      operationId: createProjectMilestone
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, percentage]
+              properties:
+                title:
+                  type: string
+                percentage:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                adminAddress:
+                  type: string
+      responses:
+        '201':
+          description: Milestone created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/milestones/{milestoneId}/reach:
+    post:
+      tags: [Projects]
+      summary: Mark a milestone as reached
+      operationId: reachMilestone
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - name: milestoneId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                transactionHash:
+                  type: string
+                adminAddress:
+                  type: string
+      responses:
+        '200':
+          description: Milestone updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Milestone'
+        '404':
+          description: Milestone not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/matching:
+    get:
+      tags: [Projects]
+      summary: List active donation matches for a project
+      operationId: listProjectMatches
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: List of active matches
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DonationMatch'
+    post:
+      tags: [Projects]
+      summary: Create a donation matching offer
+      operationId: createProjectMatch
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [matcherAddress, capXLM, multiplier, expiresAt]
+              properties:
+                matcherAddress:
+                  type: string
+                capXLM:
+                  type: number
+                  example: 5000.0
+                multiplier:
+                  type: number
+                  minimum: 1
+                  example: 2
+                expiresAt:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Match created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/DonationMatch'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/projects/{id}/generate-summary:
+    post:
+      tags: [Projects]
+      summary: Generate AI impact summary for a project
+      operationId: generateProjectSummary
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [adminAddress]
+              properties:
+                adminAddress:
+                  type: string
+                  description: Must match the project wallet address (owner only)
+      responses:
+        '200':
+          description: AI summary generated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          aiSummary:
+                            type: string
+                          aiSummaryGeneratedAt:
+                            type: string
+                            format: date-time
+                          aiSummaryModel:
+                            type: string
+                          aiSummarySourceHash:
+                            type: string
+        '400':
+          description: Missing adminAddress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Only the project owner can generate a summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: AI feature not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Donations ────────────────────────────────────────────────────────────────
+  /api/donations:
+    post:
+      tags: [Donations]
+      summary: Record a donation
+      operationId: recordDonation
+      description: Records an already-submitted on-chain donation. Idempotent by transactionHash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, donorAddress, transactionHash]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                donorAddress:
+                  type: string
+                  example: GABC...XYZ
+                amountXLM:
+                  type: number
+                  example: 100.0
+                amount:
+                  type: number
+                currency:
+                  type: string
+                  default: XLM
+                message:
+                  type: string
+                  maxLength: 100
+                transactionHash:
+                  type: string
+                  pattern: '^[a-fA-F0-9]{64}$'
+      responses:
+        '201':
+          description: Donation recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Donation'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded
+
+  /api/donations/project/{projectId}:
+    get:
+      tags: [Donations]
+      summary: List donations for a project
+      operationId: listProjectDonations
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          description: ISO timestamp for cursor-based pagination
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated donations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Donation'
+                      nextCursor:
+                        type: string
+                        format: date-time
+                        nullable: true
+
+  /api/donations/project/{projectId}/messages:
+    get:
+      tags: [Donations]
+      summary: List donations with messages for a project
+      operationId: listProjectDonationMessages
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+            maximum: 50
+      responses:
+        '200':
+          description: Donations with messages, sorted by amount
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Donation'
+
+  /api/donations/donor/{publicKey}:
+    get:
+      tags: [Donations]
+      summary: List donations by a donor
+      operationId: listDonorDonations
+      parameters:
+        - $ref: '#/components/parameters/publicKey'
+      responses:
+        '200':
+          description: All donations by this donor
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Donation'
+        '400':
+          description: Invalid public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Profiles ─────────────────────────────────────────────────────────────────
+  /api/profiles/{publicKey}:
+    get:
+      tags: [Profiles]
+      summary: Get donor profile
+      operationId: getProfile
+      parameters:
+        - $ref: '#/components/parameters/publicKey'
+      responses:
+        '200':
+          description: Donor profile
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Profile'
+        '400':
+          description: Invalid public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/profiles:
+    post:
+      tags: [Profiles]
+      summary: Create or update donor profile
+      operationId: upsertProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [publicKey]
+              properties:
+                publicKey:
+                  type: string
+                displayName:
+                  type: string
+                  maxLength: 30
+                bio:
+                  type: string
+                  maxLength: 300
+      responses:
+        '200':
+          description: Profile created or updated
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Profile'
+        '400':
+          description: Invalid public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Leaderboard ──────────────────────────────────────────────────────────────
+  /api/leaderboard:
+    get:
+      tags: [Leaderboard]
+      summary: Get donor leaderboard
+      operationId: getLeaderboard
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [all, month, year]
+            default: all
+      responses:
+        '200':
+          description: Ranked donor list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/LeaderboardEntry'
+
+  # ── Updates ──────────────────────────────────────────────────────────────────
+  /api/updates/{projectId}:
+    get:
+      tags: [Updates]
+      summary: List updates for a project
+      operationId: listProjectUpdates
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated project updates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProjectUpdate'
+                      nextCursor:
+                        type: string
+                        format: date-time
+                        nullable: true
+
+  /api/updates:
+    post:
+      tags: [Updates]
+      summary: Post a project update (admin)
+      operationId: createProjectUpdate
+      parameters:
+        - name: x-admin-key
+          in: header
+          description: Admin API key (required when ADMIN_API_KEY env var is set)
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, title, body]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+                body:
+                  type: string
+      responses:
+        '201':
+          description: Update created and subscribers notified
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ProjectUpdate'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/updates/{updateId}/like:
+    post:
+      tags: [Updates]
+      summary: Toggle like on an update
+      operationId: toggleUpdateLike
+      parameters:
+        - name: updateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [donorAddress]
+              properties:
+                donorAddress:
+                  type: string
+      responses:
+        '200':
+          description: Like toggled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          liked:
+                            type: boolean
+                          likeCount:
+                            type: integer
+        '400':
+          description: Missing donorAddress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Update not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/updates/{updateId}/likes:
+    get:
+      tags: [Updates]
+      summary: Get like count and user like status for an update
+      operationId: getUpdateLikes
+      parameters:
+        - name: updateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: donorAddress
+          in: query
+          description: Check if this address has liked the update
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Like info
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          likeCount:
+                            type: integer
+                          liked:
+                            type: boolean
+
+  # ── Subscriptions ────────────────────────────────────────────────────────────
+  /api/subscriptions:
+    post:
+      tags: [Subscriptions]
+      summary: Subscribe to project updates
+      operationId: subscribeToProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, email]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                email:
+                  type: string
+                  format: email
+                donorAddress:
+                  type: string
+      responses:
+        '201':
+          description: Subscribed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Already subscribed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/subscriptions/{projectId}/count:
+    get:
+      tags: [Subscriptions]
+      summary: Get subscriber count for a project
+      operationId: getSubscriberCount
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Subscriber count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  count:
+                    type: integer
+
+  # ── Jobs ─────────────────────────────────────────────────────────────────────
+  /api/jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      operationId: listJobs
+      responses:
+        '200':
+          description: List of escrow jobs (latest 50)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Job'
+
+  /api/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get a job by ID
+      operationId: getJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job detail
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Job'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/jobs/{id}/release:
+    patch:
+      tags: [Jobs]
+      summary: Release escrow for a job
+      operationId: releaseJob
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [releaseTransactionHash]
+              properties:
+                releaseTransactionHash:
+                  type: string
+                  pattern: '^[a-fA-F0-9]{64}$'
+      responses:
+        '200':
+          description: Job released
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Job'
+        '400':
+          description: Invalid hash or job not in escrow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Stats ─────────────────────────────────────────────────────────────────────
+  /api/stats/global:
+    get:
+      tags: [Stats]
+      summary: Landing-page hero aggregate statistics
+      operationId: getGlobalStats
+      responses:
+        '200':
+          description: Aggregate platform totals for the landing page hero
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalXLMRaised:
+                    type: string
+                    example: "123456.0000000"
+                  totalCO2OffsetKg:
+                    type: integer
+                    example: 98765
+                  totalDonations:
+                    type: integer
+                    example: 4321
+                  totalProjects:
+                    type: integer
+                    example: 42
+                  totalDonors:
+                    type: integer
+                    example: 1234
+
+  /api/stats/categories:
+    get:
+      tags: [Stats]
+      summary: Active project count per category
+      operationId: getStatsByCategory
+      responses:
+        '200':
+          description: Category breakdown
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            category:
+                              type: string
+                            count:
+                              type: integer
+
+  # ── Impact ───────────────────────────────────────────────────────────────────
+  /api/impact/project/{id}:
+    get:
+      tags: [Impact]
+      summary: Impact metrics for a project
+      operationId: getProjectImpact
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Project impact (cached 5 min)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totalDonationsXLM:
+                            type: string
+                          donorCount:
+                            type: integer
+                          co2OffsetKg:
+                            type: integer
+                          treesEquivalent:
+                            type: number
+                          uniqueCountries:
+                            type: integer
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/impact/global:
+    get:
+      tags: [Impact]
+      summary: Global impact metrics
+      operationId: getGlobalImpact
+      responses:
+        '200':
+          description: Platform-wide impact (cached 5 min)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totalDonationsXLM:
+                            type: string
+                          donorCount:
+                            type: integer
+                          co2OffsetKg:
+                            type: integer
+                          treesEquivalent:
+                            type: number
+                          uniqueCountries:
+                            type: integer
+                          breakdownByCategory:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                category:
+                                  type: string
+                                totalDonationsXLM:
+                                  type: string
+                                donorCount:
+                                  type: integer
+                                co2OffsetKg:
+                                  type: integer
+
+  /api/impact/donor/{publicKey}:
+    get:
+      tags: [Impact]
+      summary: Impact metrics for a donor
+      operationId: getDonorImpact
+      parameters:
+        - $ref: '#/components/parameters/publicKey'
+      responses:
+        '200':
+          description: Donor impact (cached 5 min)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totalDonatedXLM:
+                            type: string
+                          co2OffsetKg:
+                            type: integer
+                          projectsSupported:
+                            type: integer
+                          topCategory:
+                            type: string
+                            nullable: true
+        '400':
+          description: Invalid public key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Ratings ──────────────────────────────────────────────────────────────────
+  /api/ratings:
+    post:
+      tags: [Ratings]
+      summary: Submit or update a project rating
+      operationId: submitRating
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, donorAddress, rating]
+              properties:
+                projectId:
+                  type: string
+                  format: uuid
+                donorAddress:
+                  type: string
+                rating:
+                  type: integer
+                  minimum: 1
+                  maximum: 5
+                review:
+                  type: string
+      responses:
+        '201':
+          description: Rating submitted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/Rating'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/ratings/pending:
+    get:
+      tags: [Ratings]
+      summary: Get a project pending a rating from a donor
+      operationId: getPendingRating
+      description: Returns a project the donor donated to >7 days ago but hasn't rated yet.
+      parameters:
+        - name: donorAddress
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project pending a rating (or null)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        nullable: true
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          name:
+                            type: string
+        '400':
+          description: Missing donorAddress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ── Admin ────────────────────────────────────────────────────────────────────
+  /api/admin/audit:
+    get:
+      tags: [Admin]
+      summary: Query admin audit log
+      operationId: getAuditLog
+      parameters:
+        - name: actor
+          in: query
+          description: Filter by actor (Stellar public key or identifier)
+          schema:
+            type: string
+        - name: action
+          in: query
+          description: Filter by action string (e.g. project.status.active)
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Paginated audit log entries
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditLog'
+                      pagination:
+                        $ref: '#/components/schemas/Pagination'

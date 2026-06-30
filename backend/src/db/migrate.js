@@ -5,15 +5,129 @@ const path = require("path");
 const pool = require("./pool");
 const { seedProjects, seedProjectUpdates, seedJobs } = require("../services/store");
 
+const MIGRATIONS_DIR = path.join(__dirname, "migrations");
+
+async function ensureMigrationsTable(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version TEXT PRIMARY KEY,
+      name    TEXT        NOT NULL,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+function loadMigrationFiles() {
+  if (!fs.existsSync(MIGRATIONS_DIR)) return [];
+  return fs
+    .readdirSync(MIGRATIONS_DIR)
+    .filter((f) => f.endsWith(".js"))
+    .sort()
+    .map((f) => ({
+      version: f.replace(".js", ""),
+      file: path.join(MIGRATIONS_DIR, f),
+    }));
+}
+
+async function getAppliedVersions(client) {
+  const result = await client.query(
+    "SELECT version FROM schema_migrations ORDER BY version ASC"
+  );
+  return result.rows.map((r) => r.version);
+}
+
 async function runMigrations() {
   const client = await pool.connect();
-
   try {
     await client.query("BEGIN");
+    await ensureMigrationsTable(client);
 
-    const schemaPath = path.join(__dirname, "schema.sql");
-    const schemaSql = fs.readFileSync(schemaPath, "utf8");
-    await client.query(schemaSql);
+    const applied = await getAppliedVersions(client);
+    const files = loadMigrationFiles();
+    let ran = 0;
+
+    for (const { version, file } of files) {
+      if (applied.includes(version)) continue;
+      const migration = require(file);
+      console.log(`[DB] Applying migration: ${version}`);
+      await migration.up(client);
+      await client.query(
+        "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
+        [version, migration.name ?? version]
+      );
+      ran++;
+    }
+
+    if (ran === 0) {
+      console.log("[DB] No pending migrations");
+    }
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  await seedDatabase();
+  console.log("[DB] Migration complete");
+}
+
+/**
+ * Roll back the last `steps` applied migrations (default: 1).
+ * Each migration's `down()` function is called in reverse-applied order.
+ */
+async function rollbackMigrations(steps = 1) {
+  if (steps < 1) throw new Error("steps must be >= 1");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await ensureMigrationsTable(client);
+
+    const result = await client.query(
+      "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT $1",
+      [steps]
+    );
+
+    if (result.rows.length === 0) {
+      console.log("[DB] Nothing to roll back");
+      await client.query("COMMIT");
+      return;
+    }
+
+    for (const row of result.rows) {
+      const file = path.join(MIGRATIONS_DIR, `${row.version}.js`);
+      if (!fs.existsSync(file)) {
+        throw new Error(`Migration file not found for rollback: ${file}`);
+      }
+      const migration = require(file);
+      if (typeof migration.down !== "function") {
+        throw new Error(`Migration ${row.version} does not export a down() function`);
+      }
+      console.log(`[DB] Rolling back migration: ${row.version}`);
+      await migration.down(client);
+      await client.query(
+        "DELETE FROM schema_migrations WHERE version = $1",
+        [row.version]
+      );
+    }
+
+    await client.query("COMMIT");
+    console.log(`[DB] Rolled back ${result.rows.length} migration(s)`);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function seedDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
 
     for (const project of seedProjects) {
       await client.query(
@@ -44,7 +158,7 @@ async function runMigrations() {
           project.tags,
           project.createdAt,
           project.updatedAt,
-        ],
+        ]
       );
     }
 
@@ -53,7 +167,7 @@ async function runMigrations() {
         `INSERT INTO project_updates (id, project_id, title, body, created_at)
          VALUES ($1, $2, $3, $4, $5)
          ON CONFLICT (id) DO NOTHING`,
-        [update.id, update.projectId, update.title, update.body, update.createdAt],
+        [update.id, update.projectId, update.title, update.body, update.createdAt]
       );
     }
 
@@ -74,12 +188,11 @@ async function runMigrations() {
           job.status,
           job.createdAt,
           job.updatedAt,
-        ],
+        ]
       );
     }
 
     await client.query("COMMIT");
-    console.log("[DB] Migration and seeding complete");
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -88,4 +201,30 @@ async function runMigrations() {
   }
 }
 
-module.exports = { runMigrations };
+// --- CLI entry point ---
+// node migrate.js [--rollback [N]]
+
+if (require.main === module) {
+  const args = process.argv.slice(2);
+  const rollbackIdx = args.indexOf("--rollback");
+
+  if (rollbackIdx !== -1) {
+    const stepsArg = args[rollbackIdx + 1];
+    const steps = stepsArg && !stepsArg.startsWith("--") ? parseInt(stepsArg, 10) : 1;
+    rollbackMigrations(steps)
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error("[DB] Rollback failed:", err.message);
+        process.exit(1);
+      });
+  } else {
+    runMigrations()
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error("[DB] Migration failed:", err.message);
+        process.exit(1);
+      });
+  }
+}
+
+module.exports = { runMigrations, rollbackMigrations };

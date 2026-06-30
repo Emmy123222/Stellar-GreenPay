@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenpay-config
+  namespace: {{ .Values.namespace }}
+data:
+  NODE_ENV: "production"
+  PORT: {{ .Values.backend.port | quote }}
+  STELLAR_NETWORK: {{ .Values.config.stellarNetwork }}
+  HORIZON_URL: {{ .Values.config.horizonUrl }}
+  ALLOWED_ORIGINS: "https://{{ .Values.ingress.host }}"
+  APP_URL: "http://frontend-svc:{{ .Values.frontend.port }}"
+  EMAIL_FROM: {{ .Values.config.emailFrom | quote }}
+  CONTRACT_ID: {{ .Values.config.contractId | quote }}
+  NEXT_PUBLIC_STELLAR_NETWORK: {{ .Values.config.stellarNetwork }}
+  NEXT_PUBLIC_HORIZON_URL: {{ .Values.config.horizonUrl }}
+  NEXT_PUBLIC_SOROBAN_RPC_URL: {{ .Values.config.sorobanRpcUrl }}
+  NEXT_PUBLIC_API_URL: "http://backend-svc:{{ .Values.backend.port }}"
+  NEXT_PUBLIC_CONTRACT_ID: {{ .Values.config.contractId | quote }}
+  NEXT_PUBLIC_USDC_ISSUER: {{ .Values.config.usdcIssuer | quote }}

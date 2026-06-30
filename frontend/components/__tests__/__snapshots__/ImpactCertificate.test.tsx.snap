@@ -1,0 +1,182 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ImpactCertificate matches snapshot 1`] = `
+<div>
+  <div
+    class="bg-white border border-forest-200 rounded-3xl overflow-hidden shadow-lg"
+    id="impact-certificate"
+  >
+    <div
+      class="bg-gradient-to-r from-forest-900 to-forest-800 text-white px-8 py-8"
+    >
+      <div
+        class="flex items-center justify-between gap-6"
+      >
+        <div>
+          <p
+            class="text-xs tracking-[0.22em] uppercase text-forest-100 font-body"
+          >
+            Stellar GreenPay
+          </p>
+          <h2
+            class="font-display text-3xl font-bold leading-tight"
+          >
+            Impact Certificate
+          </h2>
+          <p
+            class="text-forest-100 text-sm mt-2 font-body"
+          >
+            This certificate recognizes climate impact achieved through on-chain donations.
+          </p>
+        </div>
+        <div
+          class="text-5xl"
+        >
+          🌿
+        </div>
+      </div>
+    </div>
+    <div
+      class="px-8 py-8"
+    >
+      <div
+        class="text-center mb-8"
+      >
+        <p
+          class="text-sm text-[#5a7a5a] font-body"
+        >
+          Presented to
+        </p>
+        <p
+          class="font-display text-3xl font-bold text-forest-900 mt-2"
+        >
+          Jane Doe
+        </p>
+        <p
+          class="text-xs text-[#8aaa8a] mt-2 font-body"
+        >
+          Donor Address: 
+          GABCDEFGHI...KLMNOPQRST
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8"
+      >
+        <div
+          class="card text-center border-forest-100/50"
+        >
+          <p
+            class="text-2xl mb-2"
+          >
+            💚
+          </p>
+          <p
+            class="font-display font-bold text-forest-900 text-lg"
+          >
+            1,500 XLM
+          </p>
+          <p
+            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+          >
+            Total Donated
+          </p>
+        </div>
+        <div
+          class="card text-center border-forest-100/50"
+        >
+          <p
+            class="text-2xl mb-2"
+          >
+            ♻️
+          </p>
+          <p
+            class="font-display font-bold text-forest-900 text-lg"
+          >
+            2.4k kg CO₂
+          </p>
+          <p
+            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+          >
+            CO₂ Offset
+          </p>
+        </div>
+        <div
+          class="card text-center border-forest-100/50"
+        >
+          <p
+            class="text-2xl mb-2"
+          >
+            🌲
+          </p>
+          <p
+            class="font-display font-bold text-forest-900 text-lg"
+          >
+            Forest
+          </p>
+          <p
+            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+          >
+            Badge Tier
+          </p>
+        </div>
+      </div>
+      <div
+        class="rounded-2xl border border-forest-100 bg-forest-50 p-5"
+      >
+        <h3
+          class="font-display font-bold text-forest-900 mb-2"
+        >
+          Projects Supported
+        </h3>
+        <ul
+          class="text-sm text-forest-900 font-body grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1"
+        >
+          <li
+            class="flex items-center gap-2"
+          >
+            <span
+              class="text-forest-600"
+            >
+              •
+            </span>
+            <span
+              class="font-semibold"
+            >
+              Amazon Reforestation
+            </span>
+          </li>
+          <li
+            class="flex items-center gap-2"
+          >
+            <span
+              class="text-forest-600"
+            >
+              •
+            </span>
+            <span
+              class="font-semibold"
+            >
+              Solar for Schools
+            </span>
+          </li>
+        </ul>
+      </div>
+      <div
+        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-8 pt-6 border-t border-forest-100"
+      >
+        <p
+          class="text-xs text-[#8aaa8a] font-body"
+        >
+          Issued on 
+          Jan 15, 2026
+        </p>
+        <p
+          class="text-xs text-[#8aaa8a] font-body"
+        >
+          Verified by on-chain donation history
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+`;

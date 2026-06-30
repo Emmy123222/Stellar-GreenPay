@@ -1,0 +1,7 @@
+node_modules
+.git
+.github
+*.log
+.env
+.env.local
+tests

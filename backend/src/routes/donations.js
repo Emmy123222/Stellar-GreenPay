@@ -5,10 +5,27 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuid } = require("uuid");
+const logger = require("../logger");
 const pool = require("../db/pool");
+const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+
+const donationSchema = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+  donorAddress: z.string().min(1, "donorAddress is required"),
+  amountXLM: z.union([z.string(), z.number()]).transform((value) => String(value)),
+  amount: z.union([z.string(), z.number()]).optional(),
+  currency: z.string().optional(),
+  message: sanitizedStringField({ required: false, maxLength: 100, message: "must not contain HTML" }).optional(),
+  transactionHash: z.string().min(1, "transactionHash is required"),
+}).transform((data) => ({
+  ...data,
+  message: data.message ?? null,
+}));
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid Stellar public key"); e.status = 400; throw e; }
@@ -18,7 +35,16 @@ function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) { const e = new Error("Invalid transaction hash"); e.status = 400; throw e; }
 }
 
-// POST /api/donations — record a donation after on-chain tx
+/**
+ * Record a donation after an on-chain transaction is observed.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the persisted donation record or an error response.
+ * @throws {Error} If validation, project lookup, or donation persistence fails.
+ */
 async function recordDonation(req, res, next) {
   let client;
   let inTransaction = false;
@@ -44,6 +70,18 @@ async function recordDonation(req, res, next) {
     );
     if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
 
+    // Verify the transaction is confirmed on-chain before recording it.
+    // Prevents a caller from inflating raised_xlm with a fake or unconfirmed tx hash.
+    let onChainTx;
+    try {
+      onChainTx = await server.getTransaction(transactionHash);
+    } catch {
+      const e = new Error("Transaction not found on Stellar"); e.status = 400; throw e;
+    }
+    if (!onChainTx || onChainTx.successful !== true) {
+      const e = new Error("Transaction not confirmed on Stellar"); e.status = 400; throw e;
+    }
+
     await client.query("BEGIN");
     inTransaction = true;
 
@@ -65,6 +103,60 @@ async function recordDonation(req, res, next) {
       ],
     );
 
+    const recordedDonation = donationResult.rows[0] || {
+      id: uuid(),
+      project_id: projectId,
+      donor_address: donorAddress,
+      amount_xlm: currency === "XLM" ? parsedAmount : null,
+      amount: parsedAmount,
+      currency,
+      message: message?.trim().slice(0, 100) || null,
+      transaction_hash: transactionHash,
+      created_at: new Date().toISOString(),
+    };
+
+    // Check for active matching offers
+    if (currency === "XLM") {
+      const matchesResult = await client.query(
+        `SELECT id, matcher_address, cap_xlm, matched_xlm, multiplier
+         FROM donation_matches
+         WHERE project_id = $1 AND expires_at > NOW()`,
+        [projectId],
+      );
+
+      for (const match of matchesResult.rows) {
+        const matchedXlm = Number.parseFloat(match.matched_xlm || "0");
+        const capXlm = Number.parseFloat(match.cap_xlm);
+        const remaining = capXlm - matchedXlm;
+
+        if (remaining > 0) {
+          const matchAmount = Math.min(parsedAmount * match.multiplier, remaining);
+
+          await client.query(
+            `INSERT INTO donations (
+              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            [
+              uuid(),
+              projectId,
+              match.matcher_address,
+              matchAmount,
+              matchAmount,
+              "XLM",
+              `Matching donation for donation from ${donorAddress}`,
+              `match-${transactionHash}-${match.id}`,
+            ],
+          );
+
+          await client.query(
+            "UPDATE donation_matches SET matched_xlm = matched_xlm + $1 WHERE id = $2",
+            [matchAmount, match.id],
+          );
+        }
+      }
+    }
+
     // Update project totals
     await client.query(
       `UPDATE projects
@@ -79,48 +171,37 @@ async function recordDonation(req, res, next) {
       [currency === "XLM" ? parsedAmount : 0, projectId],
     );
 
-    // Update donor profile
-    const existingProfileResult = await client.query(
-      "SELECT * FROM profiles WHERE public_key = $1",
-      [donorAddress],
-    );
-    const existingProfile = existingProfileResult.rows[0];
-    const previousTotal = existingProfile
-      ? Number.parseFloat(existingProfile.total_donated_xlm || "0")
-      : 0;
-    const newTotal = currency === "XLM" ? previousTotal + parsedAmount : previousTotal;
-    const projectsSupportedResult = await client.query(
-      `SELECT COUNT(DISTINCT project_id) AS count
-       FROM donations
-       WHERE donor_address = $1`,
-      [donorAddress],
-    );
-    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
-    const badges = computeBadges(newTotal);
-
-    await client.query(
-      `INSERT INTO profiles (
-        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())
-      ON CONFLICT (public_key) DO UPDATE SET
-        total_donated_xlm = EXCLUDED.total_donated_xlm,
-        projects_supported = EXCLUDED.projects_supported,
-        badges = EXCLUDED.badges,
-        updated_at = EXCLUDED.updated_at`,
-      [
-        donorAddress,
-        existingProfile?.display_name || null,
-        existingProfile?.bio || null,
-        newTotal.toFixed(7),
-        projectsSupported,
-        JSON.stringify(badges),
-      ],
-    );
-
     await client.query("COMMIT");
     inTransaction = false;
-    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+
+    enqueueProfileUpdate(donorAddress).catch((err) => {
+      logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
+    });
+
+    (req.log || logger).info({
+      event: "donation_recorded",
+      amount: parsedAmount,
+      currency,
+      project: projectId,
+      donor: donorAddress,
+      txHash: transactionHash,
+    }, "Donation recorded");
+
+    const io = req.app?.get("io");
+    if (io && typeof io.emit === "function") {
+      io.emit("donation_event", {
+        projectId,
+        donorAddress,
+        amountXLM: recordedDonation.amount_xlm,
+        transactionHash,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    const mappedDonation = mapDonationRow(donationResult.rows[0]);
+    donationEvents.emit("new_donation", mappedDonation);
+
+    res.status(201).json({ success: true, data: mappedDonation });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     next(e);
@@ -129,9 +210,71 @@ async function recordDonation(req, res, next) {
   }
 }
 
+/**
+ * Register a donation via the public API.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created donation payload.
+ * @throws {Error} If rate limiting or donation creation fails.
+ */
 router.post("/", donationLimiter, recordDonation);
 
+// GET /api/donations/stream
+router.get("/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const keepAlive = setInterval(() => {
+    res.write(":\\n\\n");
+  }, 15000);
+
+  const onNewDonation = (donation) => {
+    res.write(`data: ${JSON.stringify(donation)}\\n\\n`);
+  };
+
+  donationEvents.on("new_donation", onNewDonation);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    donationEvents.off("new_donation", onNewDonation);
+  });
+});
+
 // GET /api/donations/project/:id
+router.get("/project/:projectId/messages", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+    const result = await pool.query(
+      `SELECT *
+       FROM donations
+       WHERE project_id = $1
+         AND message IS NOT NULL
+         AND length(trim(message)) > 0
+       ORDER BY amount DESC, created_at DESC
+       LIMIT $2`,
+      [req.params.projectId, limit],
+    );
+    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * List donations for a specific project.
+ *
+ * @route GET /api/donations/project/:projectId
+ * @param {import('express').Request} req - Express request containing the project id and pagination options.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the paginated donation history.
+ * @throws {Error} If the donation query fails.
+ */
 router.get("/project/:projectId", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
@@ -162,7 +305,16 @@ router.get("/project/:projectId", async (req, res, next) => {
   }
 });
 
-// GET /api/donations/donor/:publicKey
+/**
+ * List donations for a specific donor.
+ *
+ * @route GET /api/donations/donor/:publicKey
+ * @param {import('express').Request} req - Express request containing the donor public key.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the donor donation history.
+ * @throws {Error} If validation or the donation query fails.
+ */
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
@@ -176,5 +328,51 @@ router.get("/donor/:publicKey", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/donations/:id - single donation fetch endpoint
+router.get("/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    // Basic UUID validation
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      const e = new Error("Invalid donation ID");
+      e.status = 400;
+      throw e;
+    }
+
+    const query = `
+      SELECT 
+        d.*,
+        p.name AS project_name,
+        pr.display_name AS donor_display_name,
+        CASE
+          WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+          ELSE 0
+        END AS co2_offset_kg
+      FROM donations d
+      JOIN projects p ON d.project_id = p.id
+      LEFT JOIN profiles pr ON d.donor_address = pr.public_key
+      WHERE d.id = $1
+    `;
+    const result = await pool.query(query, [id]);
+
+    if (!result.rows[0]) {
+      const e = new Error("Donation not found");
+      e.status = 404;
+      throw e;
+    }
+
+    const row = result.rows[0];
+    const donationData = mapDonationRow(row);
+    donationData.projectName = row.project_name;
+    donationData.donorDisplayName = row.donor_display_name || null;
+    donationData.co2OffsetKg = Math.round(Number.parseFloat(row.co2_offset_kg || "0"));
+
+    res.json({ success: true, data: donationData });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.recordDonation = recordDonation;
+

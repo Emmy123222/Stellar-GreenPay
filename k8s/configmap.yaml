@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: greenpay-config
+  namespace: greenpay
+data:
+  # Shared
+  NODE_ENV: "production"
+  # Backend
+  PORT: "4000"
+  STELLAR_NETWORK: "testnet"
+  HORIZON_URL: "https://horizon-testnet.stellar.org"
+  ALLOWED_ORIGINS: "https://greenpay.app,http://localhost:3000"
+  APP_URL: "http://frontend-svc:3000"
+  EMAIL_FROM: "GreenPay <updates@yourdomain.com>"
+  CONTRACT_ID: ""
+  # Frontend
+  NEXT_PUBLIC_STELLAR_NETWORK: "testnet"
+  NEXT_PUBLIC_HORIZON_URL: "https://horizon-testnet.stellar.org"
+  NEXT_PUBLIC_SOROBAN_RPC_URL: "https://soroban-testnet.stellar.org"
+  NEXT_PUBLIC_API_URL: "http://backend-svc:4000"
+  NEXT_PUBLIC_CONTRACT_ID: ""
+  NEXT_PUBLIC_USDC_ISSUER: ""

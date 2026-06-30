@@ -3,6 +3,9 @@
  * Shared TypeScript types for Stellar GreenPay.
  */
 
+/**
+ * Supported project categories shown in the UI.
+ */
 export type ProjectCategory =
   | "Reforestation"
   | "Solar Energy"
@@ -14,8 +17,14 @@ export type ProjectCategory =
   | "Sustainable Agriculture"
   | "Other";
 
-export type ProjectStatus = "active" | "completed" | "paused";
+/**
+ * Lifecycle status for a project in the marketplace.
+ */
+export type ProjectStatus = "active" | "completed" | "paused" | "rejected";
 
+/**
+ * A climate project listed on Stellar GreenPay.
+ */
 export interface ClimateProject {
   id: string;
   name: string;
@@ -28,16 +37,53 @@ export interface ClimateProject {
   raisedXLM: string;           // total raised so far
   donorCount: number;
   co2OffsetKg: number;         // estimated CO2 offset in kg
+  co2_per_xlm?: number;        // CO2 offset per XLM donated
   status: ProjectStatus;
+  rejectionReason?: string | null;
   verified: boolean;
   onChainVerified?: boolean;
+  contractRegisteredAt?: number | null;
+  totalRaisedOnChain?: string;
   tags: string[];
   createdAt: string;
   updatedAt: string;
   campaigns?: ProjectCampaign[];
   activeCampaign?: ProjectCampaign | null;
+  averageRating?: number;
+  ratingCount?: number;
+  milestones?: ProjectMilestone[];
+  // Cached AI-generated impact summary (populated by
+  // POST /api/projects/:id/generate-summary). Null until the project owner
+  // generates one. `aiSummarySourceHash` is a SHA-256 of the description at
+  // generation time so the UI can surface a "needs refresh" hint when the
+  // description has been edited since.
+  aiSummary?: string | null;
+  aiSummaryGeneratedAt?: string | null;
+  aiSummaryModel?: string | null;
+  aiSummarySourceHash?: string | null;
+  // Follow state — populated by GET /api/projects/:id?walletAddress=G...
+  // `isFollowing` is only present (and meaningful) when a walletAddress was
+  // passed to the fetch; defaults to false when omitted.
+  followCount?: number;
+  isFollowing?: boolean;
 }
 
+/**
+ * A project milestone representing progress towards a goal.
+ */
+export interface ProjectMilestone {
+  id: string;
+  projectId: string;
+  percentage: number;
+  title: string;
+  reachedAt?: string | null;
+  transactionHash?: string | null;
+  createdAt: string;
+}
+
+/**
+ * A time-limited fundraising campaign for a project.
+ */
 export interface ProjectCampaign {
   id: string;
   projectId: string;
@@ -52,6 +98,9 @@ export interface ProjectCampaign {
   createdAt: string;
 }
 
+/**
+ * A donation record associated with a project and donor.
+ */
 export interface Donation {
   id: string;
   projectId: string;
@@ -65,8 +114,14 @@ export interface Donation {
   createdAt: string;
   // On-chain contract data
   contractRecordId?: string;
+  // Matching status
+  isMatched?: boolean;
+  matchedBy?: string;
 }
 
+/**
+ * Donor profile information stored off-chain.
+ */
 export interface DonorProfile {
   publicKey: string;
   displayName?: string;
@@ -77,8 +132,14 @@ export interface DonorProfile {
   createdAt: string;
 }
 
+/**
+ * Badge tiers awarded to donors based on total donations.
+ */
 export type BadgeTier = "seedling" | "tree" | "forest" | "earth";
 
+/**
+ * Freelancer profile used in the escrow/jobs feature.
+ */
 export interface FreelancerProfile {
   publicKey: string;
   displayName?: string;
@@ -89,12 +150,18 @@ export interface FreelancerProfile {
   createdAt: string;
 }
 
+/**
+ * A donor badge earned at a point in time.
+ */
 export interface DonorBadge {
   tier: BadgeTier;
   earnedAt: string;
   projectId?: string;
 }
 
+/**
+ * Project update post displayed in the updates feed.
+ */
 export interface ProjectUpdate {
   id: string;
   projectId: string;
@@ -104,6 +171,9 @@ export interface ProjectUpdate {
   createdAt: string;
 }
 
+/**
+ * Leaderboard entry representing a donor's rank and totals.
+ */
 export interface LeaderboardEntry {
   rank: number;
   publicKey: string;
@@ -113,6 +183,9 @@ export interface LeaderboardEntry {
   topBadge?: BadgeTier;
 }
 
+/**
+ * Minimal project payload used by the donate page.
+ */
 export interface DonateProject {
   id: string;
   name: string;
@@ -123,15 +196,23 @@ export interface DonateProject {
   raisedXLM: number;
 }
 
-
+/**
+ * Props provided to the donate page.
+ */
 export interface DonatePageProps {
   
   project: DonateProject | null;
   presetAmount: number | null;
 }
 
+/**
+ * Status for an escrow job in the jobs marketplace.
+ */
 export type EscrowJobStatus = "draft" | "in_escrow" | "completed";
 
+/**
+ * Escrow job funded on-chain and tracked off-chain.
+ */
 export interface EscrowJob {
   id: string;
   title: string;
@@ -145,11 +226,17 @@ export interface EscrowJob {
   updatedAt: string;
 }
 
+/**
+ * History entry for monthly subscription payments.
+ */
 export interface MonthlyDonationHistoryItem {
   paidAt: string;
   amountXLM: string;
 }
 
+/**
+ * Recurring monthly donation subscription state.
+ */
 export interface MonthlySubscription {
   id: string;
   projectId: string;

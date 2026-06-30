@@ -1,0 +1,32 @@
+title = "Stellar GreenPay secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated distributable archives are not source files to scan."
+paths = [
+  '''^extension/greenpay-extension\.zip$''',
+]
+
+[[allowlists]]
+description = "Environment templates contain placeholder-only values for contributors."
+condition = "AND"
+paths = [
+  '''(^|/)\.env\.example$''',
+]
+regexes = [
+  '''(?i)(yourdomain\.com|YOUR_PUBLIC_ADDRESS|YOUR_|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres)''',
+  '''^$''',
+]
+
+[[allowlists]]
+description = "Automated tests and mocks use deterministic dummy identifiers."
+condition = "AND"
+paths = [
+  '''(^|/)(__tests__|__mocks__|e2e|test_snapshots)(/|$)''',
+  '''\.(test|spec)\.(js|ts|tsx)$''',
+]
+regexes = [
+  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
+]

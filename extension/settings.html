@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>GreenPay Settings</title>
+  <link rel="stylesheet" href="popup.css">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+  <div class="app-container">
+    <header class="glass-panel">
+      <div class="header-top">
+        <h1 class="logo">🌿 GreenPay</h1>
+        <button id="back-btn" class="btn glow-btn">← Back</button>
+      </div>
+      <p class="subtitle" style="margin-top:8px;">Extension Settings</p>
+    </header>
+
+    <main>
+      <form id="settings-form" class="glass-panel settings-form" novalidate>
+
+        <div class="settings-field">
+          <label class="settings-label" for="backend-url">Backend URL</label>
+          <p class="settings-hint">The GreenPay API endpoint this extension connects to.</p>
+          <input
+            type="url"
+            id="backend-url"
+            class="settings-input"
+            placeholder="https://api.stellar-greenpay.app"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <span id="url-error" class="settings-error hidden">Please enter a valid URL.</span>
+        </div>
+
+        <div class="settings-field">
+          <label class="settings-label" for="default-amount">Default Donation Amount</label>
+          <p class="settings-hint">Pre-filled amount on the donation form.</p>
+          <div class="input-wrapper" style="position:relative;">
+            <input
+              type="number"
+              id="default-amount"
+              class="settings-input"
+              placeholder="5"
+              min="0.1"
+              step="0.1"
+              autocomplete="off"
+            />
+            <span class="currency">XLM</span>
+          </div>
+        </div>
+
+        <div class="settings-field">
+          <label class="settings-label">Stellar Network</label>
+          <p class="settings-hint">Choose which Stellar network to use for transactions.</p>
+          <div class="network-toggle" role="group" aria-label="Stellar network">
+            <button type="button" id="btn-testnet" class="btn network-btn" data-network="testnet">
+              Testnet
+            </button>
+            <button type="button" id="btn-mainnet" class="btn network-btn" data-network="mainnet">
+              Mainnet
+            </button>
+          </div>
+          <span id="mainnet-warning" class="settings-warning hidden">
+            Warning: Mainnet transactions use real XLM.
+          </span>
+        </div>
+
+        <div class="settings-field">
+          <label class="settings-label">Connected Wallet</label>
+          <p class="settings-hint">Your Freighter wallet connection status.</p>
+          <div class="wallet-status-settings">
+            <div id="wallet-display" class="wallet-connected">
+              <span class="dot" id="wallet-dot"></span>
+              <span id="wallet-address-text">Not connected</span>
+            </div>
+            <button id="wallet-action-btn" class="btn glow-btn" type="button">Connect Wallet</button>
+          </div>
+        </div>
+
+        <button type="submit" id="save-btn" class="btn donate-btn save-btn">
+          Save Settings
+        </button>
+        <div id="save-status" class="status-message"></div>
+      </form>
+    </main>
+  </div>
+  <script src="dist/settings.js"></script>
+</body>
+</html>

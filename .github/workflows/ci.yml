@@ -76,16 +76,15 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from backend --build
+        working-directory: .
 
   contracts:
-    name: Soroban Contract (Rust)
+    name: Soroban Contracts (Rust)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        contract: [greenpay-contract, escrow-contract]
     defaults:
       run:
-        working-directory: contracts/${{ matrix.contract }}
+        working-directory: contracts
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -96,8 +95,63 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ matrix.contract }}-${{ hashFiles('contracts/**/Cargo.lock') }}
-      - run: cargo check --target wasm32-unknown-unknown
-      - run: cargo test
-      - run: cargo build --target wasm32-unknown-unknown --release
+            contracts/target
+          key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/**/Cargo.lock') }}
+      - run: cargo check --workspace
+      - run: cargo test --workspace
+      - run: cargo build --workspace --target wasm32-unknown-unknown --release
+
+  helm:
+    name: Helm Chart Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v3
+        with:
+          version: latest
+      - uses: azure/setup-kubectl@v3
+        with:
+          version: latest
+      - run: helm lint helm/greenpay/
+      - run: helm template greenpay helm/greenpay/ | kubectl apply --dry-run=client -f -
+
+  gitleaks:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gitleaks
+        run: |
+          curl -sL "https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m).tar.gz" | tar xzf -
+          sudo mv gitleaks /usr/local/bin/gitleaks
+      - name: Secret scanning
+        run: gitleaks detect --config .gitleaks.toml --source . --exit-code 1
+
+  zap_scan:
+    name: DAST Security Scan (OWASP ZAP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Run ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target: 'https://staging.greenpay.app'
+          cmd_options: '-J report.json'
+          fail_action: false
+
+      - name: Run Security Triage Script
+        run: node scripts/triage-zap.js
+
+      - name: Upload ZAP Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-scan-report
+          path: |
+            report_html.html
+            report.json
+          retention-days: 14
+          if-no-files-found: warn

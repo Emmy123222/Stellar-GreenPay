@@ -1,0 +1,34 @@
+namespace: greenpay
+
+backend:
+  image: greenpay/backend:latest
+  replicas: 2
+  port: 4000
+
+frontend:
+  image: greenpay/frontend:latest
+  replicas: 2
+  port: 3000
+
+postgres:
+  image: postgres:16-alpine
+  storage: 5Gi
+
+config:
+  stellarNetwork: testnet
+  horizonUrl: https://horizon-testnet.stellar.org
+  sorobanRpcUrl: https://soroban-testnet.stellar.org
+  contractId: ""
+  usdcIssuer: ""
+  emailFrom: "GreenPay <updates@yourdomain.com>"
+
+secrets:
+  postgresUser: postgres
+  postgresPassword: changeme
+  postgresDb: greenpay
+  resendApiKey: ""
+  adminApiKey: ""
+
+ingress:
+  host: greenpay.local
+  className: nginx

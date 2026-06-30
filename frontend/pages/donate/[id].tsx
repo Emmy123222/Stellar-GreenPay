@@ -4,6 +4,7 @@ import Head from "next/head";
 import Link from "next/link";
 import DonationQRCode, { DonationQRCodeHandle } from "../../components/DonationQRCode";
 import type { DonateProject, DonatePageProps } from "../../utils/types";
+import { formatXLM } from "../../utils/format";
 
 //Category icons (matches the live site's category set)//
 
@@ -392,7 +393,7 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
           <GoalProgress raised={project.raisedXLM} goal={project.goalXLM} />
           {presetAmount && presetAmount > 0 && (
             <p className="donate-card__amount-chip">
-              Preset donation: <span>{presetAmount} XLM</span>
+              Preset donation: <span>{formatXLM(presetAmount)}</span>
             </p>
           )}
 
@@ -462,7 +463,7 @@ export const getServerSideProps: GetServerSideProps<DonatePageProps> = async (ct
     process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
   try {
-    const res = await fetch(`${apiBase}/api/projects/${id}`);
+    const res = await fetch(`${apiBase}/api/v1/projects/${id}`);
     if (!res.ok) {
       return { props: { project: null, presetAmount } };
     }

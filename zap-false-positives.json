@@ -1,0 +1,10 @@
+{
+  "ignored_alerts": [
+    {
+      "pluginId": "10020",
+      "alert": "X-Frame-Options Header Scanner",
+      "url": "https://staging.greenpay.app/widget",
+      "reason": "Intentionally allowed frame embedding on widget sub-routes to support integration on third-party sites."
+    }
+  ]
+}

@@ -21,8 +21,8 @@ export default function NotFound() {
         <p className="font-body text-lg sm:text-xl text-[#1a2e1a] font-medium text-center mb-2">
           This page has gone back to nature 🌿
         </p>
-        <p className="font-body text-sm text-[#5a7a5a] text-center mb-10 max-w-sm">
-          The path you followed has returned to the forest floor. Let's get
+        <p className="font-body text-sm text-[#5a7a5a] dark:text-[#8aaa8a] text-center mb-10 max-w-sm">
+          The path you followed has returned to the forest floor. Let&apos;s get
           you back to greener ground.
         </p>
 
@@ -37,7 +37,7 @@ export default function NotFound() {
         </div>
 
         {/* Subtle decorative footer */}
-        <p className="mt-16 text-xs text-[#5a7a5a] font-body">
+        <p className="mt-16 text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
           🌱 GreenPay — every donation tracked on-chain
         </p>
       </div>

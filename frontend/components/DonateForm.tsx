@@ -6,13 +6,14 @@ import { useState, useEffect } from "react";
 import { buildDonationTransaction, buildContractDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { recordDonation } from "@/lib/api";
-import { formatXLM } from "@/utils/format";
+import { formatXLM, formatCO2 } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 interface DonateFormProps {
   project: ClimateProject;
   publicKey: string;
   initialAmount?: string;
+  initialMessage?: string;
   onSuccess?: () => void;
 }
 
@@ -21,7 +22,7 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
-export default function DonateForm({ project, publicKey, initialAmount, onSuccess }: DonateFormProps) {
+export default function DonateForm({ project, publicKey, initialAmount, initialMessage, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState("");
   const [message, setMessage] = useState("");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
@@ -37,6 +38,11 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
     if (!initialAmount) return;
     setAmount(initialAmount);
   }, [initialAmount]);
+
+  useEffect(() => {
+    if (!initialMessage) return;
+    setMessage(initialMessage);
+  }, [initialMessage]);
 
   useEffect(() => {
     let mounted = true;
@@ -72,6 +78,14 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
 
   const amountNum = parseFloat(amount);
   const isValid   = !isNaN(amountNum) && amountNum >= 1;
+
+  // Calculate CO₂ impact for XLM donations
+  const co2Impact = currency === "XLM" && amount && !isNaN(amountNum) && project.co2_per_xlm
+    ? (amountNum * project.co2_per_xlm) / 1000 // Convert to kg
+    : 0;
+
+  // Calculate tree equivalent (rough estimate: 1 tree absorbs ~22kg CO₂ per year)
+  const treeEquivalent = co2Impact > 0 ? Math.round(co2Impact / 22) : 0;
 
     const charCount = message.length;
 
@@ -190,12 +204,12 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
       <div className="card text-center animate-slide-up">
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Thank you!</h3>
-        <p className="text-[#5a7a5a] text-sm mb-4 font-body">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">
           Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>.
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
-            <p className="text-sm font-semibold text-forest-900 mb-1">🎉 Badge Earned!</p>
+            <p className="text-sm font-semibold text-forest-900 mb-1">🎉 Congrats! You earned a new badge!</p>
             <p className="text-lg font-bold text-forest-700">{donorBadge}</p>
           </div>
         )}
@@ -209,7 +223,7 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
   return (
     <div className="card animate-fade-in">
       <h3 className="font-display text-lg font-semibold text-forest-900 mb-1">Make a Donation</h3>
-          <p className="text-[#5a7a5a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
 
       <div className="space-y-4">
         {/* Currency selector */}
@@ -245,11 +259,25 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
             placeholder="Or enter custom amount..." min="1" step="1"
             className="input-field" />
           {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
+          
+          {/* CO₂ Impact Calculator */}
+          {currency === "XLM" && amount && !isNaN(amountNum) && co2Impact > 0 && (
+            <div className="mt-3 p-3 bg-forest-50 border border-forest-200 rounded-xl">
+              <p className="text-sm font-medium text-forest-900 mb-1">
+                🌱 Your donation will offset approximately <span className="font-bold text-forest-700">{formatCO2(co2Impact)}</span>
+              </p>
+              {treeEquivalent > 0 && (
+                <p className="text-xs text-forest-600 mt-1">
+                  That is equivalent to planting about <span className="font-semibold">{treeEquivalent} {treeEquivalent === 1 ? 'tree' : 'trees'}</span>
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Message */}
         <div>
-          <label className="label">Message <span className="normal-case text-[#8aaa8a] font-normal">(optional)</span></label>
+          <label className="label">Message <span className="normal-case text-[#8aaa8a] dark:text-forest-300 font-normal">(optional)</span></label>
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)}
             placeholder="Leave a message of support..." maxLength={100}
             className="input-field" />
@@ -277,7 +305,7 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
             <p>USDC: <span className="font-medium">{usdcBalance === null ? "No trustline" : usdcBalance}</span></p>
             {usdcBalance === null && (
               <div className="mt-2 text-sm text-amber-600">
-                You don't have a USDC trustline on this account. Add a trustline in your wallet or follow these instructions to accept USDC: <a href="https://developers.stellar.org/docs/learn/fundamentals/stellar-data-structures/assets/" target="_blank" rel="noopener noreferrer" className="underline">Add trustline</a>
+                You don&apos;t have a USDC trustline on this account. Add a trustline in your wallet or follow these instructions to accept USDC: <a href="https://developers.stellar.org/docs/learn/fundamentals/stellar-data-structures/assets/" target="_blank" rel="noopener noreferrer" className="underline">Add trustline</a>
               </div>
             )}
           </div>
@@ -288,13 +316,13 @@ export default function DonateForm({ project, publicKey, initialAmount, onSucces
           {step === "building"   && <><Spinner />Building transaction...</>}
           {step === "signing"    && <><Spinner />Sign in Freighter...</>}
           {step === "submitting" && <><Spinner />Submitting...</>}
-          {step === "recording"  && <><Spinner />Recording on-chain...</>}
+          {step === "recording"  && <>Done</>}
           {step === "idle"       && <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`) : currency}</>}
           {step === "error"      && "Retry"}
         </button>
 
         {step === "signing" && (
-          <p className="text-center text-xs text-[#5a7a5a] animate-pulse font-body">
+          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
             Please confirm in your Freighter wallet...
           </p>
         )}

@@ -1,10 +1,6 @@
-const rateLimit = require('express-rate-limit')
+const rateLimit = require("express-rate-limit");
+const logger = require("../logger");
 
-/**
- * Factory function to create reusable rate limiters
- * @param {number} maxRequests - max requests allowed
- * @param {number} windowMinutes - time window in minutes
- */
 const createRateLimiter = (maxRequests, windowMinutes) => {
   return rateLimit({
     windowMs: windowMinutes * 60 * 1000,
@@ -12,9 +8,17 @@ const createRateLimiter = (maxRequests, windowMinutes) => {
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
-      res.set('Retry-After', Math.ceil(windowMinutes * 60));
+      (req.log || logger).warn({
+        event: "rate_limit_hit",
+        ip: req.ip,
+        path: req.path,
+        method: req.method,
+        limit: maxRequests,
+        windowMinutes,
+      }, "Rate limit exceeded");
+      res.set("Retry-After", Math.ceil(windowMinutes * 60));
       return res.status(429).json({
-        message: 'Too many requests — Try again later.',
+        message: "Too many requests — Try again later.",
       });
     },
   });

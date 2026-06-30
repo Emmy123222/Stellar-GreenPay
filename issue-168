@@ -1,0 +1,12 @@
+Summary
+There is no mobile project detail screen. Tapping a project card should open it.
+
+Tasks
+
+Create ProjectDetailScreen via Expo Router dynamic route [id].tsx
+
+Display: name, description, goal progress bar, CO₂ offset, updates
+
+'Donate' CTA navigates to donation screen
+Acceptance Criteria
+All projects from the API can be viewed on mobile.

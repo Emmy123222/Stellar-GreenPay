@@ -7,7 +7,7 @@
  * @see https://developers.stellar.org/docs/data/horizon
  * @see https://soroban.stellar.org/docs
  */
-import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
+import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account, xdr } from "@stellar/stellar-sdk";
 
 export const NETWORK = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -198,6 +198,143 @@ export async function buildContractDonationTransaction({
 }
 
 /**
+ * Maps the frontend `BadgeTier` strings (lowercase, used across the UI and the
+ * off-chain API) to the on-chain `BadgeTier` enum variant names used by the
+ * GreenPay Soroban contract (`Seedling | Tree | Forest | EarthGuardian`).
+ */
+export const CONTRACT_BADGE_SYMBOL: Record<string, string> = {
+  seedling: "Seedling",
+  tree: "Tree",
+  forest: "Forest",
+  earth: "EarthGuardian",
+};
+
+/**
+ * Builds the Soroban ScVal for a `BadgeTier` unit-variant enum value.
+ * Soroban serialises a unit (data-less) enum variant as a Vec containing a
+ * single Symbol with the variant's name.
+ */
+function badgeTierToScVal(tier: string) {
+  const variant = CONTRACT_BADGE_SYMBOL[tier];
+  if (!variant) {
+    throw new Error(`Unknown badge tier "${tier}". Cannot mint Impact NFT.`);
+  }
+  return xdr.ScVal.scvVec([nativeToScVal(variant, { type: "symbol" })]);
+}
+
+/**
+ * Builds a Soroban transaction that calls `mint_impact_nft(donor, tier)` on the
+ * GreenPay contract. The `donor` account authorises and pays for the mint, and
+ * `tier` must match the donor's current on-chain badge tier (enforced by the
+ * contract). Pass the lowercase frontend tier string (e.g. "seedling").
+ */
+export async function buildMintImpactNftTransaction({
+  contractId,
+  donor,
+  tier,
+}: {
+  contractId: string;
+  donor: string;
+  tier: string;
+}) {
+  if (!contractId.trim()) {
+    throw new Error(
+      "GreenPay contract is not configured (set NEXT_PUBLIC_CONTRACT_ID).",
+    );
+  }
+  const source = await server.loadAccount(donor);
+  const contract = new Contract(contractId);
+  const donorAddr = new Address(donor);
+
+  const tx = new TransactionBuilder(source, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call("mint_impact_nft", donorAddr.toScVal(), badgeTierToScVal(tier)),
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    return rpc.assembleTransaction(tx, simulated).build();
+  }
+  throw formatMintSimulationFailure(simulated);
+}
+
+/** Maps Soroban `mint_impact_nft` simulation errors to user-facing messages. */
+export function formatMintSimulationFailure(simulated: unknown): Error {
+  const raw = JSON.stringify(simulated);
+  if (raw.includes("NFT already minted for this tier")) {
+    return new Error("You have already claimed the Impact NFT for this tier.");
+  }
+  if (raw.includes("No badge tier reached yet")) {
+    return new Error("No badge tier reached yet — donate more to unlock an Impact NFT.");
+  }
+  if (raw.includes("Tier does not match donor's current badge")) {
+    return new Error("This tier no longer matches your on-chain badge. Refresh and try again.");
+  }
+  if (raw.includes("Cannot mint NFT for None tier")) {
+    return new Error("There is no badge tier to claim yet.");
+  }
+  if (/underfunded|insufficient/i.test(raw) && /balance|fee|Fund/i.test(raw)) {
+    return new Error(
+      "Insufficient XLM to pay Soroban fees. Add test XLM to this account and try again.",
+    );
+  }
+  if (raw.includes("HostError") || raw.includes("VmValidation")) {
+    return new Error(
+      "The contract rejected this mint. Check the network (testnet/mainnet) and contract ID.",
+    );
+  }
+  return new Error(
+    "Could not simulate mint_impact_nft. Verify NEXT_PUBLIC_CONTRACT_ID and that your badge tier is recorded on-chain.",
+  );
+}
+
+/**
+ * Submits a signed Soroban contract transaction via the Soroban RPC server and
+ * polls until it is applied. Returns the transaction hash and the ledger it was
+ * included in (the "mint ledger" for an NFT mint). Unlike {@link submitTransaction}
+ * (which targets Horizon and is unsuitable for contract invocations), this uses
+ * the RPC `sendTransaction` / `getTransaction` flow.
+ */
+export async function submitSorobanTransaction(
+  signedXDR: string,
+  { timeoutMs = 30000, intervalMs = 1500 }: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<{ hash: string; ledger: number }> {
+  const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
+  const sent = await rpcServer.sendTransaction(tx);
+
+  if (sent.status === "ERROR") {
+    throw new Error(
+      `Transaction submission failed: ${JSON.stringify(sent.errorResult ?? sent)}`,
+    );
+  }
+
+  const hash = sent.hash;
+  const deadline = Date.now() + timeoutMs;
+
+  // Poll the RPC until the transaction is applied (SUCCESS) or fails.
+  while (Date.now() < deadline) {
+    const result = await rpcServer.getTransaction(hash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      return { hash, ledger: result.ledger };
+    }
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+      throw new Error("Transaction failed on-chain. The mint was not completed.");
+    }
+    // NOT_FOUND — still pending; wait and retry.
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(
+    "Timed out waiting for the mint transaction to confirm. Check the explorer with the transaction hash.",
+  );
+}
+
+/**
  * Builds a Soroban transaction that calls `release_escrow(client, job_id)` on the escrow contract.
  * The client account must match the job’s client and must have funded this job via `create_job` on-chain.
  *
@@ -242,6 +379,35 @@ export async function buildReleaseEscrowTransaction({
     return rpc.assembleTransaction(tx, simulated).build();
   }
   throw formatSimulationFailure(simulated);
+}
+
+/**
+ * Builds a small memo transaction to record a milestone on-chain.
+ * Sends a tiny amount (0.00001 XLM) to the source account itself (circular payment).
+ */
+export async function buildMilestoneTransaction({
+  publicKey,
+  milestoneTitle,
+}: {
+  publicKey: string;
+  milestoneTitle: string;
+}) {
+  const source = await server.loadAccount(publicKey);
+  const builder = new TransactionBuilder(source, {
+    fee: "100",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      Operation.payment({
+        destination: publicKey,
+        asset: Asset.native(),
+        amount: "0.00001",
+      }),
+    )
+    .addMemo(Memo.text(`Milestone: ${milestoneTitle.slice(0, 17)}`))
+    .setTimeout(60);
+
+  return builder.build();
 }
 
 /** Maps Soroban simulation errors to short, user-facing messages. */
@@ -554,6 +720,88 @@ export function streamGlobalProjectDonations(
     });
 
   return closeStream;
+}
+
+export interface ProjectDiscussionMessage {
+  id: string;
+  from: string;
+  amount: string;
+  memo: string;
+  createdAt: string;
+  transactionHash: string;
+}
+
+/**
+ * Fetches recent donation memos for a project's wallet address by reading Horizon payment
+ * history and joining it with the transaction memo.
+ *
+ * Notes:
+ * - Only text memos are supported (memo_type === "text").
+ * - Memo length on Stellar is limited; DonateForm caps to 100 chars for UX but on-chain
+ *   the memo will be truncated by wallets/SDKs if too long.
+ */
+export async function fetchProjectDiscussion(
+  walletAddress: string,
+  limit = 50,
+): Promise<ProjectDiscussionMessage[]> {
+  const payments = await server
+    .payments()
+    .forAccount(walletAddress)
+    .order("desc")
+    .limit(limit)
+    .call();
+
+  const rows = (payments?.records ?? []) as any[];
+  const donationPayments = rows.filter(
+    (r) =>
+      (r.type === "payment" || r.type === "create_account") &&
+      typeof r.transaction_hash === "string" &&
+      r.transaction_hash,
+  );
+
+  const txHashes = Array.from(
+    new Set(donationPayments.map((p) => p.transaction_hash as string)),
+  ).slice(0, limit);
+
+  const txMemoByHash = new Map<string, string>();
+  const txCreatedAtByHash = new Map<string, string>();
+
+  const txResults = await Promise.allSettled(
+    txHashes.map(async (h) => {
+      const tx = await server.transactions().transaction(h).call();
+      const memoType = (tx as any).memo_type as string | undefined;
+      const memo = (tx as any).memo as string | undefined;
+      const createdAt = (tx as any).created_at as string | undefined;
+      if (memoType === "text" && memo && createdAt) {
+        txMemoByHash.set(h, memo);
+        txCreatedAtByHash.set(h, createdAt);
+      }
+    }),
+  );
+  // Avoid unused lint warnings in some configs
+  void txResults;
+
+  const messages: ProjectDiscussionMessage[] = donationPayments
+    .map((p) => {
+      const hash = p.transaction_hash as string;
+      const memo = txMemoByHash.get(hash);
+      const createdAt = txCreatedAtByHash.get(hash) || p.created_at;
+      if (!memo || !createdAt) return null;
+      return {
+        id: `${p.id}`,
+        from: p.from || p.funder || p.source_account,
+        amount: p.amount || p.starting_balance || "0",
+        memo,
+        createdAt,
+        transactionHash: hash,
+      };
+    })
+    .filter(Boolean) as ProjectDiscussionMessage[];
+
+  // Chronological feed (oldest → newest)
+  messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  return messages;
 }
 
 async function simulateCall(contract: Contract, method: string, args: any[] = []) {
