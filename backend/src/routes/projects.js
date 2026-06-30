@@ -9,7 +9,7 @@ const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
-const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
+const { getOnChainProject, getProjectDonationEvents, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
@@ -180,6 +180,7 @@ router.get("/", async (req, res, next) => {
     // All user-controlled values (status, category, search, cursor fields) are
     // passed as parameterised $N placeholders in `values`. Dynamic WHERE clauses
     // are built only from whitelisted enum strings, so no injection surface exists.
+    // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, values);
     const rows = result.rows;
     const hasMore = rows.length > pageSize;
@@ -283,6 +284,47 @@ router.get("/:id/verify", async (req, res) => {
         totalRaisedOnChain: "0.0000000",
       },
     });
+  }
+});
+
+/**
+ * GET /api/projects/:id/on-chain-donations
+ */
+router.get("/:id/on-chain-donations", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const { limit = 20, cursor } = req.query;
+    const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const events = await getProjectDonationEvents(projectId, { limit: pageSize, cursor });
+    const hasMore = events.length >= pageSize;
+    const data = events.map(({ donor, amount, ledger, badge, msgHash }) => ({
+      donor,
+      amount,
+      ledger,
+      badge,
+      msgHash,
+    }));
+
+    let nextCursor = null;
+    if (events.length > 0) {
+      nextCursor = events[events.length - 1].pagingToken || null;
+    }
+
+    res.json({
+      success: true,
+      data,
+      next_cursor: nextCursor,
+      nextCursor: nextCursor,
+      has_more: Boolean(hasMore && nextCursor),
+    });
+  } catch (e) {
+    next(e);
   }
 });
 
@@ -426,8 +468,10 @@ router.post("/admin/register", async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
     
+    if (!adminAddress) {
+      return res.status(401).json({ success: false, error: "adminAddress is required" });
+    }
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
-    if (!adminAddress) throw new Error("adminAddress is required");
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
