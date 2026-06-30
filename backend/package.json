@@ -11,7 +11,8 @@
     "db:rollback:n": "node src/db/migrate.js --rollback",
     "lint": "eslint src/**/*.js",
     "docs": "typedoc --options typedoc.json",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "load-test": "k6 run ../scripts/load-test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.108.0",
@@ -19,11 +20,11 @@
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "csurf": "^1.11.0",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "expo-server-sdk": "^5.0.0",
-    "express": "^4.19.2",
+    "express": "^5.2.1",
     "express-rate-limit": "^7.3.1",
-    "helmet": "^7.1.0",
+    "helmet": "^8.2.0",
     "iconv-lite": "^0.7.2",
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.3",
