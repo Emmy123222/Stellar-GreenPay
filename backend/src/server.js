@@ -31,10 +31,11 @@ const server = http.createServer(app);
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   const swaggerUi = require("swagger-ui-express");
-  const yaml      = require("js-yaml");
-  const fs        = require("fs");
-  const path      = require("path");
-  const swaggerDoc = yaml.load(fs.readFileSync(path.join(__dirname, "../../docs/openapi.yml"), "utf8"));
+  const yaml = require("js-yaml");
+  const fs = require("fs");
+  const path = require("path");
+  const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
+  const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 }
 
