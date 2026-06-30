@@ -66,7 +66,7 @@ const io = new Server(server, {
 app.set("io", io);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-// ── CSRF token endpoint ──────────────────────────────────────────────────────
+// ── CSRF token endpoint (Closes #466) ─────────────────────────────────────────
 function csrfTokenHandler(req, res) {
   res.json({ success: true, csrfToken: req.csrfToken() });
 }
