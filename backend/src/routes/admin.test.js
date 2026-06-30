@@ -1,7 +1,7 @@
 "use strict";
 const express = require("express");
 const request = require("supertest");
-const { signToken, adminRequired } = require("../middleware/auth");
+const { signToken, adminRequired, adminKeyRequired } = require("../middleware/auth");
 
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
@@ -9,6 +9,7 @@ jest.mock("../middleware/rateLimiter", () => ({
 
 process.env.ADMIN_USERNAME = "admin";
 process.env.ADMIN_PASSWORD = "testpass";
+process.env.ADMIN_API_KEY = "test-admin-key";
 process.env.JWT_SECRET = "test-secret-for-jest";
 
 function buildApp() {
@@ -134,6 +135,53 @@ describe("adminRequired middleware", () => {
   it("allows requests with valid token", async () => {
     const token = signToken({ role: "admin", sub: "admin" }, "1h");
     const res = await request(app).get("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it("allows requests with valid X-Admin-Key", async () => {
+    const res = await request(app).get("/protected").set("X-Admin-Key", "test-admin-key");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.user.authMethod).toBe("x-admin-key");
+  });
+});
+
+describe("adminKeyRequired middleware", () => {
+  let app;
+
+  beforeEach(() => {
+    process.env.ADMIN_API_KEY = "test-admin-key";
+    delete process.env.ADMIN_API_KEYS;
+    app = express();
+    app.use(express.json());
+    app.post("/protected", adminKeyRequired, (req, res) => res.json({ ok: true, user: req.admin }));
+  });
+
+  it("rejects requests without X-Admin-Key", async () => {
+    const res = await request(app).post("/protected").send({});
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Missing X-Admin-Key header");
+  });
+
+  it("rejects requests with an invalid X-Admin-Key", async () => {
+    const res = await request(app).post("/protected").set("X-Admin-Key", "wrong").send({});
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Invalid X-Admin-Key header");
+  });
+
+  it("allows requests with the configured X-Admin-Key", async () => {
+    const res = await request(app).post("/protected").set("X-Admin-Key", "test-admin-key").send({});
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.user.role).toBe("admin");
+  });
+
+  it("allows rotated comma-separated keys from ADMIN_API_KEYS", async () => {
+    delete process.env.ADMIN_API_KEY;
+    process.env.ADMIN_API_KEYS = "old-key, new-key";
+
+    const res = await request(app).post("/protected").set("X-Admin-Key", "new-key").send({});
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
   });
