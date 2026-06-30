@@ -58,6 +58,44 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
   const [matches, setMatches] = useState<any[]>([]);
 
+  const [widgetAccent, setWidgetAccent] = useState("#059669");
+  const [widgetButtonText, setWidgetButtonText] = useState("Donate on GreenPay");
+  const [widgetCurrency, setWidgetCurrency] = useState<"XLM" | "USDC">("XLM");
+  const [copied, setCopied] = useState(false);
+
+  const widgetEmbedCode = useMemo(() => {
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+    const params = new URLSearchParams({
+      accent: widgetAccent,
+      buttonText: widgetButtonText,
+      currency: widgetCurrency,
+    });
+    return `<iframe src="${baseUrl}/widget/${projectId}?${params}" width="360" height="420" frameborder="0" style="border:none;overflow:hidden" sandbox="allow-scripts allow-same-origin"></iframe>`;
+  }, [widgetAccent, widgetButtonText, widgetCurrency, projectId]);
+
+  const PRESET_COLORS = [
+    "#059669", "#10b981", "#34d399", "#6ee7b7",
+    "#2563eb", "#7c3aed", "#db2777", "#dc2626",
+    "#ea580c", "#d97706", "#65a30d", "#0891b2",
+  ];
+
+  const copyEmbed = async () => {
+    try {
+      await navigator.clipboard.writeText(widgetEmbedCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = widgetEmbedCode;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
     setLoading(true);
@@ -270,7 +308,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
         <div className="text-center mb-10">
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">Project Admin</h1>
-          <p className="text-[#5a7a5a] font-body">Connect the project wallet to access analytics and post updates.</p>
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Connect the project wallet to access analytics and post updates.</p>
         </div>
         <WalletConnect onConnect={onConnect} />
       </div>
@@ -305,10 +343,10 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12">
         <div className="card">
           <h1 className="font-display text-xl font-bold text-forest-900 mb-2">Access denied</h1>
-          <p className="text-sm text-[#5a7a5a] font-body">
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
             This admin dashboard is only accessible to the connected wallet that matches the project wallet address.
           </p>
-          <div className="mt-4 text-xs text-[#8aaa8a] font-body">
+          <div className="mt-4 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
             Connected: {shortenAddress(publicKey)} • Project wallet: {shortenAddress(project.walletAddress)}
           </div>
           <div className="mt-5">
@@ -325,9 +363,9 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] font-body">Project Admin</p>
+          <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] dark:text-forest-300 font-body">Project Admin</p>
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">{project.name}</h1>
-          <p className="text-sm text-[#5a7a5a] font-body">Wallet: {shortenAddress(project.walletAddress, 10)}</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Wallet: {shortenAddress(project.walletAddress, 10)}</p>
         </div>
         <Link href={`/projects/${project.id}`} className="btn-primary text-sm py-2.5 px-5 flex-shrink-0">
           View Project
@@ -344,7 +382,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           <div key={stat.label} className="card text-center shadow-sm border border-forest-100/50">
             <p className="text-2xl mb-2">{stat.icon}</p>
             <p className="font-display font-bold text-forest-900 text-lg leading-tight">{stat.value}</p>
-            <p className="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
+            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
           </div>
         ))}
       </div>
@@ -362,7 +400,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="h-64">
           <DonationGrowthChartNoSSR data={weeklyGrowth} />
         </div>
-        <p className="text-xs text-[#8aaa8a] mt-3 font-body">
+        <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-3 font-body">
           Weekly totals based on recent donation history (up to 200 donations loaded).
         </p>
       </div>
@@ -372,7 +410,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             {milestones.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] font-body">No milestones defined yet.</p>
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No milestones defined yet.</p>
             ) : (
               milestones.map((m) => {
                 const reached = parseFloat(project.raisedXLM) >= (parseFloat(project.goalXLM) * m.percentage / 100);
@@ -458,7 +496,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="card">
           <h2 className="font-display text-xl font-bold text-forest-900 mb-4">Recent Donations</h2>
           {donations.length === 0 ? (
-            <p className="text-sm text-[#5a7a5a] font-body">No donations yet.</p>
+            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No donations yet.</p>
           ) : (
             <div className="space-y-3">
               {donations.slice(0, 10).map((d) => (
@@ -467,10 +505,10 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">
                       {shortenAddress(d.donorAddress)} • {formatXLM(d.amountXLM || d.amount || "0", 2)}
                     </p>
-                    <p className="text-xs text-[#8aaa8a] font-body">{timeAgo(d.createdAt)}</p>
+                    <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</p>
                   </div>
                   {d.message && (
-                    <p className="text-xs text-[#5a7a5a] font-body max-w-[220px] text-right">
+                    <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body max-w-[220px] text-right">
                       “{d.message.slice(0, 60)}{d.message.length > 60 ? "…" : ""}”
                     </p>
                   )}
@@ -482,7 +520,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
         <div className="card">
           <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Post Update</h2>
-          <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
             Publish a project update to notify subscribers.
           </p>
           <div className="space-y-3">
@@ -524,7 +562,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Approval Workflow */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Approval Workflow</h2>
-        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
           Manage project status. Current status:{" "}
           <span className={`font-semibold ${project.status === "active" ? "text-emerald-600" : project.status === "rejected" ? "text-red-600" : "text-amber-600"}`}>
             {project.status}
@@ -578,7 +616,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* On-Chain Registration */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">On-Chain Registration</h2>
-        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
           Register this project on the Stellar blockchain via Soroban smart contract.
         </p>
 
@@ -606,12 +644,12 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Donation Match Funds */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Donation Match Funds</h2>
-        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
           View and manage donation matching for this project.
         </p>
 
         {matches.length === 0 ? (
-          <p className="text-sm text-[#5a7a5a] font-body">No active donation matches.</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No active donation matches.</p>
         ) : (
           <div className="space-y-3">
             {matches.map((m: any) => (
@@ -621,7 +659,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">
                       {m.multiplier}x matching
                     </p>
-                    <p className="text-xs text-[#8aaa8a] font-body">
+                    <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
                       Matcher: {shortenAddress(m.matcherAddress)}
                     </p>
                   </div>
@@ -643,13 +681,117 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">{formatXLM(m.remainingXLM)}</p>
                   </div>
                 </div>
-                <p className="text-xs text-[#8aaa8a] font-body mt-2">
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-2">
                   Expires: {new Date(m.expiresAt).toLocaleDateString()}
                 </p>
               </div>
             ))}
           </div>
         )}
+      </div>
+
+      {/* Widget Builder */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Widget Builder</h2>
+        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          Customise the embeddable widget for this project and copy the embed code to paste on external sites.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Controls */}
+          <div className="space-y-5">
+            {/* Accent colour */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-2 ml-1 opacity-50">
+                Accent Colour
+              </label>
+              <div className="flex items-center gap-2 mb-2">
+                {PRESET_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setWidgetAccent(c)}
+                    className={`w-7 h-7 rounded-full border-2 transition-all ${widgetAccent === c ? "border-forest-900 scale-110" : "border-transparent"}`}
+                    style={{ backgroundColor: c }}
+                    aria-label={`Select colour ${c}`}
+                  />
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={widgetAccent}
+                  onChange={(e) => setWidgetAccent(e.target.value)}
+                  className="w-10 h-10 rounded cursor-pointer border border-forest-200 p-0.5"
+                />
+                <span className="text-xs font-mono text-[#5a7a5a]">{widgetAccent}</span>
+              </div>
+            </div>
+
+            {/* Button text */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+                Button Text
+              </label>
+              <input
+                value={widgetButtonText}
+                onChange={(e) => setWidgetButtonText(e.target.value)}
+                className="input-field"
+                placeholder="Donate on GreenPay"
+                maxLength={60}
+              />
+            </div>
+
+            {/* Currency */}
+            <div>
+              <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-2 ml-1 opacity-50">
+                Currency Displayed
+              </label>
+              <div className="flex gap-2">
+                {(["XLM", "USDC"] as const).map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setWidgetCurrency(c)}
+                    className={`px-5 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                      widgetCurrency === c
+                        ? "bg-forest-600 text-white border-forest-600"
+                        : "bg-white text-[#5a7a5a] border-forest-200 hover:bg-forest-50"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Live preview hint */}
+            <div className="p-3 rounded-xl bg-forest-50 border border-forest-100">
+              <p className="text-xs text-[#5a7a5a] font-body">
+                <span className="font-semibold">Tip:</span> The widget will display {widgetCurrency} amounts with the accent colour shown above.
+              </p>
+            </div>
+          </div>
+
+          {/* Embed code */}
+          <div className="space-y-3">
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest ml-1 opacity-50">
+              Embed Code
+            </label>
+            <textarea
+              readOnly
+              value={widgetEmbedCode}
+              className="input-field font-mono text-xs min-h-[100px] resize-none bg-forest-50/50"
+              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+            />
+            <button
+              onClick={copyEmbed}
+              className={`btn-primary w-full text-sm py-2.5 transition-all ${
+                copied ? "bg-emerald-600 hover:bg-emerald-700" : ""
+              }`}
+            >
+              {copied ? "✓ Copied!" : "Copy Embed Code"}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
