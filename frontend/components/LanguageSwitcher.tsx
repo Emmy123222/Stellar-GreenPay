@@ -1,9 +1,9 @@
 /**
- * components/LanguageSwitcher.tsx — Dropdown to switch between EN/ES.
+ * components/LanguageSwitcher.tsx — adds EN/ES locale picker.
  */
 import { useI18n } from "@/lib/i18n";
 
-const LANGS = [
+const LOCALES = [
   { code: "en" as const, label: "English", flag: "🇺🇸" },
   { code: "es" as const, label: "Español", flag: "🇪🇸" },
 ];
@@ -14,11 +14,13 @@ export default function LanguageSwitcher() {
   return (
     <select
       value={locale}
-      onChange={(e) => setLocale(e.target.value as "en" | "es")}
-      className="text-xs bg-forest-50 border border-forest-200 rounded-lg px-2 py-1.5 text-forest-700 font-body cursor-pointer focus:outline-none focus:ring-2 focus:ring-forest-300"
-      aria-label="Select language"
+      onChange={(e) => setLocale(e.target.value as typeof LOCALES[number]["code"])}
+      className="text-sm bg-[#f0f7f0] dark:bg-[#0e1f13] border border-[rgba(34,114,57,0.20)] dark:border-[rgba(96,208,123,0.25)]
+                 text-[#227239] dark:text-[#81c784] rounded-lg px-2 py-1.5
+                 focus:outline-none focus:ring-2 focus:ring-[rgba(34,114,57,0.30)] dark:focus:ring-[rgba(96,208,123,0.40)]"
+      aria-label="Language"
     >
-      {LANGS.map((l) => (
+      {LOCALES.map((l) => (
         <option key={l.code} value={l.code}>
           {l.flag} {l.label}
         </option>
