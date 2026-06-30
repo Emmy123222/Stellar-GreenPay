@@ -24,7 +24,7 @@ export default function LeaderboardPage() {
         <h1 className="font-display text-3xl sm:text-4xl font-bold text-forest-900 mb-3">
           Top Climate Donors
         </h1>
-        <p className="text-[#5a7a5a] max-w-xl mx-auto font-body leading-relaxed">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] max-w-xl mx-auto font-body leading-relaxed">
           Celebrating the community members who are driving the most impact. Every XLM donated is recorded permanently on the Stellar blockchain.
         </p>
       </div>
@@ -42,7 +42,7 @@ export default function LeaderboardPage() {
             <div key={b.name} className="bg-white rounded-xl p-3 border border-forest-100">
               <p className="text-2xl mb-1">{b.emoji}</p>
               <p className="text-xs font-semibold text-forest-900 font-body">{b.name}</p>
-              <p className="text-xs text-[#8aaa8a] font-body">{b.req}</p>
+              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{b.req}</p>
             </div>
           ))}
         </div>
@@ -73,7 +73,7 @@ export default function LeaderboardPage() {
       <LeaderboardTable limit={50} period={period} />
 
       <div className="mt-10 text-center">
-        <p className="text-[#5a7a5a] text-sm mb-4 font-body">Want to see your name here?</p>
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">Want to see your name here?</p>
         <Link href="/projects" className="btn-primary">🌱 Start Donating</Link>
       </div>
     </div>

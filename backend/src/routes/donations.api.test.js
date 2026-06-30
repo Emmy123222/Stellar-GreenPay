@@ -133,6 +133,22 @@ describe("POST /api/donations", () => {
     expect(res.body.error).toContain("Invalid transaction hash");
   });
 
+  test("rejects HTML in donation messages with 422 field errors", async () => {
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey(),
+        amountXLM: 100,
+        message: "<script>alert('x')</script>",
+        transactionHash: makeTxHash(),
+      })
+      .expect(422);
+
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.message).toBeDefined();
+  });
+
   test("returns 404 for unknown project", async () => {
     createMockClient({ rows: [] });
 

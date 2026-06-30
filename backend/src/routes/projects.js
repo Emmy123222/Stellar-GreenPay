@@ -13,6 +13,8 @@ const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -29,6 +31,16 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+
+const createProjectSchema = z.object({
+  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
+  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
+  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
+  category: z.enum(VALID_CATEGORIES),
+  wallet_address: z.string().min(1, "wallet_address is required"),
+  goal_xlm: z.union([z.string(), z.number()]).optional(),
+  tags: z.array(z.string()).optional().default([]),
+});
 
 /**
  * GET /api/projects/featured
@@ -204,7 +216,7 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
-router.post("/", async (req, res, next) => {
+router.post("/", validateBody(createProjectSchema), async (req, res, next) => {
   try {
     const { name, description, location, category, wallet_address, goal_xlm = 0, tags = [] } = req.body || {};
 
@@ -520,6 +532,24 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch follower count and, when ?walletAddress=G... is provided, whether
+    // that wallet is currently following this project.
+    const followCountResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
+
+    let isFollowing = false;
+    const { walletAddress } = req.query;
+    if (walletAddress && typeof walletAddress === "string") {
+      const followResult = await pool.query(
+        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+        [req.params.id, walletAddress],
+      );
+      isFollowing = followResult.rowCount > 0;
+    }
+
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
       let value;
@@ -548,6 +578,89 @@ router.get("/:id", async (req, res, next) => {
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0].count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
+        followCount,
+        isFollowing,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/follow
+ * Follow a project. Body: { walletAddress: "G..." }
+ * Idempotent — re-following a project that is already followed is a no-op.
+ */
+router.post("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    await pool.query(
+      `INSERT INTO project_follows (project_id, wallet_address, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: true,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/projects/:id/follow
+ * Unfollow a project. Body: { walletAddress: "G..." }
+ * Idempotent — unfollowing a project not currently followed is a no-op.
+ */
+router.delete("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    await pool.query(
+      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: false,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
       },
     });
   } catch (e) {

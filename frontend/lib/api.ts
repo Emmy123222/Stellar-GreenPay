@@ -112,9 +112,11 @@ export async function fetchProjects(params?: {
   return data.data;
 }
 
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
+  const params = walletAddress ? { walletAddress } : undefined;
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
+    { params },
   );
   return data.data;
 }
@@ -379,6 +381,53 @@ export async function confirmProjectRegistration(payload: {
     payload,
   );
   return data;
+}
+
+// ── Project Follows ───────────────────────────────────────────────
+
+export interface FollowResponse {
+  isFollowing: boolean;
+  followCount: number;
+}
+
+/**
+ * Follow a project. Returns the updated isFollowing flag and follower count.
+ * Idempotent — safe to call even if already following.
+ */
+export async function followProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<FollowResponse> {
+  const { data } = await api.post<{ success: boolean; data: FollowResponse }>(
+    `/api/projects/${projectId}/follow`,
+    { walletAddress },
+  );
+  return data.data;
+}
+
+/**
+ * Unfollow a project. Returns the updated isFollowing flag and follower count.
+ * Idempotent — safe to call even if not currently following.
+ */
+export async function unfollowProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<FollowResponse> {
+  const { data } = await api.delete<{ success: boolean; data: FollowResponse }>(
+    `/api/projects/${projectId}/follow`,
+    { data: { walletAddress } },
+  );
+  return data.data;
+}
+
+/**
+ * Fetch the current follower count for a project without requiring a wallet.
+ */
+export async function fetchFollowCount(projectId: string): Promise<number> {
+  const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
+    `/api/projects/${projectId}`,
+  );
+  return data.data.followCount ?? 0;
 }
 
 // ── Update Likes ─────────────────────────────────────────────────

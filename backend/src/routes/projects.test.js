@@ -180,3 +180,60 @@ describe("POST /api/projects (admin)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("POST /api/projects", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("rejects HTML in project name with 422 field errors", async () => {
+    const res = await request(app)
+      .post("/api/projects")
+      .send({
+        name: "<script>Bad</script>",
+        description: "A test climate project that is long enough",
+        location: "Brazil",
+        category: "Reforestation",
+        wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        goal_xlm: 100,
+      })
+      .expect(422);
+
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.name).toBeDefined();
+  });
+});
+
+describe("POST /api/projects/:id/generate-summary", () => {
+  let app;
+
+  const OWNER_ADDRESS = "GSEEDLING" + "A".repeat(47);
+  const OTHER_ADDRESS = "GDIFFERENT" + "B".repeat(46);
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 403 when caller is not the project owner", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: "proj-1",
+        name: "Test Project",
+        category: "Reforestation",
+        description: "A test climate project",
+        wallet_address: OWNER_ADDRESS,
+      }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/generate-summary")
+      .send({ adminAddress: OTHER_ADDRESS });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Only the project owner can generate a summary");
+  });
+});

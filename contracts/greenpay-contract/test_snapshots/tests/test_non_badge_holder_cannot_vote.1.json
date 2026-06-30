@@ -50,6 +50,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -556,6 +559,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -580,7 +586,14 @@
               }
             ],
             "data": {
-              "string": "proj-001"
+              "vec": [
+                {
+                  "string": "proj-001"
+                },
+                {
+                  "u32": 120960
+                }
+              ]
             }
           }
         }
@@ -659,7 +672,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Only badge holders (Seedling or above) can vote' from contract function 'Symbol(obj#165)'"
+                  "string": "caught panic 'Only badge holders (Seedling or above) can vote' from contract function 'Symbol(obj#167)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
