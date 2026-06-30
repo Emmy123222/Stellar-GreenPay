@@ -23,6 +23,11 @@ router.post("/register", async (req, res, next) => {
     if (!platform || typeof platform !== "string") {
       return res.status(400).json({ error: "platform is required (ios/android)" });
     }
+    if (!['ios', 'android'].includes(platform.toLowerCase())) {
+      return res.status(400).json({ error: "platform must be either ios or android" });
+    }
+
+    const normalizedPlatform = platform.toLowerCase();
 
     // Check if token exists
     const existingResult = await pool.query(
@@ -36,7 +41,7 @@ router.post("/register", async (req, res, next) => {
         `UPDATE device_tokens 
          SET platform = $1, wallet_address = $2, updated_at = NOW()
          WHERE token = $3`,
-        [platform, walletAddress || null, token]
+        [normalizedPlatform, walletAddress || null, token]
       );
       res.json({ success: true, data: { tokenId: existingResult.rows[0].id } });
     } else {
@@ -45,7 +50,7 @@ router.post("/register", async (req, res, next) => {
       await pool.query(
         `INSERT INTO device_tokens (id, token, platform, wallet_address)
          VALUES ($1, $2, $3, $4)`,
-        [id, token, platform, walletAddress || null]
+        [id, token, normalizedPlatform, walletAddress || null]
       );
       res.json({ success: true, data: { tokenId: id } });
     }
