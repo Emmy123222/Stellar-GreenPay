@@ -22,9 +22,11 @@ interface ClimateProject {
 export default function DonateScreen() {
   const { colors } = useTheme();
   const router = useRouter();
-  const { id } = useLocalSearchParams();
+  const { id, wallet: scannedWallet } = useLocalSearchParams();
   const [projects, setProjects] = useState<ClimateProject[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(id as string | undefined);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(
+    id && id !== 'scan' ? (id as string) : undefined
+  );
   const [amount, setAmount] = useState('1');
   const [message, setMessage] = useState('');
   const [secretKey, setSecretKey] = useState('');
@@ -57,7 +59,16 @@ export default function DonateScreen() {
     }
   };
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) || projects[0] || null;
+  // When arriving from the QR scanner, prefer the project whose wallet matches
+  // the scanned address; fall back to id-based or first project selection.
+  const scannedAddr = typeof scannedWallet === 'string' ? scannedWallet : null;
+  const selectedProject =
+    (scannedAddr
+      ? projects.find((p) => p.walletAddress === scannedAddr)
+      : undefined) ??
+    projects.find((project) => project.id === selectedProjectId) ??
+    projects[0] ??
+    null;
 
   const handleDonate = async () => {
     if (!selectedProject) {
@@ -192,6 +203,14 @@ export default function DonateScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Donate to {selectedProject?.name || 'a project'}</Text>
         <Text style={styles.subtitle}>Choose a project and donate XLM on testnet.</Text>
+        {scannedAddr && (
+          <View style={styles.scannedBanner}>
+            <Text style={styles.scannedBannerText}>
+              QR scanned: {scannedAddr.slice(0, 8)}…{scannedAddr.slice(-4)}
+              {selectedProject ? ` — matched to ${selectedProject.name}` : ' (no matching project found)'}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.selectorCard}>
@@ -310,6 +329,18 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     marginTop: 4,
+  },
+  scannedBanner: {
+    marginTop: 10,
+    backgroundColor: 'rgba(76,175,80,0.15)',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#4caf50',
+  },
+  scannedBannerText: {
+    fontSize: 12,
+    color: '#1b5e20',
   },
   selectorCard: {
     margin: 16,
