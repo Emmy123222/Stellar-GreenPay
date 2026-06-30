@@ -31,7 +31,15 @@ const projectsRouter = require("./projects");
 function buildApp() {
   const app = express();
   app.use(express.json());
+
+
+  const io = { emit: jest.fn(), to: () => ({ emit: jest.fn() }) };
+  app.set("io", io);
+
+  app.use("/api/donations", donationsRouter);
+  
   app.use("/api/projects", projectsRouter);
+
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
@@ -66,10 +74,38 @@ describe("GET /api/projects", () => {
     jest.clearAllMocks();
   });
 
+
+  test("records a valid donation", async () => {
+    createMockClient(
+      { rows: [MOCK_PROJECT] }, // project check
+      { rows: [] }, // existing donation check
+      {}, // BEGIN
+      { rows: [MOCK_DONATION_ROW] }, // insert donation
+      { rows: [] }, // matches
+      {}, // update project totals
+      { rows: [] }, // existing profile
+      { rows: [{ count: "1" }] }, // projects_supported
+      {}, // upsert profile
+      {}, // COMMIT
+    );
+
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey(),
+        amountXLM: 100,
+        currency: "XLM",
+        message: "Great project!",
+        transactionHash: makeTxHash(),
+      })
+      .expect(201);
+
   test("returns projects list with default pagination", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
 
     const res = await request(app).get("/api/projects").expect(200);
+
 
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(1);
