@@ -16,21 +16,16 @@ mod fuzz {
     use proptest::prelude::*;
     use soroban_sdk::{
         testutils::Address as _,
-        Address, Env, String as SorobanString,
+        token::StellarAssetClient, Address, Env, String as SorobanString,
     };
-    use soroban_sdk::token::StellarAssetClient;
-    use crate::{GreenPayContract, GreenPayContractClient};
+    use crate::{DataKey, GreenPayContract, GreenPayContractClient, Project};
 
     /// Upper bound for a single donation: 1 billion XLM in stroops (10^16).
     /// Chosen so that a single donation is large but a few thousand back-to-back
     /// still fit in an i128 without overflowing.
     const MAX_DONATION: i128 = 1_000_000_000 * 10_000_000; // 10^16
 
-    /// Message hash re-used across all fuzz donations.
-    const MSG_HASH: u32 = 0xF0CCu32;
-    const FUZZ_STROOP: i128 = 10_000_000;
-
-    fn setup() -> (Env, GreenPayContractClient<'static>, Address, SorobanString, Address) {
+    fn setup() -> (Env, Address, GreenPayContractClient<'static>, Address, SorobanString, Address) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -46,47 +41,62 @@ mod fuzz {
 
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let sac = StellarAssetClient::new(&env, &token);
-        sac.mint(&admin, &(MAX_DONATION * 100));
 
-        (env, client, wallet, project_id, token)
+        (env, contract_id, client, wallet, project_id, token)
     }
 
-    /// Set up a contract with USDC configured and a project registered.
-    /// Returns `(env, client, project_id, usdc_token_address)`.
-    fn setup_usdc(
-        co2_per_xlm: u32,
-    ) -> (Env, GreenPayContractClient<'static>, SorobanString, Address) {
-        let env = Env::default();
-        env.mock_all_auths();
-
-        let contract_id = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &contract_id);
-
-        let admin = Address::generate(&env);
-        client.initialize(&admin);
-
-        let project_id = SorobanString::from_str(&env, "proj-fuzz-usdc");
-        let wallet = Address::generate(&env);
-        client.register_project(
-            &admin,
-            &project_id,
-            &SorobanString::from_str(&env, "USDC Fuzz Project"),
-            &wallet,
-            &co2_per_xlm,
-        );
-
-        let token_admin = Address::generate(&env);
-        let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
-        client.set_usdc_token(&admin, &usdc_token);
-
-        (env, client, project_id, usdc_token)
+    fn set_project_total_raised(env: &Env, contract_id: &Address, project_id: &SorobanString, amount: i128) {
+        env.as_contract(contract_id, || {
+            let mut project: Project = env.storage().instance()
+                .get(&DataKey::Project(project_id.clone()))
+                .expect("project should exist");
+            project.total_raised = amount;
+            env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+        });
     }
 
-    /// Mint USDC to a donor so the token transfer inside donate_usdc won't fail.
-    fn fund_usdc(env: &Env, usdc_token: &Address, donor: &Address, amount: &i128) {
-        let sac = StellarAssetClient::new(env, usdc_token);
-        sac.mint(donor, amount);
+    fn mint_tokens(env: &Env, token: &Address, donor: &Address, amount: i128) {
+        let token_client = StellarAssetClient::new(env, token);
+        token_client.mint(donor, &amount);
+    }
+
+    #[test]
+    fn donation_of_i128_max_minus_one_does_not_panic() {
+        let (env, _contract_id, client, _wallet, project_id, token) = setup();
+        let donor = Address::generate(&env);
+        mint_tokens(&env, &token, &donor, i128::MAX - 1);
+
+        client.donate(&token, &donor, &project_id, &(i128::MAX - 1), &42u32);
+
+        let project = client.get_project(&project_id);
+        assert_eq!(project.total_raised, i128::MAX - 1);
+        assert_eq!(project.donor_count, 1u32);
+        assert_eq!(client.get_global_total(), i128::MAX - 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Project total_raised overflow")]
+    fn donation_of_i128_max_panics() {
+        let (env, contract_id, client, _wallet, project_id, token) = setup();
+        let donor = Address::generate(&env);
+        set_project_total_raised(&env, &contract_id, &project_id, 1);
+        mint_tokens(&env, &token, &donor, i128::MAX);
+
+        client.donate(&token, &donor, &project_id, &i128::MAX, &42u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Project total_raised overflow")]
+    fn sequential_donations_panic_when_sum_exceeds_i128_max() {
+        let (env, contract_id, client, _wallet, project_id, token) = setup();
+        let donor_a = Address::generate(&env);
+        let donor_b = Address::generate(&env);
+        set_project_total_raised(&env, &contract_id, &project_id, 1);
+        mint_tokens(&env, &token, &donor_a, i128::MAX - 1);
+        mint_tokens(&env, &token, &donor_b, 2);
+
+        client.donate(&token, &donor_a, &project_id, &(i128::MAX - 1), &42u32);
+        client.donate(&token, &donor_b, &project_id, &2i128, &42u32);
     }
 
     proptest! {
@@ -96,16 +106,12 @@ mod fuzz {
         /// overflow global stats.
         #[test]
         fn prop_single_donation_no_overflow(amount in 1i128..=MAX_DONATION) {
-            let (env, client, _wallet, project_id, token) = setup();
+            let (env, _contract_id, client, _wallet, project_id, token) = setup();
             let donor = Address::generate(&env);
-            let msg_hash = MSG_HASH;
-
-            // Fund the donor so the token transfer inside donate succeeds.
-            let sac = StellarAssetClient::new(&env, &token);
-            sac.mint(&donor, &amount);
+            mint_tokens(&env, &token, &donor, amount);
 
             // donate must not panic (panics signal overflow via checked_add.expect)
-            client.donate(&token, &donor, &project_id, &amount, &msg_hash);
+            client.donate(&token, &donor, &project_id, &amount, &42u32);
 
             let global_total = client.get_global_total();
             let global_co2   = client.get_global_co2();
@@ -134,17 +140,14 @@ mod fuzz {
             a in 1i128..=MAX_DONATION / 2,
             b in 1i128..=MAX_DONATION / 2,
         ) {
-            let (env, client, _wallet, project_id, token) = setup();
+            let (env, _contract_id, client, _wallet, project_id, token) = setup();
             let donor_a = Address::generate(&env);
             let donor_b = Address::generate(&env);
-            let msg_hash = MSG_HASH;
+            mint_tokens(&env, &token, &donor_a, a);
+            mint_tokens(&env, &token, &donor_b, b);
 
-            let sac = StellarAssetClient::new(&env, &token);
-            sac.mint(&donor_a, &a);
-            sac.mint(&donor_b, &b);
-
-            client.donate(&token, &donor_a, &project_id, &a, &msg_hash);
-            client.donate(&token, &donor_b, &project_id, &b, &msg_hash);
+            client.donate(&token, &donor_a, &project_id, &a, &42u32);
+            client.donate(&token, &donor_b, &project_id, &b, &42u32);
 
             let global_total = client.get_global_total();
             let expected     = a.checked_add(b).expect("test helper overflow");
@@ -167,14 +170,11 @@ mod fuzz {
         fn prop_zero_donation_does_not_corrupt_state(
             legit in 1i128..=MAX_DONATION,
         ) {
-            let (env, client, _wallet, project_id, token) = setup();
+            let (env, _contract_id, client, _wallet, project_id, token) = setup();
             let donor = Address::generate(&env);
-            let msg_hash = MSG_HASH;
+            mint_tokens(&env, &token, &donor, legit);
 
-            let sac = StellarAssetClient::new(&env, &token);
-            sac.mint(&donor, &legit);
-
-            client.donate(&token, &donor, &project_id, &legit, &msg_hash);
+            client.donate(&token, &donor, &project_id, &legit, &42u32);
             let total_before = client.get_global_total();
 
             // A second call with the same donor — amount 0 may panic or succeed

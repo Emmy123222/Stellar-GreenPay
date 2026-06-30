@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fetchJobs } from "@/lib/api";
 import type { EscrowJob } from "@/utils/types";
+import { formatXLM } from "@/utils/format";
 
 export default function JobsIndexPage() {
   const [jobs, setJobs] = useState<EscrowJob[]>([]);
@@ -43,8 +44,8 @@ export default function JobsIndexPage() {
                 <span className="font-display font-semibold text-forest-900">
                   {j.title}
                 </span>
-                <span className="block text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 capitalize">
-                  {j.status.replace("_", " ")} · {j.amountEscrowXlm} XLM
+                <span className="block text-xs text-[#8aaa8a] mt-1 capitalize">
+                  {j.status.replace("_", " ")} · {formatXLM(j.amountEscrowXlm)}
                 </span>
               </Link>
             </li>
