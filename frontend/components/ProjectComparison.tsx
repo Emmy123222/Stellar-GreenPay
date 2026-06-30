@@ -49,17 +49,17 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
         </div>
 
         <div className="grid gap-4" style={{ gridTemplateColumns: `150px repeat(${projects.length}, minmax(180px, 1fr))` }}>
-          <div className="font-body text-xs uppercase tracking-widest text-[#8aaa8a]">Metric</div>
+          <div className="font-body text-xs uppercase tracking-widest text-[#8aaa8a] dark:text-forest-300">Metric</div>
           {projects.map((project) => (
             <div key={`${project.id}-header`} className="p-3 rounded-lg bg-forest-50 border border-forest-200">
               <p className="font-display text-sm font-semibold text-forest-900">{project.name}</p>
-              <p className="text-xs text-[#5a7a5a] mt-1 font-body">{project.category}</p>
+              <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-1 font-body">{project.category}</p>
             </div>
           ))}
 
           {ROWS.map((row) => (
             <Fragment key={row.key}>
-              <div className="font-body text-sm text-[#5a7a5a] py-2 border-t border-forest-100">
+              <div className="font-body text-sm text-[#5a7a5a] dark:text-[#8aaa8a] py-2 border-t border-forest-100">
                 {row.label}
               </div>
               {projects.map((project) => {
@@ -80,7 +80,7 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
                   <div key={`${project.id}-${row.key}`} className="py-2 border-t border-forest-100">
                     <p className="font-body text-sm text-forest-900">{value}</p>
                     {row.key === "raised" && (
-                      <p className="font-body text-xs text-[#8aaa8a] mt-1">{formatCO2(project.co2OffsetKg)} offset</p>
+                      <p className="font-body text-xs text-[#8aaa8a] dark:text-forest-300 mt-1">{formatCO2(project.co2OffsetKg)} offset</p>
                     )}
                   </div>
                 );

@@ -3,7 +3,10 @@ name: Build and Release Extension
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -11,16 +14,42 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          else
+            echo "Tag '$TAG' must be in the form v1.2.3" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          export VERSION
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest_path = Path("extension/manifest.json")
+          data = json.loads(manifest_path.read_text())
+          data["version"] = os.environ["VERSION"]
+          manifest_path.write_text(json.dumps(data, indent=2) + "\n")
+          PY
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "18"
 
       - name: Install dependencies
         run: |
           cd extension
-          npm install
+          npm ci
 
       - name: Build extension
         run: |
@@ -30,36 +59,33 @@ jobs:
       - name: Create distribution package
         run: |
           cd extension
-          mkdir -p greenpay-extension
-          cp manifest.json popup.html popup.css greenpay-extension/
-          cp -r dist greenpay-extension/
-          zip -r greenpay-extension.zip greenpay-extension/
+          zip -r "greenpay-extension-v${VERSION}.zip" dist/ manifest.json popup.html popup.css
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Upload to Chrome Web Store
+        if: ${{ secrets.CHROME_WEBSTORE_CLIENT_ID != '' && secrets.CHROME_WEBSTORE_CLIENT_SECRET != '' && secrets.CHROME_WEBSTORE_REFRESH_TOKEN != '' && secrets.CHROME_WEBSTORE_EXTENSION_ID != '' }}
+        run: |
+          npm install -g chrome-webstore-upload-cli
+          chrome-webstore-upload upload \
+            --source "extension/greenpay-extension-v${VERSION}.zip" \
+            --extension-id "${CHROME_WEBSTORE_EXTENSION_ID}" \
+            --client-id "${CHROME_WEBSTORE_CLIENT_ID}" \
+            --client-secret "${CHROME_WEBSTORE_CLIENT_SECRET}" \
+            --refresh-token "${CHROME_WEBSTORE_REFRESH_TOKEN}" \
+            --auto-publish
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CHROME_WEBSTORE_EXTENSION_ID: ${{ secrets.CHROME_WEBSTORE_EXTENSION_ID }}
+          CHROME_WEBSTORE_CLIENT_ID: ${{ secrets.CHROME_WEBSTORE_CLIENT_ID }}
+          CHROME_WEBSTORE_CLIENT_SECRET: ${{ secrets.CHROME_WEBSTORE_CLIENT_SECRET }}
+          CHROME_WEBSTORE_REFRESH_TOKEN: ${{ secrets.CHROME_WEBSTORE_REFRESH_TOKEN }}
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: extension/greenpay-extension.zip
+          files: extension/greenpay-extension-v${{ steps.version.outputs.version }}.zip
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Firefox version
-        run: |
-          cd extension
-          npm run build:firefox
-
-      - name: Create Firefox distribution
-        run: |
-          cd extension
-          mkdir -p greenpay-extension-firefox
-          cp manifest.firefox.json greenpay-extension-firefox/manifest.json
-          cp popup.html popup.css greenpay-extension-firefox/
-          cp -r dist-firefox greenpay-extension-firefox/dist
-          zip -r greenpay-extension-firefox.zip greenpay-extension-firefox/
-
-      - name: Upload Firefox artifact
-        uses: actions/upload-artifact@v3
-        with:
-          name: greenpay-extension-firefox
-          path: extension/greenpay-extension-firefox.zip
