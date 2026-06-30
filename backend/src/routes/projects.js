@@ -514,6 +514,12 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch subscriber count
+    const subscriberResult = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
+      [req.params.id],
+    );
+
     // Fetch milestones
     const milestoneResult = await pool.query(
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
@@ -547,6 +553,7 @@ router.get("/:id", async (req, res, next) => {
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        subscriberCount: subscriberResult.rows[0].count,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
       },
     });
