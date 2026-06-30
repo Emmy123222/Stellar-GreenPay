@@ -70,6 +70,8 @@ function ProjectCard({
       style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityLabel={`View ${project.name} project`}
+      accessibilityRole="button"
     >
       <View style={styles.cardHeader}>
         <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
@@ -107,6 +109,7 @@ function ProjectCard({
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const handleScan = () => router.push('/scan' as `${string}`);
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -204,6 +207,8 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.retryButton, { backgroundColor: colors.primary }]}
                 onPress={() => { setLoading(true); loadProjects(); }}
+                accessibilityLabel="Retry loading projects"
+                accessibilityRole="button"
               >
                 <Text style={[styles.retryText, { color: colors.buttonText }]}>Retry</Text>
               </TouchableOpacity>
