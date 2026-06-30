@@ -7,10 +7,11 @@ const router  = express.Router();
 const { v4: uuid } = require("uuid");
 const logger = require("../logger");
 const pool = require("../db/pool");
+const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
-const { z } = require("zod");
+const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 const donationSchema = z.object({
@@ -34,7 +35,16 @@ function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) { const e = new Error("Invalid transaction hash"); e.status = 400; throw e; }
 }
 
-// POST /api/donations — record a donation after on-chain tx
+/**
+ * Record a donation after an on-chain transaction is observed.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the persisted donation record or an error response.
+ * @throws {Error} If validation, project lookup, or donation persistence fails.
+ */
 async function recordDonation(req, res, next) {
   let client;
   let inTransaction = false;
@@ -60,6 +70,18 @@ async function recordDonation(req, res, next) {
     );
     if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
 
+    // Verify the transaction is confirmed on-chain before recording it.
+    // Prevents a caller from inflating raised_xlm with a fake or unconfirmed tx hash.
+    let onChainTx;
+    try {
+      onChainTx = await server.getTransaction(transactionHash);
+    } catch {
+      const e = new Error("Transaction not found on Stellar"); e.status = 400; throw e;
+    }
+    if (!onChainTx || onChainTx.successful !== true) {
+      const e = new Error("Transaction not confirmed on Stellar"); e.status = 400; throw e;
+    }
+
     await client.query("BEGIN");
     inTransaction = true;
 
@@ -80,6 +102,18 @@ async function recordDonation(req, res, next) {
         transactionHash,
       ],
     );
+
+    const recordedDonation = donationResult.rows[0] || {
+      id: uuid(),
+      project_id: projectId,
+      donor_address: donorAddress,
+      amount_xlm: currency === "XLM" ? parsedAmount : null,
+      amount: parsedAmount,
+      currency,
+      message: message?.trim().slice(0, 100) || null,
+      transaction_hash: transactionHash,
+      created_at: new Date().toISOString(),
+    };
 
     // Check for active matching offers
     if (currency === "XLM") {
@@ -137,47 +171,12 @@ async function recordDonation(req, res, next) {
       [currency === "XLM" ? parsedAmount : 0, projectId],
     );
 
-    // Update donor profile
-    const existingProfileResult = await client.query(
-      "SELECT * FROM profiles WHERE public_key = $1",
-      [donorAddress],
-    );
-    const existingProfile = existingProfileResult.rows[0];
-    const previousTotal = existingProfile
-      ? Number.parseFloat(existingProfile.total_donated_xlm || "0")
-      : 0;
-    const newTotal = currency === "XLM" ? previousTotal + parsedAmount : previousTotal;
-    const projectsSupportedResult = await client.query(
-      `SELECT COUNT(DISTINCT project_id) AS count
-       FROM donations
-       WHERE donor_address = $1`,
-      [donorAddress],
-    );
-    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
-    const badges = computeBadges(newTotal);
-
-    await client.query(
-      `INSERT INTO profiles (
-        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW(), NOW())
-      ON CONFLICT (public_key) DO UPDATE SET
-        total_donated_xlm = EXCLUDED.total_donated_xlm,
-        projects_supported = EXCLUDED.projects_supported,
-        badges = EXCLUDED.badges,
-        updated_at = EXCLUDED.updated_at`,
-      [
-        donorAddress,
-        existingProfile?.display_name || null,
-        existingProfile?.bio || null,
-        newTotal.toFixed(7),
-        projectsSupported,
-        JSON.stringify(badges),
-      ],
-    );
-
     await client.query("COMMIT");
     inTransaction = false;
+
+    enqueueProfileUpdate(donorAddress).catch((err) => {
+      logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
+    });
 
     (req.log || logger).info({
       event: "donation_recorded",
@@ -189,17 +188,20 @@ async function recordDonation(req, res, next) {
     }, "Donation recorded");
 
     const io = req.app?.get("io");
-    if (io) {
+    if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
         donorAddress,
-        amountXLM: donationResult.rows[0].amount_xlm,
+        amountXLM: recordedDonation.amount_xlm,
         transactionHash,
         timestamp: new Date().toISOString(),
       });
     }
 
-    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+    const mappedDonation = mapDonationRow(donationResult.rows[0]);
+    donationEvents.emit("new_donation", mappedDonation);
+
+    res.status(201).json({ success: true, data: mappedDonation });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     next(e);
@@ -208,7 +210,40 @@ async function recordDonation(req, res, next) {
   }
 }
 
-router.post("/", donationLimiter, validateBody(donationSchema), recordDonation);
+/**
+ * Register a donation via the public API.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created donation payload.
+ * @throws {Error} If rate limiting or donation creation fails.
+ */
+router.post("/", donationLimiter, recordDonation);
+
+// GET /api/donations/stream
+router.get("/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const keepAlive = setInterval(() => {
+    res.write(":\\n\\n");
+  }, 15000);
+
+  const onNewDonation = (donation) => {
+    res.write(`data: ${JSON.stringify(donation)}\\n\\n`);
+  };
+
+  donationEvents.on("new_donation", onNewDonation);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    donationEvents.off("new_donation", onNewDonation);
+  });
+});
 
 // GET /api/donations/project/:id
 router.get("/project/:projectId/messages", async (req, res, next) => {
@@ -230,6 +265,16 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
   }
 });
 
+/**
+ * List donations for a specific project.
+ *
+ * @route GET /api/donations/project/:projectId
+ * @param {import('express').Request} req - Express request containing the project id and pagination options.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the paginated donation history.
+ * @throws {Error} If the donation query fails.
+ */
 router.get("/project/:projectId", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
@@ -260,7 +305,16 @@ router.get("/project/:projectId", async (req, res, next) => {
   }
 });
 
-// GET /api/donations/donor/:publicKey
+/**
+ * List donations for a specific donor.
+ *
+ * @route GET /api/donations/donor/:publicKey
+ * @param {import('express').Request} req - Express request containing the donor public key.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the donor donation history.
+ * @throws {Error} If validation or the donation query fails.
+ */
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);

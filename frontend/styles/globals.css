@@ -5,6 +5,7 @@
 @tailwind utilities;
 
 @layer base {
+  /* ── Light theme (default) ───────────────────────────────────────── */
   :root {
     --bg: #f0f7f0;
     --surface: #ffffff;
@@ -19,18 +20,19 @@
     --subtle: #c8dfc8;
   }
 
+  /* ── Dark theme (toggled via `.dark` class on <html>) ─────────────── */
   .dark {
-    --bg: #0b1a0b;
-    --surface: #0f220f;
-    --surface-2: #162816;
-    --border: rgba(76, 175, 112, 0.18);
-    --border-hover: rgba(76, 175, 112, 0.40);
-    --green: #4caf70;
-    --green-light: #66bb6a;
-    --green-dim: rgba(76, 175, 112, 0.10);
-    --text: #c8dfc8;
-    --muted: #8aaa8a;
-    --subtle: #1a2e1a;
+    --bg: #06140a;
+    --surface: #102214;
+    --surface-2: #1c3928;
+    --border: rgba(96, 208, 123, 0.18);
+    --border-hover: rgba(96, 208, 123, 0.35);
+    --green: #60d07b;
+    --green-light: #81c784;
+    --green-dim: rgba(96, 208, 123, 0.10);
+    --text: #e6f5e9;
+    --muted: #b2d5b5;
+    --subtle: #24472f;
   }
 
   * {
@@ -46,6 +48,7 @@
     font-family: "Nunito", sans-serif;
     -webkit-font-smoothing: antialiased;
     min-height: 100vh;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   ::-webkit-scrollbar {
@@ -62,35 +65,44 @@
 
 @layer components {
   .card {
-    @apply bg-white border border-[rgba(34,114,57,0.12)] rounded-2xl p-6 shadow-sm;
+    @apply bg-white dark:bg-[#102214] border border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)]
+           rounded-2xl p-6 shadow-sm dark:shadow-none;
   }
 
   .card-hover {
-    @apply card hover:border-[rgba(34,114,57,0.30)] hover:shadow-md transition-all duration-200 cursor-pointer;
+    @apply card hover:border-[rgba(34,114,57,0.30)] dark:hover:border-[rgba(96,208,123,0.40)]
+           hover:shadow-md dark:hover:bg-[#15291a] transition-all duration-200 cursor-pointer;
   }
 
   .btn-primary {
-    @apply bg-[#227239] hover:bg-[#1a5a2c] text-white font-semibold px-6 py-3 rounded-xl
+    @apply bg-[#227239] dark:bg-[#3da668] hover:bg-[#1a5a2c] dark:hover:bg-[#60d07b]
+           text-white font-semibold px-6 py-3 rounded-xl
            transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed
-           focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
+           focus:outline-none focus:ring-2 focus:ring-green-500 dark:focus:ring-[#60d07b] focus:ring-offset-2
+           dark:focus:ring-offset-[#06140a];
   }
 
   .btn-secondary {
-    @apply border border-[rgba(34,114,57,0.35)] hover:border-[rgba(34,114,57,0.65)]
-           text-[#227239] font-medium px-6 py-3 rounded-xl transition-all duration-200
-           bg-[rgba(34,114,57,0.04)] hover:bg-[rgba(34,114,57,0.08)]
-           focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
+    @apply border border-[rgba(34,114,57,0.35)] dark:border-[rgba(96,208,123,0.35)]
+           hover:border-[rgba(34,114,57,0.65)] dark:hover:border-[rgba(96,208,123,0.65)]
+           text-[#227239] dark:text-[#81c784] font-medium px-6 py-3 rounded-xl transition-all duration-200
+           bg-[rgba(34,114,57,0.04)] dark:bg-[rgba(96,208,123,0.06)]
+           hover:bg-[rgba(34,114,57,0.08)] dark:hover:bg-[rgba(96,208,123,0.12)]
+           focus:outline-none focus:ring-2 focus:ring-green-500 dark:focus:ring-[#60d07b] focus:ring-offset-2
+           dark:focus:ring-offset-[#06140a];
   }
 
   .btn-ghost {
-    @apply text-[#5a7a5a] hover:text-[#227239] font-medium px-4 py-2 rounded-lg
-           transition-colors hover:bg-[rgba(34,114,57,0.06)];
+    @apply text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-[#227239] dark:hover:text-[#81c784]
+           font-medium px-4 py-2 rounded-lg transition-colors hover:bg-[rgba(34,114,57,0.06)]
+           dark:hover:bg-[rgba(96,208,123,0.10)];
   }
 
   .input-field {
-    @apply w-full bg-[#f0f7f0] border border-[rgba(34,114,57,0.18)] rounded-xl px-4 py-3
-           text-[#1a2e1a] placeholder-[#8aaa8a]
-           focus:outline-none focus:border-[rgba(34,114,57,0.50)] focus:ring-1 focus:ring-[rgba(34,114,57,0.25)]
+    @apply w-full bg-[#f0f7f0] dark:bg-[#0e1f13] border border-[rgba(34,114,57,0.18)] dark:border-[rgba(96,208,123,0.20)]
+           rounded-xl px-4 py-3 text-[#1a2e1a] dark:text-[#e6f5e9] placeholder-[#8aaa8a] dark:placeholder-[#7a9b80]
+           focus:outline-none focus:border-[rgba(34,114,57,0.50)] dark:focus:border-[rgba(96,208,123,0.55)]
+           focus:ring-1 focus:ring-[rgba(34,114,57,0.25)] dark:focus:ring-[rgba(96,208,123,0.30)]
            transition-all duration-200 text-sm font-body;
   }
 
@@ -99,7 +111,7 @@
   }
 
   .label {
-    @apply block text-xs font-semibold text-[#5a7a5a] uppercase tracking-widest mb-2;
+    @apply block text-xs font-semibold text-[#5a7a5a] dark:text-[#b2d5b5] uppercase tracking-widest mb-2;
   }
 
   .badge {
@@ -107,38 +119,40 @@
   }
 
   .badge-active {
-    @apply badge bg-emerald-50 text-emerald-700 border-emerald-200;
+    @apply badge bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/40;
   }
 
   .badge-complete {
-    @apply badge bg-blue-50 text-blue-700 border-blue-200;
+    @apply badge bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/40;
   }
 
   .badge-paused {
-    @apply badge bg-amber-50 text-amber-700 border-amber-200;
+    @apply badge bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700/40;
   }
 
   .badge-verified {
-    @apply badge bg-green-50 text-green-700 border-green-200;
+    @apply badge bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/40;
   }
 
   .progress-bar {
-    @apply h-2 bg-[#c8dfc8] rounded-full overflow-hidden;
+    @apply h-2 bg-[#c8dfc8] dark:bg-[#24472f] rounded-full overflow-hidden;
   }
 
   .progress-fill {
-    @apply h-full bg-gradient-to-r from-[#227239] to-[#4caf70] rounded-full transition-all duration-500;
+    @apply h-full bg-gradient-to-r from-[#227239] to-[#4caf70] dark:from-[#3da668] dark:to-[#60d07b]
+           rounded-full transition-all duration-500;
   }
 
   .address-tag {
-    @apply font-mono text-xs bg-[#e8f3e8] text-[#227239] px-2.5 py-1 rounded-lg border border-[rgba(34,114,57,0.20)];
+    @apply font-mono text-xs bg-[#e8f3e8] dark:bg-[#1c3928] text-[#227239] dark:text-[#81c784]
+           px-2.5 py-1 rounded-lg border border-[rgba(34,114,57,0.20)] dark:border-[rgba(96,208,123,0.25)];
   }
   .dark .address-tag {
     @apply bg-[#162816] text-[#4caf70] border-[rgba(76,175,112,0.25)];
   }
 
   .stat-card {
-    @apply bg-[#e8f3e8] rounded-xl p-4 border border-[rgba(34,114,57,0.10)];
+    @apply bg-[#e8f3e8] dark:bg-[#1c3928] rounded-xl p-4 border border-[rgba(34,114,57,0.10)] dark:border-[rgba(96,208,123,0.18)];
   }
   .dark .stat-card {
     @apply bg-[#162816] border-[rgba(76,175,112,0.12)];
@@ -243,7 +257,7 @@
   }
 
   .divider {
-    @apply border-t border-[rgba(34,114,57,0.08)] my-6;
+    @apply border-t border-[rgba(34,114,57,0.08)] dark:border-[rgba(96,208,123,0.12)] my-6;
   }
 
   /* Tooltip Styles */
@@ -253,9 +267,9 @@
 
   .tooltip-text {
     @apply invisible absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56
-           bg-forest-900 text-white text-[11px] leading-snug p-2.5 rounded-xl shadow-xl
+           bg-forest-900 dark:bg-[#020805] text-white text-[11px] leading-snug p-2.5 rounded-xl shadow-xl
            opacity-0 transition-all duration-200 pointer-events-none font-body text-center
-           border border-forest-800/50 backdrop-blur-sm;
+           border border-forest-800/50 dark:border-[rgba(96,208,123,0.20)] backdrop-blur-sm;
   }
   .dark .tooltip-text {
     @apply bg-[#0a1a0a] border-[#1a3a1a]/50;
@@ -268,7 +282,7 @@
 
   .tooltip-text::after {
     content: "";
-    @apply absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-forest-900;
+    @apply absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-forest-900 dark:border-t-[#020805];
   }
 }
 

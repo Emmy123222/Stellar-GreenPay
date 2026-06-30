@@ -13,7 +13,8 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike, followProject, unfollowProject } from "@/lib/api";
+import WalletAddressQRCode from "@/components/WalletAddressQRCode";
+import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
@@ -716,6 +717,7 @@ export default function ProjectDetail({
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
       <Head>
         <title>{ogTitle}</title>
+        <meta name="greenpay:project:id" content={project.id} />
         <meta name="description" content={ogDescription} />
         <meta property="og:type" content="website" />
         <meta property="og:title" content={ogTitle} />
@@ -954,11 +956,15 @@ export default function ProjectDetail({
                   🎉 Goal Reached!
                 </div>
               ) : (
-                <div className="flex items-center gap-5">
-                  <CircularProgress percentage={pct} size={64} strokeWidth={6} />
-                  <div className="flex-1">
-                    <p className="font-semibold text-forest-800 text-lg">{formatXLM(project.raisedXLM)} raised</p>
-                    <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body mt-0.5">towards {formatXLM(project.goalXLM)} goal</p>
+                <div className="space-y-3">
+                  <ProjectProgressBar
+                    raisedXLM={project.raisedXLM}
+                    goalXLM={project.goalXLM}
+                    className="w-full"
+                  />
+                  <div className="flex items-center justify-between text-sm text-[#5a7a5a] font-body">
+                    <span>{formatXLM(project.raisedXLM)} raised</span>
+                    <span>{Number(project.goalXLM) > 0 ? `towards ${formatXLM(project.goalXLM)} goal` : "No goal set"}</span>
                   </div>
                 </div>
               )}
@@ -1083,6 +1089,15 @@ export default function ProjectDetail({
                   </svg>
                 )}
               </button>
+            </div>
+
+            {/* QR code — tap to reveal; lets Freighter mobile scan-to-donate
+                without copying the wallet address manually (issue #405) */}
+            <div className="mt-3">
+              <WalletAddressQRCode
+                walletAddress={project.walletAddress}
+                projectName={project.name}
+              />
             </div>
           </div>
 

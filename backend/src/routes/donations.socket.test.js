@@ -4,6 +4,9 @@ jest.mock("../db/pool", () => ({ connect: jest.fn() }));
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
+jest.mock("../services/stellar", () => ({
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
 
 const http = require("http");
 const express = require("express");

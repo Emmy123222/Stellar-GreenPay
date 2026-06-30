@@ -410,6 +410,25 @@
                             }
                           ]
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "VoterList"
+                            },
+                            {
+                              "string": "proj-001"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            }
+                          ]
+                        }
                       }
                     ]
                   }
@@ -898,7 +917,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Already voted on this proposal' from contract function 'Symbol(obj#339)'"
+                  "string": "caught panic 'Already voted on this proposal' from contract function 'Symbol(obj#347)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"

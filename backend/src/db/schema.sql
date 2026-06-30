@@ -31,6 +31,14 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPT
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model        TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 
+-- Webhook notification support: project owners can register a URL that receives
+-- signed POSTs when donation milestones are reached.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
 -- donations: immutable donation ledger. Each row is a single
 -- contribution from donor_address to a project. transaction_hash must be
 -- unique (one Stellar payment → one donation). No updated_at column —
@@ -174,17 +182,36 @@ CREATE TABLE IF NOT EXISTS project_follows (
   UNIQUE(project_id, device_token_id)
 );
 
--- Community comments on project pages (v1.4)
--- Only wallets with ≥1 donation to the project may post.
--- Threaded replies are supported via parent_id (one level of nesting).
-CREATE TABLE IF NOT EXISTS project_comments (
+-- Verification requests submitted via the /apply form on the frontend.
+-- Each row represents an organisation asking the GreenPay admin team to
+-- verify their climate project. Mirrors the columns of migration 002.
+CREATE TABLE IF NOT EXISTS verification_requests (
   id UUID PRIMARY KEY,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  parent_id UUID REFERENCES project_comments(id) ON DELETE CASCADE,
-  donor_address TEXT NOT NULL,
-  message TEXT NOT NULL CHECK (char_length(message) BETWEEN 1 AND 2000),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  organization_name TEXT NOT NULL,
+  organization_website TEXT,
+  organization_country TEXT,
+  contact_email TEXT NOT NULL,
+  wallet_address TEXT NOT NULL,
+  project_name TEXT NOT NULL,
+  project_category TEXT NOT NULL,
+  project_location TEXT NOT NULL,
+  project_description TEXT,
+  co2_per_xlm NUMERIC(20, 7) NOT NULL,
+  expected_annual_tonnes_co2 NUMERIC(20, 7),
+  supporting_documents JSONB NOT NULL DEFAULT '[]'::JSONB,
+  storage_backend TEXT NOT NULL DEFAULT 'local',
+  notes TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reviewer_notes TEXT,
+  reviewed_by TEXT,
+  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ,
+  CONSTRAINT verification_requests_status_check
+    CHECK (status IN ('pending', 'in_review', 'approved', 'rejected')),
+  CONSTRAINT verification_requests_co2_positive
+    CHECK (co2_per_xlm >= 0)
 );
-
-CREATE INDEX IF NOT EXISTS idx_project_comments_project_id ON project_comments(project_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_project_comments_parent_id  ON project_comments(parent_id);
+CREATE INDEX IF NOT EXISTS verification_requests_status_idx
+  ON verification_requests (status, submitted_at DESC);
+CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
+  ON verification_requests (wallet_address);

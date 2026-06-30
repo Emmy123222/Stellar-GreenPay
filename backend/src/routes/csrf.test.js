@@ -11,6 +11,7 @@ describe("CSRF protection", () => {
     expect(res.body).toEqual(expect.objectContaining({ success: true }));
     expect(typeof res.body.csrfToken).toBe("string");
     expect(res.body.csrfToken.length).toBeGreaterThan(0);
+    expect(res.headers["content-security-policy"]).toBe("default-src 'none'; frame-ancestors 'none'");
   });
 
   it("rejects mutating requests without an X-CSRF-Token header", async () => {
