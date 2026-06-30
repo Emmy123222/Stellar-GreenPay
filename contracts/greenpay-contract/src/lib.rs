@@ -613,7 +613,7 @@ impl GreenPayContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String};
+    use soroban_sdk::{testutils::{Address as _, Events as _, Ledger as _}, Address, Env, String, TryFromVal};
     use soroban_sdk::token::StellarAssetClient;
 
     // ─── Existing tests ───────────────────────────────────────────────────────
@@ -877,6 +877,37 @@ mod tests {
         assert!(p.resolved);
         assert_eq!(p.votes_for,     1);
         assert_eq!(p.votes_against, 2);
+    }
+
+    #[test]
+    fn test_resolve_proposal_tie_rejected_with_rejection_event() {
+        let (env, cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &0u32);
+
+        for i in 0..2u32 {
+            let voter = Address::generate(&env);
+            grant_badge(&env, &cid, &voter);
+            client.vote_verify_project(&voter, &pid, &(i == 0));
+        }
+
+        extend_ttl(&env, &cid);
+        env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
+        client.resolve_proposal(&pid);
+
+        let p = client.get_proposal(&pid);
+        assert!(p.resolved);
+        assert_eq!(p.votes_for,     1);
+        assert_eq!(p.votes_against, 1);
+
+        let rejection_events = env.events().all().into_iter().filter(|(_, topics, _)| {
+            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("prop_rej")
+        }).count();
+        assert_eq!(rejection_events, 1);
+
+        let approval_events = env.events().all().into_iter().filter(|(_, topics, _)| {
+            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("proj_ver")
+        }).count();
+        assert_eq!(approval_events, 0);
     }
 
     #[test]
