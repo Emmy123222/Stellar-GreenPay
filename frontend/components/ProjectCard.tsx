@@ -7,6 +7,7 @@ import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass
 import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
+import ProjectProgressBar from "./ProjectProgressBar";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
@@ -73,22 +74,15 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
               ✅ Fully Funded
             </div>
           ) : (
-            <div className="flex items-center gap-3">
-              <CircularProgress percentage={pct} size={48} strokeWidth={4} />
-              <div className="flex-1 flex justify-between text-xs text-[#8aaa8a] font-body">
-                <div>
-                  <span className="font-semibold text-forest-700 block mb-0.5">{formatXLM(project.raisedXLM)}</span>
-                  {formatUSDEquivalent(project.raisedXLM, xlmUsd) && (
-                    <span className="block text-[10px] text-[#aac0aa]">raised ({formatUSDEquivalent(project.raisedXLM, xlmUsd)})</span>
-                  )}
-                  {!formatUSDEquivalent(project.raisedXLM, xlmUsd) && <span>raised</span>}
-                </div>
-                <div className="text-right">
-                  <span className="block mb-0.5">Goal: {formatXLM(project.goalXLM)}</span>
-                  {formatUSDEquivalent(project.goalXLM, xlmUsd) && (
-                    <span className="block text-[10px] text-[#aac0aa]">{formatUSDEquivalent(project.goalXLM, xlmUsd)}</span>
-                  )}
-                </div>
+            <div className="space-y-2">
+              <ProjectProgressBar
+                raisedXLM={project.raisedXLM}
+                goalXLM={project.goalXLM}
+                className="w-full"
+              />
+              <div className="flex items-center justify-between text-[11px] text-[#8aaa8a] font-body">
+                <span>{formatXLM(project.raisedXLM)} raised</span>
+                <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM)}` : "No goal set"}</span>
               </div>
             </div>
           )}
