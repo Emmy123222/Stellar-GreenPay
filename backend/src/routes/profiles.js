@@ -7,6 +7,8 @@ const router  = express.Router();
 const pool = require("../db/pool");
 const { mapProfileRow } = require("../services/store");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid public key"); e.status = 400; throw e; }
@@ -14,16 +16,46 @@ function validateKey(k) {
 
 const profilePostLimiter = createRateLimiter(20, 1);
 
+const profileSchema = z.object({
+  publicKey: z.string().min(1, "publicKey is required"),
+  displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
+  bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
+});
+
 router.get("/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
     const result = await pool.query("SELECT * FROM profiles WHERE public_key = $1", [req.params.publicKey]);
     if (!result.rows[0]) { const e = new Error("Profile not found"); e.status = 404; throw e; }
-    res.json({ success: true, data: mapProfileRow(result.rows[0]) });
+
+    const co2Result = await pool.query(
+      `SELECT COALESCE(
+        SUM(
+          CASE
+            WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+            ELSE 0
+          END
+        ),
+        0
+      ) AS total_co2_offset_kg
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+      [req.params.publicKey],
+    );
+    const totalCo2OffsetKg = Math.round(
+      Number.parseFloat(co2Result.rows[0]?.total_co2_offset_kg || "0"),
+    );
+
+    res.json({
+      success: true,
+      data: { ...mapProfileRow(result.rows[0]), totalCo2OffsetKg },
+    });
   } catch (e) { next(e); }
 });
 
-router.post("/", profilePostLimiter, async (req, res, next) => {
+router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, res, next) => {
   try {
     const { publicKey, displayName, bio } = req.body;
     validateKey(publicKey);

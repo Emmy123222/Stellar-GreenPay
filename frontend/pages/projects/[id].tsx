@@ -13,6 +13,7 @@ import WalletConnect from "@/components/WalletConnect";
 import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
+import WalletAddressQRCode from "@/components/WalletAddressQRCode";
 import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
@@ -78,6 +79,9 @@ export default function ProjectDetail({
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [aiSummaryState, setAiSummaryState] = useState<"idle" | "loading" | "error">("idle");
   const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followCount, setFollowCount] = useState(0);
+  const [followLoading, setFollowLoading] = useState(false);
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -92,7 +96,7 @@ export default function ProjectDetail({
   useEffect(() => {
     if (!id) return;
     Promise.all([
-      fetchProject(id as string),
+      fetchProject(id as string, publicKey ?? undefined),
       fetchProjectUpdates(id as string),
       fetchProjectMatches(id as string),
     ])
@@ -100,6 +104,10 @@ export default function ProjectDetail({
         setProject(p);
         setUpdates(u);
         setMatches(m);
+        // Seed follow state from the server response so the button is correct
+        // on initial load without a separate round-trip.
+        setIsFollowing(p.isFollowing ?? false);
+        setFollowCount(p.followCount ?? 0);
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
@@ -145,6 +153,22 @@ export default function ProjectDetail({
       setUpdateLikes((prev) => ({ ...prev, [updateId]: result }));
     } catch {
       // silently fail
+    }
+  };
+
+  const handleToggleFollow = async () => {
+    if (!publicKey || !project || followLoading) return;
+    setFollowLoading(true);
+    try {
+      const result = isFollowing
+        ? await unfollowProject(project.id, publicKey)
+        : await followProject(project.id, publicKey);
+      setIsFollowing(result.isFollowing);
+      setFollowCount(result.followCount);
+    } catch {
+      // silently fail — button will revert on next load
+    } finally {
+      setFollowLoading(false);
     }
   };
 
@@ -730,7 +754,7 @@ export default function ProjectDetail({
 
       <Link
         href="/projects"
-        className="inline-flex items-center gap-1 text-sm text-[#5a7a5a] hover:text-forest-700 transition-colors mb-6 font-body"
+        className="inline-flex items-center gap-1 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] hover:text-forest-700 transition-colors mb-6 font-body"
       >
         ← Back to Projects
       </Link>
@@ -850,7 +874,7 @@ export default function ProjectDetail({
                       ✓ Verified
                     </span>
                   ) : null}
-                  <span className="text-xs text-[#8aaa8a] bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
+                  <span className="text-xs text-[#8aaa8a] dark:text-forest-300 bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
                     {project.category}
                   </span>
                   <button
@@ -860,6 +884,25 @@ export default function ProjectDetail({
                   >
                     {shareState === "copied" ? "✓ Link copied!" : "Share 🌍"}
                   </button>
+                  {/* Follow button — visible to connected wallets only */}
+                  {publicKey && (
+                    <button
+                      onClick={handleToggleFollow}
+                      disabled={followLoading}
+                      className={`text-xs py-1 px-3 rounded-lg border font-medium transition-all duration-200 ${
+                        isFollowing
+                          ? "bg-green-50 text-green-700 border-green-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300"
+                          : "bg-forest-50 text-forest-700 border-forest-200 hover:bg-green-50 hover:text-green-700 hover:border-green-300"
+                      } ${followLoading ? "opacity-60 cursor-not-allowed" : ""}`}
+                      title={isFollowing ? "Unfollow project" : "Follow project"}
+                    >
+                      {followLoading
+                        ? "…"
+                        : isFollowing
+                        ? `✓ Following${followCount > 0 ? ` (${followCount})` : ""}`
+                        : `Follow${followCount > 0 ? ` (${followCount})` : ""}`}
+                    </button>
+                  )}
                   <button
                     onClick={() => toggleWishlist(project.id)}
                     className={`p-2 rounded-lg border transition-all duration-300 transform active:scale-90 
@@ -892,14 +935,14 @@ export default function ProjectDetail({
                   {project.name}
                 </h1>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
-                  <p className="text-[#5a7a5a] text-sm font-body">
+                  <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body">
                     📍 {project.location}
                   </p>
                   {(project.averageRating || 0) > 0 && (
                     <div className="flex items-center gap-1">
                       <span className="text-amber-400 text-sm">★</span>
                       <span className="text-forest-900 text-sm font-bold">{project.averageRating?.toFixed(1)}</span>
-                      <span className="text-[#8aaa8a] text-xs">({project.ratingCount} reviews)</span>
+                      <span className="text-[#8aaa8a] dark:text-forest-300 text-xs">({project.ratingCount} reviews)</span>
                     </div>
                   )}
                 </div>
@@ -913,11 +956,15 @@ export default function ProjectDetail({
                   🎉 Goal Reached!
                 </div>
               ) : (
-                <div className="flex items-center gap-5">
-                  <CircularProgress percentage={pct} size={64} strokeWidth={6} />
-                  <div className="flex-1">
-                    <p className="font-semibold text-forest-800 text-lg">{formatXLM(project.raisedXLM)} raised</p>
-                    <p className="text-[#5a7a5a] text-sm font-body mt-0.5">towards {formatXLM(project.goalXLM)} goal</p>
+                <div className="space-y-3">
+                  <ProjectProgressBar
+                    raisedXLM={project.raisedXLM}
+                    goalXLM={project.goalXLM}
+                    className="w-full"
+                  />
+                  <div className="flex items-center justify-between text-sm text-[#5a7a5a] font-body">
+                    <span>{formatXLM(project.raisedXLM)} raised</span>
+                    <span>{Number(project.goalXLM) > 0 ? `towards ${formatXLM(project.goalXLM)} goal` : "No goal set"}</span>
                   </div>
                 </div>
               )}
@@ -970,13 +1017,13 @@ export default function ProjectDetail({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-[#8aaa8a] font-body">{s.label}</p>
+                  <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{s.label}</p>
                 </div>
               ))}
             </div>
 
             {/* Wallet link */}
-            <div className="mt-4 pt-4 border-t border-forest-100 flex items-center gap-2 text-xs text-[#8aaa8a] font-body">
+            <div className="mt-4 pt-4 border-t border-forest-100 flex items-center gap-2 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
               <span>Project wallet:</span>
               <a
                 href={accountUrl(project.walletAddress)}
@@ -1028,7 +1075,7 @@ export default function ProjectDetail({
                   </span>
                 ) : (
                   <svg
-                    className="w-4 h-4 text-[#8aaa8a] hover:text-forest-700"
+                    className="w-4 h-4 text-[#8aaa8a] dark:text-forest-300 hover:text-forest-700"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1042,6 +1089,15 @@ export default function ProjectDetail({
                   </svg>
                 )}
               </button>
+            </div>
+
+            {/* QR code — tap to reveal; lets Freighter mobile scan-to-donate
+                without copying the wallet address manually (issue #405) */}
+            <div className="mt-3">
+              <WalletAddressQRCode
+                walletAddress={project.walletAddress}
+                projectName={project.name}
+              />
             </div>
           </div>
 
@@ -1093,7 +1149,7 @@ export default function ProjectDetail({
                   {project.aiSummary}
                 </p>
               ) : (
-                <p className="text-sm text-[#5a7a5a] italic font-body">
+                <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] italic font-body">
                   No AI summary yet. Click &ldquo;Generate summary&rdquo; to create one for donors.
                 </p>
               )}
@@ -1193,7 +1249,7 @@ export default function ProjectDetail({
                         Completed
                       </span>
                     </div>
-                    <p className="text-xs text-[#5a7a5a] font-body mb-2">
+                    <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-2">
                       Ended {new Date(campaign.deadline).toLocaleDateString()}
                     </p>
                     <div className="flex justify-between text-xs mb-1 font-body">
@@ -1221,7 +1277,7 @@ export default function ProjectDetail({
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-2">
               Campaign Creator
             </h2>
-            <p className="text-xs text-[#5a7a5a] font-body mb-4">
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
               Project admins can launch a time-limited campaign with a custom
               goal and deadline.
             </p>
@@ -1305,7 +1361,7 @@ export default function ProjectDetail({
               {t("project.projectUpdates")}
             </h2>
             {updates.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] font-body">{t("project.noUpdatesYet")}</p>
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">{t("project.noUpdatesYet")}</p>
             ) : (
               <div className="space-y-4">
                 {updates.map((u) => {
@@ -1319,12 +1375,12 @@ export default function ProjectDetail({
                         <h3 className="font-semibold text-forest-900 text-sm font-body">
                           {u.title}
                         </h3>
-                        <span className="text-xs text-[#8aaa8a] font-body">
+                        <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
                           {timeAgo(u.createdAt)}
                         </span>
                       </div>
                       <div
-                        className="text-[#5a7a5a] text-sm leading-relaxed font-body prose prose-sm max-w-none"
+                        className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed font-body prose prose-sm max-w-none"
                         dangerouslySetInnerHTML={{ __html: renderMarkdown(u.body) }}
                       />
                       <div className="flex items-center gap-3 mt-2">
@@ -1334,7 +1390,7 @@ export default function ProjectDetail({
                           className={`flex items-center gap-1.5 text-xs font-body transition-colors ${
                             like?.liked
                               ? "text-red-500 font-semibold"
-                              : "text-[#8aaa8a] hover:text-red-400"
+                              : "text-[#8aaa8a] dark:text-forest-300 hover:text-red-400"
                           } disabled:opacity-50`}
                         >
                           <span>{like?.liked ? "❤️" : "🤍"}</span>
@@ -1377,16 +1433,16 @@ export default function ProjectDetail({
               <h2 className="font-display text-lg font-semibold text-forest-900">
                 Donor Discussion
               </h2>
-              <span className="text-xs text-[#8aaa8a] font-body">On-chain memos</span>
+              <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">On-chain memos</span>
             </div>
-            <p className="text-xs text-[#5a7a5a] font-body mb-4">
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
               Discuss by donating — messages are Stellar transaction memos from real donations.
             </p>
 
             {discussionLoading ? (
-              <p className="text-sm text-[#5a7a5a] font-body">Loading discussion…</p>
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Loading discussion…</p>
             ) : discussion.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] font-body">
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
                 No memo messages yet. Be the first to leave a message with your donation.
               </p>
             ) : (
@@ -1397,7 +1453,7 @@ export default function ProjectDetail({
                   return (
                     <div key={m.id} className="p-3 rounded-xl border border-forest-100 bg-white">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div className="text-xs text-[#8aaa8a] font-body">
+                        <div className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
                           <a
                             href={accountUrl(m.from)}
                             target="_blank"
@@ -1450,7 +1506,7 @@ export default function ProjectDetail({
           {/* Impact Calculator */}
           <div className="card bg-forest-50 border-forest-200">
             <h3 className="font-display font-semibold text-forest-900 mb-2">Impact Calculator</h3>
-            <p className="text-xs text-[#5a7a5a] mb-3 font-body">See what your donation can achieve before you give.</p>
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mb-3 font-body">See what your donation can achieve before you give.</p>
             
             <div className="flex flex-wrap gap-2 mb-3">
               {["10", "25", "50", "100", "250"].map(p => (
@@ -1524,7 +1580,7 @@ export default function ProjectDetail({
             </div>
           ) : (
             <div>
-              <p className="text-center text-[#5a7a5a] text-sm mb-4 font-body">
+              <p className="text-center text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">
                 Connect your wallet to donate
               </p>
               <WalletConnect onConnect={onConnect} />
@@ -1534,7 +1590,7 @@ export default function ProjectDetail({
           {/* Share card */}
           <div className="card text-center bg-forest-50 border-forest-200">
             <p className="font-display font-semibold text-forest-900 mb-2">Spread the word 🌍</p>
-            <p className="text-xs text-[#5a7a5a] mb-3 font-body">Share this project with friends and family to increase its impact.</p>
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mb-3 font-body">Share this project with friends and family to increase its impact.</p>
             
             <div className="grid grid-cols-3 gap-2 mb-3">
               <button
@@ -1579,7 +1635,7 @@ export default function ProjectDetail({
             <p className="font-display font-semibold text-forest-900 mb-2">
               Impact Report 📊
             </p>
-            <p className="text-xs text-[#5a7a5a] mb-3 font-body">
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mb-3 font-body">
               Download a print-friendly summary of this project&apos;s progress and
               impact.
             </p>
@@ -1596,11 +1652,11 @@ export default function ProjectDetail({
             <p className="font-display font-semibold text-forest-900 mb-1">
               Get project updates 🔔
             </p>
-            <p className="text-xs text-[#5a7a5a] mb-3 font-body">
+            <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mb-3 font-body">
               Receive an email when this project posts new updates.
             </p>
             {subscriberCount !== null && (
-              <p className="text-xs text-[#8aaa8a] font-body mb-3">
+              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mb-3">
                 📬 {subscriberCount.toLocaleString()}{" "}
                 {subscriberCount === 1 ? "subscriber" : "subscribers"}
               </p>

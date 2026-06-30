@@ -1,6 +1,11 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  // Use the `class` strategy so dark mode is toggled explicitly by
+  // `lib/theme.tsx` (instead of auto-detecting `prefers-color-scheme`).
+  // Gives us localStorage persistence, a user-facing toggle in the
+  // navbar, and a deterministic first paint.
+  darkMode: "class",
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
