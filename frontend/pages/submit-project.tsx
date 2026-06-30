@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "next/router";
-import { submitProject } from "@/lib/api";
+import { notifyAdmin, submitProject } from "@/lib/api";
 import { PROJECT_CATEGORIES } from "@/utils/format";
 
 type Step = "org" | "project" | "wallet" | "methodology" | "done";
@@ -24,6 +24,7 @@ interface FormData {
   co2VerificationBody: string;
   co2AnnualTonnes: string;
   co2DocumentUrl: string;
+  impactMetrics: string[];
 }
 
 const STEPS: Step[] = ["org", "project", "wallet", "methodology", "done"];
@@ -36,6 +37,11 @@ const STEP_LABELS: Record<Step, string> = {
 };
 
 const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
+const IMPACT_METRICS = [
+  { label: "CO₂ Reduction", value: "co2-reduction" },
+  { label: "Tree Planting", value: "tree-planting" },
+  { label: "Community Jobs", value: "community-jobs" },
+];
 
 function Field({
   label,
@@ -78,6 +84,7 @@ export default function SubmitProjectPage() {
     co2VerificationBody: "",
     co2AnnualTonnes: "",
     co2DocumentUrl: "",
+    impactMetrics: [],
   });
 
   const set = (field: keyof FormData) => (
@@ -85,6 +92,15 @@ export default function SubmitProjectPage() {
   ) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
     setFieldErrors((prev) => ({ ...prev, [field]: undefined }));
+  };
+
+  const toggleImpactMetric = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      impactMetrics: prev.impactMetrics.includes(value)
+        ? prev.impactMetrics.filter((metric) => metric !== value)
+        : [...prev.impactMetrics, value],
+    }));
   };
 
   function validateStep(): boolean {
@@ -154,9 +170,19 @@ export default function SubmitProjectPage() {
           annualTonnesCO2: form.co2AnnualTonnes,
           documentUrl: form.co2DocumentUrl,
         },
+        impactMetrics: form.impactMetrics,
       };
       const data = await submitProject(payload);
       setReviewTimeline(data?.reviewTimeline ?? "5–10 business days");
+      try {
+        await notifyAdmin({
+          projectName: form.projectName,
+          contactEmail: form.contactEmail,
+          impactMetrics: form.impactMetrics,
+        });
+      } catch {
+        // Best-effort admin notification; the success state should still render.
+      }
       setStep("done");
     } catch (err: any) {
       const msg =
@@ -323,6 +349,23 @@ export default function SubmitProjectPage() {
             </Field>
             <Field label="Supporting Document URL" error={fieldErrors.co2DocumentUrl}>
               <input className="input-field" value={form.co2DocumentUrl} onChange={set("co2DocumentUrl")} placeholder="https://…" />
+            </Field>
+
+            <Field label="Impact Metrics">
+              <div className="flex flex-col gap-2 rounded-xl border border-[rgba(34,114,57,0.12)] bg-[#f8fcf8] p-3">
+                {IMPACT_METRICS.map((metric) => (
+                  <label key={metric.value} className="flex items-center gap-2 text-sm text-[#5a7a5a]">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-[#8aaa8a] text-emerald-600 focus:ring-emerald-500"
+                      checked={form.impactMetrics.includes(metric.value)}
+                      onChange={() => toggleImpactMetric(metric.value)}
+                      aria-label={metric.label}
+                    />
+                    <span>{metric.label}</span>
+                  </label>
+                ))}
+              </div>
             </Field>
 
             {serverError && (

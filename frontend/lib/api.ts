@@ -548,10 +548,24 @@ export interface SubmitProjectResponse {
   reviewTimeline: string;
 }
 
+export interface AdminNotificationPayload {
+  projectName: string;
+  contactEmail: string;
+  impactMetrics: string[];
+}
+
 export async function submitProject(payload: SubmitProjectPayload): Promise<SubmitProjectResponse> {
   const { data } = await api.post<{ success: boolean; data: SubmitProjectResponse }>(
     "/api/projects",
     payload,
   );
   return data.data;
+}
+
+export async function notifyAdmin(payload: AdminNotificationPayload) {
+  const { data } = await api.post<{ success: boolean; message?: string }>(
+    "/api/admin/notifications",
+    payload,
+  );
+  return data;
 }
