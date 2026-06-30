@@ -117,6 +117,8 @@ pub enum DataKey {
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
+    // Oracle for dynamic CO2 pricing
+    CO2OraclePrice,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -165,6 +167,7 @@ impl GreenPayContract {
         env.storage().instance().set(&DataKey::DonationCount,        &0u32);
         env.storage().instance().set(&DataKey::GlobalTotalRaised,    &0i128);
         env.storage().instance().set(&DataKey::GlobalCO2OffsetGrams, &0i128);
+        env.storage().instance().set(&DataKey::CO2OraclePrice,       &100i128);
     }
 
     // ─── Project management ───────────────────────────────────────────────────
@@ -320,9 +323,37 @@ impl GreenPayContract {
         token_client.transfer(&donor, &project.wallet, &amount);
 
         env.events().publish(
-            (symbol_short!("donated"), donor, project_id),
+            (symbol_short!("donated"), donor.clone(), project_id.clone()),
             (amount, donor_stats.badge.clone(), msg_hash),
         );
+
+        env.events().publish(
+            (symbol_short!("don_rec"), donor, project_id),
+            (amount, env.ledger().sequence()),
+        );
+
+        if donor_stats.badge != prev_badge && donor_stats.badge != BadgeTier::None {
+            env.events().publish(
+                (symbol_short!("badge_up"), donor),
+                donor_stats.badge.clone(),
+            );
+        }
+    }
+
+    // ─── Oracle management ────────────────────────────────────────────────────
+
+    pub fn set_co2_price(env: Env, admin: Address, price: i128) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can set CO2 price"); }
+        if price <= 0 { panic!("CO2 price must be positive"); }
+        env.storage().instance().set(&DataKey::CO2OraclePrice, &price);
+        env.events().publish((symbol_short!("oracle_upd"),), price);
+    }
+
+    pub fn get_co2_price(env: Env) -> i128 {
+        env.storage().instance().get(&DataKey::CO2OraclePrice).unwrap_or(100)
     }
 
     // ─── Getters ─────────────────────────────────────────────────────────────
@@ -449,7 +480,11 @@ impl GreenPayContract {
             resolved:        false,
         };
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
-        env.events().publish((symbol_short!("prop_new"), admin), (project_id, window));
+        env.events().publish((symbol_short!("prop_new"), admin), (project_id.clone(), window));
+        env.events().publish(
+            (symbol_short!("prop_crt"), admin),
+            (project_id, deadline_ledger),
+        );
     }
 
     /// Badge holders (≥ Seedling) cast a vote. One vote per address per proposal.
@@ -485,7 +520,11 @@ impl GreenPayContract {
                 .checked_add(1).expect("votes_against overflow");
         }
         env.storage().instance().set(&DataKey::Proposal(project_id.clone()), &proposal);
-        env.events().publish((symbol_short!("voted"), voter, project_id), approve);
+        env.events().publish((symbol_short!("voted"), voter.clone(), project_id.clone()), approve);
+        env.events().publish(
+            (symbol_short!("vote_cast"), voter, project_id),
+            approve,
+        );
     }
 
     /// Callable by anyone after the deadline. Resolves based on majority.
@@ -546,10 +585,10 @@ impl GreenPayContract {
             panic!("USDC token not configured");
         }
 
-        // Simple price stub: assume 1 USDC ≈ 8 XLM for now
-        // In production, this would call a real price oracle
+        let co2_price: i128 = env.storage().instance()
+            .get(&DataKey::CO2OraclePrice).unwrap_or(100);
         let xlm_equivalent = usdc_amount
-            .checked_mul(8).expect("USDC to XLM conversion overflow");
+            .checked_mul(co2_price / 100).expect("USDC to XLM conversion overflow");
 
         let mut project: Project = env.storage().instance()
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
