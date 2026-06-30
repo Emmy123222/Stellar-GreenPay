@@ -5,6 +5,7 @@ import { Toaster } from "sonner";
 import Navbar from "@/components/Navbar";
 import { PriceProvider } from "@/lib/priceContext";
 import { I18nProvider } from "@/lib/i18n";
+import { ThemeProvider } from "@/lib/themeContext";
 import { connectWallet, getConnectedPublicKey } from "@/lib/wallet";
 import "@/styles/globals.css";
 
@@ -31,6 +32,7 @@ export default function App({ Component, pageProps }: AppProps) {
   };
 
   return (
+    <ThemeProvider>
     <I18nProvider>
       <Head>
         <title>Stellar GreenPay — Climate Donations on Stellar</title>
@@ -38,12 +40,13 @@ export default function App({ Component, pageProps }: AppProps) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
       <Toaster position="top-right" richColors closeButton />
-      <div className="min-h-screen bg-[#f0f7f0]">
+      <div className="min-h-screen bg-[#f0f7f0] dark:bg-[#0b1a0b]">
         <Navbar publicKey={publicKey} onConnect={handleConnect} onDisconnect={() => setPublicKey(null)} />
         <main>
           <Component {...pageProps} publicKey={publicKey} onConnect={handleConnect} />
         </main>
       </div>
     </I18nProvider>
+    </ThemeProvider>
   );
 }

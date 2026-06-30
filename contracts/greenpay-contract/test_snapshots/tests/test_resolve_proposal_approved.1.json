@@ -513,6 +513,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "paused"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "registered_at"
                               },
                               "val": {

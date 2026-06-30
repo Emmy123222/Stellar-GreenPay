@@ -24,14 +24,14 @@ export default function WalletConnect({ onConnect }: WalletConnectProps) {
     <div className="card max-w-sm mx-auto text-center animate-slide-up shadow-green">
       <div className="text-4xl mb-4">🌿</div>
       <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Connect Your Wallet</h3>
-      <p className="text-[#5a7a5a] text-sm mb-5 font-body leading-relaxed">
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-5 font-body leading-relaxed">
         Use <a href="https://freighter.app" target="_blank" rel="noopener noreferrer" className="text-forest-600 hover:underline font-semibold">Freighter</a> to donate XLM directly to climate projects with zero platform fees.
       </p>
       {error && <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-body">{error}</div>}
       <button onClick={handleConnect} disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2">
         {loading ? <><Spinner />Connecting...</> : "🔗 Connect Freighter Wallet"}
       </button>
-      <p className="mt-3 text-xs text-[#8aaa8a] font-body">
+      <p className="mt-3 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
         No wallet? <a href="https://freighter.app" target="_blank" rel="noopener noreferrer" className="text-forest-600 hover:underline">Install Freighter →</a>
       </p>
     </div>
