@@ -23,7 +23,7 @@ function buildApp() {
   const app = express();
   app.use(express.json());
 
-  const io = { to: () => ({ emit: jest.fn() }) };
+  const io = { emit: jest.fn(), to: () => ({ emit: jest.fn() }) };
   app.set("io", io);
 
   app.use("/api/donations", donationsRouter);
@@ -80,14 +80,16 @@ describe("POST /api/donations", () => {
 
   test("records a valid donation", async () => {
     createMockClient(
-      { rows: [MOCK_PROJECT] },
-      { rows: [] },
-      { rows: [MOCK_DONATION_ROW] },
-      { rows: [] },
-      { rows: [] },
-      undefined,
-      { rows: [{ ...MOCK_DONATION_ROW, total_donated_xlm: 100 }] },
-      { rows: [] },
+      { rows: [MOCK_PROJECT] }, // SELECT project
+      { rows: [] }, // dedup check
+      { rows: [] }, // BEGIN
+      { rows: [MOCK_DONATION_ROW] }, // INSERT donation
+      { rows: [] }, // SELECT donation_matches
+      { rows: [] }, // UPDATE projects
+      { rows: [] }, // SELECT profiles (new donor)
+      { rows: [{ count: "1" }] }, // SELECT COUNT(DISTINCT project_id)
+      { rows: [] }, // INSERT INTO profiles
+      { rows: [] }, // COMMIT
     );
 
     const res = await request(app)
@@ -100,7 +102,7 @@ describe("POST /api/donations", () => {
         message: "Great project!",
         transactionHash: makeTxHash(),
       })
-      .expect(200);
+      .expect(201);
 
     expect(res.body.success).toBe(true);
   });
