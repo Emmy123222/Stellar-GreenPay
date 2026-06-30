@@ -105,6 +105,7 @@ pub enum DataKey {
     DonorStats(Address),
     ImpactNFT(Address, BadgeTier),
     DonationCount,
+    DonationRecord(u32),
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
     // Tracks whether `donor` has ever donated to `project` — used so
@@ -295,6 +296,16 @@ impl GreenPayContract {
         let dc: u32 = env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0);
         let new_dc = dc.checked_add(1).expect("DonationCount overflow");
         env.storage().instance().set(&DataKey::DonationCount, &new_dc);
+        // Store donation record for trustless enumeration
+        let donation_record = DonationRecord {
+            donor: donor.clone(),
+            project: project_id.clone(),
+            amount,
+            ledger: env.ledger().sequence(),
+            message_hash: msg_hash,
+            currency: symbol_short!("XLM"),
+        };
+        env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
 
         let gr: i128 = env.storage().instance().get(&DataKey::GlobalTotalRaised).unwrap_or(0);
         let new_gr = gr.checked_add(amount).expect("GlobalTotalRaised overflow");
@@ -348,6 +359,11 @@ impl GreenPayContract {
 
     pub fn get_donation_count(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0)
+    }
+
+    /// Retrieve a donation record by its index.
+    pub fn get_donation_record(env: Env, index: u32) -> DonationRecord {
+        env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -577,6 +593,16 @@ impl GreenPayContract {
         let dc: u32 = env.storage().instance().get(&DataKey::DonationCount).unwrap_or(0);
         let new_dc = dc.checked_add(1).expect("DonationCount overflow");
         env.storage().instance().set(&DataKey::DonationCount, &new_dc);
+        // Store USDC donation record for trustless enumeration
+        let donation_record = DonationRecord {
+            donor: donor.clone(),
+            project: project_id.clone(),
+            amount: usdc_amount,
+            ledger: env.ledger().sequence(),
+            message_hash: msg_hash,
+            currency: symbol_short!("USDC"),
+        };
+        env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
 
         let gr: i128 = env.storage().instance().get(&DataKey::GlobalTotalRaised).unwrap_or(0);
         env.storage().instance().set(&DataKey::GlobalTotalRaised,
@@ -652,6 +678,23 @@ mod tests {
         assert_eq!(client.get_project_count(), 0);
         assert_eq!(client.get_donation_count(), 0);
         assert_eq!(client.get_global_total(), 0);
+    }
+
+        #[test]
+    fn test_get_donation_record() {
+        let (env, cid, client, admin, pid) = setup();
+        // Set up USDC token
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        client.set_usdc_token(&env, &admin, &token);
+        let donor = Address::generate(&env);
+        let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
+        client.donate_usdc(&env, &token, &donor, &pid, usdc_amount, 0);
+        let record = client.get_donation_record(&env, 0);
+        assert_eq!(record.donor, donor);
+        assert_eq!(record.project, pid);
+        assert_eq!(record.amount, usdc_amount);
+        assert_eq!(record.currency, symbol_short!("USDC"));
     }
 
     #[test]
