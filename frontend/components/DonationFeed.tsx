@@ -125,7 +125,7 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
           Listening for live donations…
         </div>
       )}
-      <p className="text-center text-[#5a7a5a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
+      <p className="text-center text-[#5a7a5a] dark:text-[#8aaa8a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
     </div>
   );
 
@@ -166,9 +166,9 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
                 </span>
               )}
             </div>
-            {d.message && <p className="text-xs text-[#5a7a5a] mt-0.5 italic font-body">&quot;{d.message}&quot;</p>}
+            {d.message && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-0.5 italic font-body">&quot;{d.message}&quot;</p>}
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-[#8aaa8a] font-body">{timeAgo(d.createdAt)}</span>
+              <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</span>
               <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
                 className="text-xs text-forest-500 hover:text-forest-700 transition-colors font-body">
                 View tx ↗

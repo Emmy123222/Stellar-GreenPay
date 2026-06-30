@@ -8,11 +8,14 @@ const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
+const { adminKeyRequired } = require("../middleware/auth");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const { getOnChainProject, getProjectDonationEvents, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("../services/stellar");
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -29,6 +32,17 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
+
+const createProjectSchema = z.object({
+  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
+  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
+  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
+  category: z.enum(VALID_CATEGORIES),
+  wallet_address: z.string().min(1, "wallet_address is required"),
+  goal_xlm: z.union([z.string(), z.number()]).optional(),
+  tags: z.array(z.string()).optional().default([]),
+});
 
 /**
  * GET /api/projects/featured
@@ -205,7 +219,7 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
-router.post("/", async (req, res, next) => {
+router.post("/", validateBody(createProjectSchema), async (req, res, next) => {
   try {
     const { name, description, location, category, wallet_address, goal_xlm = 0, tags = [] } = req.body || {};
 
@@ -404,7 +418,7 @@ router.get("/:id/milestones", async (req, res, next) => {
   }
 });
 
-router.post("/:id/milestones", async (req, res, next) => {
+router.post("/:id/milestones", adminKeyRequired, async (req, res, next) => {
   try {
     const { title, percentage } = req.body;
     if (!title || typeof percentage !== "number") {
@@ -432,7 +446,7 @@ router.post("/:id/milestones", async (req, res, next) => {
   }
 });
 
-router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
+router.post("/:id/milestones/:milestoneId/reach", adminKeyRequired, async (req, res, next) => {
   try {
     const { transactionHash } = req.body;
     const result = await pool.query(
@@ -460,11 +474,43 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/admin/pending
+ * Admin-only endpoint returning unverified active projects for review.
+ */
+router.get("/admin/pending", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'"
+    );
+    const total = countResult.rows[0].total;
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE verified = false AND status = 'active'
+       ORDER BY created_at ASC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map(mapProjectRow),
+      total
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", async (req, res) => {
+router.post("/admin/register", adminKeyRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
     
@@ -503,7 +549,7 @@ router.post("/admin/register", async (req, res) => {
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
  */
-router.post("/admin/confirm", async (req, res) => {
+router.post("/admin/confirm", adminKeyRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
     
@@ -558,11 +604,35 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch subscriber count
+    const subscriberResult = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
+      [req.params.id],
+    );
+
     // Fetch milestones
     const milestoneResult = await pool.query(
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
       [req.params.id],
     );
+
+    // Fetch follower count and, when ?walletAddress=G... is provided, whether
+    // that wallet is currently following this project.
+    const followCountResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
+
+    let isFollowing = false;
+    const { walletAddress } = req.query;
+    if (walletAddress && typeof walletAddress === "string") {
+      const followResult = await pool.query(
+        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+        [req.params.id, walletAddress],
+      );
+      isFollowing = followResult.rowCount > 0;
+    }
 
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
@@ -591,7 +661,91 @@ router.get("/:id", async (req, res, next) => {
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
         averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        subscriberCount: subscriberResult.rows[0].count,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
+        followCount,
+        isFollowing,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/follow
+ * Follow a project. Body: { walletAddress: "G..." }
+ * Idempotent — re-following a project that is already followed is a no-op.
+ */
+router.post("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    await pool.query(
+      `INSERT INTO project_follows (project_id, wallet_address, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: true,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/projects/:id/follow
+ * Unfollow a project. Body: { walletAddress: "G..." }
+ * Idempotent — unfollowing a project not currently followed is a no-op.
+ */
+router.delete("/:id/follow", async (req, res, next) => {
+  try {
+    const { walletAddress } = req.body || {};
+    if (!walletAddress || typeof walletAddress !== "string") {
+      return res.status(400).json({ error: "walletAddress is required" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    await pool.query(
+      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
+      [req.params.id, walletAddress],
+    );
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: {
+        isFollowing: false,
+        followCount: parseInt(countResult.rows[0].count, 10) || 0,
       },
     });
   } catch (e) {
@@ -613,7 +767,7 @@ router.get("/:id", async (req, res, next) => {
  * Response: { success: true, data: { aiSummary, aiSummaryGeneratedAt,
  *                                    aiSummaryModel, aiSummarySourceHash } }
  */
-router.post("/:id/generate-summary", async (req, res, next) => {
+router.post("/:id/generate-summary", adminKeyRequired, async (req, res, next) => {
   try {
     const { adminAddress } = req.body || {};
     if (!adminAddress || typeof adminAddress !== "string") {
@@ -652,7 +806,7 @@ router.post("/:id/generate-summary", async (req, res, next) => {
   }
 });
 
-router.post("/:id/matching", async (req, res, next) => {
+router.post("/:id/matching", adminKeyRequired, async (req, res, next) => {
   try {
     const { matcherAddress, capXLM, multiplier, expiresAt } = req.body || {};
 
@@ -745,7 +899,7 @@ router.get("/:id/matching", async (req, res, next) => {
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
  */
-router.patch("/:id/status", async (req, res, next) => {
+router.patch("/:id/status", adminKeyRequired, async (req, res, next) => {
   try {
     const { status, reason, adminAddress } = req.body || {};
     const validStatuses = ["active", "rejected", "paused"];
@@ -780,6 +934,172 @@ router.patch("/:id/status", async (req, res, next) => {
     await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/comments
+ * Body: { donorAddress, message, parentId? }
+ * Only wallets with ≥1 confirmed donation to the project may post.
+ */
+router.post("/:id/comments", async (req, res, next) => {
+  try {
+    const { donorAddress, message, parentId } = req.body || {};
+
+    if (!donorAddress || typeof donorAddress !== "string") {
+      return res.status(400).json({ error: "donorAddress is required" });
+    }
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      return res.status(400).json({ error: "message is required" });
+    }
+    if (message.trim().length > 2000) {
+      return res.status(400).json({ error: "message must be 2000 characters or fewer" });
+    }
+
+    // Verify project exists
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Verify donor has at least one donation to this project
+    const donorCheck = await pool.query(
+      "SELECT 1 FROM donations WHERE project_id = $1 AND donor_address = $2 LIMIT 1",
+      [req.params.id, donorAddress],
+    );
+    if (!donorCheck.rows[0]) {
+      return res.status(403).json({ error: "Only donors who have contributed to this project can post comments" });
+    }
+
+    // If parentId provided, verify it belongs to the same project
+    if (parentId) {
+      const parentCheck = await pool.query(
+        "SELECT id FROM project_comments WHERE id = $1 AND project_id = $2",
+        [parentId, req.params.id],
+      );
+      if (!parentCheck.rows[0]) {
+        return res.status(400).json({ error: "parentId does not reference a comment on this project" });
+      }
+    }
+
+    const result = await pool.query(
+      `INSERT INTO project_comments (id, project_id, parent_id, donor_address, message)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [uuid(), req.params.id, parentId || null, donorAddress, message.trim()],
+    );
+
+    const row = result.rows[0];
+    res.status(201).json({
+      success: true,
+      data: {
+        id: row.id,
+        projectId: row.project_id,
+        parentId: row.parent_id || null,
+        donorAddress: row.donor_address,
+        message: row.message,
+        createdAt: new Date(row.created_at).toISOString(),
+        replies: [],
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/comments
+ * Query params: limit (default 20, max 100), cursor (opaque base64 pagination token)
+ * Returns top-level comments with their direct replies nested under `replies`.
+ */
+router.get("/:id/comments", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const pageSize = Math.min(Number.parseInt(req.query.limit, 10) || 20, 100);
+    const values = [req.params.id];
+    let cursorClause = "";
+
+    if (req.query.cursor) {
+      let cursorData;
+      try {
+        cursorData = JSON.parse(Buffer.from(req.query.cursor, "base64").toString("utf8"));
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      const { created_at, id } = cursorData;
+      if (!created_at || !id) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      values.push(created_at, id);
+      const caIdx = values.length - 1;
+      const idIdx = values.length;
+      cursorClause = `AND (c.created_at < $${caIdx} OR (c.created_at = $${caIdx} AND c.id < $${idIdx}))`;
+    }
+
+    values.push(pageSize + 1);
+    const limitIdx = values.length;
+
+    // Fetch top-level comments (paginated)
+    const topResult = await pool.query(
+      `SELECT * FROM project_comments c
+       WHERE c.project_id = $1 AND c.parent_id IS NULL
+       ${cursorClause}
+       ORDER BY c.created_at DESC, c.id DESC
+       LIMIT $${limitIdx}`,
+      values,
+    );
+
+    const rows = topResult.rows;
+    const hasMore = rows.length > pageSize;
+    const topComments = rows.slice(0, pageSize);
+
+    // Fetch all replies for the returned top-level comments in one query
+    let repliesMap = {};
+    if (topComments.length > 0) {
+      const parentIds = topComments.map((r) => r.id);
+      const placeholders = parentIds.map((_, i) => `$${i + 1}`).join(", ");
+      const repliesResult = await pool.query(
+        `SELECT * FROM project_comments
+         WHERE parent_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+        parentIds,
+      );
+      for (const reply of repliesResult.rows) {
+        if (!repliesMap[reply.parent_id]) repliesMap[reply.parent_id] = [];
+        repliesMap[reply.parent_id].push({
+          id: reply.id,
+          projectId: reply.project_id,
+          parentId: reply.parent_id,
+          donorAddress: reply.donor_address,
+          message: reply.message,
+          createdAt: new Date(reply.created_at).toISOString(),
+        });
+      }
+    }
+
+    const data = topComments.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      parentId: null,
+      donorAddress: row.donor_address,
+      message: row.message,
+      createdAt: new Date(row.created_at).toISOString(),
+      replies: repliesMap[row.id] || [],
+    }));
+
+    let nextCursor = null;
+    if (hasMore) {
+      const last = topComments[topComments.length - 1];
+      nextCursor = Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString("base64");
+    }
+
+    res.json({ success: true, data, next_cursor: nextCursor, has_more: hasMore });
   } catch (e) {
     next(e);
   }

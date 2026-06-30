@@ -50,6 +50,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -201,6 +204,14 @@
                               },
                               "val": {
                                 "string": "Test Project"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused"
+                              },
+                              "val": {
+                                "bool": false
                               }
                             },
                             {
@@ -559,6 +570,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -583,7 +597,14 @@
               }
             ],
             "data": {
-              "string": "proj-001"
+              "vec": [
+                {
+                  "string": "proj-001"
+                },
+                {
+                  "u32": 120960
+                }
+              ]
             }
           }
         }
@@ -719,7 +740,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Proposal already resolved' from contract function 'Symbol(obj#243)'"
+                  "string": "caught panic 'Proposal already resolved' from contract function 'Symbol(obj#245)'"
                 },
                 {
                   "string": "proj-001"
