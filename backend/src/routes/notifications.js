@@ -4,12 +4,73 @@
  * POST /api/notifications/follow        — follow a project
  * POST /api/notifications/unfollow      — unfollow a project
  * GET  /api/notifications/follows       — get user's followed projects
+ * GET  /api/notifications/unread-count  — unread project update count for a device
  */
 "use strict";
 const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db/pool");
+
+function parseLastSeen(value) {
+  if (!value || typeof value !== "string") return null;
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseUnreadCount(row) {
+  const value = row?.unread_count ?? row?.count ?? 0;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+// GET /api/notifications/unread-count
+// Return the number of unread project updates for projects followed by a device token.
+router.get("/unread-count", async (req, res, next) => {
+  try {
+    const { token, lastSeen } = req.query;
+
+    if (!token || typeof token !== "string") {
+      return res.status(400).json({ error: "token query parameter is required" });
+    }
+
+    const lastSeenAt = parseLastSeen(lastSeen);
+    if (lastSeen !== undefined && !lastSeenAt) {
+      return res.status(400).json({ error: "lastSeen must be a valid ISO-8601 timestamp" });
+    }
+
+    const tokenResult = await pool.query(
+      "SELECT id FROM device_tokens WHERE token = $1",
+      [token]
+    );
+
+    if (!tokenResult.rows[0]) {
+      return res.status(404).json({ error: "Device token not found" });
+    }
+
+    const params = [tokenResult.rows[0].id];
+    let unreadSinceClause = "";
+
+    if (lastSeenAt) {
+      params.push(lastSeenAt.toISOString());
+      unreadSinceClause = `AND pu.created_at > $${params.length}`;
+    }
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) AS unread_count
+       FROM project_updates pu
+       JOIN project_follows pf ON pf.project_id = pu.project_id
+       WHERE pf.device_token_id = $1
+       ${unreadSinceClause}`,
+      params
+    );
+
+    res.json({ unreadCount: parseUnreadCount(countResult.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
 
 // POST /api/notifications/register
 // Register or update a device token

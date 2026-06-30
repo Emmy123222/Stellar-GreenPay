@@ -3,10 +3,11 @@
  * Project detail screen
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
+import { getPushToken, followProject, unfollowProject, markNotificationsSeen } from '../../utils/notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -39,6 +40,9 @@ export default function ProjectDetailScreen() {
     if (id) {
       loadProject(id as string);
       initializeNotifications();
+      markNotificationsSeen().then(() => {
+        Notifications.setBadgeCountAsync(0).catch(() => undefined);
+      });
     }
   }, [id]);
 
@@ -57,7 +61,7 @@ export default function ProjectDetailScreen() {
 
   const checkFollowStatus = async (projectId: string, token: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/notifications/follows?token=${token}`);
+      const response = await fetch(`${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`);
       const data = await response.json();
       if (data.success) {
         const followedProjects = data.data;

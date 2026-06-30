@@ -381,6 +381,26 @@ export async function confirmProjectRegistration(payload: {
   return data;
 }
 
+// ── Notifications ─────────────────────────────────────────────────
+export interface UnreadNotificationCountParams {
+  token: string;
+  lastSeen?: string;
+}
+
+export async function fetchUnreadNotificationCount({
+  token,
+  lastSeen,
+}: UnreadNotificationCountParams): Promise<number> {
+  const params: Record<string, string> = { token };
+  if (lastSeen) params.lastSeen = lastSeen;
+
+  const { data } = await api.get<{ unreadCount: number }>(
+    "/api/notifications/unread-count",
+    { params },
+  );
+  return data.unreadCount;
+}
+
 // ── Update Likes ─────────────────────────────────────────────────
 export async function toggleUpdateLike(updateId: string, donorAddress: string) {
   const { data } = await api.post<{ success: boolean; data: { liked: boolean; likeCount: number } }>(

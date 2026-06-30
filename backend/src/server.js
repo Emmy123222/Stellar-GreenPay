@@ -42,7 +42,7 @@ app.use(helmet());
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
-app.use(csurf({
+const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -50,7 +50,13 @@ app.use(csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
-}));
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+    return next();
+  }
+  return csrfProtection(req, res, next);
+});
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -83,6 +89,7 @@ const jobsRouter          = require("./routes/jobs");
 const statsRouter         = require("./routes/stats");
 const impactRouter        = require("./routes/impact");
 const ratingsRouter       = require("./routes/ratings");
+const notificationsRouter = require("./routes/notifications");
 const adminRouter         = require("./routes/admin");
 
 function mount(path, router) {
@@ -101,6 +108,7 @@ mount("/api/jobs",          jobsRouter);
 mount("/api/stats",         statsRouter);
 mount("/api/impact",        impactRouter);
 mount("/api/ratings",       ratingsRouter);
+mount("/api/notifications", notificationsRouter);
 mount("/api/admin",         adminRouter);
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
