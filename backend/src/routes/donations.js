@@ -19,7 +19,16 @@ function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) { const e = new Error("Invalid transaction hash"); e.status = 400; throw e; }
 }
 
-// POST /api/donations — record a donation after on-chain tx
+/**
+ * Record a donation after an on-chain transaction is observed.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the persisted donation record or an error response.
+ * @throws {Error} If validation, project lookup, or donation persistence fails.
+ */
 async function recordDonation(req, res, next) {
   let client;
   let inTransaction = false;
@@ -193,9 +202,28 @@ async function recordDonation(req, res, next) {
   }
 }
 
+/**
+ * Register a donation via the public API.
+ *
+ * @route POST /api/donations
+ * @param {import('express').Request} req - Express request containing the donation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created donation payload.
+ * @throws {Error} If rate limiting or donation creation fails.
+ */
 router.post("/", donationLimiter, recordDonation);
 
-// GET /api/donations/project/:id
+/**
+ * List donation messages for a specific project.
+ *
+ * @route GET /api/donations/project/:projectId/messages
+ * @param {import('express').Request} req - Express request containing the project id and optional limit.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the donation message list.
+ * @throws {Error} If the donation query fails.
+ */
 router.get("/project/:projectId/messages", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
@@ -215,6 +243,16 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
   }
 });
 
+/**
+ * List donations for a specific project.
+ *
+ * @route GET /api/donations/project/:projectId
+ * @param {import('express').Request} req - Express request containing the project id and pagination options.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the paginated donation history.
+ * @throws {Error} If the donation query fails.
+ */
 router.get("/project/:projectId", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
@@ -245,7 +283,16 @@ router.get("/project/:projectId", async (req, res, next) => {
   }
 });
 
-// GET /api/donations/donor/:publicKey
+/**
+ * List donations for a specific donor.
+ *
+ * @route GET /api/donations/donor/:publicKey
+ * @param {import('express').Request} req - Express request containing the donor public key.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the donor donation history.
+ * @throws {Error} If validation or the donation query fails.
+ */
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);

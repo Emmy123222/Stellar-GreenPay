@@ -86,6 +86,16 @@ async function fetchCampaignsForProject(projectId) {
   return result.rows.map(mapCampaignRow);
 }
 
+/**
+ * Return the currently featured active project.
+ *
+ * @route GET /api/projects/featured
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the featured project payload or a 404 response.
+ * @throws {Error} If the database lookup or cache update fails.
+ */
 router.get("/featured", async (req, res, next) => {
   try {
     const now = Date.now();
@@ -112,6 +122,16 @@ router.get("/featured", async (req, res, next) => {
   }
 });
 
+/**
+ * List projects with optional filtering, pagination, and search.
+ *
+ * @route GET /api/projects
+ * @param {import('express').Request} req - Express request object with query filters and pagination.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends a paginated project list.
+ * @throws {Error} If the project query or cache write fails.
+ */
 router.get("/", async (req, res, next) => {
   try {
     const { category, status, verified, search, limit = 20, cursor } = req.query;
@@ -204,6 +224,16 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
+/**
+ * Create a new project record.
+ *
+ * @route POST /api/projects
+ * @param {import('express').Request} req - Express request with project creation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created project payload.
+ * @throws {Error} If validation or database insertion fails.
+ */
 router.post("/", async (req, res, next) => {
   try {
     const { name, description, location, category, wallet_address, goal_xlm = 0, tags = [] } = req.body || {};
@@ -242,6 +272,15 @@ router.post("/", async (req, res, next) => {
 /**
  * GET /api/projects/:id/verify
  * Reads the project record directly from the Soroban contract.
+ */
+/**
+ * Query the on-chain verification state for a project.
+ *
+ * @route GET /api/projects/:id/verify
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>} Sends the verification status payload.
+ * @throws {Error} If the Soroban project lookup fails unexpectedly.
  */
 router.get("/:id/verify", async (req, res) => {
   try {
@@ -286,6 +325,16 @@ router.get("/:id/verify", async (req, res) => {
   }
 });
 
+/**
+ * Create a donation campaign for a project.
+ *
+ * @route POST /api/projects/:id/campaigns
+ * @param {import('express').Request} req - Express request with campaign details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created campaign payload.
+ * @throws {Error} If validation or database insertion fails.
+ */
 router.post("/:id/campaigns", async (req, res, next) => {
   try {
     const { title, goalXLM, deadline, description } = req.body || {};
@@ -337,6 +386,16 @@ router.post("/:id/campaigns", async (req, res, next) => {
   }
 });
 
+/**
+ * List campaigns linked to a project.
+ *
+ * @route GET /api/projects/:id/campaigns
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the list of campaigns.
+ * @throws {Error} If the lookup fails.
+ */
 router.get("/:id/campaigns", async (req, res, next) => {
   try {
     const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
@@ -350,6 +409,16 @@ router.get("/:id/campaigns", async (req, res, next) => {
   }
 });
 
+/**
+ * List milestones for a project.
+ *
+ * @route GET /api/projects/:id/milestones
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the milestone list.
+ * @throws {Error} If the milestone query fails.
+ */
 router.get("/:id/milestones", async (req, res, next) => {
   try {
     const result = await pool.query(
@@ -362,6 +431,16 @@ router.get("/:id/milestones", async (req, res, next) => {
   }
 });
 
+/**
+ * Create a milestone for a project.
+ *
+ * @route POST /api/projects/:id/milestones
+ * @param {import('express').Request} req - Express request with milestone details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created milestone payload.
+ * @throws {Error} If validation or insertion fails.
+ */
 router.post("/:id/milestones", async (req, res, next) => {
   try {
     const { title, percentage } = req.body;
@@ -390,6 +469,16 @@ router.post("/:id/milestones", async (req, res, next) => {
   }
 });
 
+/**
+ * Mark a milestone as reached.
+ *
+ * @route POST /api/projects/:id/milestones/:milestoneId/reach
+ * @param {import('express').Request} req - Express request with milestone and project ids.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the updated milestone payload.
+ * @throws {Error} If the milestone update fails.
+ */
 router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
   try {
     const { transactionHash } = req.body;
@@ -421,6 +510,15 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
+ */
+/**
+ * Build a Soroban transaction to register a project on-chain.
+ *
+ * @route POST /api/projects/admin/register
+ * @param {import('express').Request} req - Express request with project registration payload.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>} Sends the XDR transaction payload.
+ * @throws {Error} If the transaction building or account lookup fails.
  */
 router.post("/admin/register", async (req, res) => {
   try {
@@ -459,6 +557,15 @@ router.post("/admin/register", async (req, res) => {
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
  */
+/**
+ * Confirm a project registration transaction and update the local project record.
+ *
+ * @route POST /api/projects/admin/confirm
+ * @param {import('express').Request} req - Express request with the confirmation payload.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {Promise<void>} Sends the updated project payload.
+ * @throws {Error} If transaction verification or persistence fails.
+ */
 router.post("/admin/confirm", async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
@@ -491,6 +598,16 @@ router.post("/admin/confirm", async (req, res) => {
   }
 });
 
+/**
+ * Return a single project with its campaigns, milestones, and rating details.
+ *
+ * @route GET /api/projects/:id
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the full project details payload.
+ * @throws {Error} If the project lookup or related data fetch fails.
+ */
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query("SELECT * FROM projects WHERE id = $1", [req.params.id]);
@@ -569,6 +686,16 @@ router.get("/:id", async (req, res, next) => {
  * Response: { success: true, data: { aiSummary, aiSummaryGeneratedAt,
  *                                    aiSummaryModel, aiSummarySourceHash } }
  */
+/**
+ * Queue an AI-generated donor-facing summary for a project.
+ *
+ * @route POST /api/projects/:id/generate-summary
+ * @param {import('express').Request} req - Express request with the owner wallet address.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the summary queue status payload.
+ * @throws {Error} If the summary queue call fails.
+ */
 router.post("/:id/generate-summary", async (req, res, next) => {
   try {
     const { adminAddress } = req.body || {};
@@ -608,6 +735,16 @@ router.post("/:id/generate-summary", async (req, res, next) => {
   }
 });
 
+/**
+ * Create a new donation-matching offer for a project.
+ *
+ * @route POST /api/projects/:id/matching
+ * @param {import('express').Request} req - Express request with matching offer details.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the created matching offer payload.
+ * @throws {Error} If validation or persistence fails.
+ */
 router.post("/:id/matching", async (req, res, next) => {
   try {
     const { matcherAddress, capXLM, multiplier, expiresAt } = req.body || {};
@@ -668,6 +805,16 @@ router.post("/:id/matching", async (req, res, next) => {
   }
 });
 
+/**
+ * List active donation-matching offers for a project.
+ *
+ * @route GET /api/projects/:id/matching
+ * @param {import('express').Request} req - Express request containing the project id.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the matching offers payload.
+ * @throws {Error} If the database query fails.
+ */
 router.get("/:id/matching", async (req, res, next) => {
   try {
     const result = await pool.query(
@@ -700,6 +847,16 @@ router.get("/:id/matching", async (req, res, next) => {
  * PATCH /api/projects/:id/status
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
+ */
+/**
+ * Update the status of a project.
+ *
+ * @route PATCH /api/projects/:id/status
+ * @param {import('express').Request} req - Express request with the new status payload.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the updated project payload.
+ * @throws {Error} If validation or persistence fails.
  */
 router.patch("/:id/status", async (req, res, next) => {
   try {
