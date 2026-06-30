@@ -861,4 +861,170 @@ router.patch("/:id/status", async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/projects/:id/comments
+ * Body: { donorAddress, message, parentId? }
+ * Only wallets with ≥1 confirmed donation to the project may post.
+ */
+router.post("/:id/comments", async (req, res, next) => {
+  try {
+    const { donorAddress, message, parentId } = req.body || {};
+
+    if (!donorAddress || typeof donorAddress !== "string") {
+      return res.status(400).json({ error: "donorAddress is required" });
+    }
+    if (!message || typeof message !== "string" || message.trim().length === 0) {
+      return res.status(400).json({ error: "message is required" });
+    }
+    if (message.trim().length > 2000) {
+      return res.status(400).json({ error: "message must be 2000 characters or fewer" });
+    }
+
+    // Verify project exists
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Verify donor has at least one donation to this project
+    const donorCheck = await pool.query(
+      "SELECT 1 FROM donations WHERE project_id = $1 AND donor_address = $2 LIMIT 1",
+      [req.params.id, donorAddress],
+    );
+    if (!donorCheck.rows[0]) {
+      return res.status(403).json({ error: "Only donors who have contributed to this project can post comments" });
+    }
+
+    // If parentId provided, verify it belongs to the same project
+    if (parentId) {
+      const parentCheck = await pool.query(
+        "SELECT id FROM project_comments WHERE id = $1 AND project_id = $2",
+        [parentId, req.params.id],
+      );
+      if (!parentCheck.rows[0]) {
+        return res.status(400).json({ error: "parentId does not reference a comment on this project" });
+      }
+    }
+
+    const result = await pool.query(
+      `INSERT INTO project_comments (id, project_id, parent_id, donor_address, message)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [uuid(), req.params.id, parentId || null, donorAddress, message.trim()],
+    );
+
+    const row = result.rows[0];
+    res.status(201).json({
+      success: true,
+      data: {
+        id: row.id,
+        projectId: row.project_id,
+        parentId: row.parent_id || null,
+        donorAddress: row.donor_address,
+        message: row.message,
+        createdAt: new Date(row.created_at).toISOString(),
+        replies: [],
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/comments
+ * Query params: limit (default 20, max 100), cursor (opaque base64 pagination token)
+ * Returns top-level comments with their direct replies nested under `replies`.
+ */
+router.get("/:id/comments", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const pageSize = Math.min(Number.parseInt(req.query.limit, 10) || 20, 100);
+    const values = [req.params.id];
+    let cursorClause = "";
+
+    if (req.query.cursor) {
+      let cursorData;
+      try {
+        cursorData = JSON.parse(Buffer.from(req.query.cursor, "base64").toString("utf8"));
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      const { created_at, id } = cursorData;
+      if (!created_at || !id) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      values.push(created_at, id);
+      const caIdx = values.length - 1;
+      const idIdx = values.length;
+      cursorClause = `AND (c.created_at < $${caIdx} OR (c.created_at = $${caIdx} AND c.id < $${idIdx}))`;
+    }
+
+    values.push(pageSize + 1);
+    const limitIdx = values.length;
+
+    // Fetch top-level comments (paginated)
+    const topResult = await pool.query(
+      `SELECT * FROM project_comments c
+       WHERE c.project_id = $1 AND c.parent_id IS NULL
+       ${cursorClause}
+       ORDER BY c.created_at DESC, c.id DESC
+       LIMIT $${limitIdx}`,
+      values,
+    );
+
+    const rows = topResult.rows;
+    const hasMore = rows.length > pageSize;
+    const topComments = rows.slice(0, pageSize);
+
+    // Fetch all replies for the returned top-level comments in one query
+    let repliesMap = {};
+    if (topComments.length > 0) {
+      const parentIds = topComments.map((r) => r.id);
+      const placeholders = parentIds.map((_, i) => `$${i + 1}`).join(", ");
+      const repliesResult = await pool.query(
+        `SELECT * FROM project_comments
+         WHERE parent_id IN (${placeholders})
+         ORDER BY created_at ASC`,
+        parentIds,
+      );
+      for (const reply of repliesResult.rows) {
+        if (!repliesMap[reply.parent_id]) repliesMap[reply.parent_id] = [];
+        repliesMap[reply.parent_id].push({
+          id: reply.id,
+          projectId: reply.project_id,
+          parentId: reply.parent_id,
+          donorAddress: reply.donor_address,
+          message: reply.message,
+          createdAt: new Date(reply.created_at).toISOString(),
+        });
+      }
+    }
+
+    const data = topComments.map((row) => ({
+      id: row.id,
+      projectId: row.project_id,
+      parentId: null,
+      donorAddress: row.donor_address,
+      message: row.message,
+      createdAt: new Date(row.created_at).toISOString(),
+      replies: repliesMap[row.id] || [],
+    }));
+
+    let nextCursor = null;
+    if (hasMore) {
+      const last = topComments[topComments.length - 1];
+      nextCursor = Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString("base64");
+    }
+
+    res.json({ success: true, data, next_cursor: nextCursor, has_more: hasMore });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
