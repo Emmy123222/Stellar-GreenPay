@@ -139,3 +139,18 @@ CREATE TABLE IF NOT EXISTS project_follows (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, device_token_id)
 );
+
+-- Community comments on project pages (v1.4)
+-- Only wallets with ≥1 donation to the project may post.
+-- Threaded replies are supported via parent_id (one level of nesting).
+CREATE TABLE IF NOT EXISTS project_comments (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_id UUID REFERENCES project_comments(id) ON DELETE CASCADE,
+  donor_address TEXT NOT NULL,
+  message TEXT NOT NULL CHECK (char_length(message) BETWEEN 1 AND 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_comments_project_id ON project_comments(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_project_comments_parent_id  ON project_comments(parent_id);
