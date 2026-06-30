@@ -263,6 +263,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   applySettings(settings);
   renderNetworkBadge(settings.network);
 
+  // Pre-fill donation amount from saved default
+  const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;
+  if (amountInput && settings.defaultDonationAmount) {
+    amountInput.value = settings.defaultDonationAmount;
+  }
+
   // Wire settings button
   const settingsBtn = document.getElementById('settings-btn');
   if (settingsBtn) {
