@@ -1,11 +1,12 @@
 /**
  * app/projects/[id].tsx
- * Project detail screen
+ * Project detail screen — with share button (#484) and accessibility (#485)
  */
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Share } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
+import { useTheme } from '../theme';
 import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -99,6 +100,23 @@ export default function ProjectDetailScreen() {
     }
   };
 
+  const handleShare = async () => {
+    if (!project) return;
+    const APP_URL = process.env.EXPO_PUBLIC_APP_URL || 'https://greenpay.app';
+    const url = `${APP_URL}/projects/${project.id}`;
+    const co2 = project.co2OffsetKg ? `${project.co2OffsetKg.toFixed(0)} kg CO₂ offset` : '';
+    const message =
+      `Support ${project.name} on GreenPay: ${url}\n` +
+      `Category: ${project.category}\n` +
+      (co2 ? `Impact: ${co2}\n` : '') +
+      `${parseFloat(project.raisedXLM).toFixed(2)} XLM raised of ${parseFloat(project.goalXLM).toFixed(2)} XLM goal`;
+    try {
+      await Share.share({ message, url });
+    } catch (error) {
+      console.error('Share failed:', error);
+    }
+  };
+
   const progressPercent = (raised: string, goal: string) => {
     const r = parseFloat(raised);
     const g = parseFloat(goal);
@@ -125,9 +143,21 @@ export default function ProjectDetailScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}> 
       <View style={[styles.header, { backgroundColor: colors.primary }]}> 
-        <Text style={[styles.category, { color: colors.headerText }]}>{project.category}</Text>
-        <Text style={[styles.name, { color: colors.headerText }]}>{project.name}</Text>
-        <Text style={[styles.location, { color: colors.headerText }]}>📍 {project.location}</Text>
+        <View style={styles.headerRow}>
+          <View style={styles.headerTextGroup}>
+            <Text style={[styles.category, { color: colors.headerText }]}>{project.category}</Text>
+            <Text style={[styles.name, { color: colors.headerText }]}>{project.name}</Text>
+            <Text style={[styles.location, { color: colors.headerText }]}>📍 {project.location}</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={handleShare}
+            accessibilityLabel={`Share ${project.name}`}
+            accessibilityRole="button"
+          >
+            <Text style={styles.shareIcon}>⬆️</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={[styles.statsCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
@@ -175,6 +205,8 @@ export default function ProjectDetailScreen() {
           style={[styles.followButton, isFollowing && styles.followButtonActive]}
           onPress={handleToggleFollow}
           disabled={followLoading}
+          accessibilityLabel={isFollowing ? `Unfollow ${project.name} for updates` : `Follow ${project.name} for updates`}
+          accessibilityRole="button"
         >
           <Text style={styles.followButtonText}>
             {followLoading ? 'Loading...' : isFollowing ? '🔔 Following' : '🔔 Follow for Updates'}
@@ -185,6 +217,8 @@ export default function ProjectDetailScreen() {
       <TouchableOpacity
         style={[styles.donateButton, { backgroundColor: colors.buttonBackground }]}
         onPress={() => router.push(`/donate/${project.id}`)}
+        accessibilityLabel={`Donate to ${project.name}`}
+        accessibilityRole="button"
       >
         <Text style={[styles.donateButtonText, { color: colors.buttonText }]}>🌱 Donate Now</Text>
       </TouchableOpacity>
@@ -208,6 +242,27 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerTextGroup: {
+    flex: 1,
+    marginRight: 12,
+  },
+  shareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  shareIcon: {
+    fontSize: 18,
   },
   category: {
     fontSize: 14,

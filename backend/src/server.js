@@ -31,10 +31,11 @@ const server = http.createServer(app);
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
   const swaggerUi = require("swagger-ui-express");
-  const yaml      = require("js-yaml");
-  const fs        = require("fs");
-  const path      = require("path");
-  const swaggerDoc = yaml.load(fs.readFileSync(path.join(__dirname, "../../docs/openapi.yml"), "utf8"));
+  const yaml = require("js-yaml");
+  const fs = require("fs");
+  const path = require("path");
+  const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
+  const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
 }
 
@@ -65,7 +66,7 @@ const io = new Server(server, {
 app.set("io", io);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-// ── CSRF token endpoint ──────────────────────────────────────────────────────
+// ── CSRF token endpoint (Closes #466) ─────────────────────────────────────────
 function csrfTokenHandler(req, res) {
   res.json({ success: true, csrfToken: req.csrfToken() });
 }
@@ -115,6 +116,9 @@ async function startServer() {
 
   const { start: startSummaryQueue } = require("./services/summaryQueue");
   await startSummaryQueue(io);
+
+  const { start: startDigestQueue } = require("./services/digestQueue");
+  await startDigestQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 

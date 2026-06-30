@@ -18,6 +18,32 @@ jobs:
         working-directory: extension
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          else
+            echo "Tag '$TAG' must be in the form v1.2.3" >&2
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          export VERSION
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest_path = Path("extension/manifest.json")
+          data = json.loads(manifest_path.read_text())
+          data["version"] = os.environ["VERSION"]
+          manifest_path.write_text(json.dumps(data, indent=2) + "\n")
+          PY
 
       - uses: actions/setup-node@v4
         with:

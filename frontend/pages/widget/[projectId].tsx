@@ -9,12 +9,23 @@ import { fetchProject } from "@/lib/api";
 import { formatXLM, formatCO2, progressPercent } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
+type Currency = "XLM" | "USDC";
+
+function hexToRgb(hex: string): string {
+  const clean = hex.replace("#", "");
+  const num = parseInt(clean, 16);
+  return `${(num >> 16) & 255}, ${(num >> 8) & 255}, ${num & 255}`;
+}
+
 export default function WidgetPage() {
   const router = useRouter();
   const { projectId } = router.query;
   const [project, setProject] = useState<ClimateProject | null>(null);
   const [loading, setLoading] = useState(true);
   const theme = (router.query.theme as "light" | "dark") || "light";
+  const accent = (router.query.accent as string) || "#059669";
+  const buttonText = (router.query.buttonText as string) || "Donate on GreenPay";
+  const currency = (router.query.currency as Currency) || "XLM";
 
   useEffect(() => {
     if (!projectId) return;
@@ -27,7 +38,7 @@ export default function WidgetPage() {
   if (loading) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === "dark" ? "bg-gray-900" : "bg-white"}`}>
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-forest-600" />
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderBottomColor: accent }} />
       </div>
     );
   }
@@ -47,17 +58,25 @@ export default function WidgetPage() {
   const textClass = theme === "dark" ? "text-gray-100" : "text-gray-900";
   const secondaryClass = theme === "dark" ? "text-gray-400" : "text-gray-600";
   const borderClass = theme === "dark" ? "border-gray-700" : "border-gray-200";
-  const buttonClass = theme === "dark"
-    ? "bg-forest-600 hover:bg-forest-700 text-white"
-    : "bg-forest-500 hover:bg-forest-600 text-white";
+
+  const formatAmount = (xlm: string) => {
+    if (currency === "USDC") {
+      const val = parseFloat(xlm);
+      return `$${val.toFixed(2)}`;
+    }
+    return formatXLM(xlm);
+  };
 
   return (
     <div className={`min-h-screen ${bgClass} p-4 flex items-center justify-center`}>
       <div className={`w-full max-w-sm rounded-xl border ${borderClass} overflow-hidden shadow-lg`}>
         {/* Header */}
-        <div className="bg-gradient-to-r from-forest-500 to-emerald-500 p-4 text-white">
+        <div
+          className="p-4 text-white"
+          style={{ background: `linear-gradient(to right, ${accent}, ${accent}dd)` }}
+        >
           <h3 className="font-display text-lg font-bold truncate">{project.name}</h3>
-          <p className={`text-sm opacity-90 truncate`}>{project.category}</p>
+          <p className="text-sm opacity-90 truncate">{project.category}</p>
         </div>
 
         {/* Content */}
@@ -66,27 +85,36 @@ export default function WidgetPage() {
           <div>
             <div className="flex justify-between items-baseline mb-2">
               <p className={`text-sm font-semibold ${textClass}`}>
-                {formatXLM(project.raisedXLM)} raised
+                {formatAmount(project.raisedXLM)} raised
               </p>
               <p className={`text-xs ${secondaryClass}`}>
-                {pct}% of {formatXLM(project.goalXLM)}
+                {pct}% of {formatAmount(project.goalXLM)}
               </p>
             </div>
-            <div className={`h-2 rounded-full bg-gray-200 overflow-hidden`}>
+            <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
               <div
-                className="h-full bg-gradient-to-r from-forest-500 to-emerald-500 transition-all"
-                style={{ width: `${Math.min(pct, 100)}%` }}
+                className="h-full transition-all"
+                style={{
+                  width: `${Math.min(pct, 100)}%`,
+                  background: `linear-gradient(to right, ${accent}, ${accent}dd)`,
+                }}
               />
             </div>
           </div>
 
           {/* Stats grid */}
           <div className="grid grid-cols-2 gap-3">
-            <div className={`p-2 rounded bg-opacity-10 bg-forest-600`}>
+            <div
+              className="p-2 rounded"
+              style={{ backgroundColor: `rgba(${hexToRgb(accent)}, 0.1)` }}
+            >
               <p className={`text-xs ${secondaryClass} font-semibold`}>Donors</p>
               <p className={`text-lg font-bold ${textClass}`}>{project.donorCount}</p>
             </div>
-            <div className={`p-2 rounded bg-opacity-10 bg-emerald-600`}>
+            <div
+              className="p-2 rounded"
+              style={{ backgroundColor: `rgba(${hexToRgb(accent)}, 0.08)` }}
+            >
               <p className={`text-xs ${secondaryClass} font-semibold`}>CO₂ Offset</p>
               <p className={`text-lg font-bold ${textClass}`}>{formatCO2(project.co2OffsetKg)}</p>
             </div>
@@ -97,9 +125,12 @@ export default function WidgetPage() {
             href={`/projects/${project.id}?utm_source=widget`}
             target="_blank"
             rel="noopener noreferrer"
-            className={`block w-full py-3 rounded-lg font-semibold text-center transition-colors ${buttonClass}`}
+            className="block w-full py-3 rounded-lg font-semibold text-center transition-colors text-white"
+            style={{ backgroundColor: accent }}
+            onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.9"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}
           >
-            Donate on GreenPay
+            {buttonText}
           </Link>
         </div>
 
@@ -109,7 +140,8 @@ export default function WidgetPage() {
             href="https://greenpay.app"
             target="_blank"
             rel="noopener noreferrer"
-            className={`text-xs ${secondaryClass} hover:text-forest-600 transition-colors`}
+            className={`text-xs ${secondaryClass} transition-colors`}
+            style={{ color: `rgba(${hexToRgb(accent)}, 0.6)` }}
           >
             Powered by GreenPay
           </a>
