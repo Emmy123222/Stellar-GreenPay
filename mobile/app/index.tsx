@@ -64,6 +64,8 @@ function ProjectCard({
       style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityLabel={`View ${project.name} project`}
+      accessibilityRole="button"
     >
       <View style={styles.cardHeader}>
         <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
@@ -101,6 +103,7 @@ function ProjectCard({
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const handleScan = () => router.push('/scan' as `${string}`);
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -139,7 +142,7 @@ export default function HomeScreen() {
       renderItem={() => <SkeletonCard colors={colors} />}
       contentContainerStyle={styles.listContent}
       scrollEnabled={false}
-      ListHeaderComponent={<Header colors={colors} />}
+      ListHeaderComponent={<Header colors={colors} onScan={handleScan} />}
     />
   );
 
@@ -164,7 +167,7 @@ export default function HomeScreen() {
           />
         )}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Header colors={colors} />}
+        ListHeaderComponent={<Header colors={colors} onScan={handleScan} />}
         ListEmptyComponent={
           networkError ? (
             <View style={styles.errorContainer}>
@@ -174,6 +177,8 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.retryButton, { backgroundColor: colors.primary }]}
                 onPress={() => { setLoading(true); loadProjects(); }}
+                accessibilityLabel="Retry loading projects"
+                accessibilityRole="button"
               >
                 <Text style={[styles.retryText, { color: colors.buttonText }]}>Retry</Text>
               </TouchableOpacity>
@@ -196,11 +201,24 @@ export default function HomeScreen() {
   );
 }
 
-function Header({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+function Header({
+  colors,
+  onScan,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  onScan: () => void;
+}) {
   return (
     <View style={[styles.header, { backgroundColor: colors.primary }]}>
-      <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
-      <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
+      <View style={styles.headerRow}>
+        <View>
+          <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+          <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
+        </View>
+        <TouchableOpacity style={styles.scanButton} onPress={onScan} accessibilityLabel="Scan QR to donate">
+          <Text style={styles.scanButtonText}>📷 Scan</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -215,6 +233,22 @@ const styles = StyleSheet.create({
   header: {
     padding: 24,
     marginBottom: 8,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  scanButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  scanButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
   title: {
     fontSize: 28,
