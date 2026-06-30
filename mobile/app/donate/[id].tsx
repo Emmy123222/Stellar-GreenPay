@@ -176,7 +176,7 @@ export default function DonateScreen() {
           },
         },
       ],
-      'plain-text-input'
+      'plain-text'
     );
   };
 
