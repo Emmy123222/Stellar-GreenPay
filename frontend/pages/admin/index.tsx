@@ -32,7 +32,7 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
         <div className="text-center mb-10">
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">Admin Dashboard</h1>
-          <p className="text-[#5a7a5a] font-body">Connect your wallet to manage projects.</p>
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Connect your wallet to manage projects.</p>
         </div>
         <WalletConnect onConnect={onConnect} />
       </div>
@@ -42,9 +42,9 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
       <div className="mb-8">
-        <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] font-body">Admin</p>
+        <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] dark:text-forest-300 font-body">Admin</p>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">All Projects</h1>
-        <p className="text-sm text-[#5a7a5a] font-body">
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
           Manage project approvals, registrations, and match funds.
         </p>
       </div>
@@ -89,11 +89,11 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
                     <span className="badge-verified text-xs flex-shrink-0">On-chain ✓</span>
                   )}
                 </div>
-                <p className="text-xs text-[#8aaa8a] font-body">
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
                   {p.category} • {p.location} • {formatXLM(p.raisedXLM)} raised
                 </p>
               </div>
-              <div className="flex items-center gap-3 text-xs text-[#5a7a5a] font-body">
+              <div className="flex items-center gap-3 text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
                 <span>{p.donorCount} donors</span>
                 <span>→</span>
               </div>

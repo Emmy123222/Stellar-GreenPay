@@ -50,6 +50,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -300,6 +303,14 @@
                               },
                               "val": {
                                 "string": "Test Project"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused"
+                              },
+                              "val": {
+                                "bool": false
                               }
                             },
                             {
@@ -691,6 +702,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -715,7 +729,14 @@
               }
             ],
             "data": {
-              "string": "proj-001"
+              "vec": [
+                {
+                  "string": "proj-001"
+                },
+                {
+                  "u32": 120960
+                }
+              ]
             }
           }
         }
@@ -877,7 +898,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Already voted on this proposal' from contract function 'Symbol(obj#337)'"
+                  "string": "caught panic 'Already voted on this proposal' from contract function 'Symbol(obj#339)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"

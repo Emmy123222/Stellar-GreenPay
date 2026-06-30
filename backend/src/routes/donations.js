@@ -8,8 +8,23 @@ const { v4: uuid } = require("uuid");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { z } = require("zod");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+
+const donationSchema = z.object({
+  projectId: z.string().min(1, "projectId is required"),
+  donorAddress: z.string().min(1, "donorAddress is required"),
+  amountXLM: z.union([z.string(), z.number()]).transform((value) => String(value)),
+  amount: z.union([z.string(), z.number()]).optional(),
+  currency: z.string().optional(),
+  message: sanitizedStringField({ required: false, maxLength: 100, message: "must not contain HTML" }).optional(),
+  transactionHash: z.string().min(1, "transactionHash is required"),
+}).transform((data) => ({
+  ...data,
+  message: data.message ?? null,
+}));
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid Stellar public key"); e.status = 400; throw e; }
@@ -193,7 +208,7 @@ async function recordDonation(req, res, next) {
   }
 }
 
-router.post("/", donationLimiter, recordDonation);
+router.post("/", donationLimiter, validateBody(donationSchema), recordDonation);
 
 // GET /api/donations/project/:id
 router.get("/project/:projectId/messages", async (req, res, next) => {
@@ -259,5 +274,51 @@ router.get("/donor/:publicKey", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// GET /api/donations/:id - single donation fetch endpoint
+router.get("/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    // Basic UUID validation
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      const e = new Error("Invalid donation ID");
+      e.status = 400;
+      throw e;
+    }
+
+    const query = `
+      SELECT 
+        d.*,
+        p.name AS project_name,
+        pr.display_name AS donor_display_name,
+        CASE
+          WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+          ELSE 0
+        END AS co2_offset_kg
+      FROM donations d
+      JOIN projects p ON d.project_id = p.id
+      LEFT JOIN profiles pr ON d.donor_address = pr.public_key
+      WHERE d.id = $1
+    `;
+    const result = await pool.query(query, [id]);
+
+    if (!result.rows[0]) {
+      const e = new Error("Donation not found");
+      e.status = 404;
+      throw e;
+    }
+
+    const row = result.rows[0];
+    const donationData = mapDonationRow(row);
+    donationData.projectName = row.project_name;
+    donationData.donorDisplayName = row.donor_display_name || null;
+    donationData.co2OffsetKg = Math.round(Number.parseFloat(row.co2_offset_kg || "0"));
+
+    res.json({ success: true, data: donationData });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 module.exports.recordDonation = recordDonation;
+
