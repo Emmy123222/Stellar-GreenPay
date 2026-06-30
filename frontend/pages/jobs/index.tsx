@@ -24,12 +24,12 @@ export default function JobsIndexPage() {
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         Jobs
       </h1>
-      <p className="text-[#5a7a5a] font-body mb-8">
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-8">
         Escrow work funded in XLM. Clients approve release after delivery.
       </p>
 
       {loading && (
-        <p className="text-[#5a7a5a] font-body">Loading…</p>
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Loading…</p>
       )}
       {error && <p className="text-red-600 font-body">{error}</p>}
 

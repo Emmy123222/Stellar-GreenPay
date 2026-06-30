@@ -569,3 +569,30 @@ input[type="number"]:focus {
   padding: 12px;
   font-size: 0.9rem;
 }
+
+/* Wallet status in settings */
+.wallet-status-settings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.wallet-connected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.wallet-status-settings .glow-btn {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
