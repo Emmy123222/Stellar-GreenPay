@@ -9,6 +9,9 @@ const logger = require("../logger");
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const EventEmitter = require("events");
+const donationEvents = new EventEmitter();
+
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 function validateKey(k) {
@@ -184,7 +187,10 @@ async function recordDonation(req, res, next) {
       });
     }
 
-    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+    const mappedDonation = mapDonationRow(donationResult.rows[0]);
+    donationEvents.emit("new_donation", mappedDonation);
+
+    res.status(201).json({ success: true, data: mappedDonation });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     next(e);
@@ -194,6 +200,29 @@ async function recordDonation(req, res, next) {
 }
 
 router.post("/", donationLimiter, recordDonation);
+
+// GET /api/donations/stream
+router.get("/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const keepAlive = setInterval(() => {
+    res.write(":\\n\\n");
+  }, 15000);
+
+  const onNewDonation = (donation) => {
+    res.write(`data: ${JSON.stringify(donation)}\\n\\n`);
+  };
+
+  donationEvents.on("new_donation", onNewDonation);
+
+  req.on("close", () => {
+    clearInterval(keepAlive);
+    donationEvents.off("new_donation", onNewDonation);
+  });
+});
 
 // GET /api/donations/project/:id
 router.get("/project/:projectId/messages", async (req, res, next) => {
