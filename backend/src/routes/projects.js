@@ -232,7 +232,8 @@ router.post("/", async (req, res, next) => {
       [id, name.trim(), description.trim(), category, location.trim(), wallet_address, goal_xlm, tags],
     );
 
-    await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
     res.status(201).json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
     next(e);
@@ -427,7 +428,7 @@ router.post("/admin/register", async (req, res) => {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
     
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
-    if (!adminAddress) throw new Error("adminAddress is required");
+    if (!adminAddress) return res.status(401).json({ success: false, error: "adminAddress is required" });
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
@@ -545,8 +546,8 @@ router.get("/:id", async (req, res, next) => {
         totalRaisedOnChain: onChainProject ? stroopsToXlm(onChainProject.total_raised) : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
-        averageRating: parseFloat(ratingResult.rows[0].avg_rating) || 0,
-        ratingCount: parseInt(ratingResult.rows[0].count) || 0,
+        averageRating: parseFloat(ratingResult.rows[0]?.avg_rating) || 0,
+        ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
       },
     });
@@ -733,7 +734,8 @@ router.patch("/:id/status", async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {

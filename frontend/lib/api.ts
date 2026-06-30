@@ -331,16 +331,33 @@ export async function fetchSubscriberCount(projectId: string) {
 
 // ── Global Stats ─────────────────────────────────────────────────
 export interface GlobalStats {
-  totalDonations: number;
   totalXLMRaised: string;
   totalCO2OffsetKg: number;
+  totalDonations: number;
+  totalProjects: number;
+  totalDonors: number;
+}
+
+function normalizeGlobalStats(stats: Partial<GlobalStats>): GlobalStats {
+  return {
+    totalXLMRaised: stats.totalXLMRaised || "0.0000000",
+    totalCO2OffsetKg: stats.totalCO2OffsetKg || 0,
+    totalDonations: stats.totalDonations || 0,
+    totalProjects: stats.totalProjects || 0,
+    totalDonors: stats.totalDonors || 0,
+  };
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {
-  const { data } = await api.get<{ success: boolean; data: GlobalStats }>(
-    "/api/stats/global",
-  );
-  return data.data;
+  const { data } = await api.get<
+    GlobalStats | { success: boolean; data: GlobalStats }
+  >("/api/stats/global");
+
+  if ("data" in data && "success" in data) {
+    return normalizeGlobalStats(data.data);
+  }
+
+  return normalizeGlobalStats(data);
 }
 
 // ── Admin: Project Approval ──────────────────────────────────────

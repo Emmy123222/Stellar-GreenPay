@@ -100,7 +100,7 @@ describe("POST /api/donations", () => {
         message: "Great project!",
         transactionHash: makeTxHash(),
       })
-      .expect(200);
+      .expect(201);
 
     expect(res.body.success).toBe(true);
   });
