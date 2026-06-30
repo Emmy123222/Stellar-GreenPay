@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
+const QRCode = require("qrcode");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
@@ -746,10 +747,16 @@ router.patch("/:id/status", async (req, res, next) => {
 /**
  * GET /api/projects/:id/impact-certificate?donorAddress=G...
  *
- * Returns a personalised impact summary for a specific donor on a specific
- * project: how much they donated, the CO₂ they helped offset, an equivalent
- * number of trees, their badge tier, and their full donation history for the
- * project.
+ * Returns a personalised impact certificate for a specific donor on a specific
+ * project. Includes:
+ *   - Donor name (from their profile, if set)
+ *   - Total XLM donated to this project
+ *   - Total CO₂ offset in kg (proportional to the project's overall offset)
+ *   - Trees equivalent
+ *   - Badge tier (bronze / silver / gold / platinum)
+ *   - Project name, category, and verification status
+ *   - QR code (base64 data-URL) linking to the most recent on-chain donation
+ *   - Full donation history for this donor on this project
  *
  * Query params:
  *   donorAddress  (required) — Stellar G… public key of the donor
@@ -760,7 +767,10 @@ router.patch("/:id/status", async (req, res, next) => {
  *   data: {
  *     projectId: string,
  *     projectName: string,
+ *     projectCategory: string,
+ *     projectVerified: boolean,
  *     donorAddress: string,
+ *     donorName: string | null,
  *     totalDonatedXLM: string,      // 7-decimal string
  *     co2OffsetKg: number,
  *     treesEquivalent: number,
@@ -769,6 +779,7 @@ router.patch("/:id/status", async (req, res, next) => {
  *     donations: Array<{
  *       id, amountXLM, message, transactionHash, createdAt
  *     }>,
+ *     qrCode: string,               // data:image/png;base64,... for the on-chain record URL
  *     issuedAt: string              // ISO timestamp
  *   }
  * }
@@ -787,6 +798,18 @@ function deriveBadgeTier(totalXLM) {
   return null;
 }
 
+/**
+ * Build the URL to the on-chain donation record on Stellar Explorer.
+ * Falls back to the Horizon testnet explorer.
+ */
+function buildOnChainUrl(transactionHash) {
+  const network = process.env.STELLAR_NETWORK || "testnet";
+  if (network === "mainnet" || network === "public") {
+    return `https://stellar.expert/explorer/public/tx/${transactionHash}`;
+  }
+  return `https://stellar.expert/explorer/testnet/tx/${transactionHash}`;
+}
+
 router.get("/:id/impact-certificate", async (req, res, next) => {
   try {
     const { donorAddress } = req.query;
@@ -802,9 +825,9 @@ router.get("/:id/impact-certificate", async (req, res, next) => {
       });
     }
 
-    // 1. Confirm the project exists
+    // 1. Fetch project — now includes category and verification status
     const projectResult = await pool.query(
-      `SELECT id, name, raised_xlm, co2_offset_kg
+      `SELECT id, name, category, verified, on_chain_verified, raised_xlm, co2_offset_kg
        FROM projects
        WHERE id = $1`,
       [req.params.id],
@@ -813,7 +836,13 @@ router.get("/:id/impact-certificate", async (req, res, next) => {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    // 2. Fetch all donations by this donor for this project
+    // 2. Fetch donor's profile (display name) — may not exist
+    const profileResult = await pool.query(
+      "SELECT display_name FROM profiles WHERE public_key = $1",
+      [donorAddress],
+    );
+
+    // 3. Fetch all XLM donations by this donor for this project
     const donationsResult = await pool.query(
       `SELECT
          id,
@@ -835,7 +864,7 @@ router.get("/:id/impact-certificate", async (req, res, next) => {
       });
     }
 
-    // 3. Compute aggregate stats
+    // 4. Compute aggregate stats
     const project = projectResult.rows[0];
     const raisedXlm = Number.parseFloat(project.raised_xlm?.toString() || "0");
     const projectCo2Kg = Number.parseFloat(project.co2_offset_kg?.toString() || "0");
@@ -859,18 +888,31 @@ router.get("/:id/impact-certificate", async (req, res, next) => {
       createdAt: new Date(row.created_at).toISOString(),
     }));
 
+    // 5. Generate QR code linking to the most recent on-chain donation record
+    const latestTxHash = donationsResult.rows[0].transaction_hash;
+    const onChainUrl = buildOnChainUrl(latestTxHash);
+    const qrCode = await QRCode.toDataURL(onChainUrl, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 256,
+    });
+
     return res.json({
       success: true,
       data: {
         projectId: project.id,
         projectName: project.name,
+        projectCategory: project.category,
+        projectVerified: Boolean(project.verified) || Boolean(project.on_chain_verified),
         donorAddress,
+        donorName: profileResult.rows[0]?.display_name || null,
         totalDonatedXLM: totalDonatedXLM.toFixed(7),
         co2OffsetKg,
         treesEquivalent,
         badgeTier: deriveBadgeTier(totalDonatedXLM),
         donationCount: donations.length,
         donations,
+        qrCode,
         issuedAt: new Date().toISOString(),
       },
     });
