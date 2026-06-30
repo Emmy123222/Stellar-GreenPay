@@ -742,3 +742,8 @@ router.patch("/:id/status", async (req, res, next) => {
 });
 
 module.exports = router;
+
+// Export internal functions for testing
+if (process.env.NODE_ENV === "test") {
+  module.exports.mapCampaignRow = mapCampaignRow;
+}
