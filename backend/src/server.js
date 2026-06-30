@@ -43,7 +43,7 @@ app.use(helmet());
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
-app.use(csurf({
+const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -51,7 +51,13 @@ app.use(csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
-}));
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+    return next();
+  }
+  return csrfProtection(req, res, next);
+});
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));

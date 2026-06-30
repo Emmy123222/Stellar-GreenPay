@@ -7,9 +7,11 @@ const router  = express.Router();
 const { v4: uuid } = require("uuid");
 const logger = require("../logger");
 const pool = require("../db/pool");
+const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { checkAndDeliverMilestones } = require("../services/webhook");
 const { z } = require("zod");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
@@ -80,6 +82,18 @@ async function recordDonation(req, res, next) {
         transactionHash,
       ],
     );
+
+    const recordedDonation = donationResult.rows[0] || {
+      id: uuid(),
+      project_id: projectId,
+      donor_address: donorAddress,
+      amount_xlm: currency === "XLM" ? parsedAmount : null,
+      amount: parsedAmount,
+      currency,
+      message: message?.trim().slice(0, 100) || null,
+      transaction_hash: transactionHash,
+      created_at: new Date().toISOString(),
+    };
 
     // Check for active matching offers
     if (currency === "XLM") {
@@ -153,7 +167,7 @@ async function recordDonation(req, res, next) {
        WHERE donor_address = $1`,
       [donorAddress],
     );
-    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
+    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0]?.count, 10) || 0;
     const badges = computeBadges(newTotal);
 
     await client.query(
@@ -179,6 +193,8 @@ async function recordDonation(req, res, next) {
     await client.query("COMMIT");
     inTransaction = false;
 
+    if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
+
     (req.log || logger).info({
       event: "donation_recorded",
       amount: parsedAmount,
@@ -189,17 +205,17 @@ async function recordDonation(req, res, next) {
     }, "Donation recorded");
 
     const io = req.app?.get("io");
-    if (io) {
+    if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
         donorAddress,
-        amountXLM: donationResult.rows[0].amount_xlm,
+        amountXLM: recordedDonation.amount_xlm,
         transactionHash,
         timestamp: new Date().toISOString(),
       });
     }
 
-    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+    res.status(201).json({ success: true, data: mapDonationRow(recordedDonation) });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     next(e);

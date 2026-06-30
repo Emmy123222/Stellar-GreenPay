@@ -13,8 +13,14 @@ import {
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
+import * as Notifications from 'expo-notifications';
 import { useTheme } from './theme';
 import { getCachedData, setCachedData } from '../utils/cache';
+import {
+  getPushToken,
+  getUnreadNotificationCount,
+  setupNotificationListener,
+} from '../utils/notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const CACHE_KEY_PROJECTS = 'home:projects_list';
@@ -108,6 +114,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const loadProjects = useCallback(async (isPullRefresh = false) => {
     if (isPullRefresh) setRefreshing(true);
@@ -135,6 +142,29 @@ export default function HomeScreen() {
     loadProjects();
   }, [loadProjects]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadUnreadCount() {
+      const token = await getPushToken();
+      if (!token) return;
+
+      const count = await getUnreadNotificationCount(token);
+      if (active) {
+        setUnreadCount(count);
+        await Notifications.setBadgeCountAsync(count).catch(() => undefined);
+      }
+    }
+
+    loadUnreadCount();
+    const subscription = setupNotificationListener(setUnreadCount);
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
   const renderSkeleton = () => (
     <FlatList
       data={[1, 2, 3, 4, 5]}
@@ -142,7 +172,7 @@ export default function HomeScreen() {
       renderItem={() => <SkeletonCard colors={colors} />}
       contentContainerStyle={styles.listContent}
       scrollEnabled={false}
-      ListHeaderComponent={<Header colors={colors} onScan={handleScan} />}
+      ListHeaderComponent={<Header colors={colors} unreadCount={unreadCount} />}
     />
   );
 
@@ -167,7 +197,7 @@ export default function HomeScreen() {
           />
         )}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Header colors={colors} onScan={handleScan} />}
+        ListHeaderComponent={<Header colors={colors} unreadCount={unreadCount} />}
         ListEmptyComponent={
           networkError ? (
             <View style={styles.errorContainer}>
@@ -203,22 +233,22 @@ export default function HomeScreen() {
 
 function Header({
   colors,
-  onScan,
+  unreadCount,
 }: {
   colors: ReturnType<typeof useTheme>['colors'];
-  onScan: () => void;
+  unreadCount: number;
 }) {
   return (
     <View style={[styles.header, { backgroundColor: colors.primary }]}>
-      <View style={styles.headerRow}>
-        <View>
-          <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
-          <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
-        </View>
-        <TouchableOpacity style={styles.scanButton} onPress={onScan} accessibilityLabel="Scan QR to donate">
-          <Text style={styles.scanButtonText}>📷 Scan</Text>
-        </TouchableOpacity>
+      <View style={styles.headerTitleRow}>
+        <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+        {unreadCount > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+          </View>
+        )}
       </View>
+      <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
     </View>
   );
 }
@@ -234,21 +264,25 @@ const styles = StyleSheet.create({
     padding: 24,
     marginBottom: 8,
   },
-  headerRow: {
+  headerTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  scanButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+  unreadBadge: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 7,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  scanButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 14,
+  unreadBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
   title: {
     fontSize: 28,

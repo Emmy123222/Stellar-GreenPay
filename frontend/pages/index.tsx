@@ -52,7 +52,7 @@ const FEATURES = [
   },
 ];
 
-const IMPACT_STATS = [
+const FALLBACK_IMPACT_STATS = [
   { value: 0, suffix: "%", label: "Platform fees", duration: 1500 },
   {
     value: 100,
@@ -62,8 +62,36 @@ const IMPACT_STATS = [
     duration: 2000,
   },
   { value: 5000, suffix: "+", label: "Monthly Donors", duration: 2500 },
-  { value: 250, suffix: "k", label: "CO₂ Offset (kg)", duration: 3000 },
+  { value: 250000, label: "CO₂ Offset (kg)", duration: 3000 },
 ];
+
+function buildHeroStats(stats: GlobalStats | null) {
+  if (!stats) return FALLBACK_IMPACT_STATS;
+
+  return [
+    {
+      value: Number.parseFloat(stats.totalXLMRaised) || 0,
+      suffix: " XLM",
+      label: "Total Raised",
+      duration: 2200,
+    },
+    {
+      value: stats.totalCO2OffsetKg,
+      label: "CO₂ Offset (kg)",
+      duration: 2500,
+    },
+    {
+      value: stats.totalDonations,
+      label: "Donations",
+      duration: 2000,
+    },
+    {
+      value: stats.totalProjects,
+      label: "Projects",
+      duration: 1800,
+    },
+  ];
+}
 
 const CATEGORIES = [
   { icon: "🌳", label: "Reforestation" },
@@ -217,7 +245,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
 
         {/* ── Stats ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-forest-200 rounded-2xl overflow-hidden border border-forest-200 mb-20 shadow-sm">
-          {IMPACT_STATS.map((s) => (
+          {buildHeroStats(globalStats).map((s) => (
             <StatItem key={s.label} stat={s} />
           ))}
         </div>
@@ -534,7 +562,7 @@ function CO2OffsetTicker({ stats }: { stats: GlobalStats }) {
         Total CO₂ Offset Across All Donations
       </p>
       <p className="text-forest-300 text-xs font-body mt-2">
-        {stats.totalDonations.toLocaleString()} donations ·{" "}
+        {stats.totalDonations.toLocaleString()} donations · {stats.totalDonors.toLocaleString()} donors ·{" "}
         {parseFloat(stats.totalXLMRaised).toLocaleString()} XLM raised
       </p>
     </div>

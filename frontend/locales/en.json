@@ -128,6 +128,15 @@
     "remaining": "Remaining",
     "expires": "Expires"
   },
+  "map": {
+    "title": "Project World Map",
+    "subtitle": "{count} active projects around the globe",
+    "activeProjects": "active projects",
+    "browseAll": "Browse all projects",
+    "noProjects": "No active projects yet",
+    "noProjectsDesc": "Check back soon — new projects are verified regularly.",
+    "dataUpdated": "Data as of {time}"
+  },
   "common": {
     "loading": "Loading…",
     "error": "Error",

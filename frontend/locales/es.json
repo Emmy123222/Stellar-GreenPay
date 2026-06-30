@@ -128,6 +128,15 @@
     "remaining": "Restante",
     "expires": "Expira"
   },
+  "map": {
+    "title": "Mapa Mundial de Proyectos",
+    "subtitle": "{count} proyectos activos alrededor del mundo",
+    "activeProjects": "proyectos activos",
+    "browseAll": "Ver todos los proyectos",
+    "noProjects": "Aún no hay proyectos activos",
+    "noProjectsDesc": "Vuelve pronto — se verifican nuevos proyectos regularmente.",
+    "dataUpdated": "Datos actualizados a las {time}"
+  },
   "common": {
     "loading": "Cargando…",
     "error": "Error",
