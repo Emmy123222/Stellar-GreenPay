@@ -146,6 +146,8 @@ router.get("/:updateId/likes", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
 // GET /api/updates/:projectId — list updates for a project
 router.get("/:projectId", async (req, res, next) => {
   try {

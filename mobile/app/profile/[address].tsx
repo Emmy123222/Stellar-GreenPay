@@ -250,6 +250,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 3,
   },
+  emptyText: {
+    fontSize: 14,
+    color: '#8aaa8a',
+    textAlign: 'center',
+    paddingVertical: 20,
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: 'bold',

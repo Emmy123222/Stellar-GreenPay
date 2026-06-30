@@ -94,7 +94,7 @@ export default function LeaderboardScreen() {
       ) : (
         entries.map((entry) => {
           const isCurrentUser =
-            CURRENT_USER_ADDRESS && entry.publicKey === CURRENT_USER_ADDRESS;
+            !!CURRENT_USER_ADDRESS && entry.publicKey === CURRENT_USER_ADDRESS;
           return (
             <TouchableOpacity
               key={entry.publicKey}
