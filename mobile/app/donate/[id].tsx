@@ -333,6 +333,8 @@ export default function DonateScreen() {
                 },
               ]}
               onPress={() => setSelectedProjectId(project.id)}
+              accessibilityLabel={`Select project ${project.name}`}
+              accessibilityRole="button"
             >
               <Text
                 style={[
@@ -359,6 +361,8 @@ export default function DonateScreen() {
             { backgroundColor: colors.buttonBackground },
           ]}
           onPress={connectWallet}
+          accessibilityLabel="Connect Stellar wallet"
+          accessibilityRole="button"
         >
           <Text style={[styles.connectButtonText, { color: colors.buttonText }]}>
             Connect Wallet
@@ -548,6 +552,18 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     marginTop: 4,
+  },
+  scannedBanner: {
+    marginTop: 10,
+    backgroundColor: 'rgba(76,175,80,0.15)',
+    borderRadius: 8,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#4caf50',
+  },
+  scannedBannerText: {
+    fontSize: 12,
+    color: '#1b5e20',
   },
   selectorCard: {
     marginHorizontal: 16,
