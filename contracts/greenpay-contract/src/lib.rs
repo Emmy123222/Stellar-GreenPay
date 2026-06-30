@@ -26,9 +26,20 @@ mod fuzz_tests;
  */
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
+    contract, contractimpl, contracttype, contractclient,
     token, Address, Env, symbol_short, Symbol, String, BytesN,
 };
+
+// ─── Oracle interface ─────────────────────────────────────────────────────────
+
+/// External price oracle interface.
+/// Any on-chain contract implementing `get_price` can serve as the oracle.
+/// `get_price` returns the number of XLM stroops equivalent to 1 USDC stroop.
+/// Example: if 1 USDC = 8 XLM, return 8.
+#[contractclient(name = "OracleClient")]
+pub trait OracleInterface {
+    fn get_price(env: Env) -> i128;
+}
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
 
@@ -116,6 +127,8 @@ pub enum DataKey {
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
+    // Price oracle for USDC → XLM conversion
+    OracleAddress,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -496,10 +509,15 @@ impl GreenPayContract {
             panic!("USDC token not configured");
         }
 
-        // Simple price stub: assume 1 USDC ≈ 8 XLM for now
-        // In production, this would call a real price oracle
+        // Fetch the USDC→XLM price from the configured oracle.
+        // The oracle returns how many XLM stroops equal 1 USDC stroop.
+        let oracle_addr: Address = env.storage().instance()
+            .get(&DataKey::OracleAddress).expect("Price oracle not configured");
+        let oracle = OracleClient::new(&env, &oracle_addr);
+        let rate = oracle.get_price();
+        if rate <= 0 { panic!("Oracle returned invalid price"); }
         let xlm_equivalent = usdc_amount
-            .checked_mul(8).expect("USDC to XLM conversion overflow");
+            .checked_mul(rate).expect("USDC to XLM conversion overflow");
 
         let mut project: Project = env.storage().instance()
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
@@ -585,6 +603,22 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::USDCTokenAddress)
     }
 
+    /// Admin-only: Set the price oracle contract address used by `donate_usdc`.
+    /// The oracle must implement `OracleInterface::get_price()`.
+    pub fn set_oracle(env: Env, admin: Address, oracle: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can set oracle"); }
+        env.storage().instance().set(&DataKey::OracleAddress, &oracle);
+        env.events().publish((symbol_short!("oracle"),), oracle);
+    }
+
+    /// Get the configured price oracle address.
+    pub fn get_oracle(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::OracleAddress)
+    }
+
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
@@ -605,6 +639,27 @@ impl GreenPayContract {
     /// Get the current contract WASM hash.
     pub fn get_contract_wasm_hash(env: Env) -> Option<BytesN<32>> {
         env.storage().instance().get(&DataKey::ContractWasmHash)
+    }
+}
+
+// ─── Mock oracle (test / integration use only) ────────────────────────────────
+
+/// A minimal oracle that returns a fixed rate of 8 XLM per 1 USDC.
+/// Deploy this in tests and local integration environments via `set_oracle`.
+///
+/// Expected OracleInterface for real integrations:
+///   - Deploy a contract that implements `get_price(env: Env) -> i128`
+///   - `get_price` must return the number of XLM stroops per 1 USDC stroop
+///   - The admin registers it via `GreenPayContract::set_oracle(admin, oracle_address)`
+///
+/// Example real oracle sources: Band Protocol, DIA, or a custom TWAP contract.
+#[contract]
+pub struct MockOracle;
+
+#[contractimpl]
+impl OracleInterface for MockOracle {
+    fn get_price(_env: Env) -> i128 {
+        8
     }
 }
 
