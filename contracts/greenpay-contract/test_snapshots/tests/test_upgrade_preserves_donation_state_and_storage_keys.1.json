@@ -492,6 +492,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "paused"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "registered_at"
                               },
                               "val": {
@@ -1578,6 +1586,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "paused"
+                  },
+                  "val": {
+                    "bool": false
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "registered_at"
                   },
                   "val": {
@@ -1838,6 +1854,14 @@
                   },
                   "val": {
                     "string": "Test Project"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "paused"
+                  },
+                  "val": {
+                    "bool": false
                   }
                 },
                 {
