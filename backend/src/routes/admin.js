@@ -10,6 +10,15 @@ const loginLimiter = createRateLimiter(10, 15);
 const TOKEN_EXPIRY = "1h";
 const REFRESH_EXPIRY = "24h";
 
+/**
+ * Authenticate an administrator and issue session tokens.
+ *
+ * @route POST /api/admin/login
+ * @param {import('express').Request} req - Express request with admin credentials.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {void} Sends the token payload or an auth error.
+ * @throws {Error} If the admin credentials are invalid or the server is not configured.
+ */
 router.post("/login", loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
   const adminUser = process.env.ADMIN_USERNAME || "admin";
@@ -28,6 +37,15 @@ router.post("/login", loginLimiter, (req, res) => {
   return res.json({ success: true, data: { token, refreshToken, expiresIn: 3600 } });
 });
 
+/**
+ * Refresh an administrator access token using a refresh token.
+ *
+ * @route POST /api/admin/refresh
+ * @param {import('express').Request} req - Express request carrying the refresh token.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {void} Sends a new access token or an auth error.
+ * @throws {Error} If the refresh token is missing or invalid.
+ */
 router.post("/refresh", (req, res) => {
   const { refreshToken } = req.body || {};
   if (!refreshToken) {
@@ -49,6 +67,15 @@ router.post("/refresh", (req, res) => {
   }
 });
 
+/**
+ * Return the authenticated admin identity.
+ *
+ * @route GET /api/admin/me
+ * @param {import('express').Request} req - Express request with the authenticated admin context.
+ * @param {import('express').Response} res - Express response object.
+ * @returns {void} Sends the admin profile payload.
+ * @throws {Error} If the request is missing a valid bearer token.
+ */
 router.get("/me", adminRequired, (req, res) => {
   res.json({
     success: true,
@@ -59,6 +86,16 @@ router.get("/me", adminRequired, (req, res) => {
   });
 });
 
+/**
+ * Query the admin audit log with optional filters and pagination.
+ *
+ * @route GET /api/admin/audit-log
+ * @param {import('express').Request} req - Express request with audit log filters.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the audit log page and metadata.
+ * @throws {Error} If the audit log query fails.
+ */
 router.get("/audit-log", adminRequired, async (req, res, next) => {
   try {
     const { actor, action, page = "1", pageSize = "50" } = req.query;
