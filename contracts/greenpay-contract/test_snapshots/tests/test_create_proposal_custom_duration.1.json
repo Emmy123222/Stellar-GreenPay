@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
@@ -52,7 +52,7 @@
                   "string": "proj-001"
                 },
                 {
-                  "u32": 0
+                  "u32": 5000
                 }
               ]
             }
@@ -263,7 +263,7 @@
                                 "symbol": "deadline_ledger"
                               },
                               "val": {
-                                "u32": 120960
+                                "u32": 5000
                               }
                             },
                             {
@@ -561,7 +561,7 @@
                   "string": "proj-001"
                 },
                 {
-                  "u32": 0
+                  "u32": 5000
                 }
               ]
             }
@@ -591,7 +591,7 @@
                   "string": "proj-001"
                 },
                 {
-                  "u32": 120960
+                  "u32": 5000
                 }
               ]
             }
@@ -636,21 +636,11 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "vote_verify_project"
+                "symbol": "get_proposal"
               }
             ],
             "data": {
-              "vec": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                },
-                {
-                  "string": "proj-001"
-                },
-                {
-                  "bool": true
-                }
-              ]
+              "string": "proj-001"
             }
           }
         }
@@ -666,119 +656,55 @@
           "v0": {
             "topics": [
               {
-                "symbol": "log"
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "get_proposal"
               }
             ],
             "data": {
-              "vec": [
+              "map": [
                 {
-                  "string": "caught panic 'Only badge holders (Seedling or above) can vote' from contract function 'Symbol(obj#167)'"
+                  "key": {
+                    "symbol": "deadline_ledger"
+                  },
+                  "val": {
+                    "u32": 5000
+                  }
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "key": {
+                    "symbol": "project_id"
+                  },
+                  "val": {
+                    "string": "proj-001"
+                  }
                 },
                 {
-                  "string": "proj-001"
+                  "key": {
+                    "symbol": "resolved"
+                  },
+                  "val": {
+                    "bool": false
+                  }
                 },
                 {
-                  "bool": true
+                  "key": {
+                    "symbol": "votes_against"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "votes_for"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
                 }
               ]
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "string": "caught error from function"
-            }
-          }
-        }
-      },
-      "failed_call": true
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "string": "contract call failed"
-                },
-                {
-                  "symbol": "vote_verify_project"
-                },
-                {
-                  "vec": [
-                    {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                    },
-                    {
-                      "string": "proj-001"
-                    },
-                    {
-                      "bool": true
-                    }
-                  ]
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": null,
-        "type_": "diagnostic",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "error"
-              },
-              {
-                "error": {
-                  "wasm_vm": "invalid_action"
-                }
-              }
-            ],
-            "data": {
-              "string": "escalating error to panic"
             }
           }
         }

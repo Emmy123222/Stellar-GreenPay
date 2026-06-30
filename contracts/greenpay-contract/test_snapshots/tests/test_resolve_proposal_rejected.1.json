@@ -50,6 +50,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -605,6 +608,31 @@
                             }
                           ]
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "VoterList"
+                            },
+                            {
+                              "string": "proj-001"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                            }
+                          ]
+                        }
                       }
                     ]
                   }
@@ -963,6 +991,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -987,7 +1018,14 @@
               }
             ],
             "data": {
-              "string": "proj-001"
+              "vec": [
+                {
+                  "string": "proj-001"
+                },
+                {
+                  "u32": 120960
+                }
+              ]
             }
           }
         }

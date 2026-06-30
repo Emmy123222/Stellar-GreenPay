@@ -27,7 +27,7 @@ mod fuzz_tests;
 
 use soroban_sdk::{
     contract, contractimpl, contracttype,
-    token, Address, Env, symbol_short, Symbol, String, BytesN,
+    token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
@@ -113,6 +113,7 @@ pub enum DataKey {
     // Governance
     Proposal(String),
     HasVoted(String, Address),
+    VoterList(String),
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
@@ -443,6 +444,14 @@ impl GreenPayContract {
         }
         env.storage().instance().set(&voted_key, &true);
 
+        // Add voter to the voter list for this proposal
+        let voter_list_key = DataKey::VoterList(project_id.clone());
+        let mut voter_list: Vec<Address> = env.storage().instance()
+            .get(&voter_list_key)
+            .unwrap_or(Vec::new(&env));
+        voter_list.push_back(voter.clone());
+        env.storage().instance().set(&voter_list_key, &voter_list);
+
         if approve {
             proposal.votes_for = proposal.votes_for
                 .checked_add(1).expect("votes_for overflow");
@@ -476,6 +485,14 @@ impl GreenPayContract {
     pub fn get_proposal(env: Env, project_id: String) -> VoteProposal {
         env.storage().instance()
             .get(&DataKey::Proposal(project_id)).expect("Proposal not found")
+    }
+
+    /// Returns the list of voter addresses for a proposal.
+    /// Can be used by governance UIs to display who voted and how.
+    pub fn get_voter_list(env: Env, project_id: String) -> Vec<Address> {
+        env.storage().instance()
+            .get(&DataKey::VoterList(project_id))
+            .unwrap_or(Vec::new(&env))
     }
 
     /// Donate USDC. Converts to XLM-equivalent for global stats using a price oracle stub.
@@ -997,5 +1014,45 @@ mod tests {
 
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
+    }
+
+    /// Test get_voter_list returns list of voters for a proposal (issue #422).
+    #[test]
+    fn test_get_voter_list() {
+        let (env, cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &0u32);
+
+        // Initially voter list should be empty
+        let voter_list = client.get_voter_list(&pid);
+        assert_eq!(voter_list.len(), 0);
+
+        // Add 3 voters
+        let voter1 = Address::generate(&env);
+        let voter2 = Address::generate(&env);
+        let voter3 = Address::generate(&env);
+        
+        grant_badge(&env, &cid, &voter1);
+        grant_badge(&env, &cid, &voter2);
+        grant_badge(&env, &cid, &voter3);
+
+        client.vote_verify_project(&voter1, &pid, &true);
+        client.vote_verify_project(&voter2, &pid, &false);
+        client.vote_verify_project(&voter3, &pid, &true);
+
+        // Check voter list contains all 3 voters
+        let voter_list = client.get_voter_list(&pid);
+        assert_eq!(voter_list.len(), 3);
+        assert!(voter_list.contains(&voter1));
+        assert!(voter_list.contains(&voter2));
+        assert!(voter_list.contains(&voter3));
+    }
+
+    /// Test get_voter_list returns empty list for non-existent proposal (issue #422).
+    #[test]
+    fn test_get_voter_list_non_existent_proposal() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        let non_existent_pid = String::from_str(&env, "non-existent");
+        let voter_list = client.get_voter_list(&non_existent_pid);
+        assert_eq!(voter_list.len(), 0);
     }
 }
