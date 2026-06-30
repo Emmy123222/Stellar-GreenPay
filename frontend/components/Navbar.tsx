@@ -2,9 +2,12 @@
  * components/Navbar.tsx
  */
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { fetchUnreadNotificationCount } from "@/lib/api";
 import { shortenAddress } from "@/utils/format";
 import { useI18n } from "@/lib/i18n";
+import { useTheme } from "@/lib/themeContext";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import ThemeToggle from "@/components/ThemeToggle";
 import clsx from "clsx";
@@ -18,17 +21,48 @@ interface NavbarProps {
 export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarProps) {
   const router = useRouter();
   const { t } = useI18n();
+  const { theme, toggleTheme } = useTheme();
   const network = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet").toLowerCase();
   const isMainnet = network === "mainnet";
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    const token = typeof window !== "undefined"
+      ? window.localStorage.getItem("greenpay:deviceToken")
+      : null;
+    const lastSeen = typeof window !== "undefined"
+      ? window.localStorage.getItem("greenpay:notifications:lastSeen") || undefined
+      : undefined;
+
+    if (!token) {
+      setUnreadCount(0);
+      return;
+    }
+
+    let cancelled = false;
+    fetchUnreadNotificationCount({ token, lastSeen })
+      .then((count) => {
+        if (!cancelled) setUnreadCount(count);
+      })
+      .catch(() => {
+        if (!cancelled) setUnreadCount(0);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const links = [
     { href: "/",            label: t("nav.home") },
     { href: "/projects",    label: t("nav.projects") },
+    { href: "/map",         label: t("nav.map") },
     { href: "/jobs",        label: t("nav.jobs") },
     { href: "/bridge",      label: t("nav.bridge") },
     { href: "/impact",      label: t("nav.impact") },
     { href: "/leaderboard", label: t("nav.leaderboard") },
     { href: "/dashboard",   label: t("nav.myImpact") },
+    { href: "/apply",       label: t("nav.apply") },
   ];
 
   return (
@@ -65,6 +99,14 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <LanguageSwitcher />
+          {unreadCount > 0 && (
+            <span
+              aria-label={`${unreadCount} unread notifications`}
+              className="min-w-5 h-5 px-1.5 rounded-full bg-red-500 text-white text-xs font-bold flex items-center justify-center shadow-sm"
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          )}
           {publicKey ? (
             <>
               <span className="address-tag flex items-center gap-1.5">
