@@ -39,7 +39,7 @@
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "eslint": "^8.57.0",
+    "eslint": "^10.6.0",
     "eslint-plugin-security": "^1.7.1",
     "eslint-plugin-sql-injection": "^1.0.1",
     "jest": "^30.3.0",
