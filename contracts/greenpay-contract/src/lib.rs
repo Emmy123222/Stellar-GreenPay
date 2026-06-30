@@ -567,7 +567,10 @@ impl GreenPayContract {
         let project_wallet = project.wallet;
         token_client.transfer(&donor, &project_wallet, &usdc_amount);
 
-        env.events().publish((symbol_short!("donated"), donor.clone(), project_id), (usdc_amount, symbol_short!("USDC")));
+        env.events().publish(
+            (symbol_short!("donated"), donor.clone(), project_id),
+            (usdc_amount, symbol_short!("USDC"), msg_hash),
+        );
     }
 
     /// Admin-only: Set the USDC token address for multi-currency donations.
