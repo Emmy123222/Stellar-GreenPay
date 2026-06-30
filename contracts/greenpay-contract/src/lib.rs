@@ -116,6 +116,9 @@ pub enum DataKey {
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
+    // Two-step admin key rotation — stores the address nominated by the
+    // current admin until the nominee accepts via accept_admin().
+    PendingAdmin,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -585,6 +588,52 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::USDCTokenAddress)
     }
 
+    // ─── Two-step admin key rotation ──────────────────────────────────────────
+
+    /// Step 1 — current admin nominates a new admin address.
+    ///
+    /// The current `admin` must sign the call. The `new_admin` is written to
+    /// `DataKey::PendingAdmin` but the live admin is NOT changed yet. The
+    /// nominee must call `accept_admin` to complete the handover, which
+    /// prevents accidental lockout if an invalid address is supplied.
+    ///
+    /// Calling `propose_new_admin` again before `accept_admin` is invoked
+    /// overwrites the previous nominee — only one pending admin can exist at
+    /// a time.
+    pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can propose a new admin"); }
+        if stored_admin == new_admin {
+            panic!("New admin must differ from the current admin");
+        }
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events().publish((symbol_short!("adm_prop"), admin), new_admin);
+    }
+
+    /// Step 2 — the nominated address accepts the admin role.
+    ///
+    /// `new_admin` must sign the call and must match the address stored in
+    /// `DataKey::PendingAdmin`. On success `DataKey::Admin` is updated to
+    /// `new_admin` and `DataKey::PendingAdmin` is cleared.
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let pending: Address = env.storage().instance()
+            .get(&DataKey::PendingAdmin).expect("No pending admin proposal");
+        if pending != new_admin {
+            panic!("Caller is not the pending admin");
+        }
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events().publish((symbol_short!("adm_acc"),), new_admin);
+    }
+
+    /// Returns the pending admin address, if a proposal is outstanding.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
@@ -997,5 +1046,130 @@ mod tests {
 
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
+    }
+
+    // ─── Two-step admin rotation tests ───────────────────────────────────────
+
+    /// Happy path: propose then accept transfers admin role cleanly.
+    #[test]
+    fn test_propose_and_accept_admin() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        let new_admin = Address::generate(&_env);
+
+        // No pending admin yet
+        assert_eq!(client.get_pending_admin(), None);
+
+        client.propose_new_admin(&admin, &new_admin);
+        assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+        // Current admin is unchanged while pending
+        assert_eq!(client.get_admin(), admin);
+
+        client.accept_admin(&new_admin);
+
+        // Admin is now updated, pending slot is cleared
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    /// Overwriting a pending proposal with a second propose_new_admin works.
+    #[test]
+    fn test_propose_overwrites_previous_nominee() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        let first_nominee  = Address::generate(&_env);
+        let second_nominee = Address::generate(&_env);
+
+        client.propose_new_admin(&admin, &first_nominee);
+        assert_eq!(client.get_pending_admin(), Some(first_nominee));
+
+        // Overwrite with a new nominee
+        client.propose_new_admin(&admin, &second_nominee);
+        assert_eq!(client.get_pending_admin(), Some(second_nominee.clone()));
+
+        // Only the second nominee can accept
+        client.accept_admin(&second_nominee);
+        assert_eq!(client.get_admin(), second_nominee);
+    }
+
+    /// Non-admin cannot call propose_new_admin.
+    #[test]
+    #[should_panic(expected = "Only admin can propose a new admin")]
+    fn test_non_admin_cannot_propose() {
+        let (_env, _cid, client, _admin, _pid) = setup();
+        let impostor  = Address::generate(&_env);
+        let new_admin = Address::generate(&_env);
+        client.propose_new_admin(&impostor, &new_admin);
+    }
+
+    /// Proposing the current admin as the new admin is rejected.
+    #[test]
+    #[should_panic(expected = "New admin must differ from the current admin")]
+    fn test_propose_same_admin_fails() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        client.propose_new_admin(&admin, &admin);
+    }
+
+    /// Accepting when no proposal exists panics.
+    #[test]
+    #[should_panic(expected = "No pending admin proposal")]
+    fn test_accept_admin_without_proposal_fails() {
+        let (_env, _cid, client, _admin, _pid) = setup();
+        let random = Address::generate(&_env);
+        client.accept_admin(&random);
+    }
+
+    /// A different address from the nominee cannot accept the proposal.
+    #[test]
+    #[should_panic(expected = "Caller is not the pending admin")]
+    fn test_wrong_address_cannot_accept() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        let nominee  = Address::generate(&_env);
+        let impostor = Address::generate(&_env);
+        client.propose_new_admin(&admin, &nominee);
+        client.accept_admin(&impostor);
+    }
+
+    /// After a successful rotation the new admin can call admin-only functions.
+    #[test]
+    fn test_new_admin_can_register_project_after_rotation() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        let new_admin = Address::generate(&_env);
+
+        client.propose_new_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        let new_pid    = String::from_str(&_env, "proj-002");
+        let new_wallet = Address::generate(&_env);
+        // Should succeed — new_admin now controls the contract
+        client.register_project(
+            &new_admin,
+            &new_pid,
+            &String::from_str(&_env, "New Project"),
+            &new_wallet,
+            &50u32,
+        );
+        assert_eq!(client.get_project_count(), 2);
+    }
+
+    /// The old admin can no longer call admin-only functions after rotation.
+    #[test]
+    #[should_panic(expected = "Only admin can register projects")]
+    fn test_old_admin_rejected_after_rotation() {
+        let (_env, _cid, client, admin, _pid) = setup();
+        let new_admin = Address::generate(&_env);
+
+        client.propose_new_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        let pid2   = String::from_str(&_env, "proj-002");
+        let wallet = Address::generate(&_env);
+        // Old admin must now be rejected
+        client.register_project(
+            &admin,
+            &pid2,
+            &String::from_str(&_env, "Should Fail"),
+            &wallet,
+            &50u32,
+        );
     }
 }

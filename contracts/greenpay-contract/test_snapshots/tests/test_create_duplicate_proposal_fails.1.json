@@ -50,6 +50,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -556,6 +559,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -580,7 +586,14 @@
               }
             ],
             "data": {
-              "string": "proj-001"
+              "vec": [
+                {
+                  "string": "proj-001"
+                },
+                {
+                  "u32": 120960
+                }
+              ]
             }
           }
         }
@@ -633,6 +646,9 @@
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -656,13 +672,16 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Proposal already exists for this project' from contract function 'Symbol(obj#163)'"
+                  "string": "caught panic 'Proposal already exists for this project' from contract function 'Symbol(obj#165)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
                   "string": "proj-001"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -728,6 +747,9 @@
                     },
                     {
                       "string": "proj-001"
+                    },
+                    {
+                      "u32": 0
                     }
                   ]
                 }

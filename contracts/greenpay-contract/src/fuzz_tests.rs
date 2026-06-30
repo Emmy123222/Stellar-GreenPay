@@ -16,6 +16,7 @@ mod fuzz {
         testutils::Address as _,
         Address, Env, String as SorobanString,
     };
+    use soroban_sdk::token::StellarAssetClient;
     use crate::{GreenPayContract, GreenPayContractClient};
 
     /// Upper bound for a single donation: 1 billion XLM in stroops (10^16).
@@ -23,7 +24,7 @@ mod fuzz {
     /// still fit in an i128 without overflowing.
     const MAX_DONATION: i128 = 1_000_000_000 * 10_000_000; // 10^16
 
-    fn setup() -> (Env, GreenPayContractClient<'static>, Address, SorobanString) {
+    fn setup() -> (Env, GreenPayContractClient<'static>, Address, Address, SorobanString) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -35,9 +36,19 @@ mod fuzz {
 
         let project_id = SorobanString::from_str(&env, "proj-fuzz-1");
         let wallet = Address::generate(&env);
-        client.register_project(&project_id, &SorobanString::from_str(&env, "Fuzz Project"), &wallet, &100u32);
+        client.register_project(
+            &admin,
+            &project_id,
+            &SorobanString::from_str(&env, "Fuzz Project"),
+            &wallet,
+            &100u32,
+        );
 
-        (env, client, wallet, project_id)
+        // Create a token for donations
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+
+        (env, client, token, wallet, project_id)
     }
 
     proptest! {
@@ -47,12 +58,15 @@ mod fuzz {
         /// overflow global stats.
         #[test]
         fn prop_single_donation_no_overflow(amount in 1i128..=MAX_DONATION) {
-            let (env, client, _wallet, project_id) = setup();
+            let (env, client, token, _wallet, project_id) = setup();
             let donor = Address::generate(&env);
-            let message = SorobanString::from_str(&env, "fuzz donation");
+
+            // Mint tokens to the donor so the transfer can succeed
+            let token_client = StellarAssetClient::new(&env, &token);
+            token_client.mint(&donor, &amount);
 
             // donate must not panic (panics signal overflow via checked_add.expect)
-            client.donate(&donor, &project_id, &amount, &message);
+            client.donate(&token, &donor, &project_id, &amount, &0u32);
 
             let global_total = client.get_global_total();
             let global_co2   = client.get_global_co2();
@@ -81,13 +95,16 @@ mod fuzz {
             a in 1i128..=MAX_DONATION / 2,
             b in 1i128..=MAX_DONATION / 2,
         ) {
-            let (env, client, _wallet, project_id) = setup();
+            let (env, client, token, _wallet, project_id) = setup();
             let donor_a = Address::generate(&env);
             let donor_b = Address::generate(&env);
-            let msg = SorobanString::from_str(&env, "fuzz");
 
-            client.donate(&donor_a, &project_id, &a, &msg);
-            client.donate(&donor_b, &project_id, &b, &msg);
+            let token_client = StellarAssetClient::new(&env, &token);
+            token_client.mint(&donor_a, &a);
+            token_client.mint(&donor_b, &b);
+
+            client.donate(&token, &donor_a, &project_id, &a, &0u32);
+            client.donate(&token, &donor_b, &project_id, &b, &0u32);
 
             let global_total = client.get_global_total();
             let expected     = a.checked_add(b).expect("test helper overflow");
@@ -110,11 +127,13 @@ mod fuzz {
         fn prop_zero_donation_does_not_corrupt_state(
             legit in 1i128..=MAX_DONATION,
         ) {
-            let (env, client, _wallet, project_id) = setup();
+            let (env, client, token, _wallet, project_id) = setup();
             let donor = Address::generate(&env);
-            let msg   = SorobanString::from_str(&env, "legit");
 
-            client.donate(&donor, &project_id, &legit, &msg);
+            let token_client = StellarAssetClient::new(&env, &token);
+            token_client.mint(&donor, &legit);
+
+            client.donate(&token, &donor, &project_id, &legit, &0u32);
             let total_before = client.get_global_total();
 
             // A second call with the same donor — amount 0 may panic or succeed
