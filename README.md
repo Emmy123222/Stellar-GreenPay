@@ -22,6 +22,21 @@ Stellar GreenPay is an open-source climate donation platform where donors give X
 
 ---
 
+## 🎥 Video Walkthrough
+
+[![Stellar GreenPay - Full Donation Flow](https://img.youtube.com/vi/l9O8GSNx1nk/0.jpg)](https://youtu.be/l9O8GSNx1nk)
+
+Watch a complete walkthrough of the donation flow on **Stellar Testnet**:
+
+1. **Connect** Freighter wallet
+2. **Browse** verified climate projects
+3. **Donate** XLM on-chain
+4. **View** your impact certificate
+
+> No Stellar account needed to watch — just hit play!
+
+---
+
 ## 🗂 Project Structure
 
 ```
@@ -117,6 +132,8 @@ ALLOWED_ORIGINS=http://localhost:3000
 ## 🤝 Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). All skill levels welcome!
+
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
 
