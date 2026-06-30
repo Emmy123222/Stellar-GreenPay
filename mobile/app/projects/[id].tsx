@@ -151,6 +151,9 @@ export default function ProjectDetailScreen() {
     if (id) {
       loadProject(id as string);
       initializeNotifications();
+      markNotificationsSeen().then(() => {
+        Notifications.setBadgeCountAsync(0).catch(() => undefined);
+      });
     }
   }, [id]);
 
@@ -456,6 +459,27 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerTextGroup: {
+    flex: 1,
+    marginRight: 12,
+  },
+  shareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  shareIcon: {
+    fontSize: 18,
   },
   category: {
     fontSize: 14,
