@@ -10,6 +10,17 @@ import { useRouter } from "next/router";
 import { useEffect, useState, useCallback } from "react";
 import { fetchProfile, fetchDonorHistory } from "@/lib/api";
 import type { DonorProfile, Donation, BadgeTier } from "@/utils/types";
+import {
+  buildMintImpactNftTransaction,
+  submitSorobanTransaction,
+  explorerUrl,
+  CONTRACT_ID,
+} from "@/lib/stellar";
+import {
+  connectWallet,
+  getConnectedPublicKey,
+  signTransactionWithWallet,
+} from "@/lib/wallet";
 
 // ── Badge helpers ─────────────────────────────────────────────────────────────
 
@@ -226,6 +237,229 @@ function ShareButton({ url }: { url: string }) {
   );
 }
 
+// ── Claim NFT card ────────────────────────────────────────────────────────────
+
+/** Order of badge tiers, lowest → highest, used to pick the donor's top tier. */
+const TIER_ORDER: BadgeTier[] = ["seedling", "tree", "forest", "earth"];
+
+/**
+ * Returns the highest badge tier the donor has earned, or null if none.
+ * The issue asks us to "check current badge tier"; the current tier is the
+ * highest one reflected by the profile (which mirrors the on-chain badge).
+ */
+function highestTier(badges: { tier: BadgeTier }[]): BadgeTier | null {
+  let best: BadgeTier | null = null;
+  let bestIdx = -1;
+  for (const b of badges) {
+    const idx = TIER_ORDER.indexOf(b.tier);
+    if (idx > bestIdx) {
+      bestIdx = idx;
+      best = b.tier;
+    }
+  }
+  return best;
+}
+
+type ClaimStep =
+  | "idle"
+  | "checking"
+  | "building"
+  | "signing"
+  | "submitting"
+  | "success"
+  | "error";
+
+interface MintedNft {
+  tier: BadgeTier;
+  ledger: number;
+  hash: string;
+}
+
+function ClaimNftCard({ profile }: { profile: DonorProfile }) {
+  const [connectedKey, setConnectedKey] = useState<string | null>(null);
+  const [step, setStep] = useState<ClaimStep>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [minted, setMinted] = useState<MintedNft | null>(null);
+
+  // The tier the donor is eligible to claim (their current/highest badge).
+  const tier = highestTier(profile.badges);
+
+  // On mount, see if a wallet is already authorised so we can match it to the
+  // profile owner (the contract's `mint_impact_nft` requires the donor to sign).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const pk = await getConnectedPublicKey();
+      if (!cancelled) setConnectedKey(pk);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const isOwner = Boolean(connectedKey && connectedKey === profile.publicKey);
+  const busy =
+    step === "checking" ||
+    step === "building" ||
+    step === "signing" ||
+    step === "submitting";
+
+  const handleConnect = useCallback(async () => {
+    setError(null);
+    const { publicKey, error: e } = await connectWallet();
+    if (e) {
+      setError(e);
+      return;
+    }
+    setConnectedKey(publicKey);
+  }, []);
+
+  const handleClaim = useCallback(async () => {
+    setError(null);
+    setMinted(null);
+
+    if (!CONTRACT_ID) {
+      setError("Impact NFT contract is not configured (set NEXT_PUBLIC_CONTRACT_ID).");
+      setStep("error");
+      return;
+    }
+    if (!connectedKey || connectedKey !== profile.publicKey) {
+      setError("Connect the wallet that owns this profile to claim its NFT.");
+      setStep("error");
+      return;
+    }
+
+    try {
+      // 1. Re-check the current badge tier from the API right before minting.
+      setStep("checking");
+      const fresh = await fetchProfile(profile.publicKey);
+      const currentTier = highestTier(fresh.badges);
+      if (!currentTier) {
+        throw new Error("No badge tier reached yet — donate more to unlock an Impact NFT.");
+      }
+
+      // 2. Build the Soroban mint_impact_nft(donor, tier) transaction.
+      setStep("building");
+      const tx = await buildMintImpactNftTransaction({
+        contractId: CONTRACT_ID,
+        donor: profile.publicKey,
+        tier: currentTier,
+      });
+
+      // 3. Prompt Freighter to sign.
+      setStep("signing");
+      const { signedXDR, error: signErr } = await signTransactionWithWallet(
+        tx.toXDR(),
+      );
+      if (signErr || !signedXDR) {
+        throw new Error(signErr || "Wallet did not return a signed transaction.");
+      }
+
+      // 4. Submit via Soroban RPC and wait for the mint ledger.
+      setStep("submitting");
+      const { hash, ledger } = await submitSorobanTransaction(signedXDR);
+
+      setMinted({ tier: currentTier, ledger, hash });
+      setStep("success");
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Something went wrong. Please try again.";
+      setError(msg);
+      setStep("error");
+    }
+  }, [connectedKey, profile.publicKey]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  // Successfully minted: show the NFT with its tier name and mint ledger.
+  if (minted) {
+    const meta = BADGE_META[minted.tier];
+    return (
+      <div className={`card border ${meta.border} ${meta.bg}`}>
+        <h2 className="label mb-3">Impact NFT Minted 🎉</h2>
+        <div className="flex items-center gap-4">
+          <div
+            className={`w-16 h-16 rounded-2xl flex items-center justify-center text-4xl border ${meta.border} bg-white/70 select-none`}
+          >
+            {meta.emoji}
+          </div>
+          <div className="min-w-0">
+            <p className={`font-display text-lg font-semibold ${meta.color}`}>
+              {meta.label} Impact NFT
+            </p>
+            <p className="text-xs text-[#5a7a5a] font-body">
+              Minted at ledger{" "}
+              <span className="font-semibold text-[#227239]">
+                #{minted.ledger.toLocaleString()}
+              </span>
+            </p>
+            <a
+              href={explorerUrl(minted.hash)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-forest-600 hover:underline font-body break-all"
+            >
+              View transaction ↗
+            </a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // No badge tier yet — nothing to claim.
+  if (!tier) return null;
+
+  const meta = BADGE_META[tier];
+
+  return (
+    <div className="card">
+      <h2 className="label mb-1">Claim your Impact NFT</h2>
+      <p className="text-sm text-[#5a7a5a] font-body mb-4">
+        Mint an on-chain{" "}
+        <span className={`font-semibold ${meta.color}`}>
+          {meta.emoji} {meta.label}
+        </span>{" "}
+        Impact NFT for your contributions.
+      </p>
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-600 text-sm font-body"
+        >
+          {error}
+        </div>
+      )}
+
+      {!connectedKey ? (
+        <button onClick={handleConnect} className="btn-primary text-sm">
+          🔗 Connect Freighter to claim
+        </button>
+      ) : !isOwner ? (
+        <p className="text-xs text-[#8aaa8a] font-body">
+          Connect the wallet that owns this profile ({shortenKey(profile.publicKey)})
+          to claim its Impact NFT.
+        </p>
+      ) : (
+        <button
+          onClick={handleClaim}
+          disabled={busy}
+          className="btn-primary text-sm flex items-center gap-2 disabled:opacity-60"
+          aria-busy={busy}
+        >
+          {step === "checking" && "Checking tier…"}
+          {step === "building" && "Building transaction…"}
+          {step === "signing" && "Confirm in Freighter…"}
+          {step === "submitting" && "Minting on-chain…"}
+          {(step === "idle" || step === "error" || step === "success") &&
+            `Claim ${meta.label} NFT`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function DonorProfilePage() {
@@ -367,6 +601,9 @@ export default function DonorProfilePage() {
               </div>
             </div>
           )}
+
+          {/* ── Claim Impact NFT ────────────────────────────────────────── */}
+          <ClaimNftCard profile={profile} />
 
           {/* ── Donation history ────────────────────────────────────────── */}
           <div className="card">
