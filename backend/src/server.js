@@ -84,6 +84,7 @@ const statsRouter         = require("./routes/stats");
 const impactRouter        = require("./routes/impact");
 const ratingsRouter       = require("./routes/ratings");
 const adminRouter         = require("./routes/admin");
+const priceRouter         = require("./routes/price");
 
 function mount(path, router) {
   app.use(path, router);
@@ -102,6 +103,7 @@ mount("/api/stats",         statsRouter);
 mount("/api/impact",        impactRouter);
 mount("/api/ratings",       ratingsRouter);
 mount("/api/admin",         adminRouter);
+mount("/api/price",         priceRouter);
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // eslint-disable-next-line no-unused-vars

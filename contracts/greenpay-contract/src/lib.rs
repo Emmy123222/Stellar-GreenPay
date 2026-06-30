@@ -478,17 +478,24 @@ impl GreenPayContract {
             .get(&DataKey::Proposal(project_id)).expect("Proposal not found")
     }
 
-    /// Donate USDC. Converts to XLM-equivalent for global stats using a price oracle stub.
+    /// Donate USDC. Converts to XLM-equivalent for global stats using a DEX spot price
+    /// supplied by the caller from the off-chain Stellar DEX price oracle.
+    ///
+    /// `xlm_per_usdc` is the mid-price (in XLM stroops per 1 USDC stroop) fetched
+    /// from the Horizon orderbook and cached for 30 seconds by the backend service.
+    /// The caller is responsible for providing a fresh, non-zero rate.
     pub fn donate_usdc(
-        env:        Env,
-        usdc_token: Address,
-        donor:      Address,
-        project_id: String,
-        usdc_amount: i128,
-        msg_hash:   u32,
+        env:          Env,
+        usdc_token:   Address,
+        donor:        Address,
+        project_id:   String,
+        usdc_amount:  i128,
+        xlm_per_usdc: i128,
+        _msg_hash:    u32,
     ) {
         donor.require_auth();
-        if usdc_amount <= 0 { panic!("Donation amount must be positive"); }
+        if usdc_amount <= 0  { panic!("Donation amount must be positive"); }
+        if xlm_per_usdc <= 0 { panic!("xlm_per_usdc rate must be positive"); }
 
         let stored_usdc: Option<Address> = env.storage().instance()
             .get(&DataKey::USDCTokenAddress);
@@ -496,10 +503,10 @@ impl GreenPayContract {
             panic!("USDC token not configured");
         }
 
-        // Simple price stub: assume 1 USDC ≈ 8 XLM for now
-        // In production, this would call a real price oracle
+        // Convert USDC amount to XLM-equivalent using the DEX spot mid-price
+        // supplied by the off-chain price oracle (Horizon orderbook, 30 s cache).
         let xlm_equivalent = usdc_amount
-            .checked_mul(8).expect("USDC to XLM conversion overflow");
+            .checked_mul(xlm_per_usdc).expect("USDC to XLM conversion overflow");
 
         let mut project: Project = env.storage().instance()
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
@@ -997,5 +1004,43 @@ mod tests {
 
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
+    }
+    /// Tests for `donate_usdc` with the live-rate parameter.
+    #[test]
+    fn test_donate_usdc_with_dex_rate() {
+        let (env, _cid, client, admin, pid) = setup();
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env.register_stellar_asset_contract_v2(usdc_admin.clone()).address();
+        let usdc_client = StellarAssetClient::new(&env, &usdc_token);
+        client.set_usdc_token(&admin, &usdc_token);
+
+        let donor      = Address::generate(&env);
+        let usdc_amt   = 1_000_000i128; // 0.1 USDC (7 decimal places)
+        // Simulate a DEX mid-price of 9 XLM per USDC (in stroops ratio: 9)
+        let rate       = 9i128;
+        let expected_xlm = usdc_amt.checked_mul(rate).unwrap();
+
+        usdc_client.mint(&donor, &usdc_amt);
+        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amt, &rate, &0u32);
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, expected_xlm);
+        let global = client.get_global_total();
+        assert_eq!(global, expected_xlm);
+    }
+
+    #[test]
+    #[should_panic(expected = "xlm_per_usdc rate must be positive")]
+    fn test_donate_usdc_zero_rate_panics() {
+        let (env, _cid, client, admin, pid) = setup();
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env.register_stellar_asset_contract_v2(usdc_admin.clone()).address();
+        let usdc_client = StellarAssetClient::new(&env, &usdc_token);
+        client.set_usdc_token(&admin, &usdc_token);
+
+        let donor = Address::generate(&env);
+        usdc_client.mint(&donor, &1_000_000i128);
+        // Rate of 0 must be rejected
+        client.donate_usdc(&usdc_token, &donor, &pid, &1_000_000i128, &0i128, &0u32);
     }
 }
