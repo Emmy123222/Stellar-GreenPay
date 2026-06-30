@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { authenticate } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
-import { Keypair, Server, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -59,7 +59,7 @@ export default function DonateScreen() {
     }
   };
 
-  const selectedProject = projects.find((project) => project.id === selectedProjectId) || projects[0] || null;
+  const selectedProject = projects.find((project: ClimateProject) => project.id === selectedProjectId) || projects[0] || null;
 
   const handleDonate = async () => {
     if (!selectedProject) {
@@ -110,7 +110,7 @@ export default function DonateScreen() {
     setStatusMessage('Signing and submitting your donation...');
 
     try {
-      const server = new Server(HORIZON_URL);
+      const server = new Horizon.Server(HORIZON_URL);
       const sourceAccount = await server.loadAccount(publicKey);
 
       const transaction = new TransactionBuilder(sourceAccount, {
@@ -159,7 +159,7 @@ export default function DonateScreen() {
   };
 
   const connectWallet = async () => {
-    Alert.alert(
+    Alert.prompt(
       'Connect Wallet',
       'Enter your Stellar public key:',
       [
@@ -202,7 +202,7 @@ export default function DonateScreen() {
       <View style={styles.selectorCard}>
         <Text style={styles.sectionTitle}>Select a project</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectList}>
-          {projects.map((project) => (
+          {projects.map((project: ClimateProject) => (
             <TouchableOpacity
               key={project.id}
               style={[

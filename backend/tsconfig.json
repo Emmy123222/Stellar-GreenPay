@@ -8,7 +8,7 @@
     "moduleResolution": "node",
     "noEmit": true,
     "skipLibCheck": true
-    ,"ignoreDeprecations": "6.0"
   },
   "include": ["src/services/**/*.js"]
+
 }
