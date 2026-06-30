@@ -181,6 +181,32 @@ describe("POST /api/projects (admin)", () => {
   });
 });
 
+describe("POST /api/projects", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("rejects HTML in project name with 422 field errors", async () => {
+    const res = await request(app)
+      .post("/api/projects")
+      .send({
+        name: "<script>Bad</script>",
+        description: "A test climate project that is long enough",
+        location: "Brazil",
+        category: "Reforestation",
+        wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        goal_xlm: 100,
+      })
+      .expect(422);
+
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.name).toBeDefined();
+  });
+});
+
 describe("POST /api/projects/:id/generate-summary", () => {
   let app;
 

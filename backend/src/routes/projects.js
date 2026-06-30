@@ -13,6 +13,8 @@ const { getOnChainProject, CONTRACT_ID, server, NETWORK_PASSPHRASE } = require("
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -29,6 +31,16 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+
+const createProjectSchema = z.object({
+  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
+  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
+  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
+  category: z.enum(VALID_CATEGORIES),
+  wallet_address: z.string().min(1, "wallet_address is required"),
+  goal_xlm: z.union([z.string(), z.number()]).optional(),
+  tags: z.array(z.string()).optional().default([]),
+});
 
 /**
  * GET /api/projects/featured
@@ -204,7 +216,7 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
-router.post("/", async (req, res, next) => {
+router.post("/", validateBody(createProjectSchema), async (req, res, next) => {
   try {
     const { name, description, location, category, wallet_address, goal_xlm = 0, tags = [] } = req.body || {};
 

@@ -7,12 +7,20 @@ const router  = express.Router();
 const pool = require("../db/pool");
 const { mapProfileRow } = require("../services/store");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid public key"); e.status = 400; throw e; }
 }
 
 const profilePostLimiter = createRateLimiter(20, 1);
+
+const profileSchema = z.object({
+  publicKey: z.string().min(1, "publicKey is required"),
+  displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
+  bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
+});
 
 router.get("/:publicKey", async (req, res, next) => {
   try {
@@ -47,7 +55,7 @@ router.get("/:publicKey", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.post("/", profilePostLimiter, async (req, res, next) => {
+router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, res, next) => {
   try {
     const { publicKey, displayName, bio } = req.body;
     validateKey(publicKey);
