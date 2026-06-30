@@ -13,8 +13,14 @@ import {
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
+import * as Notifications from 'expo-notifications';
 import { useTheme } from './theme';
 import { getCachedData, setCachedData } from '../utils/cache';
+import {
+  getPushToken,
+  getUnreadNotificationCount,
+  setupNotificationListener,
+} from '../utils/notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const CACHE_KEY_PROJECTS = 'home:projects_list';
@@ -64,6 +70,8 @@ function ProjectCard({
       style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.cardBorder, shadowColor: colors.cardShadow }]}
       onPress={onPress}
       activeOpacity={0.8}
+      accessibilityLabel={`View ${project.name} project`}
+      accessibilityRole="button"
     >
       <View style={styles.cardHeader}>
         <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
@@ -101,10 +109,12 @@ function ProjectCard({
 export default function HomeScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const handleScan = () => router.push('/scan' as `${string}`);
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [networkError, setNetworkError] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const loadProjects = useCallback(async (isPullRefresh = false) => {
     if (isPullRefresh) setRefreshing(true);
@@ -132,6 +142,29 @@ export default function HomeScreen() {
     loadProjects();
   }, [loadProjects]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadUnreadCount() {
+      const token = await getPushToken();
+      if (!token) return;
+
+      const count = await getUnreadNotificationCount(token);
+      if (active) {
+        setUnreadCount(count);
+        await Notifications.setBadgeCountAsync(count).catch(() => undefined);
+      }
+    }
+
+    loadUnreadCount();
+    const subscription = setupNotificationListener(setUnreadCount);
+
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
   const renderSkeleton = () => (
     <FlatList
       data={[1, 2, 3, 4, 5]}
@@ -139,7 +172,7 @@ export default function HomeScreen() {
       renderItem={() => <SkeletonCard colors={colors} />}
       contentContainerStyle={styles.listContent}
       scrollEnabled={false}
-      ListHeaderComponent={<Header colors={colors} />}
+      ListHeaderComponent={<Header colors={colors} unreadCount={unreadCount} />}
     />
   );
 
@@ -164,7 +197,7 @@ export default function HomeScreen() {
           />
         )}
         contentContainerStyle={styles.listContent}
-        ListHeaderComponent={<Header colors={colors} />}
+        ListHeaderComponent={<Header colors={colors} unreadCount={unreadCount} />}
         ListEmptyComponent={
           networkError ? (
             <View style={styles.errorContainer}>
@@ -174,6 +207,8 @@ export default function HomeScreen() {
               <TouchableOpacity
                 style={[styles.retryButton, { backgroundColor: colors.primary }]}
                 onPress={() => { setLoading(true); loadProjects(); }}
+                accessibilityLabel="Retry loading projects"
+                accessibilityRole="button"
               >
                 <Text style={[styles.retryText, { color: colors.buttonText }]}>Retry</Text>
               </TouchableOpacity>
@@ -196,10 +231,23 @@ export default function HomeScreen() {
   );
 }
 
-function Header({ colors }: { colors: ReturnType<typeof useTheme>['colors'] }) {
+function Header({
+  colors,
+  unreadCount,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  unreadCount: number;
+}) {
   return (
     <View style={[styles.header, { backgroundColor: colors.primary }]}>
-      <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+      <View style={styles.headerTitleRow}>
+        <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+        {unreadCount > 0 && (
+          <View style={styles.unreadBadge}>
+            <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+          </View>
+        )}
+      </View>
       <Text style={[styles.subtitle, { color: colors.headerText }]}>Climate donations on Stellar</Text>
     </View>
   );
@@ -215,6 +263,26 @@ const styles = StyleSheet.create({
   header: {
     padding: 24,
     marginBottom: 8,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  unreadBadge: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 7,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadBadgeText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '800',
   },
   title: {
     fontSize: 28,
