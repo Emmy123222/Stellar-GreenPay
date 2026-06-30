@@ -15,6 +15,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional().default(""),
   ADMIN_USERNAME: z.string().optional().default("admin"),
   ADMIN_PASSWORD: z.string().optional().default(""),
+  ADMIN_API_KEY: z.string().optional().default(""),
+  ADMIN_API_KEYS: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   REDIS_URL: z.string().optional().default("redis://localhost:6379"),
   ENABLE_TURRETS: z.enum(["true", "false"]).optional().default("false"),
