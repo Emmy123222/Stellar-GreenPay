@@ -302,6 +302,7 @@ async function generatePreSignedTransactions({
  */
 function startTurretsServer(port = 3001) {
   const express = require("express");
+  const { adminKeyRequired } = require("../middleware/auth");
   const app = express();
 
   app.use(express.json());
@@ -324,7 +325,7 @@ function startTurretsServer(port = 3001) {
   });
 
   // Endpoint to generate pre-signed transactions
-  app.post("/admin/presign", async (req, res) => {
+  app.post("/admin/presign", adminKeyRequired, async (req, res) => {
     try {
       const {
         matcherAddress,

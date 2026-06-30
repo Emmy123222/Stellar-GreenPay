@@ -43,7 +43,7 @@ app.use(helmet());
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
-app.use(csurf({
+const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -51,7 +51,13 @@ app.use(csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
-}));
+});
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+    return next();
+  }
+  return csrfProtection(req, res, next);
+});
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -66,7 +72,7 @@ const io = new Server(server, {
 app.set("io", io);
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
 
-// ── CSRF token endpoint ──────────────────────────────────────────────────────
+// ── CSRF token endpoint (Closes #466) ─────────────────────────────────────────
 function csrfTokenHandler(req, res) {
   res.json({ success: true, csrfToken: req.csrfToken() });
 }
@@ -74,17 +80,19 @@ app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
 // ── Route mounts — each router registered at /api and /api/v1 ───────────────
-const projectsRouter      = require("./routes/projects");
-const donationsRouter     = require("./routes/donations");
-const profilesRouter      = require("./routes/profiles");
-const leaderboardRouter   = require("./routes/leaderboard");
-const updatesRouter       = require("./routes/updates");
-const subscriptionsRouter = require("./routes/subscriptions");
-const jobsRouter          = require("./routes/jobs");
-const statsRouter         = require("./routes/stats");
-const impactRouter        = require("./routes/impact");
-const ratingsRouter       = require("./routes/ratings");
-const adminRouter         = require("./routes/admin");
+const projectsRouter        = require("./routes/projects");
+const donationsRouter       = require("./routes/donations");
+const profilesRouter        = require("./routes/profiles");
+const leaderboardRouter     = require("./routes/leaderboard");
+const updatesRouter         = require("./routes/updates");
+const subscriptionsRouter   = require("./routes/subscriptions");
+const jobsRouter            = require("./routes/jobs");
+const statsRouter           = require("./routes/stats");
+const impactRouter          = require("./routes/impact");
+const ratingsRouter         = require("./routes/ratings");
+const adminRouter           = require("./routes/admin");
+const verificationRouter    = require("./routes/verification");
+const uploadsRouter         = require("./routes/uploads");
 
 function mount(path, router) {
   app.use(path, router);
@@ -92,17 +100,19 @@ function mount(path, router) {
 }
 
 app.use("/health", require("./routes/health"));
-mount("/api/projects",      projectsRouter);
-mount("/api/donations",     donationsRouter);
-mount("/api/profiles",      profilesRouter);
-mount("/api/leaderboard",   leaderboardRouter);
-mount("/api/updates",       updatesRouter);
-mount("/api/subscriptions", subscriptionsRouter);
-mount("/api/jobs",          jobsRouter);
-mount("/api/stats",         statsRouter);
-mount("/api/impact",        impactRouter);
-mount("/api/ratings",       ratingsRouter);
-mount("/api/admin",         adminRouter);
+mount("/api/projects",            projectsRouter);
+mount("/api/donations",           donationsRouter);
+mount("/api/profiles",            profilesRouter);
+mount("/api/leaderboard",         leaderboardRouter);
+mount("/api/updates",             updatesRouter);
+mount("/api/subscriptions",       subscriptionsRouter);
+mount("/api/jobs",                jobsRouter);
+mount("/api/stats",               statsRouter);
+mount("/api/impact",              impactRouter);
+mount("/api/ratings",             ratingsRouter);
+mount("/api/admin",               adminRouter);
+mount("/api/verification-requests", verificationRouter);
+mount("/api/uploads",             uploadsRouter);
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // eslint-disable-next-line no-unused-vars
@@ -116,6 +126,9 @@ async function startServer() {
 
   const { start: startSummaryQueue } = require("./services/summaryQueue");
   await startSummaryQueue(io);
+
+  const { start: startDigestQueue } = require("./services/digestQueue");
+  await startDigestQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
