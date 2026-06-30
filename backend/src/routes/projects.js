@@ -741,4 +741,142 @@ router.patch("/:id/status", async (req, res, next) => {
   }
 });
 
+// ── Impact certificate ─────────────────────────────────────────────────────
+
+/**
+ * GET /api/projects/:id/impact-certificate?donorAddress=G...
+ *
+ * Returns a personalised impact summary for a specific donor on a specific
+ * project: how much they donated, the CO₂ they helped offset, an equivalent
+ * number of trees, their badge tier, and their full donation history for the
+ * project.
+ *
+ * Query params:
+ *   donorAddress  (required) — Stellar G… public key of the donor
+ *
+ * Response 200:
+ * {
+ *   success: true,
+ *   data: {
+ *     projectId: string,
+ *     projectName: string,
+ *     donorAddress: string,
+ *     totalDonatedXLM: string,      // 7-decimal string
+ *     co2OffsetKg: number,
+ *     treesEquivalent: number,
+ *     badgeTier: "bronze"|"silver"|"gold"|"platinum"|null,
+ *     donationCount: number,
+ *     donations: Array<{
+ *       id, amountXLM, message, transactionHash, createdAt
+ *     }>,
+ *     issuedAt: string              // ISO timestamp
+ *   }
+ * }
+ *
+ * Errors: 400 (missing/invalid donorAddress), 404 (project or donor not found)
+ */
+
+const KG_CO2_PER_TREE_CERT = 21.77; // consistent with impact.js
+
+/** Derive a badge tier from the donor's total XLM donated to this project. */
+function deriveBadgeTier(totalXLM) {
+  if (totalXLM >= 10000) return "platinum";
+  if (totalXLM >= 1000) return "gold";
+  if (totalXLM >= 100) return "silver";
+  if (totalXLM > 0) return "bronze";
+  return null;
+}
+
+router.get("/:id/impact-certificate", async (req, res, next) => {
+  try {
+    const { donorAddress } = req.query;
+
+    // Validate donorAddress — must be a 56-char Stellar G-address
+    if (
+      !donorAddress ||
+      typeof donorAddress !== "string" ||
+      !/^G[A-Z2-7]{55}$/.test(donorAddress)
+    ) {
+      return res.status(400).json({
+        error: "donorAddress query parameter is required and must be a valid Stellar public key",
+      });
+    }
+
+    // 1. Confirm the project exists
+    const projectResult = await pool.query(
+      `SELECT id, name, raised_xlm, co2_offset_kg
+       FROM projects
+       WHERE id = $1`,
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // 2. Fetch all donations by this donor for this project
+    const donationsResult = await pool.query(
+      `SELECT
+         id,
+         COALESCE(amount_xlm, amount) AS amount_xlm,
+         message,
+         transaction_hash,
+         created_at
+       FROM donations
+       WHERE project_id = $1
+         AND donor_address = $2
+         AND (currency = 'XLM' OR currency IS NULL)
+       ORDER BY created_at DESC`,
+      [req.params.id, donorAddress],
+    );
+
+    if (donationsResult.rows.length === 0) {
+      return res.status(404).json({
+        error: "No donations found for this donor on this project",
+      });
+    }
+
+    // 3. Compute aggregate stats
+    const project = projectResult.rows[0];
+    const raisedXlm = Number.parseFloat(project.raised_xlm?.toString() || "0");
+    const projectCo2Kg = Number.parseFloat(project.co2_offset_kg?.toString() || "0");
+    const kgPerXlm = raisedXlm > 0 ? projectCo2Kg / raisedXlm : 0;
+
+    const totalDonatedXLM = donationsResult.rows.reduce(
+      (sum, row) => sum + Number.parseFloat(row.amount_xlm?.toString() || "0"),
+      0,
+    );
+    const co2OffsetKg = Math.round(totalDonatedXLM * kgPerXlm);
+    const treesEquivalent =
+      co2OffsetKg > 0
+        ? Number((co2OffsetKg / KG_CO2_PER_TREE_CERT).toFixed(2))
+        : 0;
+
+    const donations = donationsResult.rows.map((row) => ({
+      id: row.id,
+      amountXLM: Number.parseFloat(row.amount_xlm?.toString() || "0").toFixed(7),
+      message: row.message || null,
+      transactionHash: row.transaction_hash,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
+    return res.json({
+      success: true,
+      data: {
+        projectId: project.id,
+        projectName: project.name,
+        donorAddress,
+        totalDonatedXLM: totalDonatedXLM.toFixed(7),
+        co2OffsetKg,
+        treesEquivalent,
+        badgeTier: deriveBadgeTier(totalDonatedXLM),
+        donationCount: donations.length,
+        donations,
+        issuedAt: new Date().toISOString(),
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

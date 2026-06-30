@@ -180,3 +180,213 @@ describe("POST /api/projects (admin)", () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ── GET /api/projects/:id/impact-certificate ──────────────────────────────────
+
+// A real 56-char Stellar G-address used as the donor in these tests
+const CERT_DONOR = "GAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J";
+
+const MOCK_DONATION_ROW = {
+  id: "don-1",
+  amount_xlm: "250.0000000",
+  message: "Keep it up!",
+  transaction_hash: "abc123",
+  created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
+};
+
+describe("GET /api/projects/:id/impact-certificate", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+  });
+
+  test("returns 200 with certificate data for a valid donor", async () => {
+    // 1. project found
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Amazon Reforestation", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    // 2. donations found
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    const d = res.body.data;
+    expect(d.projectId).toBe("proj-1");
+    expect(d.projectName).toBe("Amazon Reforestation");
+    expect(d.donorAddress).toBe(CERT_DONOR);
+    expect(d.donationCount).toBe(1);
+    expect(d.donations).toHaveLength(1);
+    expect(d.donations[0].transactionHash).toBe("abc123");
+    expect(typeof d.totalDonatedXLM).toBe("string");
+    expect(typeof d.co2OffsetKg).toBe("number");
+    expect(typeof d.treesEquivalent).toBe("number");
+    expect(d.issuedAt).toBeTruthy();
+  });
+
+  test("assigns bronze badge tier when donor gave < 100 XLM", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "50.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.badgeTier).toBe("bronze");
+  });
+
+  test("assigns silver badge tier when donor gave >= 100 XLM", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "100.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.badgeTier).toBe("silver");
+  });
+
+  test("assigns gold badge tier when donor gave >= 1000 XLM", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "2000", co2_offset_kg: "10000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "1000.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.badgeTier).toBe("gold");
+  });
+
+  test("assigns platinum badge tier when donor gave >= 10000 XLM", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "20000", co2_offset_kg: "100000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "10000.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.badgeTier).toBe("platinum");
+  });
+
+  test("returns 400 when donorAddress is missing", async () => {
+    const res = await request(app)
+      .get("/api/projects/proj-1/impact-certificate")
+      .expect(400);
+
+    expect(res.body.error).toMatch(/donorAddress/i);
+  });
+
+  test("returns 400 when donorAddress is invalid (too short)", async () => {
+    const res = await request(app)
+      .get("/api/projects/proj-1/impact-certificate?donorAddress=GBADKEY")
+      .expect(400);
+
+    expect(res.body.error).toMatch(/donorAddress/i);
+  });
+
+  test("returns 400 when donorAddress starts with wrong letter", async () => {
+    const res = await request(app)
+      .get("/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J")
+      .expect(400);
+
+    expect(res.body.error).toMatch(/donorAddress/i);
+  });
+
+  test("returns 404 when project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] }); // project not found
+
+    const res = await request(app)
+      .get(`/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(404);
+
+    expect(res.body.error).toMatch(/project not found/i);
+  });
+
+  test("returns 404 when donor has no donations on this project", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // no donations
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(404);
+
+    expect(res.body.error).toMatch(/no donations found/i);
+  });
+
+  test("co2OffsetKg is proportional to donor's share of total raised", async () => {
+    // project raised 1000 XLM, offset 5000 kg → 5 kg/XLM
+    // donor gave 200 XLM → expected 1000 kg
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "200.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.co2OffsetKg).toBe(1000);
+  });
+
+  test("co2OffsetKg is 0 when project has raised_xlm = 0", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "0", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_DONATION_ROW, amount_xlm: "100.0000000" }],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.co2OffsetKg).toBe(0);
+    expect(res.body.data.treesEquivalent).toBe(0);
+  });
+
+  test("aggregates multiple donations for the same donor", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", name: "Test", raised_xlm: "1000", co2_offset_kg: "5000" }],
+    });
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { ...MOCK_DONATION_ROW, id: "don-1", amount_xlm: "100.0000000" },
+        { ...MOCK_DONATION_ROW, id: "don-2", amount_xlm: "200.0000000" },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/proj-1/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .expect(200);
+
+    expect(res.body.data.donationCount).toBe(2);
+    expect(res.body.data.donations).toHaveLength(2);
+    // 300 XLM × (5000/1000 kg/XLM) = 1500 kg
+    expect(res.body.data.co2OffsetKg).toBe(1500);
+  });
+});
