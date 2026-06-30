@@ -85,7 +85,15 @@ export async function registerDeviceToken(
 }
 
 /**
- * Follow a project for push notifications
+ * Follow a project.
+ *
+ * Calls both endpoints in parallel:
+ *  1. POST /api/notifications/follow  — registers the push-token follow so the
+ *     device receives project update notifications.
+ *  2. POST /api/projects/:id/follows  — wallet-address follow for the REST API
+ *     (issue #399); only sent when walletAddress is provided.
+ *
+ * Returns true only when all attempted calls succeed.
  */
 export async function followProject(
   projectId: string,
@@ -94,19 +102,27 @@ export async function followProject(
 ): Promise<boolean> {
   try {
     const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-    
-    await fetch(`${API_URL}/api/notifications/follow`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        projectId,
-        token,
-        walletAddress,
+
+    const calls: Promise<Response>[] = [
+      fetch(`${API_URL}/api/notifications/follow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, token, walletAddress }),
       }),
-    });
-    
+    ];
+
+    // Wire up the REST follows endpoint when we have a wallet address.
+    if (walletAddress) {
+      calls.push(
+        fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress }),
+        })
+      );
+    }
+
+    await Promise.all(calls);
     console.log(`Followed project ${projectId}`);
     return true;
   } catch (error) {
@@ -116,26 +132,37 @@ export async function followProject(
 }
 
 /**
- * Unfollow a project
+ * Unfollow a project.
+ *
+ * Mirrors followProject: calls both unfollow endpoints in parallel.
  */
 export async function unfollowProject(
   projectId: string,
-  token: string
+  token: string,
+  walletAddress?: string
 ): Promise<boolean> {
   try {
     const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-    
-    await fetch(`${API_URL}/api/notifications/unfollow`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        projectId,
-        token,
+
+    const calls: Promise<Response>[] = [
+      fetch(`${API_URL}/api/notifications/unfollow`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId, token }),
       }),
-    });
-    
+    ];
+
+    if (walletAddress) {
+      calls.push(
+        fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ walletAddress }),
+        })
+      );
+    }
+
+    await Promise.all(calls);
     console.log(`Unfollowed project ${projectId}`);
     return true;
   } catch (error) {
