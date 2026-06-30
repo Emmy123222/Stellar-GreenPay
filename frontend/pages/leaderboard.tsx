@@ -75,6 +75,11 @@ export default function LeaderboardPage() {
       <div className="mt-10 text-center">
         <p className="text-[#5a7a5a] text-sm mb-4 font-body">Want to see your name here?</p>
         <Link href="/projects" className="btn-primary">🌱 Start Donating</Link>
+        <div className="mt-4">
+          <Link href="/leaderboard/history" className="text-forest-600 text-sm underline">
+            🏅 View Donor of the Month history
+          </Link>
+        </div>
       </div>
     </div>
   );

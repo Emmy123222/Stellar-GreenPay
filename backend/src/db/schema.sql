@@ -139,3 +139,18 @@ CREATE TABLE IF NOT EXISTS project_follows (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, device_token_id)
 );
+
+-- Monthly leaderboard snapshots: one row per donor per month
+CREATE TABLE IF NOT EXISTS monthly_leaderboard (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  month DATE NOT NULL,                          -- first day of the month (YYYY-MM-01)
+  donor_address TEXT NOT NULL,
+  display_name TEXT,
+  total_xlm_that_month NUMERIC(20, 7) NOT NULL DEFAULT 0,
+  badge TEXT,                                   -- top badge tier at snapshot time
+  rank INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(month, donor_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_monthly_leaderboard_month ON monthly_leaderboard (month DESC);
