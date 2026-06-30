@@ -1,3 +1,7 @@
+-- projects: core project registry. Central entity; every other table
+-- references projects.id. Status lifecycle: active → completed / cancelled.
+-- on_chain_verified reflects Stellar anchor verification.
+-- raised_xlm / donor_count / co2_offset_kg are summary counters updated by triggers.
 CREATE TABLE IF NOT EXISTS projects (
   id UUID PRIMARY KEY,
   name TEXT NOT NULL,
@@ -27,6 +31,18 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPT
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model        TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 
+-- Webhook notification support: project owners can register a URL that receives
+-- signed POSTs when donation milestones are reached.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+
+-- donations: immutable donation ledger. Each row is a single
+-- contribution from donor_address to a project. transaction_hash must be
+-- unique (one Stellar payment → one donation). No updated_at column —
+-- records are never mutated after insert.
 CREATE TABLE IF NOT EXISTS donations (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -39,6 +55,9 @@ CREATE TABLE IF NOT EXISTS donations (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- profiles: aggregated donor stats and public profile for a Stellar wallet.
+-- total_donated_xlm and projects_supported are computed counters kept in
+-- sync by triggers on donations. badges is a JSONB array of earned badge IDs.
 CREATE TABLE IF NOT EXISTS profiles (
   public_key TEXT PRIMARY KEY,
   display_name TEXT,
@@ -50,6 +69,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   updated_at TIMESTAMPTZ
 );
 
+-- project_updates: news / blog posts published by project owners. Listed
+-- on the project detail page in reverse chronological order.
 CREATE TABLE IF NOT EXISTS project_updates (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -58,6 +79,8 @@ CREATE TABLE IF NOT EXISTS project_updates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- project_subscriptions: email-based subscriptions to project updates.
+-- UNIQUE(project_id, email) prevents duplicate sign-ups.
 CREATE TABLE IF NOT EXISTS project_subscriptions (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -67,6 +90,10 @@ CREATE TABLE IF NOT EXISTS project_subscriptions (
   UNIQUE(project_id, email)
 );
 
+-- jobs: freelance jobs using Stellar escrow. Client deposits
+-- amount_escrow_xlm; the job sits in_escrow until the client releases funds
+-- (release_transaction_hash is set), transitioning to released. The escrow
+-- pattern ties Stellar payment lifecycles to off-chain job completion.
 CREATE TABLE IF NOT EXISTS jobs (
   id UUID PRIMARY KEY,
   title TEXT NOT NULL,
@@ -80,6 +107,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- project_campaigns: time-boxed fundraising campaigns for a project,
+-- each with its own goal and deadline.
 CREATE TABLE IF NOT EXISTS project_campaigns (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -90,6 +119,8 @@ CREATE TABLE IF NOT EXISTS project_campaigns (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- project_milestones: percentage-based funding milestones for a project.
+-- reached_at + transaction_hash are set when the milestone is met on-chain.
 CREATE TABLE IF NOT EXISTS project_milestones (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -100,6 +131,8 @@ CREATE TABLE IF NOT EXISTS project_milestones (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- project_ratings: 1-5 star ratings with optional review from donors.
+-- UNIQUE(project_id, donor_address) ensures one rating per donor per project.
 CREATE TABLE IF NOT EXISTS project_ratings (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -110,6 +143,9 @@ CREATE TABLE IF NOT EXISTS project_ratings (
   UNIQUE(project_id, donor_address)
 );
 
+-- donation_matches: matching offer contracts. A matcher pledges to multiply
+-- donations up to cap_xlm by multiplier (e.g. 2×). matched_xlm tracks the
+-- total matched so far; expires_at ends the offer period.
 CREATE TABLE IF NOT EXISTS donation_matches (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -122,6 +158,9 @@ CREATE TABLE IF NOT EXISTS donation_matches (
 );
 
 
+-- device_tokens: push notification device registrations. token is the FCM /
+-- APNs device token; platform is 'ios' or 'android'. wallet_address links
+-- the device to a profile when known.
 CREATE TABLE IF NOT EXISTS device_tokens (
   id UUID PRIMARY KEY,
   token TEXT NOT NULL UNIQUE,
@@ -131,6 +170,9 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- project_follows: many-to-many join between projects and device_tokens.
+-- A device "follows" a project to receive push notifications.
+-- UNIQUE(project_id, device_token_id) prevents duplicate follows.
 CREATE TABLE IF NOT EXISTS project_follows (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -139,3 +181,18 @@ CREATE TABLE IF NOT EXISTS project_follows (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, device_token_id)
 );
+
+-- Monthly leaderboard snapshots: one row per donor per month
+CREATE TABLE IF NOT EXISTS monthly_leaderboard (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  month DATE NOT NULL,                          -- first day of the month (YYYY-MM-01)
+  donor_address TEXT NOT NULL,
+  display_name TEXT,
+  total_xlm_that_month NUMERIC(20, 7) NOT NULL DEFAULT 0,
+  badge TEXT,                                   -- top badge tier at snapshot time
+  rank INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(month, donor_address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_monthly_leaderboard_month ON monthly_leaderboard (month DESC);

@@ -112,9 +112,11 @@ export async function fetchProjects(params?: {
   return data.data;
 }
 
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
+  const params = walletAddress ? { walletAddress } : undefined;
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
+    { params },
   );
   return data.data;
 }
@@ -381,6 +383,26 @@ export async function confirmProjectRegistration(payload: {
   return data;
 }
 
+// ── Notifications ─────────────────────────────────────────────────
+export interface UnreadNotificationCountParams {
+  token: string;
+  lastSeen?: string;
+}
+
+export async function fetchUnreadNotificationCount({
+  token,
+  lastSeen,
+}: UnreadNotificationCountParams): Promise<number> {
+  const params: Record<string, string> = { token };
+  if (lastSeen) params.lastSeen = lastSeen;
+
+  const { data } = await api.get<{ unreadCount: number }>(
+    "/api/notifications/unread-count",
+    { params },
+  );
+  return data.unreadCount;
+}
+
 // ── Update Likes ─────────────────────────────────────────────────
 export async function toggleUpdateLike(updateId: string, donorAddress: string) {
   const { data } = await api.post<{ success: boolean; data: { liked: boolean; likeCount: number } }>(
@@ -499,10 +521,24 @@ export interface SubmitProjectResponse {
   reviewTimeline: string;
 }
 
+export interface AdminNotificationPayload {
+  projectName: string;
+  contactEmail: string;
+  impactMetrics: string[];
+}
+
 export async function submitProject(payload: SubmitProjectPayload): Promise<SubmitProjectResponse> {
   const { data } = await api.post<{ success: boolean; data: SubmitProjectResponse }>(
     "/api/projects",
     payload,
   );
   return data.data;
+}
+
+export async function notifyAdmin(payload: AdminNotificationPayload) {
+  const { data } = await api.post<{ success: boolean; message?: string }>(
+    "/api/admin/notifications",
+    payload,
+  );
+  return data;
 }

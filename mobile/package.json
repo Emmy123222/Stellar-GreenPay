@@ -10,11 +10,11 @@
   },
   "dependencies": {
     "@react-navigation/native": "^6.1.9",
-    "@react-navigation/native-stack": "^6.9.17",
+    "@react-navigation/native-stack": "^7.17.6",
     "@react-native-async-storage/async-storage": "^1.23.0",
     "@stellar/stellar-sdk": "^12.0.0",
     "axios": "^1.7.0",
-    "expo-sharing": "~12.0.0",
+    "expo-sharing": "~57.0.1",
     "react-native-view-shot": "^3.8.0",
     "expo": "~51.0.0",
     "expo-linking": "~6.3.0",
@@ -22,18 +22,19 @@
     "expo-router": "~3.5.0",
     "expo-status-bar": "~1.12.0",
     "expo-notifications": "~0.28.0",
+    "expo-camera": "~15.0.0",
     "react": "18.2.0",
-    "react-native": "0.74.1",
+    "react-native": "0.86.0",
     "react-native-safe-area-context": "4.10.1",
     "react-native-screens": "3.31.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0",
+    "@babel/core": "^8.0.1",
     "@testing-library/jest-native": "^5.4.3",
-    "@testing-library/react-native": "^12.5.1",
+    "@testing-library/react-native": "^14.0.1",
     "jest": "^29.7.0",
     "jest-expo": "~51.0.0",
-    "react-test-renderer": "18.2.0"
+    "react-test-renderer": "19.2.7"
   },
   "jest": {
     "preset": "jest-expo",
@@ -43,7 +44,8 @@
     ],
     "moduleNameMapper": {
       "^axios$": "<rootDir>/__mocks__/axios.js",
-      "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js"
+      "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
+      "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js"
     }
   }
 }
