@@ -430,6 +430,38 @@ router.post("/:id/milestones/:milestoneId/reach", async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/admin/pending
+ * Admin-only endpoint returning unverified active projects for review.
+ */
+router.get("/admin/pending", async (req, res, next) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const offset = parseInt(req.query.offset, 10) || 0;
+
+    const countResult = await pool.query(
+      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'"
+    );
+    const total = countResult.rows[0].total;
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE verified = false AND status = 'active'
+       ORDER BY created_at ASC
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map(mapProjectRow),
+      total
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * POST /api/projects/admin/register
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
