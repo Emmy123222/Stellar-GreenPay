@@ -506,3 +506,112 @@ export async function submitProject(payload: SubmitProjectPayload): Promise<Subm
   );
   return data.data;
 }
+
+// ── Verification Requests (/apply) ───────────────────────────────────────────
+export interface VerificationDocument {
+  name: string;
+  url: string;
+  size?: number;
+  contentType?: string;
+  backend?: "local" | "s3" | "ipfs";
+}
+
+export interface VerificationRequestPayload {
+  organizationName: string;
+  organizationWebsite?: string;
+  organizationCountry?: string;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription?: string;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2?: string;
+  supportingDocuments?: VerificationDocument[];
+  notes?: string;
+}
+
+export interface VerificationRequestResponse {
+  id: string;
+  organizationName: string;
+  organizationWebsite: string | null;
+  organizationCountry: string | null;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription: string | null;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2: string | null;
+  supportingDocuments: VerificationDocument[];
+  storageBackend: "local" | "s3" | "ipfs";
+  notes: string | null;
+  status: "pending" | "in_review" | "approved" | "rejected";
+  reviewerNotes: string | null;
+  reviewedBy: string | null;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewTimeline: string;
+}
+
+export async function submitVerificationRequest(
+  payload: VerificationRequestPayload,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.post<{ success: boolean; data: VerificationRequestResponse }>(
+    "/api/verification-requests",
+    payload,
+  );
+  return data.data;
+}
+
+export async function fetchMyVerificationRequests(
+  walletAddress: string,
+): Promise<VerificationRequestResponse[]> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
+    "/api/verification-requests/me",
+    { params: { wallet: walletAddress } },
+  );
+  return data.data;
+}
+
+export async function fetchVerificationRequest(
+  id: string,
+  walletAddress?: string,
+): Promise<VerificationRequestResponse> {
+  const params: Record<string, string> = {};
+  if (walletAddress) params.wallet = walletAddress;
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}`,
+    { params },
+  );
+  return data.data;
+}
+
+export interface UploadedDocument {
+  key: string;
+  url: string;
+  size: number;
+  contentType: string;
+  backend: "local" | "s3" | "ipfs";
+  originalName: string;
+}
+
+/**
+ * Uploads a file to /api/uploads. The backend stores it according to
+ * STORAGE_BACKEND (local disk by default) and returns a URL that the
+ * verification form stashes into `supportingDocuments[]` on submit.
+ */
+export async function uploadSupportingDocument(file: File): Promise<UploadedDocument> {
+  // CSRF + multipart: axios automatically sets the right Content-Type when
+  // given a FormData body; we still need the X-CSRF-Token header, which the
+  // request interceptor already adds on POSTs.
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<{ success: boolean; data: UploadedDocument }>(
+    "/api/uploads",
+    form,
+  );
+  return data.data;
+}

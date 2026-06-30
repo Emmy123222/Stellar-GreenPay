@@ -24,6 +24,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
     { href: "/impact",      label: t("nav.impact") },
     { href: "/leaderboard", label: t("nav.leaderboard") },
     { href: "/dashboard",   label: t("nav.myImpact") },
+    { href: "/apply",       label: t("nav.apply") },
   ];
 
   return (
