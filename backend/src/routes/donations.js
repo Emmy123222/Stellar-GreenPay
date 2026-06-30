@@ -10,6 +10,7 @@ const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { checkAndDeliverMilestones } = require("../services/webhook");
 const { z } = require("zod");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
@@ -198,6 +199,8 @@ async function recordDonation(req, res, next) {
         timestamp: new Date().toISOString(),
       });
     }
+
+    checkAndDeliverMilestones(projectId).catch(() => {});
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
