@@ -62,4 +62,22 @@ describe("CORS policy", () => {
       ]),
     );
   });
+  test("allows requests without an Origin header", async () => {
+    const res = await request(buildApp())
+      .get("/health");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  test("allows a configured origin for preflight OPTIONS request", async () => {
+    const res = await request(buildApp())
+      .options("/health")
+      .set("Origin", "https://greenpay.app")
+      .set("Access-Control-Request-Method", "GET");
+
+    expect(res.status).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://greenpay.app");
+    expect(res.headers["access-control-allow-methods"]).toBe("GET,POST,PATCH");
+  });
 });
