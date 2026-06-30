@@ -112,8 +112,26 @@ export async function fetchProjects(params?: {
   return data.data;
 }
 
-export async function fetchProject(id: string, walletAddress?: string) {
-  const params = walletAddress ? { walletAddress } : undefined;
+/** Tag suggestions for browse-page autocomplete (uses project search ILIKE on tags). */
+export async function fetchTagSuggestions(query: string, limit = 8): Promise<string[]> {
+  const projects = await fetchProjects({ search: query, limit: 50 });
+  const lowerQuery = query.toLowerCase();
+  const tags = new Set<string>();
+
+  for (const project of projects) {
+    for (const tag of project.tags) {
+      if (tag.toLowerCase().includes(lowerQuery)) {
+        tags.add(tag);
+      }
+    }
+  }
+
+  return Array.from(tags)
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, limit);
+}
+
+export async function fetchProject(id: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
     { params },
@@ -333,16 +351,33 @@ export async function fetchSubscriberCount(projectId: string) {
 
 // ── Global Stats ─────────────────────────────────────────────────
 export interface GlobalStats {
-  totalDonations: number;
   totalXLMRaised: string;
   totalCO2OffsetKg: number;
+  totalDonations: number;
+  totalProjects: number;
+  totalDonors: number;
+}
+
+function normalizeGlobalStats(stats: Partial<GlobalStats>): GlobalStats {
+  return {
+    totalXLMRaised: stats.totalXLMRaised || "0.0000000",
+    totalCO2OffsetKg: stats.totalCO2OffsetKg || 0,
+    totalDonations: stats.totalDonations || 0,
+    totalProjects: stats.totalProjects || 0,
+    totalDonors: stats.totalDonors || 0,
+  };
 }
 
 export async function fetchGlobalStats(): Promise<GlobalStats> {
-  const { data } = await api.get<{ success: boolean; data: GlobalStats }>(
-    "/api/stats/global",
-  );
-  return data.data;
+  const { data } = await api.get<
+    GlobalStats | { success: boolean; data: GlobalStats }
+  >("/api/stats/global");
+
+  if ("data" in data && "success" in data) {
+    return normalizeGlobalStats(data.data);
+  }
+
+  return normalizeGlobalStats(data);
 }
 
 // ── Admin: Project Approval ──────────────────────────────────────
@@ -383,51 +418,24 @@ export async function confirmProjectRegistration(payload: {
   return data;
 }
 
-// ── Project Follows ───────────────────────────────────────────────
-
-export interface FollowResponse {
-  isFollowing: boolean;
-  followCount: number;
+// ── Notifications ─────────────────────────────────────────────────
+export interface UnreadNotificationCountParams {
+  token: string;
+  lastSeen?: string;
 }
 
-/**
- * Follow a project. Returns the updated isFollowing flag and follower count.
- * Idempotent — safe to call even if already following.
- */
-export async function followProject(
-  projectId: string,
-  walletAddress: string,
-): Promise<FollowResponse> {
-  const { data } = await api.post<{ success: boolean; data: FollowResponse }>(
-    `/api/projects/${projectId}/follow`,
-    { walletAddress },
-  );
-  return data.data;
-}
+export async function fetchUnreadNotificationCount({
+  token,
+  lastSeen,
+}: UnreadNotificationCountParams): Promise<number> {
+  const params: Record<string, string> = { token };
+  if (lastSeen) params.lastSeen = lastSeen;
 
-/**
- * Unfollow a project. Returns the updated isFollowing flag and follower count.
- * Idempotent — safe to call even if not currently following.
- */
-export async function unfollowProject(
-  projectId: string,
-  walletAddress: string,
-): Promise<FollowResponse> {
-  const { data } = await api.delete<{ success: boolean; data: FollowResponse }>(
-    `/api/projects/${projectId}/follow`,
-    { data: { walletAddress } },
+  const { data } = await api.get<{ unreadCount: number }>(
+    "/api/notifications/unread-count",
+    { params },
   );
-  return data.data;
-}
-
-/**
- * Fetch the current follower count for a project without requiring a wallet.
- */
-export async function fetchFollowCount(projectId: string): Promise<number> {
-  const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
-    `/api/projects/${projectId}`,
-  );
-  return data.data.followCount ?? 0;
+  return data.unreadCount;
 }
 
 // ── Update Likes ─────────────────────────────────────────────────
@@ -562,10 +570,111 @@ export async function submitProject(payload: SubmitProjectPayload): Promise<Subm
   return data.data;
 }
 
-export async function notifyAdmin(payload: AdminNotificationPayload) {
-  const { data } = await api.post<{ success: boolean; message?: string }>(
-    "/api/admin/notifications",
+// ── Verification Requests (/apply) ───────────────────────────────────────────
+export interface VerificationDocument {
+  name: string;
+  url: string;
+  size?: number;
+  contentType?: string;
+  backend?: "local" | "s3" | "ipfs";
+}
+
+export interface VerificationRequestPayload {
+  organizationName: string;
+  organizationWebsite?: string;
+  organizationCountry?: string;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription?: string;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2?: string;
+  supportingDocuments?: VerificationDocument[];
+  notes?: string;
+}
+
+export interface VerificationRequestResponse {
+  id: string;
+  organizationName: string;
+  organizationWebsite: string | null;
+  organizationCountry: string | null;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription: string | null;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2: string | null;
+  supportingDocuments: VerificationDocument[];
+  storageBackend: "local" | "s3" | "ipfs";
+  notes: string | null;
+  status: "pending" | "in_review" | "approved" | "rejected";
+  reviewerNotes: string | null;
+  reviewedBy: string | null;
+  submittedAt: string;
+  reviewedAt: string | null;
+  reviewTimeline: string;
+}
+
+export async function submitVerificationRequest(
+  payload: VerificationRequestPayload,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.post<{ success: boolean; data: VerificationRequestResponse }>(
+    "/api/verification-requests",
     payload,
   );
-  return data;
+  return data.data;
+}
+
+export async function fetchMyVerificationRequests(
+  walletAddress: string,
+): Promise<VerificationRequestResponse[]> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
+    "/api/verification-requests/me",
+    { params: { wallet: walletAddress } },
+  );
+  return data.data;
+}
+
+export async function fetchVerificationRequest(
+  id: string,
+  walletAddress?: string,
+): Promise<VerificationRequestResponse> {
+  const params: Record<string, string> = {};
+  if (walletAddress) params.wallet = walletAddress;
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}`,
+    { params },
+  );
+  return data.data;
+}
+
+export interface UploadedDocument {
+  key: string;
+  url: string;
+  size: number;
+  contentType: string;
+  backend: "local" | "s3" | "ipfs";
+  originalName: string;
+}
+
+/**
+ * Uploads a file to /api/uploads. The backend stores it according to
+ * STORAGE_BACKEND (local disk by default) and returns a URL that the
+ * verification form stashes into `supportingDocuments[]` on submit.
+ */
+export async function uploadSupportingDocument(file: File): Promise<UploadedDocument> {
+  // CSRF + multipart: axios automatically sets the right Content-Type when
+  // given a FormData body; we still need the X-CSRF-Token header, which the
+  // request interceptor already adds on POSTs.
+  const form = new FormData();
+  form.append("file", file);
+  const { data } = await api.post<{ success: boolean; data: UploadedDocument }>(
+    "/api/uploads",
+    form,
+  );
+  return data.data;
 }
