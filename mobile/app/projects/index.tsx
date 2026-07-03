@@ -1,6 +1,6 @@
 /**
  * app/projects/index.tsx
- * Projects browse screen
+ * Projects browse screen — with offline cache support (#482)
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -102,6 +102,8 @@ export default function ProjectsScreen() {
         placeholderTextColor={colors.placeholder}
         value={searchQuery}
         onChangeText={setSearchQuery}
+        accessibilityLabel="Search projects"
+        accessibilityRole="search"
       />
       <ScrollView style={[styles.scroll, { borderColor: colors.background }]}>
         {filteredProjects.map(project => (
@@ -109,6 +111,8 @@ export default function ProjectsScreen() {
             key={project.id}
             style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}
             onPress={() => router.push(`/projects/${project.id}`)}
+            accessibilityLabel={`View ${project.name} project`}
+            accessibilityRole="button"
           >
             <View style={styles.cardHeader}>
               <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>

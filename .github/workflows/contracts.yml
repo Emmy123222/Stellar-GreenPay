@@ -1,0 +1,22 @@
+name: Contracts CI
+
+on:
+  pull_request:
+    paths: [contracts/**]
+
+jobs:
+  test:
+    name: Soroban Contracts (Rust)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+      - run: cargo test --features testutils
+      - run: cargo clippy -- -D warnings
+      - run: cargo build --target wasm32-unknown-unknown --release

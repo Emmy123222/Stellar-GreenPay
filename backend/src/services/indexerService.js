@@ -7,6 +7,7 @@ const { server: stellarServer } = require("./stellar");
 const pool = require("../db/pool");
 const { v4: uuid } = require("uuid");
 const { computeBadges } = require("./store");
+const { checkAndDeliverMilestones } = require("./webhook");
 const logger = require("../logger");
 
 let lastProcessedLedger = 0;
@@ -177,6 +178,9 @@ async function handleDonation(projectId, op) {
         timestamp: new Date().toISOString()
       });
     }
+
+    // 6. Check milestones asynchronously
+    checkAndDeliverMilestones(projectId).catch(() => {});
   } catch (err) {
     if (inTransaction) await client.query("ROLLBACK");
     logger.error({ event: "indexer_donation_error", project: projectId, txHash, err }, err.message);

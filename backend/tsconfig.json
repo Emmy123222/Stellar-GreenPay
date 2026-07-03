@@ -5,7 +5,7 @@
     "jsx": "react",
     "module": "commonjs",
     "target": "ES2020",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noEmit": true,
     "skipLibCheck": true,
     "ignoreDeprecations": "5.0"

@@ -58,4 +58,40 @@ router.get("/:projectId/count", async (req, res, next) => {
   }
 });
 
+// DELETE /api/subscriptions/:id
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const { email, donorAddress } = req.body;
+    
+    if (!email && !donorAddress) {
+      return res.status(400).json({ error: "email or donorAddress is required to unsubscribe" });
+    }
+
+    const sub = await pool.query("SELECT email, donor_address FROM project_subscriptions WHERE id = $1", [req.params.id]);
+    
+    if (!sub.rows[0]) {
+      return res.status(404).json({ error: "Subscription not found" });
+    }
+    
+    const record = sub.rows[0];
+    
+    let authorized = false;
+    if (email && email.toLowerCase().trim() === record.email) {
+      authorized = true;
+    } else if (donorAddress && donorAddress === record.donor_address) {
+      authorized = true;
+    }
+    
+    if (!authorized) {
+      return res.status(403).json({ error: "Unauthorized to delete this subscription" });
+    }
+    
+    await pool.query("DELETE FROM project_subscriptions WHERE id = $1", [req.params.id]);
+    
+    res.json({ success: true, message: "Unsubscribed successfully" });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

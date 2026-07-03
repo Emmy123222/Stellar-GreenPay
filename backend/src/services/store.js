@@ -169,6 +169,7 @@ function mapProjectRow(row) {
     aiSummaryGeneratedAt: row.ai_summary_generated_at ? toIso(row.ai_summary_generated_at) : null,
     aiSummaryModel:       row.ai_summary_model || null,
     aiSummarySourceHash:  row.ai_summary_source_hash || null,
+    webhookUrl: row.webhook_url || null,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };

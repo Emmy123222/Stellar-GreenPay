@@ -32,6 +32,8 @@ export function WalletConnect() {
             { text: 'Disconnect', style: 'destructive', onPress: disconnect },
           ])
         }
+        accessibilityLabel={`Connected wallet ${truncateAddress(publicKey)}, long press to disconnect`}
+        accessibilityRole="button"
       >
         <View style={styles.dot} />
         <Text style={styles.addressText}>{truncateAddress(publicKey)}</Text>
@@ -51,7 +53,7 @@ export function WalletConnect() {
 
   return (
     <>
-      <TouchableOpacity style={styles.connectButton} onPress={() => setModalVisible(true)}>
+      <TouchableOpacity style={styles.connectButton} onPress={() => setModalVisible(true)} accessibilityLabel="Connect Stellar wallet" accessibilityRole="button">
         <Text style={styles.connectButtonText}>Connect Wallet</Text>
       </TouchableOpacity>
 
@@ -79,6 +81,8 @@ export function WalletConnect() {
               style={[styles.confirmButton, connecting && styles.disabled]}
               onPress={handleConnect}
               disabled={connecting || !inputAddress.trim()}
+              accessibilityLabel="Confirm wallet connection"
+              accessibilityRole="button"
             >
               {connecting ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -87,7 +91,7 @@ export function WalletConnect() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setModalVisible(false)}>
+            <TouchableOpacity onPress={() => setModalVisible(false)} accessibilityLabel="Cancel wallet connection" accessibilityRole="button">
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>

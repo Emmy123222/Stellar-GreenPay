@@ -1605,27 +1605,31 @@ paths:
   /api/stats/global:
     get:
       tags: [Stats]
-      summary: Global platform statistics
+      summary: Landing-page hero aggregate statistics
       operationId: getGlobalStats
       responses:
         '200':
-          description: Platform-wide totals
+          description: Aggregate platform totals for the landing page hero
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Success'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          totalDonations:
-                            type: integer
-                          totalXLMRaised:
-                            type: string
-                          totalCO2OffsetKg:
-                            type: integer
+                type: object
+                properties:
+                  totalXLMRaised:
+                    type: string
+                    example: "123456.0000000"
+                  totalCO2OffsetKg:
+                    type: integer
+                    example: 98765
+                  totalDonations:
+                    type: integer
+                    example: 4321
+                  totalProjects:
+                    type: integer
+                    example: 42
+                  totalDonors:
+                    type: integer
+                    example: 1234
 
   /api/stats/categories:
     get:
