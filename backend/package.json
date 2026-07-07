@@ -15,7 +15,7 @@
     "load-test": "k6 run ../scripts/load-test.js"
   },
   "dependencies": {
-    "@sentry/node": "^7.51.0",
+    "@sentry/node": "^10.63.0",
     "@sentry/tracing": "^7.51.0",
     "@anthropic-ai/sdk": "^0.91.1",
     "pg-boss": "^10.1.0",
