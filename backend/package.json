@@ -31,7 +31,7 @@
     "iconv-lite": "^0.7.2",
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.3",
-    "morgan": "^1.10.0",
+    "morgan": "^1.11.0",
     "multer": "^2.2.0",
     "pg": "^8.20.0",
     "pg-boss": "^10.1.0",
