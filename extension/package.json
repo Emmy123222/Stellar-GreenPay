@@ -12,7 +12,7 @@
     "@types/chrome": "^0.2.0",
     "ts-loader": "^9.5.1",
     "typescript": "^6.0.3",
-    "webpack": "^5.90.1",
+    "webpack": "^5.108.4",
     "webpack-cli": "^7.1.0"
   }
 }
