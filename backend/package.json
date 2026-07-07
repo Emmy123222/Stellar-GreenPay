@@ -28,7 +28,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
-    "iconv-lite": "^0.7.2",
+    "iconv-lite": "^0.7.3",
     "ioredis": "^5.4.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
