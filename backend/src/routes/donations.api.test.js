@@ -166,15 +166,19 @@ describe("GET /api/projects/:id", () => {
 
   test("returns a single project", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 3 }],
+    });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.name).toBe("Test Project");
+    expect(res.body.data.followCount).toBe(3);
   });
 
   test("returns 404 for non-existent project", async () => {

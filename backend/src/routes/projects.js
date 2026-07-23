@@ -787,11 +787,17 @@ router.post("/admin/confirm", adminRequired, async (req, res) => {
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query(
-      "SELECT * FROM projects WHERE id = $1",
+      `SELECT p.*, COUNT(pf.id)::int AS follow_count
+       FROM projects p
+       LEFT JOIN project_follows pf ON pf.project_id = p.id
+       WHERE p.id = $1
+       GROUP BY p.id`,
       [req.params.id],
     );
     if (!projectResult.rows[0])
       return res.status(404).json({ error: "Project not found" });
+
+    const followCount = parseInt(projectResult.rows[0].follow_count, 10) || 0;
 
     const updatedAt = projectResult.rows[0].updated_at;
     const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
@@ -823,14 +829,7 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
-    // Fetch follower count and, when ?walletAddress=G... is provided, whether
-    // that wallet is currently following this project.
-    const followCountResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
-      [req.params.id],
-    );
-    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
-
+    // When ?walletAddress=G... is provided, report whether that wallet follows.
     let isFollowing = false;
     const { walletAddress } = req.query;
     if (walletAddress && typeof walletAddress === "string") {
