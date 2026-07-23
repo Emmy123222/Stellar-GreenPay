@@ -2,7 +2,14 @@
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
 
+// Mock rate limiter so it doesn't interfere with most tests; individual
+// tests override this when they need to exercise rate-limit behaviour.
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: jest.fn(() => (_req, _res, next) => next()),
+}));
+
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 const request = require("supertest");
 const express = require("express");
 const leaderboardRouter = require("./leaderboard");
@@ -165,5 +172,41 @@ describe("GET /api/leaderboard — limit handling", () => {
     await request(app).get("/api/leaderboard?limit=abc").expect(200);
 
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+  });
+});
+
+describe("GET /api/leaderboard — rate limiting", () => {
+  test("createRateLimiter is called with (30, 1) matching the donations-endpoint pattern", () => {
+    // The module was already required above; just verify the factory was invoked
+    // with the correct arguments (30 req/min per IP).
+    expect(createRateLimiter).toHaveBeenCalledWith(30, 1);
+  });
+
+  test("returns 429 when the rate limiter blocks the request", async () => {
+    // Temporarily override the mock to simulate a blocked request.
+    createRateLimiter.mockImplementationOnce(() => (_req, res) => {
+      res.set("Retry-After", "60");
+      return res.status(429).json({ message: "Too many requests — Try again later." });
+    });
+
+    // Re-require the router so it picks up the new mock implementation.
+    jest.resetModules();
+    jest.mock("../db/pool", () => ({ query: jest.fn() }));
+    jest.mock("../middleware/rateLimiter", () => ({
+      createRateLimiter: jest.fn(() => (_req, res) => {
+        res.set("Retry-After", "60");
+        return res.status(429).json({ message: "Too many requests — Try again later." });
+      }),
+    }));
+
+    const freshRouter = require("./leaderboard");
+    const app = express();
+    app.use(express.json());
+    app.use("/api/leaderboard", freshRouter);
+
+    const res = await request(app).get("/api/leaderboard");
+    expect(res.status).toBe(429);
+    expect(res.body.message).toMatch(/too many requests/i);
+    expect(res.headers["retry-after"]).toBe("60");
   });
 });
