@@ -4,6 +4,13 @@
 "use strict";
 
 require("dotenv").config();
+const express = require("express");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf = require("csurf");
+const rateLimit = require("express-rate-limit");
+const logger = require("./logger");
+const requestLogger = require("./middleware/requestLogger");
 const Sentry = require("@sentry/node");
 const Tracing = require("@sentry/tracing");
 
@@ -84,6 +91,36 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+// ── API Routes ──────────────────────────────────────────────────────
+// Mount every route module at both /api and /api/v1 so that versioned
+// clients (frontend rewrites /api/* → /api/v1/*) and unversioned
+// clients both resolve correctly.
+const routeModules = {
+  "/api/stats": require("./routes/stats"),
+  "/api/projects": require("./routes/projects"),
+  "/api/donations": require("./routes/donations"),
+  "/api/profiles": require("./routes/profiles"),
+  "/api/leaderboard": require("./routes/leaderboard"),
+  "/api/admin": require("./routes/admin"),
+  "/api/jobs": require("./routes/jobs"),
+  "/api/subscriptions": require("./routes/subscriptions"),
+  "/api/notifications": require("./routes/notifications"),
+  "/api/updates": require("./routes/updates"),
+  "/api/impact": require("./routes/impact"),
+  "/api/ratings": require("./routes/ratings"),
+  "/api/health": require("./routes/health"),
+  "/api/readiness": require("./routes/readiness"),
+  "/api/uploads": require("./routes/uploads"),
+  "/api/verification-requests": require("./routes/verification"),
+};
+
+Object.entries(routeModules).forEach(([path, router]) => {
+  app.use(path, router);
+  const v1Path = path.replace(/^\/api\//, "/api/v1/");
+  app.use(v1Path, router);
+});
+
+// ── 404 Catch-all ───────────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture and send exceptions to Sentry
 app.use(Sentry.Handlers.errorHandler());
