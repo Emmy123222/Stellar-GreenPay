@@ -179,6 +179,7 @@ export interface LeaderboardEntry {
   publicKey: string;
   displayName?: string;
   totalDonatedXLM: string;
+  totalCO2OffsetKg: string;
   projectsSupported: number;
   topBadge?: BadgeTier;
 }

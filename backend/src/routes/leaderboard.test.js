@@ -24,6 +24,8 @@ const SORTED_DONORS = [
     display_name: "Alice",
     badges: [{ tier: "earth", earnedAt: "2026-01-01T00:00:00.000Z" }],
     total_donated_xlm: "5000",
+    total_co2_offset_kg: "1250.5",
+    impact_score: "3525.375",
     projects_supported: 4,
   },
   {
@@ -31,6 +33,8 @@ const SORTED_DONORS = [
     display_name: "Bob",
     badges: [{ tier: "forest", earnedAt: "2026-01-02T00:00:00.000Z" }],
     total_donated_xlm: "750",
+    total_co2_offset_kg: "180",
+    impact_score: "525.54",
     projects_supported: 2,
   },
   {
@@ -38,6 +42,8 @@ const SORTED_DONORS = [
     display_name: null,
     badges: [],
     total_donated_xlm: "12",
+    total_co2_offset_kg: "0",
+    impact_score: "8.4",
     projects_supported: 1,
   },
 ];
@@ -111,9 +117,28 @@ describe("GET /api/leaderboard — ranking sort order", () => {
       publicKey: SORTED_DONORS[0].public_key,
       displayName: "Alice",
       totalDonatedXLM: "5000",
+      totalCO2OffsetKg: "1250.5",
       projectsSupported: 4,
       topBadge: "earth",
     });
+  });
+
+  test("exposes totalCO2OffsetKg as a string from total_co2_offset_kg", async () => {
+    pool.query.mockResolvedValue({ rows: [SORTED_DONORS[0]] });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].totalCO2OffsetKg).toBe("1250.5");
+  });
+
+  test("defaults totalCO2OffsetKg to \"0\" when co2 offset is missing", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{ ...SORTED_DONORS[2], total_co2_offset_kg: null }],
+    });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].totalCO2OffsetKg).toBe("0");
   });
 
   test("sets displayName to null when the profile has no display name", async () => {
