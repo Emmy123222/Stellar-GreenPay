@@ -84,6 +84,8 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+app.use("/api/webhooks", require("./routes/webhooks"));
+
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture and send exceptions to Sentry
 app.use(Sentry.Handlers.errorHandler());
