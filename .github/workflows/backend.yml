@@ -8,6 +8,12 @@ on:
     branches: [main]
     paths: [backend/**]
 
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# SENTRY_DSN  — Sentry DSN for error tracking (optional). Tests pass without it.
+#               Configure as a GitHub Actions secret when deploying to production
+#               to enable error reporting in CI builds.
+# ──────────────────────────────────────────────────────────────────────────────
+
 jobs:
   test:
     name: Unit & Integration Tests

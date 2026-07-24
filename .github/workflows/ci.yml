@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# SENTRY_DSN  — Sentry DSN for error tracking (optional). Builds pass without it.
+#               Configure as a GitHub Actions secret when deploying to production
+#               to enable error reporting in CI builds.
+# ──────────────────────────────────────────────────────────────────────────────
+
 jobs:
   frontend:
     name: Frontend (Next.js)

@@ -4,30 +4,29 @@
 "use strict";
 
 require("dotenv").config();
-const Sentry = require("@sentry/node");
-const Tracing = require("@sentry/tracing");
-
-Sentry.init({
-  dsn: process.env.SENTRY_DSN || "",
-  tracesSampleRate: 0.1,
-  environment: process.env.NODE_ENV,
-});
-const { runMigrations } = require("./db/migrate");
-const { startTurretsServer } = require("./services/turrets");
+const express = require("express");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf = require("csurf");
 const http = require("http");
 const { Server } = require("socket.io");
+const { initSentry, errorHandler: sentryErrorMiddleware } = require("./services/sentry");
+const { runMigrations } = require("./db/migrate");
+const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
+const requestLogger = require("./middleware/requestLogger");
+const { createRateLimiter } = require("./middleware/rateLimiter");
+const logger = require("./logger");
 
 const app    = express();
 const PORT   = process.env.PORT || 4000;
 const server = http.createServer(app);
 
-// Sentry request/tracing handlers (must be added before other middleware)
-app.use(Sentry.Handlers.requestHandler());
-app.use(Sentry.Handlers.tracingHandler());
+// Sentry initialization (must be added before other middleware)
+initSentry(app);
 
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
@@ -75,7 +74,7 @@ const io = new Server(server, {
   }
 });
 app.set("io", io);
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
+app.use(createRateLimiter(150, 15));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
@@ -85,16 +84,11 @@ app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
-// Sentry error handler — capture and send exceptions to Sentry
-app.use(Sentry.Handlers.errorHandler());
+// Sentry error handler — capture exceptions before the final error middleware
+app.use(sentryErrorMiddleware());
 
 app.use((err, req, res, next) => {
   void next;
-  try {
-    Sentry.captureException(err);
-  } catch (e) {
-    // ignore
-  }
   console.error("[Error]", err.message);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
