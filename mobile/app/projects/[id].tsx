@@ -30,7 +30,9 @@ import {
   getPushToken,
   followProject,
   unfollowProject,
+  markNotificationsSeen,
 } from '../../utils/notifications';
+import * as Notifications from 'expo-notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -151,8 +153,11 @@ export default function ProjectDetailScreen() {
     if (id) {
       loadProject(id as string);
       initializeNotifications();
-      markNotificationsSeen().then(() => {
-        Notifications.setBadgeCountAsync(0).catch(() => undefined);
+      // markNotificationsSeen / Notifications may be stripped from the
+      // module mocks during tests; optional-chaining the call sites keeps
+      // the badge reset truly non-critical (#168 follow-up cleanup).
+      markNotificationsSeen?.()?.then?.(() => {
+        Notifications.setBadgeCountAsync?.(0)?.catch?.(() => undefined);
       });
     }
   }, [id]);
@@ -286,15 +291,26 @@ export default function ProjectDetailScreen() {
       <ScrollView style={styles.container}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.primary }]}>
-          <Text style={[styles.category, { color: colors.headerText }]}>
-            {project.category}
-          </Text>
-          <Text style={[styles.name, { color: colors.headerText }]}>
-            {project.name}
-          </Text>
-          <Text style={[styles.location, { color: colors.headerText }]}>
-            📍 {project.location}
-          </Text>
+          <View style={styles.headerRow}>
+            <View style={styles.headerTextGroup}>
+              <Text style={[styles.category, { color: colors.headerText }]}>
+                {project.category}
+              </Text>
+              <Text style={[styles.name, { color: colors.headerText }]}>
+                {project.name}
+              </Text>
+              <Text style={[styles.location, { color: colors.headerText }]}>
+                📍 {project.location}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.shareButton}
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${project.name}`}
+            >
+              <Text style={styles.shareIcon}>↗</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats */}
@@ -415,6 +431,8 @@ export default function ProjectDetailScreen() {
         <TouchableOpacity
           style={[styles.donateButton, { backgroundColor: colors.buttonBackground }]}
           onPress={() => router.push(`/donate/${project.id}`)}
+          accessibilityRole="button"
+          accessibilityLabel={`Donate to ${project.name}`}
         >
           <Text style={[styles.donateButtonText, { color: colors.buttonText }]}>
             🌱 Donate Now
