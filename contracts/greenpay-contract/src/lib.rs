@@ -175,6 +175,7 @@ pub enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    PendingAdmin,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -659,6 +660,55 @@ impl GreenPayContract {
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized")
+    }
+
+    /// Propose a new admin. The current admin keeps control until the
+    /// proposed address explicitly accepts the role.
+    pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can propose a new admin");
+        }
+        if new_admin == stored_admin {
+            panic!("New admin must differ from current admin");
+        }
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events()
+            .publish((symbol_short!("adm_prop"), admin), new_admin);
+    }
+
+    /// Accept a pending admin proposal and finalize the admin rotation.
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .expect("No pending admin proposal");
+        if pending_admin != new_admin {
+            panic!("Only pending admin can accept admin role");
+        }
+
+        let previous_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events()
+            .publish((symbol_short!("adm_acpt"), previous_admin), new_admin);
+    }
+
+    /// Read the current pending admin proposal, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // ─── Placeholders ─────────────────────────────────────────────────────────
@@ -1225,6 +1275,72 @@ mod tests {
         assert_eq!(client.get_project_count(), 0);
         assert_eq!(client.get_donation_count(), 0);
         assert_eq!(client.get_global_total(), 0);
+    }
+
+    #[test]
+    fn test_admin_rotation_requires_proposal_and_acceptance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+        client.accept_admin(&new_admin);
+
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only pending admin can accept admin role")]
+    fn test_accept_admin_requires_pending_admin_match() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let pending_admin = Address::generate(&env);
+        let wrong_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &pending_admin);
+        client.accept_admin(&wrong_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "No pending admin proposal")]
+    fn test_accept_admin_without_proposal_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.accept_admin(&new_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can propose a new admin")]
+    fn test_only_current_admin_can_propose_new_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&attacker, &new_admin);
     }
 
         #[test]
