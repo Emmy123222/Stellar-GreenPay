@@ -73,3 +73,51 @@ describe("GET /api/stats/global", () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/stats/categories", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns active project counts grouped by category ordered by count desc", async () => {
+    pool.query.mockResolvedValue({
+      rows: [
+        { category: "Reforestation", count: 10 },
+        { category: "Solar Energy", count: 7 },
+        { category: "Ocean Conservation", count: 3 },
+      ],
+    });
+
+    const res = await request(app).get("/api/stats/categories").expect(200);
+
+    expect(res.body).toEqual({
+      success: true,
+      data: [
+        { category: "Reforestation", count: 10 },
+        { category: "Solar Energy", count: 7 },
+        { category: "Ocean Conservation", count: 3 },
+      ],
+    });
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns empty data array when no active projects exist", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const res = await request(app).get("/api/stats/categories").expect(200);
+
+    expect(res.body).toEqual({ success: true, data: [] });
+  });
+
+  test("propagates database errors through Express error handler", async () => {
+    pool.query.mockRejectedValue(new Error("db down"));
+
+    const res = await request(app).get("/api/stats/categories");
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: "db down" });
+  });
+});
