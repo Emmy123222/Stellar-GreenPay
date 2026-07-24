@@ -20,6 +20,7 @@
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { snapshotLeaderboard } = require("./leaderboardSnapshot");
 
 const QUEUE = "monthly-impact-digest";
 // Default: 1st of every month at 08:00 UTC
@@ -263,6 +264,17 @@ async function runDigest() {
   }
 
   logger.info({ event: "digest_run_complete", sent, errors, monthLabel }, "[digestQueue] Monthly digest run complete");
+
+  // Snapshot the monthly leaderboard in sync with the digest
+  try {
+    const snapResult = await snapshotLeaderboard(monthStart);
+    logger.info(
+      { event: "digest_snapshot", month: snapResult.month, inserted: snapResult.inserted },
+      `[digestQueue] Leaderboard snapshot complete: ${snapResult.inserted} entries for ${snapResult.month}`
+    );
+  } catch (err) {
+    logger.error({ event: "digest_snapshot_error", err }, "[digestQueue] Leaderboard snapshot failed");
+  }
 }
 
 // ── pg-boss wiring ────────────────────────────────────────────────────────────
