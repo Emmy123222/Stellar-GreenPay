@@ -5,8 +5,12 @@
 const express = require("express");
 const router  = express.Router();
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 
-router.get("/", async (req, res, next) => {
+// 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
+const leaderboardLimiter = createRateLimiter(30, 1);
+
+router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const period = req.query.period || "all";
@@ -97,7 +101,7 @@ router.get("/", async (req, res, next) => {
  * Query params:
  *   - months (int, max 24, default 12): how many past months to return
  */
-router.get("/history", async (req, res, next) => {
+router.get("/history", leaderboardLimiter, async (req, res, next) => {
   try {
     const months = Math.min(parseInt(req.query.months, 10) || 12, 24);
     const result = await pool.query(
