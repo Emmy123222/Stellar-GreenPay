@@ -71,11 +71,13 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- project_updates: news / blog posts published by project owners. Listed
 -- on the project detail page in reverse chronological order.
+-- image_url is an optional link to a photo or chart uploaded via /api/uploads.
 CREATE TABLE IF NOT EXISTS project_updates (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
+  image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
