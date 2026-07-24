@@ -45,16 +45,6 @@ const VALID_CATEGORIES = [
 ];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
-
 /**
  * GET /api/projects/featured
  * Returns the project with the highest donorCount (active projects only).
@@ -793,13 +783,25 @@ router.get("/:id", async (req, res, next) => {
     if (!projectResult.rows[0])
       return res.status(404).json({ error: "Project not found" });
 
+    const { walletAddress } = req.query;
+    const hasWalletQuery =
+      typeof walletAddress === "string" && walletAddress.trim().length > 0;
+    const normalizedWallet = hasWalletQuery ? walletAddress.trim() : null;
+
     const updatedAt = projectResult.rows[0].updated_at;
     const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
     const lastModified = new Date(updatedAt).toUTCString();
-    res.set("ETag", etag);
-    res.set("Last-Modified", lastModified);
-    if (req.headers["if-none-match"] === etag) {
-      return res.status(304).end();
+    // Personalized ?walletAddress= responses must not be cached via ETag —
+    // isFollowing can change without projects.updated_at changing, and Express
+    // would otherwise auto-304 on res.json() when If-None-Match matches.
+    if (hasWalletQuery) {
+      res.set("Cache-Control", "private, no-store");
+    } else {
+      res.set("ETag", etag);
+      res.set("Last-Modified", lastModified);
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
     }
 
     const campaigns = await fetchCampaignsForProject(req.params.id);
@@ -823,23 +825,33 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
-    // Fetch follower count and, when ?walletAddress=G... is provided, whether
-    // that wallet is currently following this project.
-    const followCountResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
-      [req.params.id],
+    // Follower count + optional isFollowing from wallet-only project_follows rows.
+    // When ?walletAddress=G... is passed, include whether that wallet follows.
+    // Device-token (push) rows are excluded so web Follow state stays consistent
+    // with POST/DELETE /follow.
+    const followStatsResult = await pool.query(
+      `SELECT
+         (
+           SELECT COUNT(*)::int
+           FROM project_follows pf
+           WHERE pf.project_id = $1
+             AND pf.device_token_id IS NULL
+             AND pf.wallet_address IS NOT NULL
+         ) AS follow_count,
+         EXISTS (
+           SELECT 1
+           FROM project_follows pf
+           WHERE pf.project_id = $1
+             AND pf.device_token_id IS NULL
+             AND pf.wallet_address = $2
+         ) AS is_following`,
+      [req.params.id, normalizedWallet],
     );
-    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
-
-    let isFollowing = false;
-    const { walletAddress } = req.query;
-    if (walletAddress && typeof walletAddress === "string") {
-      const followResult = await pool.query(
-        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
-        [req.params.id, walletAddress],
-      );
-      isFollowing = followResult.rowCount > 0;
-    }
+    const followCount =
+      parseInt(followStatsResult.rows[0]?.follow_count, 10) || 0;
+    const isFollowing = hasWalletQuery
+      ? Boolean(followStatsResult.rows[0]?.is_following)
+      : false;
 
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
@@ -886,14 +898,19 @@ router.get("/:id", async (req, res, next) => {
 
 /**
  * POST /api/projects/:id/follow
+ * POST /api/projects/:id/follows  (alias used by mobile)
  * Follow a project. Body: { walletAddress: "G..." }
  * Idempotent — re-following a project that is already followed is a no-op.
  */
-router.post("/:id/follow", async (req, res, next) => {
+async function followProjectHandler(req, res, next) {
   try {
     const { walletAddress } = req.body || {};
     if (!walletAddress || typeof walletAddress !== "string") {
       return res.status(400).json({ error: "walletAddress is required" });
+    }
+    const normalizedWallet = walletAddress.trim();
+    if (!STELLAR_PUBLIC_KEY_RE.test(normalizedWallet)) {
+      return res.status(400).json({ error: "walletAddress must be a valid Stellar address" });
     }
 
     const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
@@ -901,16 +918,22 @@ router.post("/:id/follow", async (req, res, next) => {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    // Wallet-only follow row (device_token_id NULL). Partial unique index makes this idempotent.
     await pool.query(
-      `INSERT INTO project_follows (project_id, wallet_address, created_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
-      [req.params.id, walletAddress],
+      `INSERT INTO project_follows (id, project_id, device_token_id, wallet_address, created_at)
+       VALUES ($1, $2, NULL, $3, NOW())
+       ON CONFLICT (project_id, wallet_address)
+         WHERE device_token_id IS NULL AND wallet_address IS NOT NULL
+       DO NOTHING`,
+      [uuid(), req.params.id, normalizedWallet],
     );
 
     const countResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      `SELECT COUNT(*)::int AS count
+       FROM project_follows
+       WHERE project_id = $1
+         AND device_token_id IS NULL
+         AND wallet_address IS NOT NULL`,
       [req.params.id],
     );
 
@@ -924,32 +947,46 @@ router.post("/:id/follow", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
-});
+}
+
+router.post("/:id/follow", followProjectHandler);
+router.post("/:id/follows", followProjectHandler);
 
 /**
  * DELETE /api/projects/:id/follow
+ * DELETE /api/projects/:id/follows  (alias used by mobile)
  * Unfollow a project. Body: { walletAddress: "G..." }
  * Idempotent — unfollowing a project not currently followed is a no-op.
  */
-router.delete("/:id/follow", async (req, res, next) => {
+async function unfollowProjectHandler(req, res, next) {
   try {
     const { walletAddress } = req.body || {};
     if (!walletAddress || typeof walletAddress !== "string") {
       return res.status(400).json({ error: "walletAddress is required" });
     }
+    const normalizedWallet = walletAddress.trim();
 
     const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
 
+    // Remove wallet-only follow rows. Device-token push follows are managed via
+    // /api/notifications/unfollow and are left intact.
     await pool.query(
-      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
-      [req.params.id, walletAddress],
+      `DELETE FROM project_follows
+       WHERE project_id = $1
+         AND wallet_address = $2
+         AND device_token_id IS NULL`,
+      [req.params.id, normalizedWallet],
     );
 
     const countResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      `SELECT COUNT(*)::int AS count
+       FROM project_follows
+       WHERE project_id = $1
+         AND device_token_id IS NULL
+         AND wallet_address IS NOT NULL`,
       [req.params.id],
     );
 
@@ -963,7 +1000,10 @@ router.delete("/:id/follow", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
-});
+}
+
+router.delete("/:id/follow", unfollowProjectHandler);
+router.delete("/:id/follows", unfollowProjectHandler);
 
 /**
  * POST /api/projects/:id/generate-summary

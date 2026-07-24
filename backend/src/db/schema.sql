@@ -170,17 +170,24 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- project_follows: many-to-many join between projects and device_tokens.
--- A device "follows" a project to receive push notifications.
--- UNIQUE(project_id, device_token_id) prevents duplicate follows.
+-- project_follows: project follow relationships for push devices and/or wallets.
+-- - Mobile push: device_token_id set (UNIQUE with project_id); wallet_address optional.
+-- - Web Follow button: device_token_id NULL, wallet_address required; uniqueness
+--   enforced by partial unique index (see migration 003_wallet_project_follows).
 CREATE TABLE IF NOT EXISTS project_follows (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  device_token_id UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
+  device_token_id UUID REFERENCES device_tokens(id) ON DELETE CASCADE,
   wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, device_token_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS project_follows_project_wallet_uidx
+  ON project_follows (project_id, wallet_address)
+  WHERE device_token_id IS NULL AND wallet_address IS NOT NULL;
+CREATE INDEX IF NOT EXISTS project_follows_wallet_lookup_idx
+  ON project_follows (project_id, wallet_address)
+  WHERE wallet_address IS NOT NULL;
 
 -- Verification requests submitted via the /apply form on the frontend.
 -- Each row represents an organisation asking the GreenPay admin team to

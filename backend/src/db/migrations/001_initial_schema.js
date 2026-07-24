@@ -157,11 +157,21 @@ module.exports = {
       CREATE TABLE IF NOT EXISTS project_follows (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        device_token_id UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
+        device_token_id UUID REFERENCES device_tokens(id) ON DELETE CASCADE,
         wallet_address TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(project_id, device_token_id)
       )
+    `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS project_follows_project_wallet_uidx
+        ON project_follows (project_id, wallet_address)
+        WHERE device_token_id IS NULL AND wallet_address IS NOT NULL
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_follows_wallet_lookup_idx
+        ON project_follows (project_id, wallet_address)
+        WHERE wallet_address IS NOT NULL
     `);
   },
 

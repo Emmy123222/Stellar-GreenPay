@@ -131,13 +131,51 @@ export async function fetchProjects(params?: {
  * Fetch a single project by its id.
  *
  * @param id - Project id.
+ * @param walletAddress - Optional connected wallet; when provided, the backend
+ *   returns `isFollowing` for Follow button state on initial load (issue #705).
  * @returns The project.
  * @throws If the request fails (including 404s for missing projects).
  */
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
+  const params = walletAddress ? { walletAddress } : undefined;
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
     { params },
+  );
+  return data.data;
+}
+
+export interface FollowResponse {
+  isFollowing: boolean;
+  followCount: number;
+}
+
+/**
+ * Follow a project. Returns the updated isFollowing flag and follower count.
+ * Idempotent — safe to call even if already following.
+ */
+export async function followProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<FollowResponse> {
+  const { data } = await api.post<{ success: boolean; data: FollowResponse }>(
+    `/api/projects/${projectId}/follow`,
+    { walletAddress },
+  );
+  return data.data;
+}
+
+/**
+ * Unfollow a project. Returns the updated isFollowing flag and follower count.
+ * Idempotent — safe to call even if not currently following.
+ */
+export async function unfollowProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<FollowResponse> {
+  const { data } = await api.delete<{ success: boolean; data: FollowResponse }>(
+    `/api/projects/${projectId}/follow`,
+    { data: { walletAddress } },
   );
   return data.data;
 }
