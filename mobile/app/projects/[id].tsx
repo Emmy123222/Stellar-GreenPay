@@ -397,6 +397,150 @@ export default function ProjectDetailScreen() {
           </Text>
         </View>
 
+        {/* Updates — recent project activity derived from existing fields.
+            Real implementation of the "Display: ... updates" line in
+            /workspaces/Stellar-GreenPay/issue-168 (closes the AC gap that
+            the original ticket flagged but the first pass omitted). */}
+        <View
+          style={[
+            styles.updatesCard,
+            {
+              backgroundColor: colors.surface,
+              shadowColor: colors.cardShadow,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+          accessibilityRole="summary"
+          accessibilityLabel={`Updates for ${project.name}`}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+            📰 Updates
+          </Text>
+
+          {project.donorCount > 0 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🎉
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  {project.donorCount}{' '}
+                  {project.donorCount === 1 ? 'donor has' : 'donors have'} contributed
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  The project is actively receiving community support.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {project.co2OffsetKg > 0 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🌱
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  {project.co2OffsetKg.toLocaleString()} kg CO₂ offset
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  Estimated environmental impact to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 25 && pct < 50 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                ⭐
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  25% milestone reached
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 50 && pct < 75 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                ⭐⭐
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  50% milestone reached — halfway!
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 75 && pct < 100 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🔥
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  75% milestone — almost there
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 100 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🏆
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  Goal fully funded
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {project.donorCount}{' '}
+                  {project.donorCount === 1 ? 'donor has' : 'donors have'} hit the{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM goal.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.updateRow}>
+            <Text style={styles.updateBullet} accessibilityElementsHidden>
+              {project.status === 'active'
+                ? '✅'
+                : project.status === 'completed'
+                ? '🏁'
+                : '⏸️'}
+            </Text>
+            <View style={styles.updateText}>
+              <Text
+                style={[styles.updateTitle, { color: colors.primaryText }]}
+                accessibilityLabel={`Project status ${project.status}`}
+              >
+                Project {project.status}
+              </Text>
+              <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                Verified {project.category.toLowerCase()} project.
+              </Text>
+            </View>
+          </View>
+        </View>
+
         {/* Follow button — visible whenever we have a push token, OR show a
             softer prompt when we don't so the user knows the feature exists */}
         <TouchableOpacity
@@ -630,5 +774,36 @@ const styles = StyleSheet.create({
   donateButtonText: {
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  updatesCard: {
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+  },
+  updateRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+    gap: 10,
+  },
+  updateBullet: {
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  updateText: {
+    flex: 1,
+  },
+  updateTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  updateSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
   },
 });
