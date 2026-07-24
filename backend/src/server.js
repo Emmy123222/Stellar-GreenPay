@@ -84,6 +84,9 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+// ── Route mounts ────────────────────────────────────────────────────────
+app.use("/api/recurring-donations", require("./routes/recurringDonations"));
+
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture and send exceptions to Sentry
 app.use(Sentry.Handlers.errorHandler());
@@ -107,6 +110,9 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+
+  const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
+  await startRecurringDonationQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 

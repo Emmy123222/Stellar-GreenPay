@@ -157,6 +157,34 @@ CREATE TABLE IF NOT EXISTS donation_matches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- recurring_donations: monthly pledge schedule. Each row represents a
+-- donor's commitment to donate amount_xlm per month for duration_months.
+-- The pg-boss daily job (recurringDonationQueue.js) processes due pledges,
+-- builds Soroban transactions, and sends push/email reminders.
+-- Status lifecycle: active → completed | cancelled
+CREATE TABLE IF NOT EXISTS recurring_donations (
+  id               UUID PRIMARY KEY,
+  donor_address    TEXT NOT NULL,
+  project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  amount_xlm       NUMERIC(20, 7) NOT NULL CHECK (amount_xlm > 0),
+  currency         TEXT NOT NULL DEFAULT 'XLM',
+  next_due_date    DATE NOT NULL,
+  duration_months  INTEGER NOT NULL CHECK (duration_months >= 1),
+  remaining_months INTEGER NOT NULL CHECK (remaining_months >= 0),
+  status           TEXT NOT NULL DEFAULT 'active',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT recurring_donations_status_check
+    CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
+  CONSTRAINT recurring_donations_remaining_lte_duration
+    CHECK (remaining_months <= duration_months)
+);
+CREATE INDEX IF NOT EXISTS recurring_donations_due_idx
+  ON recurring_donations (next_due_date, status)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS recurring_donations_donor_idx
+  ON recurring_donations (donor_address);
+CREATE INDEX IF NOT EXISTS recurring_donations_project_idx
+  ON recurring_donations (project_id);
 
 -- device_tokens: push notification device registrations. token is the FCM /
 -- APNs device token; platform is 'ios' or 'android'. wallet_address links
