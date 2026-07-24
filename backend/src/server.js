@@ -4,7 +4,14 @@
 "use strict";
 
 require("dotenv").config();
+const express = require("express");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf = require("csurf");
+const rateLimit = require("express-rate-limit");
 const Sentry = require("@sentry/node");
+const requestLogger = require("./middleware/requestLogger");
+const logger = require("./logger");
 const Tracing = require("@sentry/tracing");
 
 Sentry.init({
@@ -83,6 +90,24 @@ function csrfTokenHandler(req, res) {
 }
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
+
+// ── API Routes ──────────────────────────────────────────────────────────────
+app.use("/api/jobs", require("./routes/jobs"));
+app.use("/api/stats", require("./routes/stats"));
+app.use("/api/projects", require("./routes/projects"));
+app.use("/api/donations", require("./routes/donations"));
+app.use("/api/profiles", require("./routes/profiles"));
+app.use("/api/admin", require("./routes/admin"));
+app.use("/api/health", require("./routes/health"));
+app.use("/api/readiness", require("./routes/readiness"));
+app.use("/api/impact", require("./routes/impact"));
+app.use("/api/leaderboard", require("./routes/leaderboard"));
+app.use("/api/ratings", require("./routes/ratings"));
+app.use("/api/updates", require("./routes/updates"));
+app.use("/api/uploads", require("./routes/uploads"));
+app.use("/api/notifications", require("./routes/notifications"));
+app.use("/api/subscriptions", require("./routes/subscriptions"));
+app.use("/api/verification-requests", require("./routes/verification"));
 
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture and send exceptions to Sentry

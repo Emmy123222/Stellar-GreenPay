@@ -6,7 +6,11 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
+const redis = require("../services/redis");
 const { mapJobRow } = require("../services/store");
+
+const JOBS_STATS_CACHE_KEY = "jobs:stats";
+const JOBS_STATS_CACHE_TTL_SECONDS = 60;
 
 function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) {
@@ -84,6 +88,39 @@ router.patch("/:id/release", async (req, res, next) => {
   }
 });
 
+// GET /api/jobs/stats — aggregated escrow marketplace metrics
+router.get("/stats", async (req, res, next) => {
+  try {
+    const cached = await redis.get(JOBS_STATS_CACHE_KEY);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'in_escrow')::int AS "totalJobsInEscrow",
+        COUNT(*) FILTER (WHERE status = 'completed')::int  AS "totalJobsCompleted",
+        COALESCE(SUM(amount_escrow_xlm) FILTER (WHERE status = 'in_escrow'), 0)::text AS "totalEscrowXLM",
+        COALESCE(SUM(amount_escrow_xlm) FILTER (WHERE status = 'completed'), 0)::text  AS "totalReleasedXLM"
+      FROM jobs
+    `);
+
+    const row = result.rows[0];
+    const stats = {
+      totalJobsInEscrow: Number.parseInt(row.totalJobsInEscrow, 10) || 0,
+      totalJobsCompleted: Number.parseInt(row.totalJobsCompleted, 10) || 0,
+      totalEscrowXLM: Number.parseFloat(row.totalEscrowXLM || "0").toFixed(7),
+      totalReleasedXLM: Number.parseFloat(row.totalReleasedXLM || "0").toFixed(7),
+    };
+
+    await redis.set(JOBS_STATS_CACHE_KEY, stats, JOBS_STATS_CACHE_TTL_SECONDS);
+
+    res.json(stats);
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const result = await pool.query("SELECT * FROM jobs WHERE id = $1", [
@@ -99,3 +136,5 @@ router.get("/:id", async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.JOBS_STATS_CACHE_KEY = JOBS_STATS_CACHE_KEY;
+module.exports.JOBS_STATS_CACHE_TTL_SECONDS = JOBS_STATS_CACHE_TTL_SECONDS;
