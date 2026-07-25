@@ -1,13 +1,21 @@
 /**
- * src/routes/uploads.js — Document upload endpoint
+ * src/routes/uploads.js — Document upload endpoints
  *
  * POST /api/uploads (multipart/form-data, field name `file`)
  *   - Validates: file presence, size (max 10 MB by default), and basic
  *     MIME-type whitelist (pdf, image, office docs, common text).
- *   - Storages the file via storage.uploadFile() and returns:
+ *   - Stores the file via storage.uploadFile() and returns:
  *       { success: true, data: { key, url, size, contentType, backend } }
  *   - Errors that map to user-facing 400/413 responses are returned with
  *     a `code` field so the frontend can show specific copy.
+ *
+ * POST /api/uploads/presign
+ *   - Returns a short-lived presigned S3 PUT URL for direct client-to-S3
+ *     uploads, avoiding routing file bytes through this server.
+ *   - Request body (JSON): { originalName, contentType, size? }
+ *   - Response: { success: true, data: { key, url, expiry } }
+ *   - Falls back with 503 when STORAGE_BACKEND is not "s3" or S3 credentials
+ *     are absent — callers should fall back to POST /api/uploads in that case.
  *
  * GET /api/uploads/:key
  *   - Serves files written by the local backend from backend/uploads/<key>.
@@ -22,6 +30,7 @@ const fs = require("fs");
 const path = require("path");
 const router = express.Router();
 const { uploadFile, backendName, UPLOAD_DIR } = require("../services/storage");
+const { generatePresignedPutUrl, isS3Configured } = require("../services/s3Presign");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
 const uploadRateLimiter = createRateLimiter(20, 15); // 20 uploads per 15 min
@@ -82,6 +91,75 @@ router.post("/", uploadRateLimiter, (req, res, next) => {
       next(uploadErr);
     }
   });
+});
+
+/**
+ * POST /api/uploads/presign
+ *
+ * Returns a short-lived presigned S3 PUT URL. The client uploads the file
+ * directly to S3; no file bytes pass through this server.
+ *
+ * Request body (JSON):
+ *   {
+ *     "originalName": "report.pdf",    // required — original filename
+ *     "contentType":  "application/pdf", // required — MIME type
+ *     "size":         102400             // optional — bytes; validated ≤ UPLOAD_MAX_BYTES
+ *   }
+ *
+ * Success response 200:
+ *   {
+ *     "success": true,
+ *     "data": {
+ *       "key":    "<s3-object-key>",
+ *       "url":    "<presigned-PUT-url>",
+ *       "expiry": 1234567890           // Unix timestamp (seconds)
+ *     }
+ *   }
+ *
+ * Falls back to 503 when S3 is not configured — the client should retry
+ * with a standard POST /api/uploads multipart upload in that case.
+ */
+const presignRateLimiter = createRateLimiter(30, 15); // 30 presign requests per 15 min
+
+router.post("/presign", presignRateLimiter, async (req, res, next) => {
+  const { originalName, contentType, size } = req.body || {};
+
+  if (!originalName || typeof originalName !== "string" || !originalName.trim()) {
+    return res.status(400).json({
+      error: "originalName is required and must be a non-empty string.",
+    });
+  }
+  if (!contentType || typeof contentType !== "string") {
+    return res.status(400).json({
+      error: "contentType is required and must be a string.",
+    });
+  }
+
+  try {
+    const result = await generatePresignedPutUrl({
+      originalName: originalName.trim(),
+      contentType: contentType.trim(),
+      size,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (err) {
+    // Map service-layer statusCodes to HTTP responses
+    const status = err.statusCode;
+    if (status === 400 || status === 413 || status === 503) {
+      return res.status(status).json({
+        error: err.message,
+        ...(status === 503 && {
+          fallback: "Use POST /api/uploads for a standard multipart upload.",
+        }),
+      });
+    }
+    // Unexpected errors go to the central error handler
+    return next(err);
+  }
 });
 
 /**

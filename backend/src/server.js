@@ -12,15 +12,44 @@ Sentry.init({
   tracesSampleRate: 0.1,
   environment: process.env.NODE_ENV,
 });
-const { runMigrations } = require("./db/migrate");
-const { startTurretsServer } = require("./services/turrets");
-const http = require("http");
-const { Server } = require("socket.io");
-const { start: startSummaryQueue } = require("./services/summaryQueue");
-const { start: startProfileQueue } = require("./services/profileQueue");
-const { startIndexer } = require("./services/indexerService");
-const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
+const express      = require("express");
+const helmet       = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf        = require("csurf");
+const rateLimit    = require("express-rate-limit");
+const http         = require("http");
+const { Server }   = require("socket.io");
+
+const { runMigrations }                      = require("./db/migrate");
+const { startTurretsServer }                 = require("./services/turrets");
+const { start: startSummaryQueue }           = require("./services/summaryQueue");
+const { start: startProfileQueue }           = require("./services/profileQueue");
+const { startIndexer }                       = require("./services/indexerService");
+const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
+const { createRateLimiter }                  = require("./middleware/rateLimiter");
+const requestLogger                          = require("./middleware/requestLogger");
+const logger                                 = require("./logger");
+
+// ── Routes ───────────────────────────────────────────────────────────────────
+const projectsRouter      = require("./routes/projects");
+const donationsRouter     = require("./routes/donations");
+const leaderboardRouter   = require("./routes/leaderboard");
+const profilesRouter      = require("./routes/profiles");
+const statsRouter         = require("./routes/stats");
+const updatesRouter       = require("./routes/updates");
+const uploadsRouter       = require("./routes/uploads");
+const healthRouter        = require("./routes/health");
+const readinessRouter     = require("./routes/readiness");
+const notificationsRouter = require("./routes/notifications");
+const adminRouter         = require("./routes/admin");
+const verificationRouter  = require("./routes/verification");
+const impactRouter        = require("./routes/impact");
+const subscriptionsRouter = require("./routes/subscriptions");
+const ratingsRouter       = require("./routes/ratings");
+const jobsRouter          = require("./routes/jobs");
+
+// ── App ───────────────────────────────────────────────────────────────────────
 const app    = express();
 const PORT   = process.env.PORT || 4000;
 const server = http.createServer(app);
@@ -48,6 +77,7 @@ app.use((req, res, next) => {
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
+
 const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
@@ -84,7 +114,27 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+// ── Route registration ────────────────────────────────────────────
+app.use("/api/health",         healthRouter);
+app.use("/api/readiness",      readinessRouter);
+app.use("/api/projects",       projectsRouter);
+app.use("/api/donations",      donationsRouter);
+app.use("/api/leaderboard",    leaderboardRouter);
+app.use("/api/profiles",       profilesRouter);
+app.use("/api/stats",          statsRouter);
+app.use("/api/updates",        updatesRouter);
+app.use("/api/uploads",        uploadsRouter);
+app.use("/api/notifications",  notificationsRouter);
+app.use("/api/admin",          adminRouter);
+app.use("/api/verification",   verificationRouter);
+app.use("/api/impact",         impactRouter);
+app.use("/api/subscriptions",  subscriptionsRouter);
+app.use("/api/ratings",        ratingsRouter);
+app.use("/api/jobs",           jobsRouter);
+
+// ── 404 fallthrough ───────────────────────────────────────────────
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
+
 // Sentry error handler — capture and send exceptions to Sentry
 app.use(Sentry.Handlers.errorHandler());
 
@@ -111,7 +161,7 @@ async function startServer() {
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
-    console.log();
+    logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);
   });
 
   if (process.env.ENABLE_TURRETS === "true") {
