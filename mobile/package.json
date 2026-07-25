@@ -48,6 +48,7 @@
       "^axios$": "<rootDir>/__mocks__/axios.js",
       "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
       "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
+      "^expo-modules-core(.*)$": "<rootDir>/__mocks__/expo-modules-core.js",
       "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>/__mocks__/rn-batched-bridge.js"
     }
   }

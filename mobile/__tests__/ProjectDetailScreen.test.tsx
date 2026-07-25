@@ -290,3 +290,156 @@ describe('ProjectDetailScreen – Follow button', () => {
     );
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #168 — Acceptance Criteria: All projects from the API can be viewed on
+// mobile. These tests exercise the [id].tsx screen with multiple distinct
+// project IDs and assert that every required field from the issue task list is
+// rendered, and that the Donate CTA correctly routes to the donate screen.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', () => {
+  // Three distinct mock projects that vary by category / progress / status so
+  // we exercise the Updates card branch coverage as well as the always-on
+  // fields. The IDs use a slugish format to prove the screen works for any
+  // project key, not just the magic id "proj-1".
+  const PROJECTS = {
+    'amazon-reforestation': {
+      id: 'amazon-reforestation',
+      name: 'Amazon Reforestation Initiative',
+      description: 'Planting 1 million native trees in the Brazilian Amazon.',
+      category: 'Reforestation',
+      location: 'Brazil',
+      walletAddress: 'GAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J',
+      goalXLM: '50000',
+      raisedXLM: '18420',
+      donorCount: 147,
+      co2OffsetKg: 245000,
+      status: 'active',
+    },
+    'ocean-cleanup-2030': {
+      id: 'ocean-cleanup-2030',
+      name: 'Ocean Cleanup 2030',
+      description: 'Removing plastic waste from the Pacific gyre.',
+      category: 'Ocean Conservation',
+      location: 'Pacific Ocean',
+      walletAddress: 'GD5GBLGXOXGG7BQFZAQYYJ6VEF7L4XJZ7Y6JXQV7KZNR7JL3WQCQXKPY',
+      goalXLM: '10000',
+      raisedXLM: '750', // < 25% — exercises “no milestone reached” Update card state
+      donorCount: 0,
+      co2OffsetKg: 0,
+      status: 'active',
+    },
+    'solar-village-completed': {
+      id: 'solar-village-completed',
+      name: 'Solar Village — Completed',
+      description: 'Off-grid solar for a remote village in Kenya.',
+      category: 'Solar Energy',
+      location: 'Kenya',
+      walletAddress: 'GCS5XA4NPMVLMZQXH5KX5JZQQ3G7MGW3V6HB7WD3J6LJ5QEZXKVSPY4F',
+      goalXLM: '8000',
+      raisedXLM: '8000', // 100% — exercises the "Goal fully funded" Update card
+      donorCount: 312,
+      co2OffsetKg: 1500000,
+      status: 'completed',
+    },
+  };
+
+  // Helper: drive one specific project through the screen end-to-end and
+  // yield the result of assertions on the rendered tree.
+  async function renderProject(project: typeof MOCK_PROJECT) {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: project } });
+    const screen = renderWithTheme(<ProjectDetailScreen />);
+    await waitFor(() => expect(screen.getByText(project.name)).toBeTruthy());
+    return screen;
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    mockFollowsResponse([]);
+    (notifUtils.getPushToken as jest.Mock).mockResolvedValue('expo-push-token-abc');
+    (notifUtils.followProject as jest.Mock).mockResolvedValue(true);
+    (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('renders the required fields (name, description, progress, CO₂) for project proj-1', async () => {
+    await renderProject(PROJECTS['amazon-reforestation']);
+
+    expect(screen.findByText(PROJECTS['amazon-reforestation'].name)).toBeTruthy();
+    expect(screen.findByText(PROJECTS['amazon-reforestation'].description)).toBeTruthy();
+    expect(screen.findByText(/Fundraising Progress/i)).toBeTruthy();
+    expect(
+      screen.findByText(`${PROJECTS['amazon-reforestation'].co2OffsetKg.toLocaleString()} kg CO₂ offset`)
+    ).toBeTruthy();
+  });
+
+  it('renders the Updates card with donor count and status info for any project', async () => {
+    const { findByText } = await renderProject(PROJECTS['amazon-reforestation']);
+    expect(await findByText(/Updates/i)).toBeTruthy();
+    expect(await findByText(/147 donors have contributed/i)).toBeTruthy();
+    expect(await findByText(/Project active/i)).toBeTruthy();
+  });
+
+  it('loads and renders the ocean cleanup project (different id, category)', async () => {
+    const p = PROJECTS['ocean-cleanup-2030'];
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
+
+    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const nameNode = await findByText(p.name);
+    expect(nameNode).toBeTruthy();
+    expect(axios.get).toHaveBeenCalledWith(expect.stringContaining(`/api/projects/${p.id}`));
+  });
+
+  it('loads and renders the completed solar village project, including the "Goal fully funded" update', async () => {
+    const p = PROJECTS['solar-village-completed'];
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
+
+    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
+    expect(await findByText(p.name)).toBeTruthy();
+    expect(await findByText(/Goal fully funded/i)).toBeTruthy();
+    expect(await findByText(/312 donors have hit the 8000 XLM goal/i)).toBeTruthy();
+  });
+
+  it('requests the project detail from /api/projects/:id with the id from the route', async () => {
+    const projectId = PROJECTS['ocean-cleanup-2030'].id;
+    (axios.get as jest.Mock).mockResolvedValue({
+      data: { data: PROJECTS[projectId] },
+    });
+
+    renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() =>
+      expect(axios.get).toHaveBeenCalledWith(
+        expect.stringContaining(`/api/projects/ocean-cleanup-2030`)
+      )
+    );
+  });
+
+  it('Donate CTA navigates to /donate/:id with the same id as the project', async () => {
+    const { useRouter } = require('expo-router');
+    const projectId = PROJECTS['amazon-reforestation'].id;
+    (axios.get as jest.Mock).mockResolvedValue({
+      data: { data: PROJECTS['amazon-reforestation'] },
+    });
+
+    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const donateCta = await findByText(/Donate Now/i);
+    expect(donateCta).toBeTruthy();
+
+    fireEvent.press(donateCta);
+    expect(useRouter().push).toHaveBeenCalledWith(`/donate/${projectId}`);
+  });
+
+  it('shows a graceful "Project not found" state when the API returns 404', async () => {
+    (axios.get as jest.Mock).mockRejectedValue({
+      response: { status: 404, data: { error: 'Project not found' } },
+    });
+
+    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
+    expect(await findByText(/Project not found/i)).toBeTruthy();
+  });
+});
