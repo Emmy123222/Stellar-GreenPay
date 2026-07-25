@@ -20,6 +20,7 @@
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { snapshotLeaderboard } = require("./leaderboardService");
 
 const QUEUE = "monthly-impact-digest";
 // Default: 1st of every month at 08:00 UTC
@@ -263,6 +264,19 @@ async function runDigest() {
   }
 
   logger.info({ event: "digest_run_complete", sent, errors, monthLabel }, "[digestQueue] Monthly digest run complete");
+
+  // Snapshot the current month's leaderboard in sync with the digest send.
+  // A snapshot failure must not crash/abort the digest job — log and continue,
+  // same as the per-project error handling above.
+  try {
+    const snapshotResult = await snapshotLeaderboard();
+    logger.info(
+      { event: "digest_leaderboard_snapshot", ...snapshotResult },
+      "[digestQueue] Leaderboard snapshot complete",
+    );
+  } catch (err) {
+    logger.error({ event: "digest_leaderboard_snapshot_error", err }, err.message);
+  }
 }
 
 // ── pg-boss wiring ────────────────────────────────────────────────────────────
