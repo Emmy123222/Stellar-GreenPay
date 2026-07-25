@@ -123,7 +123,11 @@ const underlying = {
     expoModulesCoreProvider: {},
   },
   requireNativeModule: jest.fn(() => safeNative),
-  requireOptionalNativeModule: jest.fn(() => null),
+  // Return a safeNative Proxy rather than null so destructuring at call
+  // sites (`const { foo } = requireOptionalNativeModule('bar')`) does not
+  // crash with "Cannot destructure property 'foo' of null". Mirrors how the
+  // real expo-modules-core exposes an empty shape for absent modules.
+  requireOptionalNativeModule: jest.fn(() => safeNative),
   requireNativeViewManager: jest.fn(() => safeNative),
   EventEmitter,
   // Subpath import: `expo-modules-core/src/polyfill/dangerous-internal`

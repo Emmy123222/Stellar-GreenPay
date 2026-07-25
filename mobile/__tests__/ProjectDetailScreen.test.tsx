@@ -16,9 +16,14 @@ import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import axios from 'axios';
 
 // ── Router / Expo mocks ────────────────────────────────────────────────────────
+// Shared spies used across every test in this file. The factory below closes
+// over these references so we can directly inspect calls.
+const routerPushMock = jest.fn();
+const mockedUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
+
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
-  useLocalSearchParams: () => ({ id: 'proj-1' }),
+  useRouter: () => ({ push: routerPushMock }),
+  useLocalSearchParams: () => mockedUseLocalSearchParams(),
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -367,45 +372,57 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   });
 
   it('renders the required fields (name, description, progress, CO₂) for project proj-1', async () => {
-    await renderProject(PROJECTS['amazon-reforestation']);
+    const renderer = await renderProject(PROJECTS['amazon-reforestation']);
 
-    expect(screen.findByText(PROJECTS['amazon-reforestation'].name)).toBeTruthy();
-    expect(screen.findByText(PROJECTS['amazon-reforestation'].description)).toBeTruthy();
-    expect(screen.findByText(/Fundraising Progress/i)).toBeTruthy();
+    await waitFor(() =>
+      expect(renderer.getByText(PROJECTS['amazon-reforestation'].name)).toBeTruthy()
+    );
     expect(
-      screen.findByText(`${PROJECTS['amazon-reforestation'].co2OffsetKg.toLocaleString()} kg CO₂ offset`)
+      renderer.getByText(PROJECTS['amazon-reforestation'].description)
+    ).toBeTruthy();
+    expect(renderer.getByText(/Fundraising Progress/i)).toBeTruthy();
+    expect(
+      renderer.getByText(
+        `${PROJECTS['amazon-reforestation'].co2OffsetKg.toLocaleString()} kg CO₂ offset`
+      )
     ).toBeTruthy();
   });
 
   it('renders the Updates card with donor count and status info for any project', async () => {
-    const { findByText } = await renderProject(PROJECTS['amazon-reforestation']);
-    expect(await findByText(/Updates/i)).toBeTruthy();
-    expect(await findByText(/147 donors have contributed/i)).toBeTruthy();
-    expect(await findByText(/Project active/i)).toBeTruthy();
+    const renderer = await renderProject(PROJECTS['amazon-reforestation']);
+
+    expect(await renderer.findByText(/Updates/i)).toBeTruthy();
+    expect(await renderer.findByText(/147 donors have contributed/i)).toBeTruthy();
+    expect(await renderer.findByText(/Project active/i)).toBeTruthy();
   });
 
   it('loads and renders the ocean cleanup project (different id, category)', async () => {
     const p = PROJECTS['ocean-cleanup-2030'];
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
 
-    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
-    const nameNode = await findByText(p.name);
+    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const nameNode = await renderer.findByText(p.name);
     expect(nameNode).toBeTruthy();
-    expect(axios.get).toHaveBeenCalledWith(expect.stringContaining(`/api/projects/${p.id}`));
+    expect(axios.get).toHaveBeenCalledWith(
+      expect.stringContaining(`/api/projects/${p.id}`)
+    );
   });
 
   it('loads and renders the completed solar village project, including the "Goal fully funded" update', async () => {
     const p = PROJECTS['solar-village-completed'];
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
 
-    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
-    expect(await findByText(p.name)).toBeTruthy();
-    expect(await findByText(/Goal fully funded/i)).toBeTruthy();
-    expect(await findByText(/312 donors have hit the 8000 XLM goal/i)).toBeTruthy();
+    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    expect(await renderer.findByText(p.name)).toBeTruthy();
+    expect(await renderer.findByText(/Goal fully funded/i)).toBeTruthy();
+    expect(
+      await renderer.findByText(/312 donors have hit the 8000 XLM goal/i)
+    ).toBeTruthy();
   });
 
   it('requests the project detail from /api/projects/:id with the id from the route', async () => {
     const projectId = PROJECTS['ocean-cleanup-2030'].id;
+    mockedUseLocalSearchParams.mockReturnValue({ id: projectId });
     (axios.get as jest.Mock).mockResolvedValue({
       data: { data: PROJECTS[projectId] },
     });
@@ -414,24 +431,27 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
 
     await waitFor(() =>
       expect(axios.get).toHaveBeenCalledWith(
-        expect.stringContaining(`/api/projects/ocean-cleanup-2030`)
+        expect.stringContaining(`/api/projects/${projectId}`)
       )
     );
   });
 
   it('Donate CTA navigates to /donate/:id with the same id as the project', async () => {
-    const { useRouter } = require('expo-router');
+    // Capture the (already-mocked) useRouter through the same jest.mock path
+    // the existing follow-button tests use, so we share the spy across every
+    // test in this suite.
+    const mockRouter = routerPushMock;
     const projectId = PROJECTS['amazon-reforestation'].id;
     (axios.get as jest.Mock).mockResolvedValue({
       data: { data: PROJECTS['amazon-reforestation'] },
     });
 
-    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
-    const donateCta = await findByText(/Donate Now/i);
+    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const donateCta = await renderer.findByText(/Donate Now/i);
     expect(donateCta).toBeTruthy();
 
     fireEvent.press(donateCta);
-    expect(useRouter().push).toHaveBeenCalledWith(`/donate/${projectId}`);
+    expect(mockRouter).toHaveBeenCalledWith(`/donate/${projectId}`);
   });
 
   it('shows a graceful "Project not found" state when the API returns 404', async () => {
@@ -439,7 +459,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
       response: { status: 404, data: { error: 'Project not found' } },
     });
 
-    const { findByText } = renderWithTheme(<ProjectDetailScreen />);
-    expect(await findByText(/Project not found/i)).toBeTruthy();
+    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    expect(await renderer.findByText(/Project not found/i)).toBeTruthy();
   });
 });
