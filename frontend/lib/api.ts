@@ -759,6 +759,50 @@ export async function fetchVerificationRequest(
   return data.data;
 }
 
+/**
+ * Fetch a single verification request as an admin (sends Bearer token).
+ * Uses the Authorization header so no wallet query param is required.
+ *
+ * @param id - Verification request id.
+ * @param adminToken - Bearer JWT issued by /api/admin/login.
+ * @returns The verification request row.
+ * @throws If the request fails or the token is invalid / expired.
+ */
+export async function fetchVerificationRequestAdmin(
+  id: string,
+  adminToken: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}`,
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data;
+}
+
+/**
+ * Transition a verification request to a new status (admin-only).
+ *
+ * @param id - Verification request id.
+ * @param status - Target status: "in_review" | "approved" | "rejected".
+ * @param adminToken - Bearer JWT issued by /api/admin/login.
+ * @param reviewerNotes - Optional notes recorded alongside the status change.
+ * @returns The updated verification request row.
+ * @throws If the transition is not permitted by the backend state machine.
+ */
+export async function updateVerificationRequestStatus(
+  id: string,
+  status: "pending" | "in_review" | "approved" | "rejected",
+  adminToken: string,
+  reviewerNotes?: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}/status`,
+    { status, ...(reviewerNotes !== undefined ? { reviewerNotes } : {}) },
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data;
+}
+
 export interface UploadedDocument {
   key: string;
   url: string;
