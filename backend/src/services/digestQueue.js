@@ -286,7 +286,26 @@ async function start() {
   boss = new PgBoss(connectionString);
   boss.on("error", (err) => logger.error({ event: "digest_pgboss_error", err }, err.message));
 
-  await boss.start();
+  const delays = [5000, 15000, 30000];
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await boss.start();
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      logger.warn(
+        { event: "digest_pgboss_retry", attempt, maxAttempts: 3 },
+        `[digestQueue] boss.start() attempt ${attempt}/3 failed: ${err.message}`,
+      );
+      if (attempt < 3) {
+        const wait = delays[attempt - 1] ?? 30000;
+        await new Promise((resolve) => setTimeout(resolve, wait));
+      }
+    }
+  }
+  if (lastErr) throw lastErr;
 
   // Register the cron schedule (idempotent — pg-boss deduplicates by name)
   await boss.schedule(QUEUE, cronSchedule, {}, { tz: "UTC" });
