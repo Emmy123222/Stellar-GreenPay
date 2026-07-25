@@ -5,6 +5,7 @@
 const express = require("express");
 const router  = express.Router();
 const pool = require("../db/pool");
+const { snapshotLeaderboard } = require("../services/leaderboardService");
 
 router.get("/", async (req, res, next) => {
   try {
@@ -144,60 +145,13 @@ router.post("/snapshot", async (req, res, next) => {
 
     const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
 
-    // Compute this calendar month's top donors
-    const topResult = await pool.query(
-      `SELECT p.public_key, p.display_name, p.badges,
-              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_xlm
-       FROM profiles p
-       LEFT JOIN donations d
-         ON p.public_key = d.donor_address
-        AND d.created_at >= DATE_TRUNC('month', NOW())
-        AND d.created_at <  DATE_TRUNC('month', NOW()) + INTERVAL '1 month'
-       GROUP BY p.public_key, p.display_name, p.badges
-       HAVING COALESCE(SUM(d.amount_xlm), 0) > 0
-       ORDER BY total_xlm DESC
-       LIMIT $1`,
-      [limit]
-    );
+    const result = await snapshotLeaderboard({ limit });
 
-    if (topResult.rows.length === 0) {
-      return res.json({ success: true, message: "No donations this month yet", inserted: 0 });
+    if (result.inserted === 0 && result.message) {
+      return res.json({ success: true, message: result.message, inserted: 0 });
     }
 
-    const monthStart = new Date();
-    monthStart.setDate(1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthStr = monthStart.toISOString().slice(0, 10); // "YYYY-MM-01"
-
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-      let inserted = 0;
-      for (let i = 0; i < topResult.rows.length; i++) {
-        const row = topResult.rows[i];
-        const badge = row.badges?.[0]?.tier || null;
-        await client.query(
-          `INSERT INTO monthly_leaderboard
-             (month, donor_address, display_name, total_xlm_that_month, badge, rank)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (month, donor_address)
-           DO UPDATE SET
-             display_name          = EXCLUDED.display_name,
-             total_xlm_that_month  = EXCLUDED.total_xlm_that_month,
-             badge                 = EXCLUDED.badge,
-             rank                  = EXCLUDED.rank`,
-          [monthStr, row.public_key, row.display_name || null, row.total_xlm, badge, i + 1]
-        );
-        inserted++;
-      }
-      await client.query("COMMIT");
-      res.json({ success: true, month: monthStr, inserted });
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
+    res.json({ success: true, month: result.month, inserted: result.inserted });
   } catch (e) {
     next(e);
   }
