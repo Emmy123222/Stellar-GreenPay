@@ -84,6 +84,10 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+// ── Route registrations ────────────────────────────────────────────
+const statsRouter = require("./routes/stats");
+app.use("/api/stats", statsRouter);
+
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture and send exceptions to Sentry
 app.use(Sentry.Handlers.errorHandler());

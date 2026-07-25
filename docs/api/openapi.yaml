@@ -400,6 +400,32 @@ components:
         updatedAt:
           type: string
           format: date-time
+    StatsTrends:
+      type: object
+      properties:
+        thisWeekXLM:
+          type: string
+          description: Total XLM donated in the current 7-day window (7-decimal string).
+          example: "1250.0000000"
+        lastWeekXLM:
+          type: string
+          description: Total XLM donated in the prior 7-day window (7-decimal string).
+          example: "980.0000000"
+        growthPercent:
+          type: number
+          nullable: true
+          description: >
+            Percentage growth from last week to this week.
+            Null when lastWeekXLM is zero (no prior donations to compare).
+          example: 27.55
+        thisWeekDonations:
+          type: integer
+          description: Number of donations in the current 7-day window.
+          example: 42
+        lastWeekDonations:
+          type: integer
+          description: Number of donations in the prior 7-day window.
+          example: 35
     StatsGlobal:
       type: object
       properties:
@@ -1679,6 +1705,21 @@ paths:
                     type: boolean
                   data:
                     $ref: '#/components/schemas/StatsGlobal'
+  /api/stats/trends:
+    get:
+      tags: [Stats]
+      summary: Get week-over-week donation growth
+      description: >
+        Returns donation totals for the current 7-day window and the preceding
+        7-day window, along with the percentage growth. Used by the admin
+        analytics dashboard to show donation trend indicators.
+      responses:
+        '200':
+          description: Week-over-week trend data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsTrends'
   /api/stats/categories:
     get:
       tags: [Stats]
