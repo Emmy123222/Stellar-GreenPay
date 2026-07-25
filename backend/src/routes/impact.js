@@ -204,11 +204,39 @@ router.get("/donor/:publicKey", async (req, res, next) => {
       [req.params.publicKey],
     );
 
+    const byProjectResult = await pool.query(
+      `SELECT
+        p.id AS "projectId",
+        p.name AS "projectName",
+        COALESCE(
+          SUM(
+            CASE
+              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "co2OffsetKg"
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)
+       GROUP BY p.id, p.name
+       ORDER BY "co2OffsetKg" DESC, p.name ASC`,
+      [req.params.publicKey],
+    );
+
     const row = totalsResult.rows[0] || {};
     const totalDonatedXLM = Number.parseFloat(row.totalDonatedXLM || "0");
     const projectsSupported = row.projectsSupported || 0;
     const co2OffsetKg = Math.round(Number.parseFloat(row.co2OffsetKg || "0"));
     const topCategory = topCategoryResult.rows[0]?.category || null;
+
+    const byProject = byProjectResult.rows.map((r) => ({
+      projectId: r.projectId,
+      projectName: r.projectName,
+      co2OffsetKg: Math.round(Number.parseFloat(r.co2OffsetKg || "0")),
+    }));
 
     return sendCached(req, res, {
       success: true,
@@ -217,6 +245,7 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         co2OffsetKg,
         projectsSupported,
         topCategory,
+        byProject,
       },
     });
   } catch (e) {
