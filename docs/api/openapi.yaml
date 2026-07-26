@@ -1697,6 +1697,187 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/CategoryStat'
+  /api/impact/project/{id}:
+    get:
+      tags: [Impact]
+      summary: Impact metrics for a project
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-None-Match
+          in: header
+          description: ETag validator from previous response
+          required: false
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          description: HTTP-date timestamp from previous Last-Modified header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Project impact (cached 5 min)
+          headers:
+            ETag:
+              description: SHA-256 hash of response body payload
+              schema:
+                type: string
+            Last-Modified:
+              description: RFC 7231 GMT timestamp of latest entity update
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      totalDonationsXLM:
+                        type: string
+                      donorCount:
+                        type: integer
+                      co2OffsetKg:
+                        type: number
+                      treesEquivalent:
+                        type: number
+                      uniqueCountries:
+                        type: integer
+        '304':
+          description: Not Modified - payload unchanged since If-None-Match or If-Modified-Since
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/impact/global:
+    get:
+      tags: [Impact]
+      summary: Global impact metrics
+      parameters:
+        - name: If-None-Match
+          in: header
+          description: ETag validator from previous response
+          required: false
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          description: HTTP-date timestamp from previous Last-Modified header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Platform-wide impact (cached 5 min)
+          headers:
+            ETag:
+              description: SHA-256 hash of response body payload
+              schema:
+                type: string
+            Last-Modified:
+              description: RFC 7231 GMT timestamp of latest entity update
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      totalDonationsXLM:
+                        type: string
+                      donorCount:
+                        type: integer
+                      co2OffsetKg:
+                        type: number
+                      treesEquivalent:
+                        type: number
+                      uniqueCountries:
+                        type: integer
+                      breakdownByCategory:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            category:
+                              type: string
+                            totalDonationsXLM:
+                              type: string
+                            donorCount:
+                              type: integer
+                            co2OffsetKg:
+                              type: number
+        '304':
+          description: Not Modified - payload unchanged since If-None-Match or If-Modified-Since
+  /api/impact/donor/{publicKey}:
+    get:
+      tags: [Impact]
+      summary: Impact metrics for a donor
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^G[A-Z0-9]{55}$'
+        - name: If-None-Match
+          in: header
+          description: ETag validator from previous response
+          required: false
+          schema:
+            type: string
+        - name: If-Modified-Since
+          in: header
+          description: HTTP-date timestamp from previous Last-Modified header
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Donor impact (cached 5 min)
+          headers:
+            ETag:
+              description: SHA-256 hash of response body payload
+              schema:
+                type: string
+            Last-Modified:
+              description: RFC 7231 GMT timestamp of latest entity update
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      totalDonatedXLM:
+                        type: string
+                      co2OffsetKg:
+                        type: number
+                      projectsSupported:
+                        type: integer
+                      topCategory:
+                        type: string
+                        nullable: true
+        '304':
+          description: Not Modified - payload unchanged since If-None-Match or If-Modified-Since
+        '400':
+          $ref: '#/components/responses/BadRequest'
   /api/admin/login:
     post:
       tags: [Admin]

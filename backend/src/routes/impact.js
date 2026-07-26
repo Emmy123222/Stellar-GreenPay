@@ -1,12 +1,10 @@
 /**
  * src/routes/impact.js
- * Impact aggregation endpoints.
+ * Impact aggregation endpoints with HTTP conditional caching (ETag & Last-Modified).
  *
  * - GET /api/impact/project/:id
  * - GET /api/impact/global
  * - GET /api/impact/donor/:publicKey
- *
- * All endpoints are cached for 5 minutes (process-local).
  */
 "use strict";
 
@@ -14,6 +12,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
 const cache = require("../services/cache");
+const { sendConditionalResponse, generateETag } = require("../utils/conditionalCache");
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const KG_CO2_PER_TREE = 21.77; // heuristic, used for treesEquivalent
@@ -35,20 +34,22 @@ function cacheKey(req) {
   return req.originalUrl;
 }
 
-function sendCached(req, res, payload) {
-  cache.set(cacheKey(req), payload, CACHE_TTL_MS);
-  res.set("Cache-Control", "public, max-age=300");
-  return res.json(payload);
+function sendCachedResponse(req, res, payload, lastModified) {
+  const etag = generateETag(payload);
+  cache.set(cacheKey(req), { payload, lastModified, etag }, CACHE_TTL_MS);
+  return sendConditionalResponse(req, res, payload, lastModified, etag);
 }
 
 // GET /api/impact/project/:id
 router.get("/project/:id", async (req, res, next) => {
   try {
     const hit = cache.get(cacheKey(req));
-    if (hit) return res.json(hit);
+    if (hit) {
+      return sendConditionalResponse(req, res, hit.payload, hit.lastModified, hit.etag);
+    }
 
     const projectResult = await pool.query(
-      `SELECT id, category, raised_xlm, co2_offset_kg
+      `SELECT id, category, raised_xlm, co2_offset_kg, updated_at, created_at
        FROM projects
        WHERE id = $1`,
       [req.params.id],
@@ -58,7 +59,8 @@ router.get("/project/:id", async (req, res, next) => {
     const aggResult = await pool.query(
       `SELECT
         COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
-        COUNT(DISTINCT d.donor_address)::int AS "donorCount"
+        COUNT(DISTINCT d.donor_address)::int AS "donorCount",
+        MAX(d.created_at) AS "latestDonationAt"
        FROM donations d
        WHERE d.project_id = $1
          AND (d.currency = 'XLM' OR d.currency IS NULL)`,
@@ -74,7 +76,12 @@ router.get("/project/:id", async (req, res, next) => {
     const kgPerXlm = raisedXlm > 0 ? projectCo2OffsetKg / raisedXlm : 0;
     const co2OffsetKg = Math.round(totalDonationsXLM * kgPerXlm);
 
-    return sendCached(req, res, {
+    const pDate = p.updated_at || p.created_at;
+    const dDate = aggResult.rows[0].latestDonationAt;
+    const dates = [pDate ? new Date(pDate) : null, dDate ? new Date(dDate) : null].filter(Boolean);
+    const lastModified = dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : new Date();
+
+    const payload = {
       success: true,
       data: {
         totalDonationsXLM: totalDonationsXLM.toFixed(7),
@@ -83,7 +90,9 @@ router.get("/project/:id", async (req, res, next) => {
         treesEquivalent: treesEquivalentFromKg(co2OffsetKg),
         uniqueCountries: 0,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
@@ -93,7 +102,9 @@ router.get("/project/:id", async (req, res, next) => {
 router.get("/global", async (req, res, next) => {
   try {
     const hit = cache.get(cacheKey(req));
-    if (hit) return res.json(hit);
+    if (hit) {
+      return sendConditionalResponse(req, res, hit.payload, hit.lastModified, hit.etag);
+    }
 
     const totalsResult = await pool.query(
       `SELECT
@@ -134,6 +145,12 @@ router.get("/global", async (req, res, next) => {
        ORDER BY "totalDonationsXLM" DESC, p.category ASC`,
     );
 
+    const timestampsResult = await pool.query(
+      `SELECT
+        (SELECT MAX(updated_at) FROM projects) AS "maxProjectUpdated",
+        (SELECT MAX(created_at) FROM donations WHERE currency = 'XLM' OR currency IS NULL) AS "maxDonationCreated"`,
+    );
+
     const totalsRow = totalsResult.rows[0] || {};
     const totalDonationsXLM = Number.parseFloat(totalsRow.totalDonationsXLM || "0");
     const donorCount = totalsRow.donorCount || 0;
@@ -146,7 +163,12 @@ router.get("/global", async (req, res, next) => {
       co2OffsetKg: Math.round(Number.parseFloat(row.co2OffsetKg || "0")),
     }));
 
-    return sendCached(req, res, {
+    const maxProj = timestampsResult.rows[0]?.maxProjectUpdated;
+    const maxDon = timestampsResult.rows[0]?.maxDonationCreated;
+    const dates = [maxProj ? new Date(maxProj) : null, maxDon ? new Date(maxDon) : null].filter(Boolean);
+    const lastModified = dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : new Date();
+
+    const payload = {
       success: true,
       data: {
         totalDonationsXLM: totalDonationsXLM.toFixed(7),
@@ -156,7 +178,9 @@ router.get("/global", async (req, res, next) => {
         uniqueCountries: 0,
         breakdownByCategory,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
@@ -168,7 +192,9 @@ router.get("/donor/:publicKey", async (req, res, next) => {
     validateKey(req.params.publicKey);
 
     const hit = cache.get(cacheKey(req));
-    if (hit) return res.json(hit);
+    if (hit) {
+      return sendConditionalResponse(req, res, hit.payload, hit.lastModified, hit.etag);
+    }
 
     const totalsResult = await pool.query(
       `SELECT
@@ -204,13 +230,29 @@ router.get("/donor/:publicKey", async (req, res, next) => {
       [req.params.publicKey],
     );
 
+    const timestampsResult = await pool.query(
+      `SELECT
+        MAX(d.created_at) AS "maxDonationCreated",
+        MAX(p.updated_at) AS "maxProjectUpdated"
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+      [req.params.publicKey],
+    );
+
     const row = totalsResult.rows[0] || {};
     const totalDonatedXLM = Number.parseFloat(row.totalDonatedXLM || "0");
     const projectsSupported = row.projectsSupported || 0;
     const co2OffsetKg = Math.round(Number.parseFloat(row.co2OffsetKg || "0"));
     const topCategory = topCategoryResult.rows[0]?.category || null;
 
-    return sendCached(req, res, {
+    const maxDon = timestampsResult.rows[0]?.maxDonationCreated;
+    const maxProj = timestampsResult.rows[0]?.maxProjectUpdated;
+    const dates = [maxDon ? new Date(maxDon) : null, maxProj ? new Date(maxProj) : null].filter(Boolean);
+    const lastModified = dates.length > 0 ? new Date(Math.max(...dates.map((d) => d.getTime()))) : new Date();
+
+    const payload = {
       success: true,
       data: {
         totalDonatedXLM: totalDonatedXLM.toFixed(7),
@@ -218,11 +260,12 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         projectsSupported,
         topCategory,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
 });
 
 module.exports = router;
-

@@ -168,3 +168,27 @@ Donations are **deduplicated by transactionHash** — safe to retry.
 | `tree` | ≥ 100 XLM | 🌳 |
 | `forest` | ≥ 500 XLM | 🌲 |
 | `earth` | ≥ 2,000 XLM | 🌍 |
+
+---
+
+## Impact & Conditional Caching
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/impact/global` | Global aggregated impact metrics |
+| GET | `/api/impact/project/:id` | Impact metrics for a single project |
+| GET | `/api/impact/donor/:publicKey` | Impact metrics for a specific donor |
+
+### HTTP Conditional Caching (ETag & Last-Modified)
+
+All `GET /api/impact` endpoints implement standards-compliant HTTP conditional caching to minimize network payload:
+
+- **ETag**: Deterministic SHA-256 hash of the JSON response payload.
+- **Last-Modified**: RFC 7231 GMT timestamp representing the newest updated/created record across relevant projects and donations.
+- **Cache-Control**: `public, max-age=300` (5 minutes).
+
+#### Conditional Request Headers
+
+- `If-None-Match`: Clients can pass the ETag received from a prior request. If matched, the server responds with `304 Not Modified` and an empty response body.
+- `If-Modified-Since`: Clients can pass the `Last-Modified` timestamp. If the server resource has not been updated since that time, it returns `304 Not Modified` with an empty response body.
+
