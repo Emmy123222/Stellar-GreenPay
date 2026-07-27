@@ -78,14 +78,39 @@ function Toast({
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    // Unmount-race hygiene for the toast's animation chain.
+    //
+    // Three things can race against an unmount:
+    //   1. The fade-IN animation (`Animated.timing({duration: 200}).start(onFadeInDone)`)
+    //      is still in flight when the component unmounts. Its start callback
+    //      fires LATER, after the cleanup has already run — so any timer we
+    //      set inside it would be unreachable from the cleanup return.
+    //   2. The hold `setTimeout(2000)` queued by the fade-in callback.
+    //   3. The fade-OUT animation the latter triggers, whose `onHide` is a
+    //      `setToast(null)` on the (now unmounted) parent state.
+    //
+    // We track all three (`anim`, `holdTimer`, `mounted`) and tear them down
+    // in the cleanup return. Stopping the fade-in animation is the
+    // load-bearing one — without it, the cleanup can run with `holdTimer`
+    // still `undefined` and the start callback then queues a timer the
+    // cleanup can no longer reach. The `mounted` guard is a belt-and-braces
+    // defence for any future async path that updates the closure.
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
+    let mounted = true;
+    let anim: Animated.CompositeAnimation | undefined;
+
     // Fade in
-    Animated.timing(opacity, {
+    anim = Animated.timing(opacity, {
       toValue: 1,
       duration: 200,
       useNativeDriver: true,
-    }).start(() => {
+    });
+    anim.start(() => {
+      // Bail if the component unmounted before fade-in finished.
+      if (!mounted) return;
       // Hold for 2 s, then fade out
-      setTimeout(() => {
+      holdTimer = setTimeout(() => {
+        if (!mounted) return;
         Animated.timing(opacity, {
           toValue: 0,
           duration: 300,
@@ -93,6 +118,15 @@ function Toast({
         }).start(onHide);
       }, 2000);
     });
+
+    return () => {
+      mounted = false;
+      if (holdTimer !== undefined) clearTimeout(holdTimer);
+      // `anim?.stop()` halts the fade-in mid-flight so its start callback
+      // never fires after unmount. (React Native's `Animated.CompositeAnimation`
+      // exposes `.stop(callback?)`; we don't need a callback here.)
+      anim?.stop();
+    };
   }, []);
 
   const bg = variant === 'success' ? '#227239' : '#b91c1c';

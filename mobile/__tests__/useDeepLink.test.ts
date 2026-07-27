@@ -2,7 +2,7 @@
  * __tests__/useDeepLink.test.ts
  * Tests for the useDeepLink hook.
  */
-import { renderHook, act } from '@testing-library/react-native';
+import { renderHook } from '@testing-library/react-native';
 
 const mockPush = jest.fn();
 const mockGetInitialURL = jest.fn(() => Promise.resolve(null));
@@ -29,16 +29,14 @@ beforeEach(() => {
 
 test('navigates to project screen on cold start', async () => {
   mockGetInitialURL.mockResolvedValueOnce('greenpay://project/42');
-  const { unmount } = renderHook(() => useDeepLink());
-  await act(async () => {});
+  const { unmount } = await renderHook(() => useDeepLink());
   expect(mockPush).toHaveBeenCalledWith('/projects/42');
   unmount();
 });
 
 test('navigates to donate screen on cold start', async () => {
   mockGetInitialURL.mockResolvedValueOnce('greenpay://donate/GABCXYZ');
-  const { unmount } = renderHook(() => useDeepLink());
-  await act(async () => {});
+  const { unmount } = await renderHook(() => useDeepLink());
   expect(mockPush).toHaveBeenCalledWith('/donate/GABCXYZ');
   unmount();
 });
@@ -50,18 +48,15 @@ test('handles warm-start url event for project', async () => {
     return { remove: jest.fn() };
   });
 
-  const { unmount } = renderHook(() => useDeepLink());
-  await act(async () => {
-    urlHandler?.({ url: 'greenpay://project/99' });
-  });
+  const { unmount } = await renderHook(() => useDeepLink());
+  urlHandler?.({ url: 'greenpay://project/99' });
   expect(mockPush).toHaveBeenCalledWith('/projects/99');
   unmount();
 });
 
 test('does not navigate for unknown path segments', async () => {
   mockGetInitialURL.mockResolvedValueOnce('greenpay://unknown/123');
-  const { unmount } = renderHook(() => useDeepLink());
-  await act(async () => {});
+  const { unmount } = await renderHook(() => useDeepLink());
   expect(mockPush).not.toHaveBeenCalled();
   unmount();
 });

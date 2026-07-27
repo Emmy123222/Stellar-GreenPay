@@ -3,7 +3,7 @@
  * Tests for offline caching behaviour in the ProjectsScreen.
  */
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { render, waitFor , act} from '@testing-library/react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -29,6 +29,14 @@ const MOCK_PROJECTS = [
   },
 ];
 
+
+// ── Animated mock ──────────────────────────────────────────────────────────────
+// Silences warnIfUpdatesNotWrappedWithActDEV from React Native Animated. The animation
+// module's update path uses rAF/setTimeout which fires outside any act() block, so the
+// only reliable fix is to stub the native helper at the bridge level. Mirrors
+// ProjectDetailScreen.test.tsx.
+jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+
 describe('ProjectsScreen — offline support', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -41,7 +49,7 @@ describe('ProjectsScreen — offline support', () => {
     (AsyncStorage.getItem as jest.Mock).mockResolvedValue(entry);
     (axios.get as jest.Mock).mockRejectedValue(new Error('Network Error'));
 
-    const { getByText } = render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
+    const { getByText } = await act(async () => render(<ThemeProvider><ProjectsScreen /></ThemeProvider>));
 
     await waitFor(() => {
       expect(getByText('Amazon Reforestation')).toBeTruthy();
@@ -52,7 +60,7 @@ describe('ProjectsScreen — offline support', () => {
   it('does not show Offline banner when network succeeds', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
 
-    const { queryByText } = render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
+    const { queryByText } = await act(async () => render(<ThemeProvider><ProjectsScreen /></ThemeProvider>));
 
     await waitFor(() => {
       expect(queryByText('Offline — showing cached data')).toBeNull();
@@ -63,7 +71,7 @@ describe('ProjectsScreen — offline support', () => {
   it('writes fresh data to cache on successful load', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
 
-    render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
+    await render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
 
     await waitFor(() => {
       expect(AsyncStorage.setItem).toHaveBeenCalledWith(

@@ -161,7 +161,11 @@ export default function HomeScreen() {
 
     return () => {
       active = false;
-      subscription.remove();
+      // Optional-chained teardown — defends against test environments where
+      // `setupNotificationListener` is stroked through our `expo-modules-core`
+      // Proxy stub and may return a class instance without a `.remove` method.
+      // Mirrors the unmount-race hygiene we use for the project-detail Toast.
+      subscription?.remove?.();
     };
   }, []);
 

@@ -18,12 +18,12 @@ import axios from 'axios';
 // ── Router / Expo mocks ────────────────────────────────────────────────────────
 // Shared spies used across every test in this file. The factory below closes
 // over these references so we can directly inspect calls.
-const routerPushMock = jest.fn();
-const mockedUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
+const mockRouterPush = jest.fn();
+const mockUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: routerPushMock }),
-  useLocalSearchParams: () => mockedUseLocalSearchParams(),
+  useRouter: () => ({ push: mockRouterPush }),
+  useLocalSearchParams: () => mockUseLocalSearchParams(),
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -69,14 +69,22 @@ function mockFollowsResponse(follows: object[] = []) {
 import { ThemeProvider } from '../app/theme';
 import ProjectDetailScreen from '../app/projects/[id]';
 
+/**
+ * expo-notifications is imported by the screen and runs a slow module-init
+ * path under our `expo-modules-core` Proxy stub (~2s on cold start). The
+ * default 5s Jest test timeout is too tight once we add several
+ * repeatedly-rendered tests to a single file, so we extend it for this
+ * suite specifically.
+ */
+jest.setTimeout(30000);
+
 /** Wrap in ThemeProvider so useTheme() doesn't throw. */
-function renderWithTheme(ui: React.ReactElement) {
+async function renderWithTheme(ui: React.ReactElement) {
   return render(<ThemeProvider>{ui}</ThemeProvider>);
 }
 
 describe('ProjectDetailScreen – Follow button', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
     jest.clearAllMocks();
     // Default: project loads successfully
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECT } });
@@ -89,19 +97,17 @@ describe('ProjectDetailScreen – Follow button', () => {
     (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  // see file header: fake timers removed (broke waitFor() polling)
 
   // ── Initial render ───────────────────────────────────────────────────────────
 
   it('renders the Follow button after the project loads', async () => {
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => expect(getByTestId('follow-button')).toBeTruthy());
   });
 
   it('shows "Follow for Updates" text when not following', async () => {
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() =>
       expect(getByTestId('follow-button')).toBeTruthy()
     );
@@ -112,7 +118,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   // ── Follow action ────────────────────────────────────────────────────────────
 
   it('calls followProject with the project id and push token on press', async () => {
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -126,7 +132,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   });
 
   it('updates button label to "Following · Tap to unfollow" after successful follow', async () => {
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -141,7 +147,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   });
 
   it('shows a success toast after following', async () => {
-    const { getByTestId, findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -158,7 +164,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Start in "already following" state
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -179,7 +185,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('resets button to "Follow for Updates" after unfollowing', async () => {
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -200,7 +206,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an unfollow confirmation toast', async () => {
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId, findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -220,7 +226,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an error toast when followProject returns false', async () => {
     (notifUtils.followProject as jest.Mock).mockResolvedValue(false);
 
-    const { getByTestId, findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -236,7 +242,7 @@ describe('ProjectDetailScreen – Follow button', () => {
       new Error('network error')
     );
 
-    const { getByTestId, findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -250,7 +256,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('does not toggle follow state when followProject fails', async () => {
     (notifUtils.followProject as jest.Mock).mockResolvedValue(false);
 
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -268,7 +274,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an error toast when push token is unavailable', async () => {
     (notifUtils.getPushToken as jest.Mock).mockResolvedValue(null);
 
-    const { getByTestId, findByText } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -285,7 +291,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Never resolve so we stay in loading state
     (notifUtils.followProject as jest.Mock).mockReturnValue(new Promise(() => {}));
 
-    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => getByTestId('follow-button'));
 
     fireEvent.press(getByTestId('follow-button'));
@@ -353,13 +359,12 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   // yield the result of assertions on the rendered tree.
   async function renderProject(project: typeof MOCK_PROJECT) {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: project } });
-    const screen = renderWithTheme(<ProjectDetailScreen />);
+    const screen = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     await waitFor(() => expect(screen.getByText(project.name)).toBeTruthy());
     return screen;
   }
 
   beforeEach(() => {
-    jest.useFakeTimers();
     jest.clearAllMocks();
     mockFollowsResponse([]);
     (notifUtils.getPushToken as jest.Mock).mockResolvedValue('expo-push-token-abc');
@@ -367,9 +372,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
+  // see file header: fake timers removed (broke waitFor() polling)
 
   it('renders the required fields (name, description, progress, CO₂) for project proj-1', async () => {
     const renderer = await renderProject(PROJECTS['amazon-reforestation']);
@@ -391,16 +394,24 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   it('renders the Updates card with donor count and status info for any project', async () => {
     const renderer = await renderProject(PROJECTS['amazon-reforestation']);
 
-    expect(await renderer.findByText(/Updates/i)).toBeTruthy();
+    // Match the 📰 emoji prefix to disambiguate from the
+    // "🔔 Follow for Updates" button which also contains the
+    // word "Updates".
+    expect(await renderer.findByText(/📰 Updates/)).toBeTruthy();
     expect(await renderer.findByText(/147 donors have contributed/i)).toBeTruthy();
     expect(await renderer.findByText(/Project active/i)).toBeTruthy();
   });
 
   it('loads and renders the ocean cleanup project (different id, category)', async () => {
     const p = PROJECTS['ocean-cleanup-2030'];
+    // The screen reads `id` from `useLocalSearchParams()`; without this
+    // override the file-level mock returns `proj-1` and the screen fetches
+    // the wrong project. Mirrors the same override pattern the
+    // `requests the project detail from /api/projects/:id` test uses.
+    mockUseLocalSearchParams.mockReturnValue({ id: p.id });
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
 
-    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     const nameNode = await renderer.findByText(p.name);
     expect(nameNode).toBeTruthy();
     expect(axios.get).toHaveBeenCalledWith(
@@ -412,7 +423,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     const p = PROJECTS['solar-village-completed'];
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
 
-    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     expect(await renderer.findByText(p.name)).toBeTruthy();
     expect(await renderer.findByText(/Goal fully funded/i)).toBeTruthy();
     expect(
@@ -422,12 +433,12 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
 
   it('requests the project detail from /api/projects/:id with the id from the route', async () => {
     const projectId = PROJECTS['ocean-cleanup-2030'].id;
-    mockedUseLocalSearchParams.mockReturnValue({ id: projectId });
+    mockUseLocalSearchParams.mockReturnValue({ id: projectId });
     (axios.get as jest.Mock).mockResolvedValue({
       data: { data: PROJECTS[projectId] },
     });
 
-    renderWithTheme(<ProjectDetailScreen />);
+    await renderWithTheme(<ProjectDetailScreen />);
 
     await waitFor(() =>
       expect(axios.get).toHaveBeenCalledWith(
@@ -440,13 +451,13 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     // Capture the (already-mocked) useRouter through the same jest.mock path
     // the existing follow-button tests use, so we share the spy across every
     // test in this suite.
-    const mockRouter = routerPushMock;
+    const mockRouter = mockRouterPush;
     const projectId = PROJECTS['amazon-reforestation'].id;
     (axios.get as jest.Mock).mockResolvedValue({
       data: { data: PROJECTS['amazon-reforestation'] },
     });
 
-    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     const donateCta = await renderer.findByText(/Donate Now/i);
     expect(donateCta).toBeTruthy();
 
@@ -459,7 +470,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
       response: { status: 404, data: { error: 'Project not found' } },
     });
 
-    const renderer = renderWithTheme(<ProjectDetailScreen />);
+    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
     expect(await renderer.findByText(/Project not found/i)).toBeTruthy();
   });
 });

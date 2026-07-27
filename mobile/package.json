@@ -6,7 +6,7 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "test": "jest --passWithNoTests"
+    "test": "EXPO_PUBLIC_USE_RN_FETCH=1 jest --passWithNoTests"
   },
   "dependencies": {
     "@react-navigation/native": "^6.1.9",
@@ -40,7 +40,9 @@
   },
   "jest": {
     "preset": "jest-expo",
-    "setupFilesAfterEnv": ["@testing-library/jest-native/extend-expect"],
+    "setupFilesAfterEnv": [
+      "@testing-library/jest-native/extend-expect"
+    ],
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?/|@react-native/)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|@stellar/.*)"
     ],
@@ -49,7 +51,11 @@
       "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
       "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
       "^expo-modules-core(.*)$": "<rootDir>/__mocks__/expo-modules-core.js",
-      "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>/__mocks__/rn-batched-bridge.js"
-    }
+      "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>/__mocks__/rn-batched-bridge.js",
+      "^test-renderer$": "<rootDir>/__mocks__/test-renderer.js"
+    },
+    "setupFiles": [
+      "<rootDir>/jest.globals-polyfill.js"
+    ]
   }
 }
