@@ -66,6 +66,8 @@ export interface ClimateProject {
   // passed to the fetch; defaults to false when omitted.
   followCount?: number;
   isFollowing?: boolean;
+  webhookUrl?: string | null;
+  webhookSecret?: string | null;
 }
 
 /**

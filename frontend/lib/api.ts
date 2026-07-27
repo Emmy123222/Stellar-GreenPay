@@ -677,6 +677,33 @@ export async function submitProject(payload: SubmitProjectPayload): Promise<Subm
   return data.data;
 }
 
+// ── Webhooks ─────────────────────────────────────────────────────────────────
+
+export interface WebhookConfig {
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+}
+
+export async function updateProjectWebhook(
+  projectId: string,
+  payload: { webhookUrl?: string | null; webhookSecret?: string | null },
+): Promise<WebhookConfig> {
+  const { data } = await api.patch<{ success: boolean; data: WebhookConfig }>(
+    `/api/projects/${projectId}/webhook`,
+    payload,
+  );
+  return data.data;
+}
+
+export async function testProjectWebhook(
+  projectId: string,
+): Promise<{ success: boolean; statusCode: number }> {
+  const { data } = await api.post<{ success: boolean; statusCode: number }>(
+    `/api/projects/${projectId}/webhook/test`,
+  );
+  return data;
+}
+
 // ── Verification Requests (/apply) ───────────────────────────────────────────
 export interface VerificationDocument {
   name: string;
