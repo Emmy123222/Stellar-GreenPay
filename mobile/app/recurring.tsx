@@ -1,9 +1,3 @@
-/**
- * app/recurring.tsx
- * Monthly recurring donation management screen.
- * Lists active recurring donations stored in AsyncStorage and allows
- * the user to cancel individual entries.
- */
 import {
   View,
   Text,
@@ -13,15 +7,19 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
+import axios from 'axios';
+import { useTheme } from './theme';
 import {
   loadRecurringDonations,
   cancelRecurringDonation,
   type RecurringDonation,
 } from '../utils/recurringDonations';
 
-function formatNextDate(isoDate: string): string {
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+
+function formatDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString(undefined, {
     year: 'numeric',
     month: 'long',
@@ -32,9 +30,11 @@ function formatNextDate(isoDate: string): string {
 function DonationCard({
   donation,
   onCancel,
+  colors,
 }: {
   donation: RecurringDonation;
   onCancel: (id: string) => void;
+  colors: ReturnType<typeof useTheme>['colors'];
 }) {
   const handleCancel = () => {
     Alert.alert(
@@ -57,22 +57,22 @@ function DonationCard({
       : 'Ongoing';
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.projectName} numberOfLines={1}>
+        <Text style={[styles.projectName, { color: colors.primaryText }]} numberOfLines={1}>
           {donation.projectName}
         </Text>
-        <Text style={styles.amount}>{donation.amountXLM} XLM/mo</Text>
+        <Text style={[styles.amount, { color: colors.primary }]}>{donation.amountXLM} XLM/mo</Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>Next payment</Text>
-          <Text style={styles.metaValue}>{formatNextDate(donation.nextDueDate)}</Text>
+          <Text style={[styles.metaLabel, { color: colors.secondaryText }]}>Next payment</Text>
+          <Text style={[styles.metaValue, { color: colors.primaryText }]}>{formatDate(donation.nextDueDate)}</Text>
         </View>
         <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>Duration</Text>
-          <Text style={styles.metaValue}>{durationText}</Text>
+          <Text style={[styles.metaLabel, { color: colors.secondaryText }]}>Duration</Text>
+          <Text style={[styles.metaValue, { color: colors.primaryText }]}>{durationText}</Text>
         </View>
       </View>
 
@@ -83,14 +83,55 @@ function DonationCard({
   );
 }
 
+function HistoryCard({
+  donation,
+  colors,
+}: {
+  donation: RecurringDonation;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  const statusLabel = donation.status === 'cancelled' ? 'Cancelled' : 'Completed';
+  const statusColor = donation.status === 'cancelled' ? '#c62828' : colors.secondaryText;
+
+  return (
+    <View style={[styles.historyRow, { borderBottomColor: colors.border }]}>
+      <View style={styles.historyInfo}>
+        <Text style={[styles.historyProject, { color: colors.primaryText }]}>
+          {donation.projectName}
+        </Text>
+        <Text style={[styles.historyMeta, { color: colors.secondaryText }]}>
+          {formatDate(donation.startDate)} &middot; {donation.remainingMonths !== null ? `${donation.remainingMonths} mo` : 'Ongoing'}
+        </Text>
+      </View>
+      <View style={styles.historyRight}>
+        <Text style={[styles.historyAmount, { color: colors.primary }]}>
+          {donation.amountXLM} XLM/mo
+        </Text>
+        <Text style={[styles.historyStatus, { color: statusColor }]}>
+          {statusLabel}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function RecurringScreen() {
+  const { colors } = useTheme();
   const [donations, setDonations] = useState<RecurringDonation[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const all = await loadRecurringDonations();
-    setDonations(all.filter((d) => d.status === 'active'));
+    try {
+      const res = await axios.get(`${API_URL}/api/recurring-donations`, {
+        params: { donorAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890' },
+      });
+      const data: RecurringDonation[] = res.data.data ?? [];
+      setDonations(data);
+    } catch {
+      const all = await loadRecurringDonations();
+      setDonations(all);
+    }
     setLoading(false);
   }, []);
 
@@ -101,33 +142,56 @@ export default function RecurringScreen() {
     setDonations((prev) => prev.filter((d) => d.id !== id));
   };
 
+  const active = donations.filter((d) => d.status === 'active');
+  const history = donations.filter((d) => d.status === 'cancelled' || d.status === 'completed');
+
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#227239" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Monthly Giving</Text>
-        <Text style={styles.headerSub}>Manage your recurring donations</Text>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+      <View style={[styles.header, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]}>Monthly Giving</Text>
+        <Text style={[styles.headerSub, { color: colors.headerText, opacity: 0.8 }]}>Manage your recurring donations</Text>
       </View>
 
-      {donations.length === 0 ? (
+      {active.length === 0 && history.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>🌱</Text>
-          <Text style={styles.emptyTitle}>No active recurring donations</Text>
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyTitle, { color: colors.primaryText }]}>No recurring donations</Text>
+          <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
             Set up a monthly donation from any project page to support ongoing impact.
           </Text>
         </View>
       ) : (
-        donations.map((donation) => (
-          <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} />
-        ))
+        <>
+          {active.length > 0 && (
+            <>
+              <Text style={[styles.sectionLabel, { color: colors.primaryText }]}>
+                Active ({active.length})
+              </Text>
+              {active.map((donation) => (
+                <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} colors={colors} />
+              ))}
+            </>
+          )}
+
+          {history.length > 0 && (
+            <View style={[styles.historyCard, { backgroundColor: colors.surface, borderColor: colors.cardBorder }]}>
+              <Text style={[styles.historyTitle, { color: colors.primaryText }]}>
+                Payment History ({history.length})
+              </Text>
+              {history.map((donation) => (
+                <HistoryCard key={donation.id} donation={donation} colors={colors} />
+              ))}
+            </View>
+          )}
+        </>
       )}
     </ScrollView>
   );
@@ -136,7 +200,6 @@ export default function RecurringScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f7f0',
   },
   content: {
     paddingBottom: 32,
@@ -147,19 +210,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: '#227239',
     padding: 24,
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#fff',
   },
   headerSub: {
     fontSize: 13,
-    color: '#c8e6c9',
     marginTop: 4,
+  },
+  sectionLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 4,
   },
   emptyState: {
     alignItems: 'center',
@@ -172,26 +239,23 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1a2e1a',
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: '#5a7a5a',
     textAlign: 'center',
     lineHeight: 20,
   },
   card: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 12,
     padding: 16,
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
+    borderWidth: 1,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -203,13 +267,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '700',
-    color: '#1a2e1a',
     marginRight: 8,
   },
   amount: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#227239',
   },
   cardBody: {
     gap: 6,
@@ -221,12 +283,10 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     fontSize: 13,
-    color: '#5a7a5a',
   },
   metaValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1a2e1a',
   },
   cancelBtn: {
     borderWidth: 1.5,
@@ -239,5 +299,48 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#c62828',
+  },
+  historyCard: {
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    borderWidth: 1,
+  },
+  historyTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 14,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  historyInfo: {
+    flex: 1,
+  },
+  historyProject: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  historyMeta: {
+    fontSize: 12,
+  },
+  historyRight: {
+    alignItems: 'flex-end',
+  },
+  historyAmount: {
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  historyStatus: {
+    fontSize: 12,
+    marginTop: 2,
   },
 });
