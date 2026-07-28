@@ -39,7 +39,7 @@ describe("GET /api/webhooks/:projectId", () => {
         id: PROJECT_ID,
         wallet_address: OWNER_ADDRESS,
         webhook_url: "https://example.com/hook",
-        webhook_secret: "super-secret-value",
+        webhook_secret: "mock-webhook-value",
       }],
     });
 
@@ -116,7 +116,7 @@ describe("GET /api/webhooks/:projectId", () => {
         id: PROJECT_ID,
         wallet_address: OWNER_ADDRESS,
         webhook_url: "https://example.com/hook",
-        webhook_secret: "secret",
+        webhook_secret: "mock",
       }],
     });
 
@@ -134,7 +134,7 @@ describe("GET /api/webhooks/:projectId", () => {
         id: PROJECT_ID,
         wallet_address: OWNER_ADDRESS,
         webhook_url: "https://example.com/hook",
-        webhook_secret: "secret1234",
+        webhook_secret: "mockxx1234",
       }],
     });
 
@@ -158,7 +158,7 @@ describe("GET /api/webhooks/:projectId", () => {
         id: PROJECT_ID,
         wallet_address: OWNER_ADDRESS,
         webhook_url: "https://example.com/hook",
-        webhook_secret: "secret",
+        webhook_secret: "mock",
       }],
     });
 
