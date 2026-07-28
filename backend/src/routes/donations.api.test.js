@@ -165,7 +165,6 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns a single project", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({
       rows: [{ ...MOCK_PROJECT_ROW, follow_count: 3 }],
     });
