@@ -19,6 +19,15 @@ Thumbs.db
 *.swp
 Cargo.lock
 
+# Local scratch files (must not be committed)
+.diag-ci.sh
+.diag-ci-out.txt
+_inflate_git_obj.py
+.restore-from-objects.mjs
+.inflate-git-obj.mjs
+.urgent-restore-backend-yml.sh
+.cursor/
+
 # Uploaded documents via /api/uploads (local storage backend).
 # Keep the directory in git via .gitkeep so the first run works out of the box.
 backend/uploads/*
