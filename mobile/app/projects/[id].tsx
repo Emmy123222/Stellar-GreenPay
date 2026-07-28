@@ -287,9 +287,18 @@ export default function ProjectDetailScreen() {
   // ── share ──────────────────────────────────────────────────────────────────
 
   // Cross-platform share using RN's built-in `Share` (works for strings; the
-  // platform share sheet is presented on iOS and Android). If the user
-  // dismisses the sheet we don't surface an error — that's a normal user
-  // gesture, not a failure.
+  // platform share sheet is presented on iOS and Android).
+  //
+  // iOS-specific quirk: `Share.share` rejects with the literal message
+  // "User did not share" when the user dismisses the sheet. That is a normal
+  // user gesture, not a failure, so we swallow it silently. Real failures
+  // (e.g. JS exception, Android SecurityException) bubble up the toast.
+  //
+  // The check intentionally matches on the iOS-shipped string rather than a
+  // platform guard -- we want this to keep working should expo upgrade RN's
+  // Share stub to behave identically. If RN ever changes that error string
+  // we'll need to update both this filter and the matching test in
+  // ProjectDetailScreen.test.tsx.
   const handleShare = async () => {
     if (!project) return;
     try {
@@ -300,7 +309,13 @@ export default function ProjectDetailScreen() {
           `${project.description}\n\n` +
           `Category: ${project.category} · ${project.location}`,
       });
-    } catch (error) {
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      if (message.includes('User did not share')) {
+        // User dismissed the share sheet — a normal, non-error interaction.
+        return;
+      }
       showToast('Could not open share dialog', 'error');
     }
   };

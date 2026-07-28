@@ -297,42 +297,79 @@ describe('ProjectDetailScreen – Follow button', () => {
     // RN's Share is a real native API under jest-expo, so the screen must
     // observe it being called. We spy on the existing stub rather than
     // re-mocking the module via jest.mock — keeps test ordering independent.
+    // Each share-related test wraps the body in try/finally so the spy is
+    // restored even if an earlier assertion throws; otherwise a leaked spy
+    // could carry stale resolved/rejected values into the next test.
     const shareSpy = jest
       .spyOn(Share, 'share')
-      .mockResolvedValue({ action: 'sharedAction' as any });
+      .mockResolvedValue({ action: 'sharedAction' as const });
+    try {
+      const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+      const shareButton = await waitFor(() => getByTestId('share-button'));
 
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
-    const shareButton = await waitFor(() => getByTestId('share-button'));
+      await act(async () => {
+        fireEvent.press(shareButton);
+      });
 
-    await act(async () => {
-      fireEvent.press(shareButton);
-    });
-
-    expect(shareSpy).toHaveBeenCalledTimes(1);
-    const callArgs = shareSpy.mock.calls[0][0];
-    expect(callArgs.title).toBe(MOCK_PROJECT.name);
-    expect(callArgs.message).toContain(MOCK_PROJECT.name);
-    expect(callArgs.message).toContain(MOCK_PROJECT.description);
-
-    shareSpy.mockRestore();
+      expect(shareSpy).toHaveBeenCalledTimes(1);
+      const callArgs = shareSpy.mock.calls[0][0];
+      expect(callArgs.title).toBe(MOCK_PROJECT.name);
+      expect(callArgs.message).toContain(MOCK_PROJECT.name);
+      expect(callArgs.message).toContain(MOCK_PROJECT.description);
+    } finally {
+      shareSpy.mockRestore();
+    }
   });
 
-  it('shows an error toast when the share sheet fails to open', async () => {
-    jest
+  it('does NOT show an error toast when the user dismisses the share sheet on iOS', async () => {
+    // iOS surfaces a literal `Error: User did not share` when the user
+    // dismisses the share sheet — that's normal behavior and must NOT be
+    // reported as a failure.
+    const shareSpy = jest
       .spyOn(Share, 'share')
-      .mockRejectedValueOnce(new Error('user dismissed'));
+      .mockRejectedValueOnce(new Error('User did not share'));
+    try {
+      const { getByTestId, queryByText } = await act(async () =>
+        renderWithTheme(<ProjectDetailScreen />)
+      );
+      const shareButton = await waitFor(() => getByTestId('share-button'));
 
-    const { getByTestId, findByText } = await act(async () =>
-      renderWithTheme(<ProjectDetailScreen />)
-    );
-    const shareButton = await waitFor(() => getByTestId('share-button'));
+      await act(async () => {
+        fireEvent.press(shareButton);
+      });
 
-    await act(async () => {
-      fireEvent.press(shareButton);
-    });
+      // Give the rejection a tick to propagate; no error toast should appear.
+      await waitFor(() => {
+        expect(queryByText(/could not open share dialog/i)).toBeNull();
+      });
+      // Sanity: the spy was actually called (so the rejection path ran).
+      expect(shareSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      shareSpy.mockRestore();
+    }
+  });
 
-    const toast = await findByText(/could not open share dialog/i);
-    expect(toast).toBeTruthy();
+  it('shows an error toast when the share sheet fails with a non-dismissal error', async () => {
+    // A real failure (JS exception, Android SecurityException, etc.) should
+    // surface as the existing error toast.
+    const shareSpy = jest
+      .spyOn(Share, 'share')
+      .mockRejectedValueOnce(new Error('System share unavailable'));
+    try {
+      const { getByTestId, findByText } = await act(async () =>
+        renderWithTheme(<ProjectDetailScreen />)
+      );
+      const shareButton = await waitFor(() => getByTestId('share-button'));
+
+      await act(async () => {
+        fireEvent.press(shareButton);
+      });
+
+      const toast = await findByText(/could not open share dialog/i);
+      expect(toast).toBeTruthy();
+    } finally {
+      shareSpy.mockRestore();
+    }
   });
 
   // ── Loading state ────────────────────────────────────────────────────────────
