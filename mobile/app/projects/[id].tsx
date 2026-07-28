@@ -21,6 +21,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  Share,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -252,10 +253,14 @@ export default function ProjectDetailScreen() {
     setFollowLoading(true);
     try {
       if (isFollowing) {
+        // Pass the wallet address so `unfollowProject` also hits the REST
+        // DELETE on /api/projects/:id/follows (paired with the follow branch,
+        // which always sends walletAddress via followProject). Without this
+        // argument the REST unfollow endpoint would never be called.
         const ok = await unfollowProject(
           project.id,
           pushToken,
-          project.walletAddress ? undefined : undefined  // no wallet on device
+          project.walletAddress
         );
         if (ok) {
           setIsFollowing(false);
@@ -279,6 +284,27 @@ export default function ProjectDetailScreen() {
     }
   };
 
+  // ── share ──────────────────────────────────────────────────────────────────
+
+  // Cross-platform share using RN's built-in `Share` (works for strings; the
+  // platform share sheet is presented on iOS and Android). If the user
+  // dismisses the sheet we don't surface an error — that's a normal user
+  // gesture, not a failure.
+  const handleShare = async () => {
+    if (!project) return;
+    try {
+      await Share.share({
+        title: project.name,
+        message:
+          `🌱 Support "${project.name}" on Stellar GreenPay!\n\n` +
+          `${project.description}\n\n` +
+          `Category: ${project.category} · ${project.location}`,
+      });
+    } catch (error) {
+      showToast('Could not open share dialog', 'error');
+    }
+  };
+
   // ── utilities ──────────────────────────────────────────────────────────────
 
   const progressPercent = (raised: string, goal: string) => {
@@ -290,8 +316,12 @@ export default function ProjectDetailScreen() {
 
   // ── follow button label ───────────────────────────────────────────────────
 
+  // Single source of truth for both the visible Text and the
+  // `accessibilityLabel`. The pushToken check sits BEFORE isFollowing so the
+  // a11y label and the rendered text can never disagree.
   const followButtonLabel = (() => {
     if (followLoading) return '⏳ Loading…';
+    if (!pushToken) return '🔔 Follow for Updates';
     if (isFollowing) return '✓ Following · Tap to unfollow';
     return '🔔 Follow for Updates';
   })();
@@ -338,9 +368,12 @@ export default function ProjectDetailScreen() {
               </Text>
             </View>
             <TouchableOpacity
+              testID="share-button"
               style={styles.shareButton}
+              onPress={handleShare}
               accessibilityRole="button"
               accessibilityLabel={`Share ${project.name}`}
+              accessibilityHint="Opens the system share sheet so you can send this project to others"
             >
               <Text style={styles.shareIcon}>↗</Text>
             </TouchableOpacity>
@@ -596,9 +629,7 @@ export default function ProjectDetailScreen() {
               isFollowing && styles.followButtonTextActive,
             ]}
           >
-            {pushToken
-              ? followButtonLabel
-              : '🔔 Follow for Updates'}
+            {followButtonLabel}
           </Text>
           {isFollowing && (
             <Text style={styles.unfollowHint}>Tap again to unfollow</Text>

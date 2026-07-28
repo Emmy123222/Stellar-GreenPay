@@ -13,6 +13,7 @@
  */
 import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
+import { Share } from 'react-native';
 import axios from 'axios';
 
 // ── Router / Expo mocks ────────────────────────────────────────────────────────
@@ -160,7 +161,7 @@ describe('ProjectDetailScreen – Follow button', () => {
 
   // ── Unfollow action ──────────────────────────────────────────────────────────
 
-  it('calls unfollowProject when pressing the button while following', async () => {
+  it('calls unfollowProject with the wallet address when pressing the button while following', async () => {
     // Start in "already following" state
     mockFollowsResponse([{ id: 'proj-1' }]);
 
@@ -175,10 +176,15 @@ describe('ProjectDetailScreen – Follow button', () => {
       fireEvent.press(getByTestId('follow-button'));
     });
 
+    // Regression for the walletAddress ternary bug: the third arg must be
+    // the project's Stellar wallet address, NOT `undefined`. The screen
+    // forwards it to `unfollowProject`, which in turn hits the REST DELETE
+    // on /api/projects/:id/follows. Without this argument, the unfollow
+    // would silently fail at the wallet-level follow record.
     expect(notifUtils.unfollowProject).toHaveBeenCalledWith(
       'proj-1',
       'expo-push-token-abc',
-      undefined
+      MOCK_PROJECT.walletAddress
     );
   });
 
@@ -282,6 +288,50 @@ describe('ProjectDetailScreen – Follow button', () => {
     });
 
     const toast = await findByText(/enable notifications/i);
+    expect(toast).toBeTruthy();
+  });
+
+  // ── Share button ─────────────────────────────────────────────────────────────
+
+  it('opens the system share sheet with the project name and description when the share button is pressed', async () => {
+    // RN's Share is a real native API under jest-expo, so the screen must
+    // observe it being called. We spy on the existing stub rather than
+    // re-mocking the module via jest.mock — keeps test ordering independent.
+    const shareSpy = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'sharedAction' as any });
+
+    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const shareButton = await waitFor(() => getByTestId('share-button'));
+
+    await act(async () => {
+      fireEvent.press(shareButton);
+    });
+
+    expect(shareSpy).toHaveBeenCalledTimes(1);
+    const callArgs = shareSpy.mock.calls[0][0];
+    expect(callArgs.title).toBe(MOCK_PROJECT.name);
+    expect(callArgs.message).toContain(MOCK_PROJECT.name);
+    expect(callArgs.message).toContain(MOCK_PROJECT.description);
+
+    shareSpy.mockRestore();
+  });
+
+  it('shows an error toast when the share sheet fails to open', async () => {
+    jest
+      .spyOn(Share, 'share')
+      .mockRejectedValueOnce(new Error('user dismissed'));
+
+    const { getByTestId, findByText } = await act(async () =>
+      renderWithTheme(<ProjectDetailScreen />)
+    );
+    const shareButton = await waitFor(() => getByTestId('share-button'));
+
+    await act(async () => {
+      fireEvent.press(shareButton);
+    });
+
+    const toast = await findByText(/could not open share dialog/i);
     expect(toast).toBeTruthy();
   });
 
