@@ -20,7 +20,7 @@ function buildApp() {
 
 describe("unsubscribeToken service", () => {
   beforeEach(() => {
-    process.env.JWT_SECRET = "test-unsubscribe-secret";
+    process.env.JWT_SECRET = "mock-unsubscribe-jwt-secret";
     delete process.env.UNSUBSCRIBE_SECRET;
   });
 
@@ -45,7 +45,7 @@ describe("GET /api/subscriptions/unsubscribe", () => {
   let app;
 
   beforeEach(() => {
-    process.env.JWT_SECRET = "test-unsubscribe-secret";
+    process.env.JWT_SECRET = "mock-unsubscribe-jwt-secret";
     delete process.env.UNSUBSCRIBE_SECRET;
     app = buildApp();
     jest.clearAllMocks();
