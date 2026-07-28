@@ -12,6 +12,7 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
+const { z } = require("zod");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 const donationSchema = z.object({

@@ -20,7 +20,10 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, isValidAdminKey } = require("../middleware/auth");
+const { z } = require("zod");
+const { sanitizedStringField } = require("../middleware/validation");
+const { rotateWebhookSecret } = require("../services/webhook");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -1260,6 +1263,66 @@ router.get("/:id/badge-holders", async (req, res, next) => {
     next(e);
   }
 });
+
+/**
+ * POST /api/projects/:id/webhook-secret/rotate
+ * POST /api/projects/:id/rotate-webhook-secret
+ * Rotate a project's webhook secret with a 24-hour grace period.
+ */
+async function handleRotateWebhookSecret(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { adminAddress } = req.body || {};
+
+    const projectResult = await pool.query(
+      "SELECT id, wallet_address FROM projects WHERE id = $1",
+      [id]
+    );
+    const project = projectResult.rows[0];
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const isAdmin = req.admin || (req.get("X-Admin-Key") && isValidAdminKey(req.get("X-Admin-Key")));
+    const isOwner = adminAddress && typeof adminAddress === "string" && adminAddress === project.wallet_address;
+
+    if (!isAdmin && !isOwner) {
+      return res.status(403).json({ error: "Only the project owner or admin can rotate webhook secret" });
+    }
+
+    const rotationResult = await rotateWebhookSecret(id);
+
+    logAdminAction({
+      actor: adminAddress || req.admin?.sub || "admin",
+      action: "project.webhook_secret.rotate",
+      targetType: "project",
+      targetId: id,
+      metadata: {
+        rotatedAt: rotationResult.rotatedAt,
+        previousSecretExpiresAt: rotationResult.previousSecretExpiresAt,
+        gracePeriodActive: rotationResult.gracePeriodActive,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        projectId: rotationResult.projectId,
+        webhookSecret: rotationResult.webhookSecret,
+        rotatedAt: rotationResult.rotatedAt,
+        previousSecretExpiresAt: rotationResult.previousSecretExpiresAt,
+        expiresAt: rotationResult.expiresAt,
+        gracePeriodActive: rotationResult.gracePeriodActive,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+router.post("/:id/webhook-secret/rotate", handleRotateWebhookSecret);
+router.post("/:id/rotate-webhook-secret", handleRotateWebhookSecret);
 
 module.exports = router;
 
