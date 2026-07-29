@@ -158,27 +158,26 @@ impl EscrowContract {
         env.storage().instance().set(&DataKey::Job(job_id), &job);
     }
 
-    /// Admin-only: Mark a job as disputed, freezing remaining releases.
-    pub fn dispute_job(env: Env, admin: Address, job_id: String) {
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin {
-            panic!("Only admin can dispute jobs");
-        }
+    /// Client or freelancer: Mark a job as disputed, freezing remaining releases.
+    pub fn raise_dispute(env: Env, client: Address, job_id: String) {
+        client.require_auth();
 
         let mut job: Job = env
             .storage()
             .instance()
             .get(&DataKey::Job(job_id.clone()))
             .expect("Job not found");
+
+        if job.client != client && job.freelancer != client {
+            panic!("Only client or freelancer can raise dispute");
+        }
         job.disputed = true;
         job.status = JobStatus::Disputed;
         env.storage().instance().set(&DataKey::Job(job_id), &job);
     }
 
     /// Admin-only: Resolve a dispute and release remaining funds.
-    pub fn resolve_dispute(env: Env, admin: Address, job_id: String, approve_remaining: bool) {
+    pub fn resolve_dispute(env: Env, admin: Address, job_id: String, release_to_freelancer: bool) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
@@ -196,7 +195,7 @@ impl EscrowContract {
             panic!("Job is not disputed");
         }
 
-        if approve_remaining {
+        if release_to_freelancer {
             // Release all unreleased milestones
             let mut total_unreleased: i128 = 0;
             for milestone in job.milestones.iter() {
@@ -391,7 +390,7 @@ mod tests {
         client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
 
         // Dispute the job
-        client.dispute_job(&admin, &job_id);
+        client.raise_dispute(&client_addr, &job_id);
 
         let job = client.get_job(&job_id).expect("Job should exist");
         assert_eq!(job.status, JobStatus::Disputed);
