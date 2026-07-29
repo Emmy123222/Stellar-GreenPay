@@ -1,40 +1,52 @@
-# test(leaderboard): add `onlyVerified` filter tests
+# test(leaderboard): cover `?onlyVerified=true` filter with Donor A / Donor B fixtures
 
 ## Summary
 
-Adds a new `GET /api/leaderboard — onlyVerified filter` test suite to `backend/src/routes/leaderboard.test.js` covering the `?onlyVerified=true` query parameter.
+The `GET /api/leaderboard` route supports an `?onlyVerified=true` query parameter that filters out donors who have ever donated to an unverified project. This behaviour had no test coverage, leaving a gap where a regression could go undetected. This PR adds a dedicated test suite with two donor fixtures — one who donated only to verified projects (Donor A) and one who donated to both verified and unverified projects (Donor B) — and asserts that only Donor A appears when the filter is active.
 
-## What changed
+## Type
 
-**`backend/src/routes/leaderboard.test.js`**
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Documentation
+- [ ] Refactor
+- [x] **Testing**
+- [ ] Smart contract change
 
-Added a new `describe` block with two donor fixtures and four tests:
+## Related Issue
 
-| Fixture | Donations |
-|---------|-----------|
-| Donor A (`GDDD…`) | Verified projects only |
-| Donor B (`GEEE…`) | Both verified **and** unverified projects |
+Closes #
 
-| # | Test | Assertion |
-|---|------|-----------|
-| 1 | `returns only Donor A when onlyVerified=true` | Response has exactly one entry; its `publicKey` matches Donor A |
-| 2 | `does not include Donor B in the results when onlyVerified=true` | Donor B's public key is absent from all response entries |
-| 3 | `sends a SQL query containing the verified-only filter` | The SQL string passed to `pool.query` contains both `verified = false` (exclusion subquery) and `verified = true` (inclusion subquery) |
-| 4 | `does not apply the verified filter when onlyVerified is absent` | Both donors appear in results; SQL lacks the verified filter |
+## Testing
 
-## How to test
+- [x] Tested locally on Testnet
+- [x] No TypeScript / Rust errors
+- [ ] Docs updated if needed
+
+### Tests added
+
+```
+GET /api/leaderboard — onlyVerified filter
+  ✓ returns only Donor A when onlyVerified=true (Donor B donated to unverified projects)
+  ✓ does not include Donor B in the results when onlyVerified=true
+  ✓ sends a SQL query containing the verified-only filter when onlyVerified=true
+  ✓ does not apply the verified filter when onlyVerified is absent
+```
+
+| Fixture | Donations | Appears in `?onlyVerified=true` response |
+|---------|-----------|------------------------------------------|
+| **Donor A** (`GDDD…`) | Verified projects only | ✅ |
+| **Donor B** (`GEEE…`) | Verified **and** unverified projects | ❌ |
+
+Run locally with:
 
 ```bash
 cd backend
 npm test -- --testPathPattern=leaderboard --no-coverage
 ```
 
-All 16 tests pass (8 pre-existing + 4 new `onlyVerified` + 4 pre-existing limit tests).
+**Result: 16/16 tests pass** (8 pre-existing + 4 new)
 
-## Checklist
+## Screenshots (if UI change)
 
-- [x] Tests cover the happy path (Donor A returned)
-- [x] Tests cover the exclusion case (Donor B absent)
-- [x] Tests verify the SQL filter is applied (or not applied) correctly
-- [x] No production code changed
-- [x] All existing tests continue to pass
+N/A — backend test-only change, no UI affected.
