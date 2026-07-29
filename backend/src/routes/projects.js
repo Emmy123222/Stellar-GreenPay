@@ -10,6 +10,8 @@ const QRCode = require("qrcode");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
 const { adminKeyRequired } = require("../middleware/auth");
+const { sanitizedStringField, validateBody } = require("../middleware/validation");
+const { z } = require("zod");
 const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
 const {
   getOnChainProject,
@@ -276,16 +278,14 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
-/**
- * Create a new project record.
- *
- * @route POST /api/projects
- * @param {import('express').Request} req - Express request with project creation payload.
- * @param {import('express').Response} res - Express response object.
- * @param {import('express').NextFunction} next - Express error middleware.
- * @returns {Promise<void>} Sends the created project payload.
- * @throws {Error} If validation or database insertion fails.
- */
+// Create a new project record.
+// @route POST /api/projects
+// @param {import('express').Request} req - Express request with project creation payload.
+// @param {import('express').Response} res - Express response object.
+// @param {import('express').NextFunction} next - Express error middleware.
+// @returns {Promise<void>} Sends the created project payload.
+// @throws {Error} If validation or database insertion fails.
+// */
 router.post("/", async (req, res, next) => {
   try {
     const {
@@ -829,7 +829,7 @@ router.get("/:id", async (req, res, next) => {
       "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
       [req.params.id],
     );
-    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
+    const followCount = parseInt(followCountResult?.rows?.[0]?.count || 0, 10) || 0;
 
     let isFollowing = false;
     const { walletAddress } = req.query;
@@ -838,7 +838,7 @@ router.get("/:id", async (req, res, next) => {
         "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
         [req.params.id, walletAddress],
       );
-      isFollowing = followResult.rowCount > 0;
+      isFollowing = (followResult?.rowCount || 0) > 0;
     }
 
     const stroopsToXlm = (stroops) => {
@@ -876,9 +876,123 @@ router.get("/:id", async (req, res, next) => {
         ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
         followCount,
+        subscriberCount: parseInt(subscriberResult.rows[0]?.count || 0, 10) || 0,
         isFollowing,
       },
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/on-chain-donations
+ * Returns decoded on-chain donation events emitted by the Soroban contract.
+ */
+router.get("/:id/on-chain-donations", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const result = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Project not found" });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const cursor = req.query.cursor;
+    const stellarService = require("../services/stellar");
+    const events = await stellarService.getProjectDonationEvents(projectId, { limit, cursor });
+
+    const data = events.map((e) => ({
+      donor: e.donor,
+      amount: e.amount,
+      ledger: e.ledger,
+      badge: e.badge,
+      msgHash: e.msgHash,
+    }));
+
+    const nextCursor = events.length ? events[events.length - 1].pagingToken : null;
+    res.json({ success: true, data, nextCursor });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/impact-certificate
+ * Returns a printable certificate payload for a donor's contributions to a project.
+ */
+router.get("/:id/impact-certificate", async (req, res, next) => {
+  try {
+    const donorAddress = req.query.donorAddress;
+    if (!donorAddress) {
+      const e = new Error("donorAddress is required");
+      e.status = 400;
+      throw e;
+    }
+    if (!/^G[A-Z0-9]{55}$/.test(donorAddress)) {
+      const e = new Error("Invalid donorAddress");
+      e.status = 400;
+      throw e;
+    }
+
+    const projectRes = await pool.query("SELECT id, name, category, verified, on_chain_verified, raised_xlm, co2_offset_kg FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectRes.rows[0]) {
+      const e = new Error("Project not found");
+      e.status = 404;
+      throw e;
+    }
+
+    const project = projectRes.rows[0];
+    const profileRes = await pool.query("SELECT display_name FROM profiles WHERE public_key = $1", [donorAddress]);
+    const donationsRes = await pool.query("SELECT * FROM donations WHERE project_id = $1 AND donor_address = $2", [req.params.id, donorAddress]);
+
+    if (!donationsRes.rows || donationsRes.rows.length === 0) {
+      const e = new Error("No donations found for donor on this project");
+      e.status = 404;
+      throw e;
+    }
+
+    const totalDonated = donationsRes.rows.reduce((acc, r) => acc + Number.parseFloat(r.amount_xlm || r.amount || "0"), 0);
+    const totalDonatedStr = totalDonated.toFixed(7);
+    const raised = Number.parseFloat(project.raised_xlm || "0");
+    const projectCo2 = Number.parseFloat(project.co2_offset_kg || "0");
+    const kgPerXlm = raised > 0 ? projectCo2 / raised : 0;
+    const co2OffsetKg = Math.round(totalDonated * kgPerXlm);
+
+    // badge tiers: bronze <100, silver >=100, gold >=1000, platinum >=10000
+    let badgeTier = "bronze";
+    if (totalDonated >= 10000) badgeTier = "platinum";
+    else if (totalDonated >= 1000) badgeTier = "gold";
+    else if (totalDonated >= 100) badgeTier = "silver";
+    else badgeTier = "bronze";
+
+    const QR = require("qrcode");
+    const qrContent = JSON.stringify({ projectId: project.id, donor: donorAddress, donated: totalDonatedStr });
+    const qrCode = await QR.toDataURL(qrContent);
+
+    const treesEquivalent = (co2OffsetKg > 0) ? Number((co2OffsetKg / 21.77).toFixed(2)) : 0;
+
+    const data = {
+      projectId: project.id,
+      projectName: project.name,
+      donorAddress,
+      projectCategory: project.category,
+      projectVerified: Boolean(project.verified) || Boolean(project.on_chain_verified),
+      donorName: profileRes.rows[0]?.display_name ?? null,
+      totalDonatedXLM: totalDonatedStr,
+      co2OffsetKg,
+      treesEquivalent,
+      donationCount: donationsRes.rows.length,
+      donations: donationsRes.rows.map((r) => ({
+        id: r.id,
+        amountXLM: r.amount_xlm?.toString?.() || (r.amount ? r.amount.toString() : "0"),
+        transactionHash: r.transaction_hash,
+        createdAt: r.created_at,
+      })),
+      badgeTier,
+      qrCode,
+      issuedAt: new Date().toISOString(),
+    };
+
+    res.json({ success: true, data });
   } catch (e) {
     next(e);
   }
