@@ -1,30 +1,40 @@
-feat: add context menu item to donate to project, fix inline address click flow via background service worker
+# test(leaderboard): add `onlyVerified` filter tests
 
 ## Summary
-This PR adds a right-click context menu item ("Donate to this GreenPay project") that appears dynamically when a user right-clicks on a page containing a GreenPay project ID (detected via URL or the new `<meta name="greenpay:project:id">` tag). Clicking the context menu item opens the extension popup, fetches the project details, and pre-fills the donation form automatically.
 
-Additionally, this PR fixes a dormant feature where clicking a highlighted inline Stellar address in the browser did not work because the background script to handle `openDonatePopup` was missing. Both features now share a robust background service worker.
+Adds a new `GET /api/leaderboard — onlyVerified filter` test suite to `backend/src/routes/leaderboard.test.js` covering the `?onlyVerified=true` query parameter.
 
-Key changes:
-- Added `greenpay:project:id` meta tag to `frontend/pages/projects/[id].tsx`.
-- Registered `background.ts` as a service worker in `manifest.json` and `manifest.firefox.json` with the `contextMenus` permission.
-- Updated `content-script.ts` to detect the project ID dynamically on load and via a `MutationObserver`/`popstate` to support Next.js SPA routing, notifying the background script of context changes.
-- Implemented `popup.ts` to consume the pending donation context from `chrome.storage.local` and auto-fill the destination `walletAddress` and project name.
+## What changed
 
-## Type
-- [x] Bug fix
-- [x] New feature
-- [ ] Documentation
-- [ ] Refactor
-- [ ] Smart contract change
+**`backend/src/routes/leaderboard.test.js`**
 
-## Related Issue
-Closes #492
+Added a new `describe` block with two donor fixtures and four tests:
 
-## Testing
-- [x] Tested locally on Testnet
-- [x] No TypeScript / Rust errors
-- [ ] Docs updated if needed
+| Fixture | Donations |
+|---------|-----------|
+| Donor A (`GDDD…`) | Verified projects only |
+| Donor B (`GEEE…`) | Both verified **and** unverified projects |
 
-## Screenshots (if UI change)
-<!-- Add screenshots here if applicable -->
+| # | Test | Assertion |
+|---|------|-----------|
+| 1 | `returns only Donor A when onlyVerified=true` | Response has exactly one entry; its `publicKey` matches Donor A |
+| 2 | `does not include Donor B in the results when onlyVerified=true` | Donor B's public key is absent from all response entries |
+| 3 | `sends a SQL query containing the verified-only filter` | The SQL string passed to `pool.query` contains both `verified = false` (exclusion subquery) and `verified = true` (inclusion subquery) |
+| 4 | `does not apply the verified filter when onlyVerified is absent` | Both donors appear in results; SQL lacks the verified filter |
+
+## How to test
+
+```bash
+cd backend
+npm test -- --testPathPattern=leaderboard --no-coverage
+```
+
+All 16 tests pass (8 pre-existing + 4 new `onlyVerified` + 4 pre-existing limit tests).
+
+## Checklist
+
+- [x] Tests cover the happy path (Donor A returned)
+- [x] Tests cover the exclusion case (Donor B absent)
+- [x] Tests verify the SQL filter is applied (or not applied) correctly
+- [x] No production code changed
+- [x] All existing tests continue to pass
