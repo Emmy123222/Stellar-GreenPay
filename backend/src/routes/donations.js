@@ -9,8 +9,10 @@ const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { z } = require("zod");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
