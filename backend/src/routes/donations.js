@@ -8,6 +8,7 @@ const { v4: uuid } = require("uuid");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { invalidateProjectImpactCache } = require("./impact");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
@@ -173,6 +174,10 @@ async function recordDonation(req, res, next) {
 
     await client.query("COMMIT");
     inTransaction = false;
+
+    invalidateProjectImpactCache(projectId).catch((err) => {
+      logger.error({ event: "impact_cache_invalidate_failed", err, projectId }, "Failed to invalidate project impact cache");
+    });
 
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
