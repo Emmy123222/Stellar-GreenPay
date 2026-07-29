@@ -303,6 +303,15 @@ router.get("/:id", async (req, res, next) => {
         const { verifyToken } = require("../middleware/auth");
         const decoded = verifyToken(auth.slice(7));
         if (decoded && decoded.role === "admin") {
+          const actor = decoded.sub || "admin";
+          logAdminAction({
+            actor,
+            action: "verification.view",
+            targetType: "verification_request",
+            targetId: req.params.id,
+            metadata: { endpoint: "GET /:id" },
+            ipAddress: req.ip,
+          });
           return res.json({ success: true, data: mapRequestRow(row) });
         }
       } catch (_err) {
@@ -344,6 +353,17 @@ router.get("/", adminRequired, async (req, res, next) => {
     query += ` ORDER BY submitted_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`;
 
     const result = await pool.query(query, values);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.list",
+      targetType: "verification_request",
+      targetId: null,
+      metadata: { filters: { status, limit, page } },
+      ipAddress: req.ip,
+    });
+
     res.json({
       success: true,
       data: result.rows.map(mapRequestRow),
