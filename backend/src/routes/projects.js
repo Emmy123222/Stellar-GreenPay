@@ -1261,6 +1261,91 @@ router.get("/:id/badge-holders", async (req, res, next) => {
   }
 });
 
+const WEBHOOK_SECRET_MIN_LENGTH = 32;
+const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
+
+/**
+ * PATCH /api/projects/:id/webhook
+ * Set or clear the webhook URL and secret for milestone notifications.
+ * Requires the project's wallet_address as the Bearer token subject so that
+ * only the project owner (not any admin) can configure this.
+ *
+ * Body:
+ *   webhookUrl    {string|null}  — https:// URL to deliver milestone events to.
+ *   webhookSecret {string|null}  — HMAC-SHA256 signing secret (≥ 32 chars).
+ *
+ * Pass null / omit both to clear the existing webhook configuration.
+ */
+router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
+  try {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(req.params.id)) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const { webhookUrl, webhookSecret } = req.body || {};
+
+    // Allow clearing the webhook by passing null / empty values for both fields.
+    const clearing = (webhookUrl == null || webhookUrl === "") &&
+                     (webhookSecret == null || webhookSecret === "");
+
+    if (!clearing) {
+      if (typeof webhookUrl !== "string" || !WEBHOOK_URL_RE.test(webhookUrl)) {
+        return res.status(400).json({
+          error: "webhookUrl must be a valid https:// URL",
+        });
+      }
+      if (typeof webhookSecret !== "string" ||
+          webhookSecret.length < WEBHOOK_SECRET_MIN_LENGTH) {
+        return res.status(400).json({
+          error: `webhookSecret must be at least ${WEBHOOK_SECRET_MIN_LENGTH} characters`,
+        });
+      }
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+          SET webhook_url    = $1,
+              webhook_secret = $2,
+              updated_at     = NOW()
+        WHERE id = $3
+        RETURNING id, webhook_url`,
+      [
+        clearing ? null : webhookUrl.trim(),
+        clearing ? null : webhookSecret,
+        req.params.id,
+      ],
+    );
+
+    logAdminAction({
+      actor: (req.admin && req.admin.sub) || "admin",
+      action: clearing ? "project.webhook.cleared" : "project.webhook.updated",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { webhookUrl: clearing ? null : webhookUrl.trim() },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: result.rows[0].id,
+        webhookUrl: result.rows[0].webhook_url || null,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
 
 // Export internal functions for testing
