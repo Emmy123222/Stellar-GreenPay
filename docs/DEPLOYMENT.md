@@ -77,6 +77,16 @@ kubectl exec -it deployment/greenpay-backend -- npm run migrate
 ```
 *(Adjust the command if you use a dedicated migration job or a different package manager command.)*
 
+### Migration Considerations and Caveats
+
+*   **Two `002_*` Migration Files**: You will notice two migration files starting with `002_`. This happened because two contributors added them independently. They do not conflict and should both be applied.
+*   **Running Migrations in the Correct Order**: The migration system will automatically execute migrations in alphabetical/numerical order based on the filename. Just run the standard migrate command, and it will apply both `002_` migrations sequentially.
+*   **CONCURRENTLY Index Caveats**: If a migration creates an index `CONCURRENTLY`, be aware that this operation cannot be run inside a transaction. Ensure that your migration script or runner is configured to run such migrations outside of a transaction block to avoid failures.
+*   **Rollback Procedure**: If a migration fails mid-deploy (e.g., a connection drops or a non-transactional statement fails), you may need to intervene manually.
+    1.  Check the database migration history table to see which migrations successfully completed.
+    2.  If a migration is in a partial state, you may need to manually clean up the applied changes.
+    3.  Once the database is clean, fix the underlying issue and re-run the migration command.
+
 ## Registering the Soroban contract on mainnet
 
 After deploying the infrastructure, you must deploy and register the Soroban smart contract on the Stellar mainnet.
