@@ -167,3 +167,206 @@ describe("GET /api/leaderboard — limit handling", () => {
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
   });
 });
+
+describe("GET /api/leaderboard/history", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("groups leaderboard entries by YYYY-MM format", async () => {
+    const mockRows = [
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        display_name: "Alice",
+        total_xlm_that_month: "5000",
+        badge: "earth",
+        rank: 1,
+      },
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        display_name: "Bob",
+        total_xlm_that_month: "750",
+        badge: "forest",
+        rank: 2,
+      },
+      {
+        month: new Date("2025-12-15T00:00:00.000Z"),
+        donor_address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        display_name: "Charlie",
+        total_xlm_that_month: "3000",
+        badge: "ocean",
+        rank: 1,
+      },
+      {
+        month: new Date("2025-11-15T00:00:00.000Z"),
+        donor_address: "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+        display_name: "Diana",
+        total_xlm_that_month: "2000",
+        badge: "sun",
+        rank: 1,
+      },
+    ];
+
+    pool.query.mockResolvedValue({ rows: mockRows });
+
+    const res = await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(3);
+
+    expect(res.body.data[0].month).toBe("2026-01");
+    expect(res.body.data[0].entries).toHaveLength(2);
+    expect(res.body.data[1].month).toBe("2025-12");
+    expect(res.body.data[1].entries).toHaveLength(1);
+    expect(res.body.data[2].month).toBe("2025-11");
+    expect(res.body.data[2].entries).toHaveLength(1);
+  });
+
+  test("returns only the last 2 months when ?months=2 is specified", async () => {
+    const mockRows = [
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        display_name: "Alice",
+        total_xlm_that_month: "5000",
+        badge: "earth",
+        rank: 1,
+      },
+      {
+        month: new Date("2025-12-15T00:00:00.000Z"),
+        donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        display_name: "Bob",
+        total_xlm_that_month: "750",
+        badge: "forest",
+        rank: 1,
+      },
+    ];
+
+    pool.query.mockResolvedValue({ rows: mockRows });
+
+    const res = await request(app).get("/api/leaderboard/history?months=2").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [2]);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0].month).toBe("2026-01");
+    expect(res.body.data[1].month).toBe("2025-12");
+  });
+
+  test("sorts entries by rank ASC within each month", async () => {
+    const mockRows = [
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        display_name: "Bob",
+        total_xlm_that_month: "750",
+        badge: "forest",
+        rank: 1,
+      },
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        display_name: "Charlie",
+        total_xlm_that_month: "3000",
+        badge: "ocean",
+        rank: 2,
+      },
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        display_name: "Alice",
+        total_xlm_that_month: "5000",
+        badge: "earth",
+        rank: 3,
+      },
+    ];
+
+    pool.query.mockResolvedValue({ rows: mockRows });
+
+    const res = await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].entries).toHaveLength(3);
+
+    const ranks = res.body.data[0].entries.map((e) => e.rank);
+    expect(ranks).toEqual([1, 2, 3]);
+  });
+
+  test("maps database snake_case fields to camelCase response shape", async () => {
+    const mockRows = [
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        display_name: "Alice",
+        total_xlm_that_month: "5000",
+        badge: "earth",
+        rank: 1,
+      },
+    ];
+
+    pool.query.mockResolvedValue({ rows: mockRows });
+
+    const res = await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data[0].month).toBe("2026-01");
+    expect(res.body.data[0].entries[0]).toMatchObject({
+      rank: 1,
+      donorAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      displayName: "Alice",
+      totalXLMThatMonth: "5000",
+      badge: "earth",
+    });
+  });
+
+  test("sets displayName to null when display_name is null", async () => {
+    const mockRows = [
+      {
+        month: new Date("2026-01-15T00:00:00.000Z"),
+        donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        display_name: null,
+        total_xlm_that_month: "5000",
+        badge: null,
+        rank: 1,
+      },
+    ];
+
+    pool.query.mockResolvedValue({ rows: mockRows });
+
+    const res = await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(res.body.data[0].entries[0].displayName).toBeNull();
+    expect(res.body.data[0].entries[0].badge).toBeNull();
+  });
+
+  test("returns empty array when no monthly leaderboard data exists", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const res = await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([]);
+  });
+
+  test("caps months parameter at 24 when larger value is requested", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    await request(app).get("/api/leaderboard/history?months=50").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [24]);
+  });
+
+  test("uses default of 12 months when not specified", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    await request(app).get("/api/leaderboard/history").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [12]);
+  });
+});
