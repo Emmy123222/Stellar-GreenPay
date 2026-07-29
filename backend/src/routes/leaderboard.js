@@ -45,7 +45,9 @@ router.get("/", async (req, res, next) => {
       LEFT JOIN donations d ON p.public_key = d.donor_address
     `;
 
-    if (period === "month") {
+    if (period === "week") {
+      query += " AND d.created_at >= NOW() - INTERVAL '7 days' ";
+    } else if (period === "month") {
       query += " AND d.created_at >= NOW() - INTERVAL '30 days' ";
     } else if (period === "year") {
       query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
