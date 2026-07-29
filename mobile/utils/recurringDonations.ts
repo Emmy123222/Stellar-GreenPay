@@ -59,10 +59,44 @@ export async function createRecurringDonation(input: {
   return donation;
 }
 
-export async function cancelRecurringDonation(id: string): Promise<void> {
-  const all = await loadRecurringDonations();
-  const updated = all.map((d) =>
-    d.id === id ? { ...d, status: 'cancelled' as const } : d,
-  );
-  await saveRecurringDonations(updated);
+export interface PaymentRecord {
+  id: string;
+  donationId: string;
+  amountXLM: string;
+  projectName: string;
+  date: string;
+  status: 'completed' | 'failed' | 'pending';
+}
+
+export async function loadPaymentHistory(): Promise<PaymentRecord[]> {
+  try {
+    const raw = await AsyncStorage.getItem('greenpay_payment_history');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function savePaymentHistory(records: PaymentRecord[]): Promise<void> {
+  await AsyncStorage.setItem('greenpay_payment_history', JSON.stringify(records));
+}
+
+export async function recordPayment(
+  donationId: string,
+  amountXLM: string,
+  projectName: string
+): Promise<PaymentRecord> {
+  const record: PaymentRecord = {
+    id: `pay_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
+    donationId,
+    amountXLM,
+    projectName,
+    date: new Date().toISOString(),
+    status: 'completed',
+  };
+  const all = await loadPaymentHistory();
+  await savePaymentHistory([record, ...all]);
+  return record;
 }
