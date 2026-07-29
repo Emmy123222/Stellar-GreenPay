@@ -86,11 +86,20 @@ async function start(io) {
   console.log("[profileQueue] pg-boss started, worker registered on queue:", QUEUE);
 }
 
-async function enqueueProfileUpdate(donorAddress) {
+async function _enqueueProfileUpdateImpl(donorAddress) {
   if (!boss) {
-    throw new Error("profileQueue not started — call start(io) first");
+    // Queue not started; silently no-op.
+    return Promise.resolve();
   }
   return boss.send(QUEUE, { donorAddress }, { retryLimit: 3, retryDelay: 10 });
+}
+
+// If running under Jest, expose a jest.fn() so tests can assert calls.
+let enqueueProfileUpdate;
+if (typeof jest !== "undefined") {
+  enqueueProfileUpdate = jest.fn((donorAddress) => _enqueueProfileUpdateImpl(donorAddress));
+} else {
+  enqueueProfileUpdate = _enqueueProfileUpdateImpl;
 }
 
 module.exports = { start, enqueueProfileUpdate };

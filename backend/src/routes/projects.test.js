@@ -223,7 +223,9 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 5 }] }); // subscriber count
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // follow count
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -747,6 +749,7 @@ describe("POST /api/projects/admin/confirm", () => {
 
     const res = await request(app)
       .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
       .send({ transactionHash, projectId })
       .expect(200);
 
