@@ -103,7 +103,7 @@ export default function EditProfileForm({ publicKey }: EditProfileFormProps) {
             onChange={(e) => setBio(e.target.value)}
             maxLength={200}
           />
-          <p className="mt-1.5 text-right text-[10px] text-[#8aaa8a] uppercase font-bold tracking-widest leading-none">
+          <p className="mt-1.5 text-right text-[10px] text-[#8aaa8a] dark:text-forest-300 uppercase font-bold tracking-widest leading-none">
             {bio.length}/200
           </p>
         </div>

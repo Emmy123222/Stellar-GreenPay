@@ -204,7 +204,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
       <div className="card text-center animate-slide-up">
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Thank you!</h3>
-        <p className="text-[#5a7a5a] text-sm mb-4 font-body">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">
           Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>.
         </p>
         {donorBadge && (
@@ -223,7 +223,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   return (
     <div className="card animate-fade-in">
       <h3 className="font-display text-lg font-semibold text-forest-900 mb-1">Make a Donation</h3>
-          <p className="text-[#5a7a5a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
 
       <div className="space-y-4">
         {/* Currency selector */}
@@ -277,7 +277,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 
         {/* Message */}
         <div>
-          <label className="label">Message <span className="normal-case text-[#8aaa8a] font-normal">(optional)</span></label>
+          <label className="label">Message <span className="normal-case text-[#8aaa8a] dark:text-forest-300 font-normal">(optional)</span></label>
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)}
             placeholder="Leave a message of support..." maxLength={100}
             className="input-field" />
@@ -322,7 +322,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         </button>
 
         {step === "signing" && (
-          <p className="text-center text-xs text-[#5a7a5a] animate-pulse font-body">
+          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
             Please confirm in your Freighter wallet...
           </p>
         )}

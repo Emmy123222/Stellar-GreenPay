@@ -67,7 +67,7 @@ export default function ToastNotification({ toasts, onDismiss }: {
                   {t.title}
                 </p>
                 {t.description && (
-                  <p className="text-xs text-[#5a7a5a] mt-0.5 font-body">
+                  <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-0.5 font-body">
                     {t.description}
                   </p>
                 )}
@@ -75,7 +75,7 @@ export default function ToastNotification({ toasts, onDismiss }: {
               <button
                 type="button"
                 onClick={() => onDismiss(t.id)}
-                className="text-[#8aaa8a] hover:text-forest-700 transition-colors text-sm leading-none px-2 py-1 rounded-lg"
+                className="text-[#8aaa8a] dark:text-forest-300 hover:text-forest-700 transition-colors text-sm leading-none px-2 py-1 rounded-lg"
                 aria-label="Dismiss notification"
               >
                 ✕

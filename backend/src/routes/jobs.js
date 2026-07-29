@@ -18,9 +18,31 @@ function validateTxHash(h) {
 
 router.get("/", async (req, res, next) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM jobs ORDER BY created_at DESC LIMIT 50",
-    );
+    const { status, clientPublicKey } = req.query;
+    let queryStr = "SELECT * FROM jobs";
+    const conditions = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (status) {
+      conditions.push(`status = ANY($${paramIndex})`);
+      values.push(status.split("|"));
+      paramIndex++;
+    }
+
+    if (clientPublicKey) {
+      conditions.push(`client_public_key = $${paramIndex}`);
+      values.push(clientPublicKey);
+      paramIndex++;
+    }
+
+    if (conditions.length > 0) {
+      queryStr += " WHERE " + conditions.join(" AND ");
+    }
+
+    queryStr += " ORDER BY created_at DESC LIMIT 50";
+
+    const result = await pool.query(queryStr, values);
     res.json({ success: true, data: result.rows.map(mapJobRow) });
   } catch (e) {
     next(e);

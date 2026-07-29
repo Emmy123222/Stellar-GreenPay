@@ -4,10 +4,11 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
 import en from "@/locales/en.json";
 import es from "@/locales/es.json";
+import fr from "@/locales/fr.json";
 
-type Locale = "en" | "es";
+type Locale = "en" | "es" | "fr";
 
-const locales: Record<Locale, Record<string, any>> = { en, es };
+const locales: Record<Locale, Record<string, any>> = { en, es, fr };
 
 interface I18nContextValue {
   locale: Locale;
