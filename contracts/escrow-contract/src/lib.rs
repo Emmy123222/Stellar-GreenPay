@@ -40,6 +40,7 @@ pub struct Job {
 pub enum DataKey {
     Job(String),
     Admin,
+    ProposedAdmin,
 }
 
 #[contract]
@@ -55,6 +56,56 @@ impl EscrowContract {
             panic!("Already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+    }
+
+    /// Propose a new admin address. Only the current admin can propose.
+    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) {
+        current_admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != current_admin {
+            panic!("Only admin can propose new admin");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ProposedAdmin, &new_admin);
+    }
+
+    /// Accept the proposed admin role. Only the proposed new admin can accept.
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let proposed_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProposedAdmin)
+            .expect("No proposed admin");
+        if proposed_admin != new_admin {
+            panic!("Not the proposed admin");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &new_admin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::ProposedAdmin);
+    }
+
+    /// Get the current admin address.
+    pub fn get_admin(env: Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized")
+    }
+
+    /// Get the proposed admin address, if any.
+    pub fn get_proposed_admin(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProposedAdmin)
     }
 
     /// Client funds escrow with milestones: transfers `amount` of `token` from client into this contract.
@@ -294,6 +345,60 @@ mod tests {
         let admin = Address::generate(env);
         client.initialize(&admin);
         (admin, client)
+    }
+
+    #[test]
+    fn test_admin_rotation_success() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_proposed_admin(), None);
+
+        client.propose_admin(&admin, &new_admin);
+        assert_eq!(client.get_proposed_admin(), Some(new_admin.clone()));
+
+        client.accept_admin(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_proposed_admin(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can propose new admin")]
+    fn test_propose_admin_unauthorized_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+        let impostor = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.propose_admin(&impostor, &new_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "Not the proposed admin")]
+    fn test_accept_admin_wrong_address_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+        let wrong_admin = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&wrong_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "No proposed admin")]
+    fn test_accept_admin_no_proposal_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        client.accept_admin(&new_admin);
     }
 
     #[test]
