@@ -4,15 +4,19 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
+const EventEmitter = require("events");
 const { v4: uuid } = require("uuid");
+const { z } = require("zod");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const donationEvents = new EventEmitter();
 
 const donationSchema = z.object({
   projectId: z.string().min(1, "projectId is required"),

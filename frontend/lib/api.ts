@@ -134,10 +134,43 @@ export async function fetchProjects(params?: {
  * @returns The project.
  * @throws If the request fails (including 404s for missing projects).
  */
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
-    { params },
+    walletAddress ? { params: { walletAddress } } : undefined,
+  );
+  return data.data;
+}
+
+export interface ProjectFollowState {
+  isFollowing: boolean;
+  followCount: number;
+}
+
+/**
+ * Follow a project for the given wallet. Idempotent on the server.
+ */
+export async function followProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<ProjectFollowState> {
+  const { data } = await api.post<{ success: boolean; data: ProjectFollowState }>(
+    `/api/projects/${projectId}/follow`,
+    { walletAddress },
+  );
+  return data.data;
+}
+
+/**
+ * Unfollow a project for the given wallet. Idempotent on the server.
+ */
+export async function unfollowProject(
+  projectId: string,
+  walletAddress: string,
+): Promise<ProjectFollowState> {
+  const { data } = await api.delete<{ success: boolean; data: ProjectFollowState }>(
+    `/api/projects/${projectId}/follow`,
+    { data: { walletAddress } },
   );
   return data.data;
 }

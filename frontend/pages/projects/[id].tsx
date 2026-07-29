@@ -14,7 +14,18 @@ import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
 import WalletAddressQRCode from "@/components/WalletAddressQRCode";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
+import {
+  fetchProject,
+  fetchProjectUpdates,
+  subscribeToProject,
+  fetchSubscriberCount,
+  createProjectCampaign,
+  fetchProjectMatches,
+  generateProjectSummary,
+  toggleUpdateLike,
+  followProject,
+  unfollowProject,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
@@ -111,7 +122,7 @@ export default function ProjectDetail({
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, publicKey, router]);
 
   useEffect(() => {
     if (!project) return;
