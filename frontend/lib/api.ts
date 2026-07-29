@@ -785,3 +785,21 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   );
   return data.data;
 }
+
+export interface VerificationStats {
+  pending: number;
+  inReview: number;
+  approved: number;
+  rejected: number;
+}
+
+export async function fetchVerificationStats(adminToken?: string): Promise<VerificationStats> {
+  const headers: Record<string, string> = {};
+  if (adminToken) headers["Authorization"] = `Bearer ${adminToken}`;
+  const { data } = await api.get<{ success: boolean; data: VerificationStats }>(
+    "/api/verification-requests/stats",
+    { headers },
+  );
+  return data.data;
+}
+

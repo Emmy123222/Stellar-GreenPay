@@ -285,6 +285,41 @@ router.get("/me", async (req, res, next) => {
 });
 
 /**
+ * GET /api/verification-requests/stats
+ * Admin only. Returns aggregated counts of verification requests grouped by
+ * status. Uses a single GROUP BY query so it is efficient even with large
+ * datasets. All four known statuses are always present in the response,
+ * defaulting to 0 when no rows exist for that status.
+ */
+router.get("/stats", adminRequired, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM verification_requests
+       GROUP BY status`
+    );
+
+    const STATUS_DEFAULTS = { pending: 0, in_review: 0, approved: 0, rejected: 0 };
+    const raw = result.rows.reduce((acc, row) => {
+      acc[row.status] = row.count;
+      return acc;
+    }, { ...STATUS_DEFAULTS });
+
+    res.json({
+      success: true,
+      data: {
+        pending:  raw.pending,
+        inReview: raw.in_review,
+        approved: raw.approved,
+        rejected: raw.rejected,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/verification-requests/:id
  * Public, but only returns the row if wallet query param matches
  * the row's wallet_address. Admins can pass ?wallet to bypass this check
