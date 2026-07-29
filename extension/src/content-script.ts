@@ -102,8 +102,27 @@ function highlightAddresses(node: Node) {
   }
 }
 
+let currentProjectId: string | null = null;
+
+function checkProjectContext() {
+  const metaTag = document.querySelector('meta[name="greenpay:project:id"]') || 
+                  document.querySelector('meta[property="greenpay:project:id"]');
+  let projectId = metaTag ? metaTag.getAttribute('content') : null;
+  
+  if (!projectId) {
+    const match = window.location.pathname.match(/\/projects\/([a-zA-Z0-9_-]+)/);
+    if (match) projectId = match[1];
+  }
+  
+  if (projectId !== currentProjectId) {
+    currentProjectId = projectId;
+    chrome.runtime.sendMessage({ action: 'setProjectContext', projectId }).catch(() => {});
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   highlightAddresses(document.body);
+  checkProjectContext();
 });
 
 const observer = new MutationObserver((mutations) => {
@@ -114,9 +133,14 @@ const observer = new MutationObserver((mutations) => {
       }
     });
   });
+  checkProjectContext();
 });
 
 observer.observe(document.body, {
   childList: true,
   subtree: true
 });
+
+window.addEventListener('popstate', checkProjectContext);
+// In case DOMContentLoaded already fired
+checkProjectContext();

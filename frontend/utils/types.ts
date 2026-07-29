@@ -61,6 +61,11 @@ export interface ClimateProject {
   aiSummaryGeneratedAt?: string | null;
   aiSummaryModel?: string | null;
   aiSummarySourceHash?: string | null;
+  // Follow state — populated by GET /api/projects/:id?walletAddress=G...
+  // `isFollowing` is only present (and meaningful) when a walletAddress was
+  // passed to the fetch; defaults to false when omitted.
+  followCount?: number;
+  isFollowing?: boolean;
 }
 
 /**

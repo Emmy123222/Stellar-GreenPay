@@ -127,9 +127,26 @@ how to record baseline numbers.
 - All Stellar transactions target the **testnet** unless `NETWORK=mainnet` is
   explicitly set in the environment.
 
+### Changelog
+
+Every PR must include an update to [CHANGELOG.md](CHANGELOG.md) under the `[Unreleased]` section describing the change. This keeps the release history accurate and simplifies the release process.
+
 ## Testing
 
 ```bash
 pnpm test          # unit + integration
 pnpm test:e2e      # end-to-end (requires running backend + Horizon testnet)
 ```
+
+## Sentry (Error monitoring)
+
+We use Sentry to capture unhandled exceptions and performance traces.
+
+- Frontend: add `NEXT_PUBLIC_SENTRY_DSN` (or `SENTRY_DSN`) to `frontend/.env.local`.
+- Backend: add `SENTRY_DSN` to `backend/.env`.
+- Traces sampling: set to 10% (configured by default in the repo).
+
+Quick test (backend): throw an error in any route and confirm it appears in your Sentry project within ~30s.
+
+If you don't have a Sentry project, create one at https://sentry.io and copy the DSN into the env files above.
+

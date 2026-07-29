@@ -16,7 +16,8 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.stellargreenpay.app"
+      "bundleIdentifier": "com.stellargreenpay.app",
+      "associatedDomains": ["applinks:greenpay.example.com"]
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +29,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "data": [{ "scheme": "greenpay" }],
+          "data": [
+            { "scheme": "greenpay" },
+            { "scheme": "https", "host": "greenpay.example.com", "pathPrefix": "/project/" }
+          ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
       ]

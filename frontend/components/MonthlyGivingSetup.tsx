@@ -67,7 +67,7 @@ export default function MonthlyGivingSetup({
           <button onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
         </div>
 
-        <p className="text-sm text-[#5a7a5a] font-body mb-5">
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-5">
           Schedule recurring monthly donations for <strong>{projectName}</strong>.
         </p>
 
@@ -127,7 +127,7 @@ export default function MonthlyGivingSetup({
         <div className="mt-8 border-t border-forest-100 pt-5">
           <h4 className="font-display text-lg font-semibold text-forest-900 mb-3">Subscription History</h4>
           {subscriptions.length === 0 ? (
-            <p className="text-sm text-[#5a7a5a] font-body">No subscriptions created for this project yet.</p>
+            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No subscriptions created for this project yet.</p>
           ) : (
             <div className="space-y-3">
               {subscriptions.map((sub) => (
@@ -135,19 +135,19 @@ export default function MonthlyGivingSetup({
                   <p className="text-sm font-semibold text-forest-900 font-body">
                     {formatXLM(sub.amountXLM)} monthly · {sub.status}
                   </p>
-                  <p className="text-xs text-[#8aaa8a] font-body mt-1">
+                  <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-1">
                     Next due: {new Date(sub.nextDueDate).toLocaleDateString()}
                   </p>
                   {sub.history.length > 0 ? (
                     <div className="mt-2 space-y-1">
                       {sub.history.slice(0, 5).map((entry) => (
-                        <p key={entry.paidAt} className="text-xs text-[#5a7a5a] font-body">
+                        <p key={entry.paidAt} className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
                           Paid {formatXLM(entry.amountXLM)} · {timeAgo(entry.paidAt)}
                         </p>
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-[#5a7a5a] font-body">No paid months yet.</p>
+                    <p className="mt-2 text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No paid months yet.</p>
                   )}
                 </div>
               ))}
