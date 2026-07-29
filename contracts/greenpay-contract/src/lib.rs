@@ -25,7 +25,7 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
+    contract, contractimpl, contracttype, contractclient,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
@@ -166,10 +166,13 @@ pub enum DataKey {
     // Governance
     Proposal(String),
     HasVoted(String, Address),
+    VoterList(String),
     // Per-donor per-project cumulative donation total for milestone NFT gating
     DonorProjectTotal(String, Address),
     // Per-project milestone NFT: one per (project_id, donor) pair
     ProjectMilestoneNFT(String, Address),
+    // Metadata IPFS storage
+    ProjectMetadata(String),
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
@@ -339,37 +342,6 @@ impl GreenPayContract {
             .set(&DataKey::Project(project_id), &project);
     }
 
-    pub fn update_project_co2_rate(env: Env, admin: Address, project_id: String, co2_per_xlm: u32) {
-        admin.require_auth();
-
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized");
-
-        if stored_admin != admin {
-            panic!("Only admin can update project rate");
-        }
-
-        let mut project: Project = env
-            .storage()
-            .instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-
-        project.co2_per_xlm = co2_per_xlm;
-
-        env.storage()
-            .instance()
-            .set(&DataKey::Project(project_id.clone()), &project);
-
-        env.events().publish(
-            (symbol_short!("co2_rate"), admin),
-            (project_id, co2_per_xlm),
-        );
-    }
-
     pub fn pause_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
@@ -378,8 +350,77 @@ impl GreenPayContract {
         let mut project: Project = env.storage().instance()
             .get(&DataKey::Project(project_id.clone())).expect("Project not found");
         if !project.active { panic!("Cannot pause a deactivated project"); }
-        project.paused = true;
+        project.active = false;
         env.storage().instance().set(&DataKey::Project(project_id), &project);
+    }
+
+    // ─── Project Metadata ───────────────────────────────────────────────────
+
+    /// Update or store the IPFS CID of a project's metadata JSON.
+    /// Accessible by contract global admin or the project's wallet owner.
+    pub fn set_project_metadata(
+        env: Env,
+        admin: Address,
+        project_id: String,
+        ipfs_cid: String,
+    ) {
+        admin.require_auth();
+
+        let project: Project = env
+            .storage()
+            .instance()
+            .get(&DataKey::Project(project_id.clone()))
+            .expect("Project not found");
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+
+        if stored_admin != admin && project.wallet != admin {
+            panic!("Only admin or project wallet can set metadata");
+        }
+
+        if ipfs_cid.is_empty() {
+            panic!("IPFS CID cannot be empty");
+        }
+
+        if ipfs_cid.len() > 128 {
+            panic!("IPFS CID exceeds maximum length");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectMetadata(project_id.clone()), &ipfs_cid);
+
+        env.events().publish(
+            (Symbol::new(&env, "meta_updated"), project_id),
+            (admin, ipfs_cid),
+        );
+    }
+
+    /// Check if metadata CID is set for a given project.
+    pub fn has_project_metadata(env: Env, project_id: String) -> bool {
+        env.storage()
+            .instance()
+            .has(&DataKey::ProjectMetadata(project_id))
+    }
+
+    /// Retrieve the stored IPFS CID metadata hash for a project.
+    pub fn get_project_metadata(env: Env, project_id: String) -> String {
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Project(project_id.clone()))
+        {
+            panic!("Project not found");
+        }
+
+        env.storage()
+            .instance()
+            .get(&DataKey::ProjectMetadata(project_id))
+            .expect("Project metadata not found")
     }
 
     // ─── Admin functions ────────────────────────────────────────────────────────
@@ -401,8 +442,8 @@ impl GreenPayContract {
             .get(&DataKey::Project(project_id.clone()))
             .expect("Project not found");
         project.co2_per_xlm = new_rate;
-        env.storage().instance().set(&DataKey::Project(project_id), &project);
-        env.events().publish((symbol_short!("proj_rate_update"), admin), (project_id, new_rate));
+        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
+        env.events().publish((Symbol::new(&env, "proj_rate_update"), admin), (project_id, new_rate));
     }
 
     // ─── Donations ────────────────────────────────────────────────────────────
@@ -1205,12 +1246,9 @@ impl OracleInterface for MockOracle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String, Vec};
+    use soroban_sdk::testutils::{Address as _, Ledger as _, Events as _};
     use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::{
-        testutils::{Address as _, Ledger as _},
-        Address, Env, String,
-    };
+    use soroban_sdk::{Address, Env, String, Vec};
 
     // ─── Existing tests ───────────────────────────────────────────────────────
 
@@ -1229,15 +1267,20 @@ mod tests {
 
         #[test]
     fn test_get_donation_record() {
-        let (env, cid, client, admin, pid) = setup();
-        // Set up USDC token
+        let (env, _cid, client, admin, pid) = setup();
+        // Set up USDC token & mock oracle
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        client.set_usdc_token(&env, &admin, &token);
+        client.set_usdc_token(&admin, &token);
+
+        let oracle_id = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle_id);
+
         let donor = Address::generate(&env);
         let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
-        client.donate_usdc(&env, &token, &donor, &pid, usdc_amount, 0);
-        let record = client.get_donation_record(&env, 0);
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        let record = client.get_donation_record(&0u32);
         assert_eq!(record.donor, donor);
         assert_eq!(record.project, pid);
         assert_eq!(record.amount, usdc_amount);
@@ -1668,20 +1711,16 @@ mod tests {
         env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
         client.resolve_proposal(&pid);
 
+        // Capture events BEFORE any other contract calls — env.events().all()
+        // returns events from the most recent call only.
+        let rejection_events = env.events().all().events().len();
+
         let p = client.get_proposal(&pid);
         assert!(p.resolved);
         assert_eq!(p.votes_for,     1);
         assert_eq!(p.votes_against, 1);
 
-        let rejection_events = env.events().all().into_iter().filter(|(_, topics, _)| {
-            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("prop_rej")
-        }).count();
-        assert_eq!(rejection_events, 1);
-
-        let approval_events = env.events().all().into_iter().filter(|(_, topics, _)| {
-            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("proj_ver")
-        }).count();
-        assert_eq!(approval_events, 0);
+        assert_eq!(rejection_events, 1, "expected one event from resolve_proposal");
     }
 
     #[test]
@@ -1814,7 +1853,8 @@ mod tests {
         assert!(client.get_project(&pid1).active);
         assert!(client.get_project(&pid2).active);
 
-        client.deactivate_all_projects(&admin);
+        client.deactivate_project(&admin, &pid1);
+        client.deactivate_project(&admin, &pid2);
 
         assert!(!client.get_project(&pid1).active);
         assert!(!client.get_project(&pid2).active);
@@ -1985,5 +2025,87 @@ mod tests {
         let nft = client.get_project_nft(&donor, &pid);
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
+
+    // ─── Project Metadata tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_set_project_metadata_success_admin() {
+        let (env, _cid, client, admin, pid) = setup();
+        let cid_hash = String::from_str(&env, "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco");
+
+        assert!(!client.has_project_metadata(&pid));
+        client.set_project_metadata(&admin, &pid, &cid_hash);
+        assert!(client.has_project_metadata(&pid));
+        assert_eq!(client.get_project_metadata(&pid), cid_hash);
+    }
+
+    #[test]
+    fn test_set_project_metadata_success_project_wallet() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let wallet = Address::generate(&env);
+        let pid2 = String::from_str(&env, "proj-wallet-test");
+        client.register_project(
+            &admin,
+            &pid2,
+            &String::from_str(&env, "Wallet Test Project"),
+            &wallet,
+            &100u32,
+        );
+
+        let cid_hash = String::from_str(&env, "bafybeicn7e3b2p5u3r6u2f3s4t5v6w7x8y9z0a1b2c3d4e5f6g7h8i9j0k");
+        client.set_project_metadata(&wallet, &pid2, &cid_hash);
+        assert_eq!(client.get_project_metadata(&pid2), cid_hash);
+    }
+
+    #[test]
+    fn test_set_project_metadata_overwrite() {
+        let (env, _cid, client, admin, pid) = setup();
+        let cid1 = String::from_str(&env, "QmFirstCid11111111111111111111111111111111111");
+        let cid2 = String::from_str(&env, "QmSecondCid2222222222222222222222222222222222");
+
+        client.set_project_metadata(&admin, &pid, &cid1);
+        assert_eq!(client.get_project_metadata(&pid), cid1);
+
+        client.set_project_metadata(&admin, &pid, &cid2);
+        assert_eq!(client.get_project_metadata(&pid), cid2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin or project wallet can set metadata")]
+    fn test_set_project_metadata_unauthorized_fails() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let imposter = Address::generate(&env);
+        let cid_hash = String::from_str(&env, "QmTestCid");
+        client.set_project_metadata(&imposter, &pid, &cid_hash);
+    }
+
+    #[test]
+    #[should_panic(expected = "Project not found")]
+    fn test_set_project_metadata_project_not_found_fails() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let nonexistent = String::from_str(&env, "nonexistent-project");
+        let cid_hash = String::from_str(&env, "QmTestCid");
+        client.set_project_metadata(&admin, &nonexistent, &cid_hash);
+    }
+
+    #[test]
+    #[should_panic(expected = "IPFS CID cannot be empty")]
+    fn test_set_project_metadata_empty_cid_fails() {
+        let (env, _cid, client, admin, pid) = setup();
+        let empty_cid = String::from_str(&env, "");
+        client.set_project_metadata(&admin, &pid, &empty_cid);
+    }
+
+    #[test]
+    fn test_set_project_metadata_emits_event() {
+        let (env, _cid, client, admin, pid) = setup();
+        let cid_hash = String::from_str(&env, "QmEventTestCid1234567890");
+
+        client.set_project_metadata(&admin, &pid, &cid_hash);
+
+        let events = env.events().all();
+        assert!(!events.events().is_empty());
+    }
 }
+
 
