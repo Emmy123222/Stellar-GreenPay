@@ -23,6 +23,21 @@ kubectl create secret generic greenpay-secrets --from-env-file=.env
 
 *Note: Ensure your `.env` file is properly configured for the production environment and NEVER committed to version control.*
 
+## GitHub Actions Deployment Workflow Secrets
+
+For automated CI/CD deployments and Sentry release management (`.github/workflows/deploy.yml`), configure the following secrets in your repository (`Settings -> Secrets and variables -> Actions`):
+
+* **`SENTRY_DSN`**: Sentry Data Source Name (DSN) for backend and frontend error tracking.
+* **`SENTRY_ORG`**: Sentry organization slug.
+* **`SENTRY_PROJECT`**: Sentry project name.
+* **`SENTRY_AUTH_TOKEN`**: Sentry authentication token for `@sentry/cli` release tracking.
+
+After deployment completes, the workflow automatically creates and finalizes the release in Sentry:
+```bash
+npx @sentry/cli releases new $VERSION
+npx @sentry/cli releases finalize $VERSION
+```
+
 ## Deploying with Helm
 
 Once your secrets are in place, you can deploy the application using the provided Helm chart.
