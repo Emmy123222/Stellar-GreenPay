@@ -134,6 +134,84 @@ describe("GET /api/leaderboard — ranking sort order", () => {
   });
 });
 
+describe("GET /api/leaderboard — onlyVerified filter", () => {
+  let app;
+
+  // Donor A: donated exclusively to verified projects
+  const DONOR_A = {
+    public_key: "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
+    display_name: "Donor A",
+    badges: [],
+    total_donated_xlm: "200",
+    projects_supported: 2,
+  };
+
+  // Donor B: donated to both verified and unverified projects.
+  // When onlyVerified=true the DB WHERE clause excludes Donor B, so the
+  // mock simulates that by not including Donor B in the returned rows.
+  const DONOR_B = {
+    public_key: "GEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
+    display_name: "Donor B",
+    badges: [],
+    total_donated_xlm: "300",
+    projects_supported: 3,
+  };
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns only Donor A when onlyVerified=true (Donor B donated to unverified projects)", async () => {
+    // Simulate the DB filtering out Donor B because they donated to unverified projects
+    pool.query.mockResolvedValue({ rows: [DONOR_A] });
+
+    const res = await request(app)
+      .get("/api/leaderboard?onlyVerified=true")
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].publicKey).toBe(DONOR_A.public_key);
+    expect(res.body.data[0].displayName).toBe("Donor A");
+  });
+
+  test("does not include Donor B in the results when onlyVerified=true", async () => {
+    pool.query.mockResolvedValue({ rows: [DONOR_A] });
+
+    const res = await request(app)
+      .get("/api/leaderboard?onlyVerified=true")
+      .expect(200);
+
+    const keys = res.body.data.map((e) => e.publicKey);
+    expect(keys).not.toContain(DONOR_B.public_key);
+  });
+
+  test("sends a SQL query containing the verified-only filter when onlyVerified=true", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
+
+    const [sql] = pool.query.mock.calls[0];
+    // The route adds a WHERE clause that excludes donors with unverified donations
+    expect(sql).toMatch(/verified\s*=\s*false/i);
+    // …and requires at least one verified donation
+    expect(sql).toMatch(/verified\s*=\s*true/i);
+  });
+
+  test("does not apply the verified filter when onlyVerified is absent", async () => {
+    pool.query.mockResolvedValue({ rows: [DONOR_A, DONOR_B] });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(2);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).not.toMatch(/verified\s*=\s*false/i);
+  });
+});
+
 describe("GET /api/leaderboard — limit handling", () => {
   let app;
 
