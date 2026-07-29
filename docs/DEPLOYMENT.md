@@ -92,3 +92,48 @@ stellar contract deploy \
 ```
 
 Once deployed, update your application configuration (via Secrets or ConfigMaps) with the new mainnet Contract ID.
+
+## Operations
+
+### Leaderboard monthly snapshot
+
+The leaderboard history is powered by the `monthly_leaderboard` table, which is populated on-demand via:
+
+```bash
+curl -X POST https://your-api.example.com/api/leaderboard/snapshot \
+  -H "x-admin-secret: $ADMIN_SECRET"
+```
+
+This endpoint must be called **at the end of each calendar month** (or very shortly after month rollover) to preserve that month's top donors before the next month's donations begin accruing. It is idempotent — re-running for the same month overwrites existing rows.
+
+**Authentication:** The `x-admin-secret` header must match the `ADMIN_SECRET` environment variable. Store this value securely:
+
+- **Kubernetes:** Include `ADMIN_SECRET` in the `.env` file when creating the `greenpay-secrets` Secret (see [Creating secrets from .env](#creating-secrets-from-env)).
+- **GitHub Actions:** Store as a [repository secret](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions) if triggering via a workflow.
+
+**Automation recommendations (pick one):**
+
+1. **Kubernetes CronJob** — Add a CronJob to the cluster that runs the curl command above on the 1st of every month:
+   ```yaml
+   apiVersion: batch/v1
+   kind: CronJob
+   metadata:
+     name: leaderboard-snapshot
+     namespace: greenpay
+   spec:
+     schedule: "0 1 1 * *"
+     jobTemplate:
+       spec:
+         template:
+           spec:
+             containers:
+             - name: curl
+               image: curlimages/curl:latest
+               command:
+               - /bin/sh
+               - -c
+               - curl -X POST http://greenpay-backend:4000/api/leaderboard/snapshot -H "x-admin-secret: $ADMIN_SECRET"
+             restartPolicy: OnFailure
+   ```
+
+2. **Extend `digestQueue.js`** — The monthly digest cron (`backend/src/services/digestQueue.js`) already runs on the 1st of every month via pg-boss. Import and call the snapshot logic from the same worker to colocate both month-end tasks. See the file for integration points.
