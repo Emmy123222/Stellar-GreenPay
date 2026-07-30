@@ -21,6 +21,7 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { VALID_STATUSES, VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -30,30 +31,6 @@ const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
 function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
 }
-
-const VALID_STATUSES = ["active", "completed", "paused"];
-const VALID_CATEGORIES = [
-  "Reforestation",
-  "Solar Energy",
-  "Ocean Conservation",
-  "Clean Water",
-  "Wildlife Protection",
-  "Carbon Capture",
-  "Wind Energy",
-  "Sustainable Agriculture",
-  "Other",
-];
-const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
-
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
 
 /**
  * GET /api/projects/featured
@@ -1215,6 +1192,60 @@ router.patch("/:id/status", async (req, res, next) => {
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/similar
+ * Returns up to 3 similar active projects in the same category,
+ * ranked by pg_trgm SIMILARITY of their name to the current project.
+ */
+router.get("/:id/similar", async (req, res, next) => {
+  let name, category;
+  try {
+    const projectResult = await pool.query(
+      "SELECT name, category FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    name = projectResult.rows[0].name;
+    category = projectResult.rows[0].category;
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE category = $1 AND id != $2 AND status = 'active'
+       ORDER BY SIMILARITY(name, $3) DESC
+       LIMIT 3`,
+      [category, req.params.id, name],
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map(mapProjectRow),
+    });
+  } catch (e) {
+    // If pg_trgm is not installed, fall back to donor_count ordering
+    if (e.code === "42883" || e.message?.includes("SIMILARITY")) {
+      try {
+        const fallback = await pool.query(
+          `SELECT * FROM projects
+           WHERE category = $1 AND id != $2 AND status = 'active'
+           ORDER BY donor_count DESC
+           LIMIT 3`,
+          [category || "Other", req.params.id],
+        );
+        return res.json({
+          success: true,
+          data: fallback.rows.map(mapProjectRow),
+        });
+      } catch (fallbackErr) {
+        next(fallbackErr);
+      }
+    }
     next(e);
   }
 });
