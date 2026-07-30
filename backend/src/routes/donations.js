@@ -5,6 +5,9 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuid } = require("uuid");
+const { z } = require("zod");
+const { EventEmitter } = require("events");
+const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
@@ -13,6 +16,14 @@ const { sanitizedStringField, validateBody } = require("../middleware/validation
 const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const donationEvents = new EventEmitter();
+
+function resolveDonorCountry(ip) {
+  if (!ip || typeof ip !== "string") return null;
+  const normalizedIp = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  const geo = geoip.lookup(normalizedIp);
+  return geo?.country || null;
+}
 
 const donationSchema = z.object({
   projectId: z.string().min(1, "projectId is required"),
@@ -51,6 +62,7 @@ async function recordDonation(req, res, next) {
 
   try {
     const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
+    const donorCountry = resolveDonorCountry(req.ip);
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
@@ -87,9 +99,9 @@ async function recordDonation(req, res, next) {
 
     const donationResult = await client.query(
       `INSERT INTO donations (
-        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       RETURNING *`,
       [
         uuid(),
@@ -100,6 +112,7 @@ async function recordDonation(req, res, next) {
         currency,
         message?.trim().slice(0, 100) || null,
         transactionHash,
+        donorCountry,
       ],
     );
 
@@ -134,9 +147,9 @@ async function recordDonation(req, res, next) {
 
           await client.query(
             `INSERT INTO donations (
-              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
             [
               uuid(),
               projectId,
@@ -146,6 +159,7 @@ async function recordDonation(req, res, next) {
               "XLM",
               `Matching donation for donation from ${donorAddress}`,
               `match-${transactionHash}-${match.id}`,
+              donorCountry,
             ],
           );
 

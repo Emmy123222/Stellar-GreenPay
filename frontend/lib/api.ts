@@ -605,8 +605,15 @@ export interface ImpactCategoryBreakdownItem {
   co2OffsetKg: number;
 }
 
+export interface ImpactCountryBreakdownItem {
+  country: string;
+  totalDonationsXLM: string;
+  donorCount: number;
+}
+
 export interface ImpactGlobalStats extends ImpactProjectStats {
   breakdownByCategory: ImpactCategoryBreakdownItem[];
+  countryBreakdown: ImpactCountryBreakdownItem[];
 }
 
 export interface ImpactDonorStats {

@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS donations (
   currency TEXT NOT NULL DEFAULT 'XLM',
   message TEXT,
   transaction_hash TEXT NOT NULL UNIQUE,
+  donor_country TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
