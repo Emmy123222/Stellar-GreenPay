@@ -51,9 +51,15 @@ router.get("/", async (req, res, next) => {
       query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
     }
 
+    query += `
+      LEFT JOIN projects pr ON pr.id = d.project_id
+    `;
+
+    const whereConditions = [];
+
     if (onlyVerified) {
-      query += `
-        WHERE NOT EXISTS (
+      whereConditions.push(`
+        NOT EXISTS (
           SELECT 1 FROM donations d2
           JOIN projects pr ON d2.project_id = pr.id
           WHERE d2.donor_address = p.public_key AND pr.verified = false
@@ -63,11 +69,16 @@ router.get("/", async (req, res, next) => {
           JOIN projects pr2 ON d3.project_id = pr2.id
           WHERE d3.donor_address = p.public_key AND pr2.verified = true
         )
+      `);
+    }
+
+    if (whereConditions.length > 0) {
+      query += `
+        WHERE ${whereConditions.join(" AND ")}
       `;
     }
 
     query += `
-      LEFT JOIN projects pr ON pr.id = d.project_id
       GROUP BY p.public_key, p.display_name, p.badges
       ORDER BY ${sortBy} DESC
       LIMIT $1
