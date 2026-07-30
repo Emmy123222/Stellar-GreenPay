@@ -5,12 +5,21 @@
 
 const express = require("express");
 const router = express.Router();
+const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { mapJobRow } = require("../services/store");
 
 function validateTxHash(h) {
   if (!h || !/^[a-fA-F0-9]{64}$/.test(h)) {
     const e = new Error("Invalid transaction hash");
+    e.status = 400;
+    throw e;
+  }
+}
+
+function validateKey(k) {
+  if (!k || !/^G[A-Z0-9]{55}$/.test(k)) {
+    const e = new Error("Invalid Stellar public key");
     e.status = 400;
     throw e;
   }
@@ -44,6 +53,45 @@ router.get("/", async (req, res, next) => {
 
     const result = await pool.query(queryStr, values);
     res.json({ success: true, data: result.rows.map(mapJobRow) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post("/", async (req, res, next) => {
+  try {
+    const { title, description, clientPublicKey, freelancerPublicKey, amountEscrowXlm } = req.body;
+
+    if (!title || !title.trim()) {
+      const e = new Error("title is required");
+      e.status = 400;
+      throw e;
+    }
+
+    if (!description || !description.trim()) {
+      const e = new Error("description is required");
+      e.status = 400;
+      throw e;
+    }
+
+    validateKey(clientPublicKey);
+    validateKey(freelancerPublicKey);
+
+    const amount = parseFloat(amountEscrowXlm);
+    if (isNaN(amount) || amount <= 0) {
+      const e = new Error("amountEscrowXlm must be a positive number");
+      e.status = 400;
+      throw e;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO jobs (id, title, description, client_public_key, freelancer_public_key, amount_escrow_xlm, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+       RETURNING *`,
+      [uuid(), title.trim(), description.trim(), clientPublicKey, freelancerPublicKey, amount, "in_escrow"],
+    );
+
+    res.status(201).json({ success: true, data: mapJobRow(result.rows[0]) });
   } catch (e) {
     next(e);
   }
