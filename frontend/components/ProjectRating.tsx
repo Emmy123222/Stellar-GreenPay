@@ -46,7 +46,7 @@ export default function ProjectRating({ projectId, projectName, donorAddress, on
         <div className="text-center mb-6">
           <div className="w-16 h-16 bg-forest-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">⭐</div>
           <h2 className="font-display text-2xl font-bold text-forest-900">How was {projectName}?</h2>
-          <p className="text-sm text-[#5a7a5a] font-body mt-1">Your feedback helps others choose impactful projects.</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mt-1">Your feedback helps others choose impactful projects.</p>
         </div>
 
         <div className="flex justify-center gap-2 mb-6">
@@ -86,7 +86,7 @@ export default function ProjectRating({ projectId, projectName, donorAddress, on
           <button
             onClick={onCancel}
             disabled={submitting}
-            className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold border border-forest-200 bg-white hover:bg-forest-50 transition-all text-[#5a7a5a]"
+            className="flex-1 px-5 py-3 rounded-xl text-sm font-semibold border border-forest-200 bg-white hover:bg-forest-50 transition-all text-[#5a7a5a] dark:text-[#8aaa8a]"
           >
             Skip for now
           </button>

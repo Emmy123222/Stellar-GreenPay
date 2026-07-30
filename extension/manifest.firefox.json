@@ -10,8 +10,12 @@
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus"
   ],
+  "background": {
+    "scripts": ["dist-firefox/background.js"]
+  },
   "host_permissions": [
     "<all_urls>"
   ],

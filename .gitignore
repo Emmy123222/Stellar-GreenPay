@@ -18,3 +18,8 @@ Thumbs.db
 .idea/
 *.swp
 Cargo.lock
+
+# Uploaded documents via /api/uploads (local storage backend).
+# Keep the directory in git via .gitkeep so the first run works out of the box.
+backend/uploads/*
+!backend/uploads/.gitkeep

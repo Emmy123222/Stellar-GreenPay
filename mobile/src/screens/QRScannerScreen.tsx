@@ -60,7 +60,7 @@ export function QRScannerScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.message}>Camera access is required to scan QR codes.</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
           <Text style={styles.backButtonText}>Go back</Text>
         </TouchableOpacity>
       </View>
@@ -79,11 +79,11 @@ export function QRScannerScreen() {
         <Text style={styles.hint}>Point camera at a GreenPay QR code</Text>
         <View style={styles.frame} />
         {scanned && (
-          <TouchableOpacity style={styles.rescanButton} onPress={() => setScanned(false)}>
+          <TouchableOpacity style={styles.rescanButton} onPress={() => setScanned(false)} accessibilityLabel="Tap to scan again" accessibilityRole="button">
             <Text style={styles.rescanText}>Tap to scan again</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton} accessibilityLabel="Cancel QR scanning" accessibilityRole="button">
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>
       </View>

@@ -33,6 +33,7 @@ pub struct Job {
     pub status: JobStatus,
     pub milestones: Vec<Milestone>,
     pub disputed: bool,
+    pub release_after: u32,
 }
 
 #[contracttype]
@@ -42,6 +43,8 @@ pub enum DataKey {
 }
 
 #[contract]
+pub const RELEASE_AFTER_LEDGERS: u32 = 10;
+
 pub struct EscrowContract;
 
 #[contractimpl]
@@ -95,6 +98,7 @@ impl EscrowContract {
             status: JobStatus::Escrowed,
             milestones,
             disputed: false,
+            release_after: env.ledger().sequence() + RELEASE_AFTER_LEDGERS,
         };
         env.storage().instance().set(&DataKey::Job(job_id), &job);
     }
@@ -233,6 +237,43 @@ impl EscrowContract {
         }
 
         job.disputed = false;
+        env.storage().instance().set(&DataKey::Job(job_id), &job);
+    }
+
+    /// Freelancer can claim a milestone after release_after ledgers if not disputed.
+    pub fn claim_milestone(env: Env, freelancer: Address, job_id: String, milestone_index: u32) {
+        freelancer.require_auth();
+        let mut job: Job = env.storage().instance().get(&DataKey::Job(job_id.clone())).expect("Job not found");
+
+        if job.disputed {
+            panic!("Job is disputed; cannot claim milestone");
+        }
+        if env.ledger().sequence() < job.release_after {
+            panic!("Release period not reached");
+        }
+        if milestone_index >= job.milestones.len() as u32 {
+            panic!("Invalid milestone index");
+        }
+        let milestone = &job.milestones.get(milestone_index as usize).unwrap();
+        if milestone.released {
+            panic!("Milestone already released");
+        }
+        // Calculate amount
+        let proportion = milestone.percentage as i128;
+        let release_amount = (job.amount * proportion) / 100i128;
+        let token_client = token::Client::new(&env, &job.token);
+        let contract_addr = env.current_contract_address();
+        token_client.transfer(&contract_addr, &job.freelancer, &release_amount);
+
+        // Mark as released
+        let mut updated_milestones = job.milestones.clone();
+        updated_milestones.get_mut(milestone_index as usize).unwrap().released = true;
+        job.milestones = updated_milestones;
+
+        // Update status
+        let all_released = job.milestones.iter().all(|m| m.released);
+        job.status = if all_released { JobStatus::Completed } else { JobStatus::PartiallyReleased };
+
         env.storage().instance().set(&DataKey::Job(job_id), &job);
     }
 
