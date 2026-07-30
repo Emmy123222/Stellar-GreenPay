@@ -108,6 +108,9 @@ async function startServer() {
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
 
+  const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
+  await startRecurringDonationQueue();
+
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {

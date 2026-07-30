@@ -65,6 +65,50 @@ async function sendUpdatePushNotifications({ project, update }) {
   }
 }
 
+/**
+ * Send a push notification reminder for an upcoming recurring donation
+ * @param {Object} params - { token, donation }
+ */
+async function sendRecurringDonationReminder({ token, donation }) {
+  try {
+    if (!Expo.isExpoPushToken(token)) {
+      console.error(`[Push] Invalid push token: ${token}`);
+      return;
+    }
+
+    const frequencyLabel =
+      donation.frequency === "monthly" ? "monthly" :
+      donation.frequency === "weekly" ? "weekly" :
+      donation.frequency === "yearly" ? "yearly" :
+      donation.frequency;
+
+    const message = {
+      to: token,
+      sound: "default",
+      title: "💚 Recurring Donation Due Tomorrow",
+      body: `Your ${frequencyLabel} donation of ${donation.amount_xlm} XLM to ${donation.project_name} is due tomorrow. Tap to donate.`,
+      data: {
+        projectId: donation.project_id,
+        recurringDonationId: donation.id,
+        type: "recurring_donation_reminder",
+      },
+    };
+
+    const chunks = expo.chunkPushNotifications([message]);
+    for (const chunk of chunks) {
+      try {
+        const tickets = await expo.sendPushNotificationsAsync(chunk);
+        console.log(`[Push] Sent recurring donation reminder for ${donation.id}`);
+      } catch (error) {
+        console.error("[Push] Error sending recurring donation reminder chunk:", error);
+      }
+    }
+  } catch (error) {
+    console.error("[Push] Error sending recurring donation reminder:", error);
+  }
+}
+
 module.exports = {
   sendUpdatePushNotifications,
+  sendRecurringDonationReminder,
 };
