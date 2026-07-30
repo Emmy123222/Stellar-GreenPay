@@ -166,6 +166,19 @@ export async function generateProjectSummary(
   return data.data;
 }
 
+/**
+ * Fetch similar projects by category using pg_trgm name similarity.
+ *
+ * @param projectId - The project to find similar projects for.
+ * @returns Up to 3 similar active projects in the same category.
+ */
+export async function fetchSimilarProjects(projectId: string): Promise<ClimateProject[]> {
+  const { data } = await api.get<{ success: boolean; data: ClimateProject[] }>(
+    `/api/projects/${projectId}/similar`,
+  );
+  return data.data;
+}
+
 export async function createProjectCampaign(
   projectId: string,
   payload: {

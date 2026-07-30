@@ -1,9 +1,15 @@
 "use strict";
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const { logAdminAction } = require("../services/audit");
+const { VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); // 5 MB max
 
 const loginLimiter = createRateLimiter(10, 15);
 
@@ -145,5 +151,165 @@ router.get("/audit-log", adminRequired, async (req, res, next) => {
     next(e);
   }
 });
+
+/**
+ * POST /api/admin/projects/import
+ * Bulk import projects from a CSV file.
+ * Accepts a multipart/form-data upload with a single "file" field.
+ * Expected CSV columns: name,description,category,location,walletAddress,goalXLM,co2PerXLM
+ *
+ * @returns { { imported: number, failed: number, errors: Array<{ row: number, error: string }> } }
+ */
+router.post("/projects/import", adminRequired, upload.single("file"), async (req, res, next) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "CSV file is required as multipart field 'file'" });
+    }
+
+    const csvText = req.file.buffer.toString("utf-8").trim();
+    if (!csvText) {
+      return res.status(400).json({ error: "CSV file is empty" });
+    }
+
+    const rows = parseCSV(csvText);
+    if (rows.length < 2) {
+      return res.status(400).json({ error: "CSV must include a header row and at least one data row" });
+    }
+
+    const header = rows[0].map((h) => h.trim());
+    const expectedColumns = ["name", "description", "category", "location", "walletAddress", "goalXLM", "co2PerXLM"];
+
+    // Validate header row
+    const missingCols = expectedColumns.filter((col) => !header.includes(col));
+    if (missingCols.length > 0) {
+      return res.status(400).json({
+        error: `Missing required CSV columns: ${missingCols.join(", ")}. Expected: ${expectedColumns.join(", ")}`,
+      });
+    }
+
+    const idx = {};
+    for (const col of expectedColumns) {
+      idx[col] = header.indexOf(col);
+    }
+
+    const imported = [];
+    const errors = [];
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 1; // 1-based in CSV (row 1 = header)
+      const rowErrors = [];
+
+      const name = (row[idx.name] || "").trim();
+      const description = (row[idx.description] || "").trim();
+      const category = (row[idx.category] || "").trim();
+      const location = (row[idx.location] || "").trim();
+      const walletAddress = (row[idx.walletAddress] || "").trim();
+      const goalXLM = (row[idx.goalXLM] || "").trim();
+      const co2PerXLM = (row[idx.co2PerXLM] || "").trim();
+
+      // Validate
+      if (!name || name.length < 3 || name.length > 120) {
+        rowErrors.push(`name must be 3-120 characters (got "${name.slice(0, 30)}")`);
+      }
+      if (!description || description.length < 10 || description.length > 5000) {
+        rowErrors.push(`description must be 10-5000 characters`);
+      }
+      if (!category || !VALID_CATEGORIES.includes(category)) {
+        rowErrors.push(`category must be one of: ${VALID_CATEGORIES.join(", ")} (got "${category}")`);
+      }
+      if (!location || location.length < 2 || location.length > 200) {
+        rowErrors.push(`location must be 2-200 characters`);
+      }
+      if (!walletAddress) {
+        rowErrors.push("walletAddress is required");
+      } else if (!STELLAR_PUBLIC_KEY_RE.test(walletAddress)) {
+        rowErrors.push(`walletAddress must be a valid Stellar public key (starts with G, 56 chars): "${walletAddress.slice(0, 12)}..."`);
+      }
+      const goal = Number.parseFloat(goalXLM);
+      if (!goalXLM || !Number.isFinite(goal) || goal < 0) {
+        rowErrors.push(`goalXLM must be a non-negative number (got "${goalXLM}")`);
+      }
+      const co2 = Number.parseFloat(co2PerXLM);
+      if (!co2PerXLM || !Number.isFinite(co2) || co2 < 0) {
+        rowErrors.push(`co2PerXLM must be a non-negative number (got "${co2PerXLM}")`);
+      }
+
+      if (rowErrors.length > 0) {
+        errors.push({ row: rowNum, error: rowErrors.join("; ") });
+        continue;
+      }
+
+      // Insert
+      try {
+        const id = uuid();
+        await pool.query(
+          `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, co2_per_xlm)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [id, name, description, category, location, walletAddress, goal.toFixed(7), co2.toFixed(7)],
+        );
+        imported.push(id);
+      } catch (dbErr) {
+        errors.push({ row: rowNum, error: `Database error: ${dbErr.message}` });
+      }
+    }
+
+    logAdminAction({
+      actor: req.admin?.sub || "unknown",
+      action: "admin.projects.import",
+      targetType: "project",
+      targetId: "csv-import",
+      metadata: { imported: imported.length, failed: errors.length, totalRows: rows.length - 1 },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        imported: imported.length,
+        failed: errors.length,
+        errors,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * Simple CSV parser that handles quoted fields and commas.
+ *
+ * @param {string} text - Raw CSV content.
+ * @returns {string[][]} Array of rows, each row an array of column values.
+ */
+function parseCSV(text) {
+  const rows = [];
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const fields = [];
+    let current = "";
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === "," && !inQuotes) {
+        fields.push(current.trim());
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    fields.push(current.trim());
+    rows.push(fields);
+  }
+  return rows;
+}
 
 module.exports = router;
