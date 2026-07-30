@@ -122,7 +122,7 @@ function buildDigestText({ project, stats, milestones, updates, projectUrl, mont
   return lines.join("\n");
 }
 
-// ── Email sender (batched, same Resend convention as email.js) ───────────────
+// ── Email sender (individual BCC sends to protect subscriber privacy) ────────
 
 async function sendDigestEmails({ project, stats, milestones, updates, emails, monthLabel }) {
   if (!RESEND_API_KEY) {
@@ -136,9 +136,7 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
   const html       = buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel });
   const text       = buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel });
 
-  const BATCH = 50;
-  for (let i = 0; i < emails.length; i += BATCH) {
-    const batch = emails.slice(i, i + BATCH);
+  for (const email of emails) {
     try {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
@@ -146,14 +144,14 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
           Authorization: `Bearer ${RESEND_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ from: FROM_ADDRESS, to: batch, subject, html, text }),
+        body: JSON.stringify({ from: FROM_ADDRESS, to: [FROM_ADDRESS], bcc: [email], subject, html, text }),
       });
       if (!res.ok) {
         const body = await res.text();
-        logger.error({ event: "digest_resend_error", projectId: project.id, batch: i / BATCH + 1 }, body);
+        logger.error({ event: "digest_resend_error", projectId: project.id, email }, body);
       }
     } catch (err) {
-      logger.error({ event: "digest_fetch_error", projectId: project.id, err }, err.message);
+      logger.error({ event: "digest_fetch_error", projectId: project.id, email, err }, err.message);
     }
   }
 }
