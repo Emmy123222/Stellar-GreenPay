@@ -1031,6 +1031,50 @@ router.post("/:id/generate-summary", async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/:id/summary-status
+ *
+ * Polling endpoint for AI summary status after triggering generation.
+ * Returns:
+ * {
+ *   "status": "queued" | "ready" | "failed",
+ *   "aiSummary": "...",
+ *   "aiSummaryGeneratedAt": "2025-01-01T00:00:00Z",
+ *   "aiSummaryModel": "claude-haiku-4-5"
+ * }
+ */
+router.get("/:id/summary-status", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query(
+      "SELECT ai_summary, ai_summary_generated_at, ai_summary_model FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    const project = projectResult.rows[0];
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    if (project.ai_summary) {
+      return res.json({
+        status: "ready",
+        aiSummary: project.ai_summary,
+        aiSummaryGeneratedAt: project.ai_summary_generated_at
+          ? new Date(project.ai_summary_generated_at).toISOString()
+          : null,
+        aiSummaryModel: project.ai_summary_model || null,
+      });
+    }
+
+    res.json({
+      status: "queued",
+      aiSummary: null,
+      aiSummaryGeneratedAt: null,
+      aiSummaryModel: null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+/**
  * Create a new donation-matching offer for a project.
  *
  * @route POST /api/projects/:id/matching

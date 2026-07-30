@@ -765,3 +765,71 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.data.onChainVerified).toBe(true);
   });
 });
+
+describe("GET /api/projects/:id/summary-status", () => {
+  let app;
+  const projectId = "proj-1";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+  });
+
+  test("returns queued status when ai_summary is null", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: null,
+          ai_summary_generated_at: null,
+          ai_summary_model: null,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "queued",
+      aiSummary: null,
+      aiSummaryGeneratedAt: null,
+      aiSummaryModel: null,
+    });
+  });
+
+  test("returns ready status with summary details when ai_summary is present", async () => {
+    const generatedAt = new Date().toISOString();
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: "This is an AI summary.",
+          ai_summary_generated_at: generatedAt,
+          ai_summary_model: "claude-haiku-4-5",
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "ready",
+      aiSummary: "This is an AI summary.",
+      aiSummaryGeneratedAt: new Date(generatedAt).toISOString(),
+      aiSummaryModel: "claude-haiku-4-5",
+    });
+  });
+});
+
