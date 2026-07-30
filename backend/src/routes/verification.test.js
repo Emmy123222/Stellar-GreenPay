@@ -12,6 +12,7 @@ jest.mock("../middleware/rateLimiter", () => ({
 jest.mock("../services/email", () => ({
   sendUpdateNotifications: jest.fn().mockResolvedValue(undefined),
   sendAdminVerificationNotification: jest.fn().mockResolvedValue(undefined),
+  sendVerificationStatusNotification: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../services/storage", () => ({
@@ -293,5 +294,74 @@ describe("PATCH /api/verification-requests/:id/status (admin)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ status: "shipped" });
     expect(res.status).toBe(400);
+  });
+
+  test("sends status-change email on transition to in_review", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "pending" }] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MOCK_DB_ROW, status: "in_review", reviewer_notes: "Looking into this now." }],
+      });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "in_review", reviewerNotes: "Looking into this now." });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setImmediate(r));
+    expect(email.sendVerificationStatusNotification).toHaveBeenCalledTimes(1);
+    const [notifiedRow, notifiedStatus] = email.sendVerificationStatusNotification.mock.calls[0];
+    expect(notifiedStatus).toBe("in_review");
+    expect(notifiedRow.contactEmail).toBe(MOCK_DB_ROW.contact_email);
+  });
+
+  test("sends status-change email on transition to approved", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MOCK_DB_ROW, status: "approved", reviewer_notes: "Great project!" }],
+      });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "approved", reviewerNotes: "Great project!" });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setImmediate(r));
+    expect(email.sendVerificationStatusNotification).toHaveBeenCalledTimes(1);
+    expect(email.sendVerificationStatusNotification.mock.calls[0][1]).toBe("approved");
+  });
+
+  test("sends status-change email on transition to rejected", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MOCK_DB_ROW, status: "rejected", reviewer_notes: "Insufficient documentation." }],
+      });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "rejected", reviewerNotes: "Insufficient documentation." });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setImmediate(r));
+    expect(email.sendVerificationStatusNotification).toHaveBeenCalledTimes(1);
+    expect(email.sendVerificationStatusNotification.mock.calls[0][1]).toBe("rejected");
+  });
+
+  test("does not send email when transitioning back to pending", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "rejected" }] })
+      .mockResolvedValueOnce({
+        rows: [{ ...MOCK_DB_ROW, status: "pending" }],
+      });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "pending" });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setImmediate(r));
+    expect(email.sendVerificationStatusNotification).not.toHaveBeenCalled();
   });
 });
