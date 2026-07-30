@@ -129,6 +129,17 @@ pub struct VoteProposal {
     pub resolved: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VerificationStatus {
+    pub has_proposal: bool,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub deadline_ledger: u32,
+    pub resolved: bool,
+    pub approved: bool,
+}
+
 /// Aggregated platform-wide counters returned by `get_global_stats`.
 ///
 /// Bundles the four values that the landing page hero section needs in a
@@ -935,6 +946,30 @@ impl GreenPayContract {
             .instance()
             .get(&DataKey::Proposal(project_id))
             .expect("Proposal not found")
+    }
+
+    pub fn get_verification_status(env: Env, project_id: String) -> VerificationStatus {
+        if env.storage().instance().has(&DataKey::Proposal(project_id.clone())) {
+            let proposal: VoteProposal = env.storage().instance().get(&DataKey::Proposal(project_id)).unwrap();
+            let approved = proposal.resolved && proposal.votes_for > proposal.votes_against;
+            VerificationStatus {
+                has_proposal: true,
+                votes_for: proposal.votes_for,
+                votes_against: proposal.votes_against,
+                deadline_ledger: proposal.deadline_ledger,
+                resolved: proposal.resolved,
+                approved,
+            }
+        } else {
+            VerificationStatus {
+                has_proposal: false,
+                votes_for: 0,
+                votes_against: 0,
+                deadline_ledger: 0,
+                resolved: false,
+                approved: false,
+            }
+        }
     }
 
     /// Returns the list of voter addresses for a proposal.
