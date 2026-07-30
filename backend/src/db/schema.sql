@@ -170,6 +170,24 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- recurring_donations: recurring donation schedules set by donors.
+-- next_due_date is calculated from the schedule when the donation is created
+-- or renewed; the recurring-donation queue polls this column daily.
+CREATE TABLE IF NOT EXISTS recurring_donations (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  donor_address TEXT NOT NULL,
+  amount_xlm NUMERIC(20, 7) NOT NULL,
+  frequency TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly', 'biweekly', 'monthly')),
+  next_due_date TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_donations_next_due
+  ON recurring_donations (next_due_date)
+  WHERE status = 'active';
+
 -- project_follows: many-to-many join between projects and device_tokens.
 -- A device "follows" a project to receive push notifications.
 -- UNIQUE(project_id, device_token_id) prevents duplicate follows.
