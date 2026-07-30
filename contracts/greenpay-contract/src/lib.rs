@@ -175,6 +175,8 @@ pub enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    // Contract version for upgrade tracking
+    ContractVersion,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -194,6 +196,8 @@ const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 // Upper bound on co2_per_xlm at registration — prevents donate-time CO₂ overflow
 // panics and misleading impact figures from misconfigured projects.
 const MAX_CO2_PER_XLM: u32 = 100_000;
+
+const CONTRACT_VERSION: &str = "1.0.0";
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -232,6 +236,9 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::GlobalCO2OffsetGrams, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &String::from_str(&env, CONTRACT_VERSION));
     }
 
     // ─── Project management ───────────────────────────────────────────────────
@@ -659,6 +666,13 @@ impl GreenPayContract {
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized")
+    }
+
+    pub fn get_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
     // ─── Placeholders ─────────────────────────────────────────────────────────
