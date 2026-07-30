@@ -1,7 +1,13 @@
 /**
  * lib/stellar.ts — Stellar SDK helpers for GreenPay
+ *
+ * Utilities for interacting with the Stellar network (Horizon) and Soroban (RPC)
+ * from the frontend.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon
+ * @see https://soroban.stellar.org/docs
  */
-import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account } from "@stellar/stellar-sdk";
+import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account, xdr } from "@stellar/stellar-sdk";
 
 export const NETWORK = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -15,6 +21,15 @@ export const CONTRACT_ID = process.env.NEXT_PUBLIC_CONTRACT_ID || "";
 /** Soroban escrow contract (deploy `contracts/escrow-contract`). */
 export const ESCROW_CONTRACT_ID = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID || "";
 
+/**
+ * Fetch an account's native XLM balance using Horizon.
+ *
+ * @param publicKey - Stellar account public key.
+ * @returns XLM balance as a string (decimal).
+ * @throws If the account does not exist, is not funded, or Horizon is unreachable.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon/api-reference/resources/accounts
+ */
 export async function getXLMBalance(publicKey: string): Promise<string> {
   try {
     const account = await server.loadAccount(publicKey);
@@ -29,6 +44,12 @@ export async function getXLMBalance(publicKey: string): Promise<string> {
  * Funds a testnet account via Stellar Friendbot.
  * Returns the credited XLM balance after funding.
  * Only works on testnet — throws on mainnet.
+ *
+ * @param publicKey - Stellar account public key to fund.
+ * @returns The account's XLM balance after funding.
+ * @throws If called on mainnet, the request fails, or the account is already funded.
+ *
+ * @see https://friendbot.stellar.org
  */
 export async function getFriendBotFunding(publicKey: string): Promise<string> {
   if (NETWORK === "mainnet") {
@@ -50,6 +71,15 @@ export async function getFriendBotFunding(publicKey: string): Promise<string> {
   return getXLMBalance(publicKey);
 }
 
+/**
+ * Fetch a non-native asset balance (e.g., USDC) for an account.
+ *
+ * @param publicKey - Stellar account public key.
+ * @param assetCode - Asset code (e.g., "USDC").
+ * @param assetIssuer - Issuer account public key.
+ * @returns Balance string, or `null` when the trustline is missing.
+ * @throws If the account does not exist, is not funded, or Horizon is unreachable.
+ */
 export async function getAssetBalance(publicKey: string, assetCode: string, assetIssuer: string): Promise<string | null> {
   try {
     const account = await server.loadAccount(publicKey);
@@ -62,6 +92,29 @@ export async function getAssetBalance(publicKey: string, assetCode: string, asse
   }
 }
 
+/**
+ * Build an unsigned payment transaction for a donation (native XLM or a custom asset).
+ *
+ * @param params - Transaction builder parameters.
+ * @param params.fromPublicKey - Source account public key (donor).
+ * @param params.toPublicKey - Destination account public key (project).
+ * @param params.amount - Amount as a decimal string.
+ * @param params.memo - Optional text memo (trimmed to 28 chars).
+ * @param params.asset - Optional asset. Omit to send native XLM.
+ * @returns Unsigned Stellar transaction ready to be signed by the wallet.
+ * @throws If Horizon fails to load the source account or parameters are invalid.
+ *
+ * @example
+ * const tx = await buildDonationTransaction({
+ *   fromPublicKey: "G...DONOR...",
+ *   toPublicKey: "G...PROJECT...",
+ *   amount: "5",
+ *   memo: "GreenPay donation",
+ * });
+ * // Sign and submit with your wallet provider.
+ *
+ * @see https://developers.stellar.org/docs/data/horizon/api-reference/resources/accounts
+ */
 export async function buildDonationTransaction({
   fromPublicKey, toPublicKey, amount, memo, asset,
 }: { fromPublicKey: string; toPublicKey: string; amount: string; memo?: string; asset?: { code: string; issuer?: string } }) {
@@ -78,6 +131,18 @@ export async function buildDonationTransaction({
 /**
  * Builds a Soroban contract donation transaction.
  * Invokes the contract's donate() function which transfers XLM and records the donation on-chain.
+ *
+ * @param params - Contract call parameters.
+ * @param params.contractId - Target Soroban contract id.
+ * @param params.tokenAddress - Token contract address (for token-based donations).
+ * @param params.donor - Donor Stellar public key.
+ * @param params.projectId - Project id (string) recorded by the contract.
+ * @param params.amount - Amount as a decimal string in XLM units.
+ * @param params.msgHash - Message hash (u32) recorded by the contract.
+ * @returns Unsigned assembled transaction ready to be signed by the wallet.
+ * @throws If simulation fails, the account is unfunded, or the contract rejects the call.
+ *
+ * @see https://soroban.stellar.org/docs
  */
 export async function buildContractDonationTransaction({
   contractId,
@@ -133,8 +198,152 @@ export async function buildContractDonationTransaction({
 }
 
 /**
+ * Maps the frontend `BadgeTier` strings (lowercase, used across the UI and the
+ * off-chain API) to the on-chain `BadgeTier` enum variant names used by the
+ * GreenPay Soroban contract (`Seedling | Tree | Forest | EarthGuardian`).
+ */
+export const CONTRACT_BADGE_SYMBOL: Record<string, string> = {
+  seedling: "Seedling",
+  tree: "Tree",
+  forest: "Forest",
+  earth: "EarthGuardian",
+};
+
+/**
+ * Builds the Soroban ScVal for a `BadgeTier` unit-variant enum value.
+ * Soroban serialises a unit (data-less) enum variant as a Vec containing a
+ * single Symbol with the variant's name.
+ */
+function badgeTierToScVal(tier: string) {
+  const variant = CONTRACT_BADGE_SYMBOL[tier];
+  if (!variant) {
+    throw new Error(`Unknown badge tier "${tier}". Cannot mint Impact NFT.`);
+  }
+  return xdr.ScVal.scvVec([nativeToScVal(variant, { type: "symbol" })]);
+}
+
+/**
+ * Builds a Soroban transaction that calls `mint_impact_nft(donor, tier)` on the
+ * GreenPay contract. The `donor` account authorises and pays for the mint, and
+ * `tier` must match the donor's current on-chain badge tier (enforced by the
+ * contract). Pass the lowercase frontend tier string (e.g. "seedling").
+ */
+export async function buildMintImpactNftTransaction({
+  contractId,
+  donor,
+  tier,
+}: {
+  contractId: string;
+  donor: string;
+  tier: string;
+}) {
+  if (!contractId.trim()) {
+    throw new Error(
+      "GreenPay contract is not configured (set NEXT_PUBLIC_CONTRACT_ID).",
+    );
+  }
+  const source = await server.loadAccount(donor);
+  const contract = new Contract(contractId);
+  const donorAddr = new Address(donor);
+
+  const tx = new TransactionBuilder(source, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call("mint_impact_nft", donorAddr.toScVal(), badgeTierToScVal(tier)),
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    return rpc.assembleTransaction(tx, simulated).build();
+  }
+  throw formatMintSimulationFailure(simulated);
+}
+
+/** Maps Soroban `mint_impact_nft` simulation errors to user-facing messages. */
+export function formatMintSimulationFailure(simulated: unknown): Error {
+  const raw = JSON.stringify(simulated);
+  if (raw.includes("NFT already minted for this tier")) {
+    return new Error("You have already claimed the Impact NFT for this tier.");
+  }
+  if (raw.includes("No badge tier reached yet")) {
+    return new Error("No badge tier reached yet — donate more to unlock an Impact NFT.");
+  }
+  if (raw.includes("Tier does not match donor's current badge")) {
+    return new Error("This tier no longer matches your on-chain badge. Refresh and try again.");
+  }
+  if (raw.includes("Cannot mint NFT for None tier")) {
+    return new Error("There is no badge tier to claim yet.");
+  }
+  if (/underfunded|insufficient/i.test(raw) && /balance|fee|Fund/i.test(raw)) {
+    return new Error(
+      "Insufficient XLM to pay Soroban fees. Add test XLM to this account and try again.",
+    );
+  }
+  if (raw.includes("HostError") || raw.includes("VmValidation")) {
+    return new Error(
+      "The contract rejected this mint. Check the network (testnet/mainnet) and contract ID.",
+    );
+  }
+  return new Error(
+    "Could not simulate mint_impact_nft. Verify NEXT_PUBLIC_CONTRACT_ID and that your badge tier is recorded on-chain.",
+  );
+}
+
+/**
+ * Submits a signed Soroban contract transaction via the Soroban RPC server and
+ * polls until it is applied. Returns the transaction hash and the ledger it was
+ * included in (the "mint ledger" for an NFT mint). Unlike {@link submitTransaction}
+ * (which targets Horizon and is unsuitable for contract invocations), this uses
+ * the RPC `sendTransaction` / `getTransaction` flow.
+ */
+export async function submitSorobanTransaction(
+  signedXDR: string,
+  { timeoutMs = 30000, intervalMs = 1500 }: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<{ hash: string; ledger: number }> {
+  const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
+  const sent = await rpcServer.sendTransaction(tx);
+
+  if (sent.status === "ERROR") {
+    throw new Error(
+      `Transaction submission failed: ${JSON.stringify(sent.errorResult ?? sent)}`,
+    );
+  }
+
+  const hash = sent.hash;
+  const deadline = Date.now() + timeoutMs;
+
+  // Poll the RPC until the transaction is applied (SUCCESS) or fails.
+  while (Date.now() < deadline) {
+    const result = await rpcServer.getTransaction(hash);
+    if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+      return { hash, ledger: result.ledger };
+    }
+    if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+      throw new Error("Transaction failed on-chain. The mint was not completed.");
+    }
+    // NOT_FOUND — still pending; wait and retry.
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(
+    "Timed out waiting for the mint transaction to confirm. Check the explorer with the transaction hash.",
+  );
+}
+
+/**
  * Builds a Soroban transaction that calls `release_escrow(client, job_id)` on the escrow contract.
  * The client account must match the job’s client and must have funded this job via `create_job` on-chain.
+ *
+ * @param params - Escrow release parameters.
+ * @param params.contractId - Escrow contract id.
+ * @param params.jobId - Job id used when the job was created on-chain.
+ * @param params.clientAddress - Client (payer) Stellar public key.
+ * @returns Unsigned assembled transaction ready to be signed by the wallet.
+ * @throws If the escrow contract is not configured, simulation fails, or the contract rejects the call.
  */
 export async function buildReleaseEscrowTransaction({
   contractId,
@@ -202,6 +411,13 @@ export async function buildMilestoneTransaction({
 }
 
 /** Maps Soroban simulation errors to short, user-facing messages. */
+/**
+ * Convert a Soroban simulation result into a user-friendly `Error`.
+ *
+ * @param simulated - RPC simulation response (success or failure).
+ * @returns An `Error` describing the likely cause.
+ * @throws Never; this function always returns an `Error` instance.
+ */
 export function formatSimulationFailure(simulated: unknown): Error {
   const raw = JSON.stringify(simulated);
   if (/underfunded|insufficient/i.test(raw) && /balance|fee|Fund/i.test(raw)) {
@@ -231,6 +447,13 @@ export function formatSimulationFailure(simulated: unknown): Error {
 }
 
 /** Maps Horizon submission errors to user-friendly text. */
+/**
+ * Convert a Horizon submission error into a short user-facing message.
+ *
+ * @param err - Error thrown by `server.submitTransaction`.
+ * @returns Friendly error text.
+ * @throws Never; this function always returns a string.
+ */
 export function formatTransactionError(err: unknown): string {
   const e = err as {
     response?: {
@@ -261,6 +484,13 @@ export function formatTransactionError(err: unknown): string {
   return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;
 }
 
+/**
+ * Submit a signed transaction XDR to Horizon.
+ *
+ * @param signedXDR - Signed transaction XDR (base64).
+ * @returns Horizon submission response.
+ * @throws If Horizon rejects the transaction; the error message is formatted for display.
+ */
 export async function submitTransaction(signedXDR: string) {
   const tx = new Transaction(signedXDR, NETWORK_PASSPHRASE);
   try {
@@ -270,16 +500,44 @@ export async function submitTransaction(signedXDR: string) {
   }
 }
 
-export function isValidStellarAddress(a: string): boolean { return /^G[A-Z0-9]{55}$/.test(a); }
+/**
+ * Validate a Stellar account public key (G...).
+ *
+ * @param a - Candidate public key string.
+ * @returns `true` if the string matches the basic public-key format.
+ * @throws Never.
+ */
+export function isValidStellarAddress(a: string): boolean {
+  return /^G[A-Z0-9]{55}$/.test(a);
+}
+
+/**
+ * Build a Stellar Expert transaction URL for the current network.
+ *
+ * @param hash - Transaction hash.
+ * @returns Explorer URL.
+ * @throws Never.
+ */
 export function explorerUrl(hash: string): string {
   return `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}/tx/${hash}`;
 }
+
+/**
+ * Build a Stellar Expert account URL for the current network.
+ *
+ * @param addr - Account public key.
+ * @returns Explorer URL.
+ * @throws Never.
+ */
 export function accountUrl(addr: string): string {
   return `https://stellar.expert/explorer/${NETWORK === "mainnet" ? "public" : "testnet"}/account/${addr}`;
 }
 
 /**
  * Queries the Soroban contract for global impact metrics.
+ *
+ * @returns Global impact metrics. Returns zeroed values when the contract is not configured or on errors.
+ * @throws Never; errors are caught and converted to zeroed values.
  */
 export async function getGlobalImpactStats() {
   if (!CONTRACT_ID) {
@@ -310,6 +568,10 @@ export async function getGlobalImpactStats() {
 
 /**
  * Queries the contract for donor statistics including badge tier.
+ *
+ * @param donorAddress - Donor Stellar public key.
+ * @returns Donor stats, or `null` when the contract is not configured or on errors.
+ * @throws Never; errors are caught and converted to `null`.
  */
 export async function getDonorStats(donorAddress: string) {
   if (!CONTRACT_ID) {
@@ -337,6 +599,10 @@ export async function getDonorStats(donorAddress: string) {
 /**
  * Simple djb2 hash function for donation messages.
  * Returns a 32-bit unsigned integer hash.
+ *
+ * @param message - Message to hash.
+ * @returns Unsigned 32-bit hash.
+ * @throws Never.
  */
 export function hashMessage(message: string): number {
   let hash = 5381;
@@ -350,6 +616,12 @@ export function hashMessage(message: string): number {
 /**
  * Stream real-time payments to a wallet address using Horizon SSE.
  * Returns a cleanup function to close the stream.
+ *
+ * @param walletAddress - Account to stream payments for.
+ * @param onPayment - Callback invoked for each matching payment event.
+ * @param cursor - Optional cursor value; defaults to "now".
+ * @returns Cleanup function to stop streaming.
+ * @throws Never; stream errors are surfaced via the Horizon SDK `onerror` callback.
  */
 export function streamProjectPayments(
   walletAddress: string,

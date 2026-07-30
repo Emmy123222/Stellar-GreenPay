@@ -103,6 +103,8 @@ export default function LeaderboardScreen() {
                 router.push(`/profile/${entry.publicKey}` as `${string}`)
               }
               style={[styles.row, isCurrentUser && styles.rowHighlighted]}
+              accessibilityLabel={`View profile of ${entry.displayName ?? entry.publicKey.slice(0, 6)}, donated ${parseFloat(entry.totalDonatedXLM).toFixed(2)} XLM`}
+              accessibilityRole="button"
             >
               <Text style={styles.rankText}>
                 {RANK_MEDALS[entry.rank] ?? `#${entry.rank}`}

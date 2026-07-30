@@ -14,6 +14,7 @@ jest.mock('expo-router', () => ({
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
 import ProjectsScreen from '../app/projects/index';
+import { ThemeProvider } from '../app/theme';
 
 const MOCK_PROJECTS = [
   {
@@ -40,7 +41,7 @@ describe('ProjectsScreen — offline support', () => {
     (AsyncStorage.getItem as jest.Mock).mockResolvedValue(entry);
     (axios.get as jest.Mock).mockRejectedValue(new Error('Network Error'));
 
-    const { getByText } = render(<ProjectsScreen />);
+    const { getByText } = render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
 
     await waitFor(() => {
       expect(getByText('Amazon Reforestation')).toBeTruthy();
@@ -51,7 +52,7 @@ describe('ProjectsScreen — offline support', () => {
   it('does not show Offline banner when network succeeds', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
 
-    const { queryByText } = render(<ProjectsScreen />);
+    const { queryByText } = render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
 
     await waitFor(() => {
       expect(queryByText('Offline — showing cached data')).toBeNull();
@@ -62,7 +63,7 @@ describe('ProjectsScreen — offline support', () => {
   it('writes fresh data to cache on successful load', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
 
-    render(<ProjectsScreen />);
+    render(<ThemeProvider><ProjectsScreen /></ThemeProvider>);
 
     await waitFor(() => {
       expect(AsyncStorage.setItem).toHaveBeenCalledWith(

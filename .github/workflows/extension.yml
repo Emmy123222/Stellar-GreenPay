@@ -1,65 +1,65 @@
-name: Build and Release Extension
+name: Extension CI
 
 on:
   push:
-    tags:
-      - 'v*'
+    paths:
+      - 'extension/**'
+    branches: [main, develop]
+  pull_request:
+    paths:
+      - 'extension/**'
+    branches: [main]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    defaults:
+      run:
+        working-directory: extension
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Derive version from tag
+        id: version
         run: |
-          cd extension
-          npm install
+          TAG="${GITHUB_REF_NAME}"
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}"
+          else
+            echo "Tag '$TAG' must be in the form v1.2.3" >&2
+            exit 1
+          fi
 
-      - name: Build extension
-        run: |
-          cd extension
-          npm run build
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          export VERSION
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Create distribution package
-        run: |
-          cd extension
-          mkdir -p greenpay-extension
-          cp manifest.json popup.html popup.css greenpay-extension/
-          cp -r dist greenpay-extension/
-          zip -r greenpay-extension.zip greenpay-extension/
+          manifest_path = Path("extension/manifest.json")
+          data = json.loads(manifest_path.read_text())
+          data["version"] = os.environ["VERSION"]
+          manifest_path.write_text(json.dumps(data, indent=2) + "\n")
+          PY
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - uses: actions/setup-node@v4
         with:
-          files: extension/greenpay-extension.zip
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: extension/package-lock.json
 
-      - name: Build Firefox version
-        run: |
-          cd extension
-          npm run build:firefox
+      - run: npm ci
 
-      - name: Create Firefox distribution
-        run: |
-          cd extension
-          mkdir -p greenpay-extension-firefox
-          cp manifest.firefox.json greenpay-extension-firefox/manifest.json
-          cp popup.html popup.css greenpay-extension-firefox/
-          cp -r dist-firefox greenpay-extension-firefox/dist
-          zip -r greenpay-extension-firefox.zip greenpay-extension-firefox/
+      - run: npm run build
 
-      - name: Upload Firefox artifact
-        uses: actions/upload-artifact@v3
+      - name: Verify build output
+        run: test -f dist/content-script.js
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: greenpay-extension-firefox
-          path: extension/greenpay-extension-firefox.zip
+          name: extension-dist
+          path: extension/dist/
+          retention-days: 7

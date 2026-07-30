@@ -76,7 +76,7 @@ function DonationCard({
         </View>
       </View>
 
-      <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.7}>
+      <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.7} accessibilityLabel={`Cancel recurring donation to ${donation.projectName}`} accessibilityRole="button">
         <Text style={styles.cancelBtnText}>Cancel</Text>
       </TouchableOpacity>
     </View>
