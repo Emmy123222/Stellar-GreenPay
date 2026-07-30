@@ -23,7 +23,7 @@ function buildApp() {
   const app = express();
   app.use(express.json());
 
-  const io = { to: () => ({ emit: jest.fn() }) };
+  const io = { to: () => ({ emit: jest.fn() }), emit: jest.fn() };
   app.set("io", io);
 
   app.use("/api/donations", donationsRouter);
@@ -80,14 +80,16 @@ describe("POST /api/donations", () => {
 
   test("records a valid donation", async () => {
     createMockClient(
-      { rows: [MOCK_PROJECT] },
-      { rows: [] },
-      { rows: [MOCK_DONATION_ROW] },
-      { rows: [] },
-      { rows: [] },
-      undefined,
-      { rows: [{ ...MOCK_DONATION_ROW, total_donated_xlm: 100 }] },
-      { rows: [] },
+      { rows: [MOCK_PROJECT] },                             // 1. find project
+      { rows: [] },                                          // 2. dedup check
+      undefined,                                             // 3. BEGIN
+      { rows: [MOCK_DONATION_ROW] },                         // 4. INSERT donation
+      { rows: [] },                                          // 5. matching offers
+      { rows: [] },                                          // 6. UPDATE project totals
+      { rows: [] },                                          // 7. find existing profile
+      { rows: [{ count: 1 }] },                             // 8. count projects supported
+      undefined,                                             // 9. INSERT INTO profiles (upsert)
+      undefined,                                             // 10. COMMIT
     );
 
     const res = await request(app)
@@ -100,7 +102,7 @@ describe("POST /api/donations", () => {
         message: "Great project!",
         transactionHash: makeTxHash(),
       })
-      .expect(200);
+      .expect(201);
 
     expect(res.body.success).toBe(true);
   });
@@ -166,7 +168,7 @@ describe("POST /api/donations", () => {
   });
 
   test("rejects zero amount", async () => {
-    createMockClient({ rows: [MOCK_PROJECT] });
+    createMockClient({ rows: [MOCK_PROJECT] }, undefined, undefined);
 
     const res = await request(app)
       .post("/api/donations")
@@ -182,7 +184,7 @@ describe("POST /api/donations", () => {
   });
 
   test("rejects negative amount", async () => {
-    createMockClient({ rows: [MOCK_PROJECT] });
+    createMockClient({ rows: [MOCK_PROJECT] }, undefined, undefined);
 
     const res = await request(app)
       .post("/api/donations")
