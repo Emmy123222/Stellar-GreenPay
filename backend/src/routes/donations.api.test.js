@@ -16,6 +16,7 @@ jest.mock("../services/redis", () => ({
 
 const pool = require("../db/pool");
 const express = require("express");
+const http = require("http");
 const request = require("supertest");
 const donationsRouter = require("./donations");
 
@@ -250,5 +251,46 @@ describe("GET /api/donations/donor/:publicKey", () => {
     await request(app)
       .get("/api/donations/donor/invalid")
       .expect(400);
+  });
+});
+
+describe("GET /api/donations/stream", () => {
+  test("opens an SSE stream with initial donation events", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
+
+    const app = buildApp();
+    const server = http.createServer(app);
+
+    await new Promise((resolve, reject) => {
+      server.listen(0, () => resolve(undefined));
+      server.on("error", reject);
+    });
+
+    const port = server.address().port;
+
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const req = http.get({ port, path: "/api/donations/stream" }, (res) => {
+          let chunks = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            chunks += chunk;
+            if (chunks.includes("event: initial")) {
+              req.destroy();
+              resolve({ statusCode: res.statusCode, body: chunks, headers: res.headers });
+            }
+          });
+          res.on("error", reject);
+        });
+        req.on("error", reject);
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/event-stream");
+      expect(response.body).toContain("event: initial");
+      expect(response.body).toContain("Great project!");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

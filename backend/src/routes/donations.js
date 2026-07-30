@@ -11,6 +11,30 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { computeBadges, mapDonationRow } = require("../services/store");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
+const donationStreamSubscribers = new Set();
+
+function formatDonationStreamPayload(donation) {
+  return {
+    ...donation,
+    projectName: donation.projectName || null,
+  };
+}
+
+function emitDonationStreamEvent(eventName, payload) {
+  const eventBody = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
+  for (const subscriber of donationStreamSubscribers) {
+    try {
+      subscriber.write(eventBody);
+    } catch (error) {
+      donationStreamSubscribers.delete(subscriber);
+    }
+  }
+}
+
+function broadcastDonationEvent(donation) {
+  emitDonationStreamEvent("donation", { donation: formatDonationStreamPayload(donation) });
+}
+
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid Stellar public key"); e.status = 400; throw e; }
 }
@@ -31,8 +55,9 @@ async function recordDonation(req, res, next) {
 
     client = await pool.connect();
 
-    const projectResult = await client.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await client.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const project = projectResult.rows[0] || {};
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
@@ -138,7 +163,7 @@ async function recordDonation(req, res, next) {
        WHERE donor_address = $1`,
       [donorAddress],
     );
-    const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0].count, 10) || 0;
+    const projectsSupported = Number.parseInt(projectsSupportedResult.rows?.[0]?.count, 10) || 0;
     const badges = computeBadges(newTotal);
 
     await client.query(
@@ -173,20 +198,31 @@ async function recordDonation(req, res, next) {
       txHash: transactionHash,
     }, "Donation recorded");
 
+    const donationRow = donationResult?.rows?.[0] || {};
     const io = req.app?.get("io");
-    if (io) {
+    if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
         donorAddress,
-        amountXLM: donationResult.rows[0].amount_xlm,
+        amountXLM: donationRow.amount_xlm ?? parsedAmount,
         transactionHash,
         timestamp: new Date().toISOString(),
       });
     }
+    const donationPayload = {
+      ...mapDonationRow({
+        ...donationRow,
+        amount_xlm: donationRow.amount_xlm ?? parsedAmount,
+        amount: donationRow.amount ?? parsedAmount,
+      }),
+      projectName: project?.name || null,
+    };
+    broadcastDonationEvent(donationPayload);
 
-    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
+    res.status(200).json({ success: true, data: donationPayload });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
+    console.error(e);
     next(e);
   } finally {
     if (client) client.release();
@@ -194,6 +230,48 @@ async function recordDonation(req, res, next) {
 }
 
 router.post("/", donationLimiter, recordDonation);
+
+// GET /api/donations/stream
+router.get("/stream", async (req, res, next) => {
+  try {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.write("retry: 1000\n\n");
+
+    const recentDonations = (await pool.query(
+      `SELECT d.*, p.name AS project_name
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       ORDER BY d.created_at DESC
+       LIMIT 10`,
+    )).rows;
+
+    res.write(`event: initial\ndata: ${JSON.stringify({ donations: recentDonations.map((row) => ({
+      ...mapDonationRow(row),
+      projectName: row.project_name || null,
+    })) })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(": keepalive\n\n");
+      }
+    }, 15000);
+
+    const cleanup = () => {
+      clearInterval(heartbeat);
+      donationStreamSubscribers.delete(res);
+    };
+
+    donationStreamSubscribers.add(res);
+    req.on("close", cleanup);
+    req.on("end", cleanup);
+    req.on("aborted", cleanup);
+  } catch (e) {
+    next(e);
+  }
+});
 
 // GET /api/donations/project/:id
 router.get("/project/:projectId/messages", async (req, res, next) => {
