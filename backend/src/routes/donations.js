@@ -187,6 +187,18 @@ async function recordDonation(req, res, next) {
       txHash: transactionHash,
     }, "Donation recorded");
 
+    // Fetch campaign progress for real-time update
+    const projectResult2 = await pool.query(
+      "SELECT goal_xlm, raised_xlm FROM projects WHERE id = $1",
+      [projectId],
+    );
+    const projectRow = projectResult2.rows[0];
+    const campaignGoalXLM = Number(projectRow.goal_xlm);
+    const campaignRaisedXLM = Number(projectRow.raised_xlm);
+    const activeCampaignProgressPercent = campaignGoalXLM > 0
+      ? Math.min(Math.round((campaignRaisedXLM / campaignGoalXLM) * 100), 100)
+      : 0;
+
     const io = req.app?.get("io");
     if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
@@ -195,6 +207,9 @@ async function recordDonation(req, res, next) {
         amountXLM: recordedDonation.amount_xlm,
         transactionHash,
         timestamp: new Date().toISOString(),
+        activeCampaignProgressPercent,
+        campaignGoalXLM,
+        campaignRaisedXLM,
       });
     }
 
