@@ -200,17 +200,8 @@ router.get("/", async (req, res, next) => {
       where.push("verified = true");
     }
     if (search && typeof search === "string") {
-      values.push(`%${search}%`);
-      where.push(`(
-        name ILIKE $${values.length}
-        OR description ILIKE $${values.length}
-        OR location ILIKE $${values.length}
-        OR EXISTS (
-          SELECT 1
-          FROM unnest(tags) AS tag
-          WHERE tag ILIKE $${values.length}
-        )
-      )`);
+      values.push(search.trim());
+      where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
     }
 
     if (cursor) {
@@ -341,8 +332,8 @@ router.post("/", async (req, res, next) => {
 
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($8, ' '), '')))
        RETURNING *`,
       [
         id,
