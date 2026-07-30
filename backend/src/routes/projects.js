@@ -21,6 +21,9 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { z } = require("zod");
+const { sanitizedStringField } = require("../middleware/validation");
+const { validateWebhookUrl } = require("../middleware/ssrf");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -46,9 +49,24 @@ const VALID_CATEGORIES = [
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
 const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
+  name: sanitizedStringField({
+    required: true,
+    minLength: 3,
+    maxLength: 120,
+    message: "must not contain HTML",
+  }),
+  description: sanitizedStringField({
+    required: true,
+    minLength: 10,
+    maxLength: 5000,
+    message: "must not contain HTML",
+  }),
+  location: sanitizedStringField({
+    required: true,
+    minLength: 2,
+    maxLength: 200,
+    message: "must not contain HTML",
+  }),
   category: z.enum(VALID_CATEGORIES),
   wallet_address: z.string().min(1, "wallet_address is required"),
   goal_xlm: z.union([z.string(), z.number()]).optional(),
@@ -329,11 +347,9 @@ router.post("/", async (req, res, next) => {
         .json({ error: "location must be between 2 and 200 characters" });
     }
     if (!category || !VALID_CATEGORIES.includes(category)) {
-      return res
-        .status(400)
-        .json({
-          error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
-        });
+      return res.status(400).json({
+        error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
+      });
     }
     if (!wallet_address || typeof wallet_address !== "string") {
       return res.status(400).json({ error: "wallet_address is required" });
@@ -666,7 +682,7 @@ router.get("/admin/pending", async (req, res, next) => {
     const offset = parseInt(req.query.offset, 10) || 0;
 
     const countResult = await pool.query(
-      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'"
+      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'",
     );
     const total = countResult.rows[0].total;
 
@@ -675,13 +691,13 @@ router.get("/admin/pending", async (req, res, next) => {
        WHERE verified = false AND status = 'active'
        ORDER BY created_at ASC
        LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      [limit, offset],
     );
 
     res.json({
       success: true,
       data: result.rows.map(mapProjectRow),
-      total
+      total,
     });
   } catch (e) {
     next(e);
@@ -698,7 +714,10 @@ router.post("/admin/register", adminRequired, async (req, res) => {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
 
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
-    if (!adminAddress) return res.status(401).json({ success: false, error: "adminAddress is required" });
+    if (!adminAddress)
+      return res
+        .status(401)
+        .json({ success: false, error: "adminAddress is required" });
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
@@ -896,7 +915,10 @@ router.post("/:id/follow", async (req, res, next) => {
       return res.status(400).json({ error: "walletAddress is required" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -938,7 +960,10 @@ router.delete("/:id/follow", async (req, res, next) => {
       return res.status(400).json({ error: "walletAddress is required" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1159,7 +1184,157 @@ router.get("/:id/matching", async (req, res, next) => {
 });
 
 /**
+ * Update project details (including name, description, location, category, webhook_url, webhook_secret, tags).
+ * Enforces HTTPS-only, SSRF protection, and max length for webhook_url.
+ *
+ * @route PATCH /api/projects/:id
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends updated project data.
+ */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const {
+      name,
+      description,
+      location,
+      category,
+      webhook_url,
+      webhook_secret,
+      tags,
+    } = req.body || {};
+
+    if (
+      webhook_url !== undefined &&
+      webhook_url !== null &&
+      webhook_url !== ""
+    ) {
+      const validation = validateWebhookUrl(webhook_url);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error });
+      }
+    }
+
+    const projectResult = await pool.query(
+      "SELECT * FROM projects WHERE id = $1",
+      [projectId],
+    );
+    if (!projectResult || !projectResult.rows || !projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      if (
+        typeof name !== "string" ||
+        name.trim().length < 3 ||
+        name.trim().length > 120
+      ) {
+        return res
+          .status(400)
+          .json({ error: "name must be between 3 and 120 characters" });
+      }
+      values.push(name.trim());
+      updates.push(`name = $${values.length}`);
+    }
+
+    if (description !== undefined) {
+      if (
+        typeof description !== "string" ||
+        description.trim().length < 10 ||
+        description.trim().length > 5000
+      ) {
+        return res
+          .status(400)
+          .json({
+            error: "description must be between 10 and 5000 characters",
+          });
+      }
+      values.push(description.trim());
+      updates.push(`description = $${values.length}`);
+    }
+
+    if (location !== undefined) {
+      if (
+        typeof location !== "string" ||
+        location.trim().length < 2 ||
+        location.trim().length > 200
+      ) {
+        return res
+          .status(400)
+          .json({ error: "location must be between 2 and 200 characters" });
+      }
+      values.push(location.trim());
+      updates.push(`location = $${values.length}`);
+    }
+
+    if (category !== undefined) {
+      if (!VALID_CATEGORIES.includes(category)) {
+        return res
+          .status(400)
+          .json({
+            error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
+          });
+      }
+      values.push(category);
+      updates.push(`category = $${values.length}`);
+    }
+
+    if (webhook_url !== undefined) {
+      const val =
+        webhook_url && typeof webhook_url === "string"
+          ? webhook_url.trim()
+          : null;
+      values.push(val);
+      updates.push(`webhook_url = $${values.length}`);
+    }
+
+    if (webhook_secret !== undefined) {
+      values.push(webhook_secret || null);
+      updates.push(`webhook_secret = $${values.length}`);
+    }
+
+    if (tags !== undefined && Array.isArray(tags)) {
+      values.push(tags);
+      updates.push(`tags = $${values.length}`);
+    }
+
+    if (updates.length === 0) {
+      return res.json({
+        success: true,
+        data: mapProjectRow(projectResult.rows[0]),
+      });
+    }
+
+    updates.push("updated_at = NOW()");
+    values.push(projectId);
+    const idIdx = values.length;
+
+    const query = `UPDATE projects SET ${updates.join(", ")} WHERE id = $${idIdx} RETURNING *`;
+    // eslint-disable-next-line sql-injection/no-sql-injection
+    const result = await pool.query(query, values);
+
+    if (!result || !result.rows || !result.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (typeof redis.deletePattern === "function") {
+      await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    }
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * PATCH /api/projects/:id/status
+
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
  */
@@ -1210,8 +1385,10 @@ router.patch("/:id/status", async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
-    if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
+    if (typeof redis.deletePattern === "function")
+      await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function")
+      await redis.deletePattern("stats:*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
@@ -1226,12 +1403,16 @@ router.patch("/:id/status", async (req, res, next) => {
 router.get("/:id/badge-holders", async (req, res, next) => {
   try {
     const projectId = req.params.id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(projectId)) {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [projectId],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1246,10 +1427,10 @@ router.get("/:id/badge-holders", async (req, res, next) => {
        WHERE d.project_id = $1 AND p.badges != '[]'::jsonb
        GROUP BY d.donor_address, p.badges
        ORDER BY total_donated DESC`,
-      [projectId]
+      [projectId],
     );
 
-    const badgeHolders = result.rows.map(row => ({
+    const badgeHolders = result.rows.map((row) => ({
       donorAddress: row.donor_address,
       badgeTier: row.badge_tier || null,
       totalDonated: Number.parseFloat(row.total_donated || "0").toFixed(7),

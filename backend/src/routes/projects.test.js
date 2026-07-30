@@ -222,7 +222,9 @@ describe("GET /api/projects/:id", () => {
   test("returns a single project", async () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
-    pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({
+      rows: [{ avg_rating: null, count: 0 }],
+    }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
@@ -438,7 +440,8 @@ const MOCK_DONATION_ROW = {
   id: "don-1",
   amount_xlm: "250.0000000",
   message: "Keep it up!",
-  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  transaction_hash:
+    "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
   created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
 };
 
@@ -466,7 +469,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // 1. project found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_CERT_PROJECT_ROW] });
     // 2. profile found (donor has a display name)
-    pool.query.mockResolvedValueOnce({ rows: [{ display_name: "Alice Donor" }] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ display_name: "Alice Donor" }],
+    });
     // 3. donations found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
 
@@ -491,7 +496,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // Donations
     expect(d.donationCount).toBe(1);
     expect(d.donations).toHaveLength(1);
-    expect(d.donations[0].transactionHash).toBe(MOCK_DONATION_ROW.transaction_hash);
+    expect(d.donations[0].transactionHash).toBe(
+      MOCK_DONATION_ROW.transaction_hash,
+    );
     // QR code
     expect(typeof d.qrCode).toBe("string");
     expect(d.qrCode).toMatch(/^data:image\/png;base64,/);
@@ -525,7 +532,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -539,7 +548,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when on_chain_verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -553,7 +564,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is false when both verified flags are false", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -595,7 +608,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns gold badge tier when donor gave >= 1000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "2000", co2_offset_kg: "10000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "2000",
+          co2_offset_kg: "10000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -611,7 +630,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns platinum badge tier when donor gave >= 10000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "20000", co2_offset_kg: "100000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "20000",
+          co2_offset_kg: "100000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -643,7 +668,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("returns 400 when donorAddress starts with wrong letter", async () => {
     const res = await request(app)
-      .get("/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J")
+      .get(
+        "/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J",
+      )
       .expect(400);
 
     expect(res.body.error).toMatch(/donorAddress/i);
@@ -653,7 +680,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // project not found
 
     const res = await request(app)
-      .get(`/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .get(
+        `/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`,
+      )
       .expect(404);
 
     expect(res.body.error).toMatch(/project not found/i);
@@ -689,7 +718,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("co2OffsetKg is 0 when project has raised_xlm = 0", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -763,5 +794,76 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.verified).toBe(true);
     expect(res.body.data.onChainVerified).toBe(true);
+  });
+});
+
+describe("PATCH /api/projects/:id", () => {
+  let app;
+  const projectId = "proj-123";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}`)
+      .send({ webhook_url: "https://example.com/webhook" })
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+  });
+
+  test("returns 400 when webhook_url is HTTP instead of HTTPS", async () => {
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}`)
+      .send({ webhook_url: "http://example.com/webhook" })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/must use HTTPS protocol/i);
+  });
+
+  test("returns 400 when webhook_url targets internal or private IP (SSRF)", async () => {
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}`)
+      .send({ webhook_url: "https://127.0.0.1/webhook" })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/internal or private IP/i);
+  });
+
+  test("returns 400 when webhook_url exceeds 2000 characters", async () => {
+    const longUrl = "https://example.com/" + "a".repeat(2000);
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}`)
+      .send({ webhook_url: longUrl })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/must not exceed 2000 characters/i);
+  });
+
+  test("successfully updates project with valid HTTPS webhook_url", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
+    const updatedRow = {
+      ...MOCK_PROJECT_ROW,
+      webhook_url: "https://myapi.org/webhooks/greenpay",
+    };
+    pool.query.mockResolvedValueOnce({ rows: [updatedRow] });
+
+    const res = await request(app)
+      .patch(`/api/projects/${projectId}`)
+      .send({ webhook_url: "https://myapi.org/webhooks/greenpay" })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.webhookUrl).toBe(
+      "https://myapi.org/webhooks/greenpay",
+    );
   });
 });
