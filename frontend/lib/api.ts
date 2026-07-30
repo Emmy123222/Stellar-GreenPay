@@ -327,7 +327,7 @@ export async function upsertProfile(
  * @returns Leaderboard entries.
  * @throws If the request fails.
  */
-export async function fetchLeaderboard(limit = 20) {
+export async function fetchLeaderboard(limit = 20, period: "all" | "week" | "month" | "year" = "all") {
   const { data } = await api.get<{
     success: boolean;
     data: LeaderboardEntry[];

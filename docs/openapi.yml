@@ -1219,7 +1219,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [all, month, year]
+            enum: [all, week, month, year]
             default: all
       responses:
         '200':

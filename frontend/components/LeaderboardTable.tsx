@@ -48,7 +48,7 @@ function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: s
   );
 }
 
-export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "month" | "year" }) {
+export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "week" | "month" | "year" }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
