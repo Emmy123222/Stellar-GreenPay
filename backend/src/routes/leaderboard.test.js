@@ -1,6 +1,9 @@
 "use strict";
 
-jest.mock("../db/pool", () => ({ query: jest.fn() }));
+jest.mock("../db/pool", () => ({
+  query:   jest.fn(),
+  connect: jest.fn(),
+}));
 
 const pool = require("../db/pool");
 const request = require("supertest");
@@ -165,5 +168,172 @@ describe("GET /api/leaderboard — limit handling", () => {
     await request(app).get("/api/leaderboard?limit=abc").expect(200);
 
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+  });
+});
+
+describe("POST /api/leaderboard/snapshot — idempotent upsert", () => {
+  let app;
+  const ADMIN_SECRET_SAVE = process.env.ADMIN_SECRET;
+
+  beforeAll(() => {
+    process.env.ADMIN_SECRET = "test-admin-secret";
+  });
+
+  afterAll(() => {
+    process.env.ADMIN_SECRET = ADMIN_SECRET_SAVE;
+  });
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  const MOCK_TOP_DONORS = [
+    {
+      public_key: "GA1",
+      display_name: "Alice",
+      badges: [{ tier: "earth" }],
+      total_xlm: "5000",
+    },
+    {
+      public_key: "GB2",
+      display_name: "Bob",
+      badges: [],
+      total_xlm: "750",
+    },
+  ];
+
+  function makeMockClient() {
+    return {
+      query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+      release: jest.fn(),
+    };
+  }
+
+  test("returns 403 without the x-admin-secret header", async () => {
+    const res = await request(app)
+      .post("/api/leaderboard/snapshot")
+      .expect(403);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toBe("Forbidden");
+  });
+
+  test("returns 403 with a wrong admin secret", async () => {
+    const res = await request(app)
+      .post("/api/leaderboard/snapshot")
+      .set("x-admin-secret", "wrong-secret")
+      .expect(403);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toBe("Forbidden");
+  });
+
+  test("responds with message when there are no donations this month", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/leaderboard/snapshot")
+      .set("x-admin-secret", "test-admin-secret")
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toBe("No donations this month yet");
+    expect(res.body.inserted).toBe(0);
+    // Should not attempt a transaction when there are no rows
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  test("calling snapshot twice for the same month is idempotent", async () => {
+    const mockClient = makeMockClient();
+
+    // --- First call ---
+    pool.query.mockResolvedValueOnce({ rows: MOCK_TOP_DONORS });
+    pool.connect.mockResolvedValueOnce(mockClient);
+
+    const res1 = await request(app)
+      .post("/api/leaderboard/snapshot")
+      .set("x-admin-secret", "test-admin-secret")
+      .expect(200);
+
+    expect(res1.body.success).toBe(true);
+    expect(res1.body.inserted).toBe(2);
+    expect(res1.body.month).toEqual(expect.stringMatching(/^\d{4}-\d{2}-01$/));
+
+    // Verify the INSERT statements use ON CONFLICT
+    const insertCalls = mockClient.query.mock.calls.filter(
+      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
+    );
+    expect(insertCalls.length).toBe(2);
+    insertCalls.forEach(([sql]) => {
+      expect(sql).toContain("ON CONFLICT");
+    });
+
+    // Verify transaction was opened and committed
+    expect(mockClient.query).toHaveBeenCalledWith("BEGIN");
+    expect(mockClient.query).toHaveBeenCalledWith("COMMIT");
+    expect(mockClient.release).toHaveBeenCalled();
+
+    // --- Second call (same month, ON CONFLICT will update existing rows) ---
+    jest.clearAllMocks();
+    const mockClient2 = makeMockClient();
+
+    pool.query.mockResolvedValueOnce({ rows: MOCK_TOP_DONORS });
+    pool.connect.mockResolvedValueOnce(mockClient2);
+
+    const res2 = await request(app)
+      .post("/api/leaderboard/snapshot")
+      .set("x-admin-secret", "test-admin-secret")
+      .expect(200);
+
+    expect(res2.body.success).toBe(true);
+    // Must return the same inserted count both times
+    expect(res2.body.inserted).toBe(res1.body.inserted);
+    expect(res2.body.month).toBe(res1.body.month);
+
+    // Verify INSERTs still use ON CONFLICT
+    const insertCalls2 = mockClient2.query.mock.calls.filter(
+      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
+    );
+    expect(insertCalls2.length).toBe(2);
+    insertCalls2.forEach(([sql]) => {
+      expect(sql).toContain("ON CONFLICT");
+    });
+  });
+
+  test("snapshot respects limit query parameter (max 500)", async () => {
+    const mockClient = makeMockClient();
+
+    // Supply a mock that honours the LIMIT param: 3 donors in DB, but
+    // request says limit=2, so only 2 rows come back from pool.query.
+    const threeDonors = [
+      ...MOCK_TOP_DONORS,
+      {
+        public_key: "GC3",
+        display_name: "Charlie",
+        badges: [{ tier: "forest" }],
+        total_xlm: "100",
+      },
+    ];
+
+    pool.query.mockImplementationOnce((_sql, params) => {
+      const limit = params?.[0] ?? 100;
+      return Promise.resolve({ rows: threeDonors.slice(0, limit) });
+    });
+    pool.connect.mockResolvedValueOnce(mockClient);
+
+    const res = await request(app)
+      .post("/api/leaderboard/snapshot?limit=2")
+      .set("x-admin-secret", "test-admin-secret")
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.inserted).toBe(2);
+
+    // Only 2 INSERTs were executed
+    const insertCalls = mockClient.query.mock.calls.filter(
+      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
+    );
+    expect(insertCalls.length).toBe(2);
   });
 });
