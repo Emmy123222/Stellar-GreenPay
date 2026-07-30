@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
-import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
+import { progressPercent } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 interface ProjectComparisonProps {
@@ -9,12 +9,10 @@ interface ProjectComparisonProps {
 }
 
 const ROWS = [
-  { key: "co2", label: "CO2 per XLM" },
-  { key: "progress", label: "Progress %" },
-  { key: "donorCount", label: "Donor count" },
-  { key: "goal", label: "Goal" },
-  { key: "raised", label: "Raised" },
-  { key: "status", label: "Status" },
+  { key: "co2", label: "CO₂ per XLM" },
+  { key: "progress", label: "% Goal Reached" },
+  { key: "donorCount", label: "Donor Count" },
+  { key: "averageRating", label: "Avg Rating" },
   { key: "verified", label: "Verified" },
 ] as const;
 
@@ -71,17 +69,16 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
                 if (row.key === "co2") value = `${co2PerXLM.toFixed(2)} kg`;
                 if (row.key === "progress") value = `${pct}%`;
                 if (row.key === "donorCount") value = project.donorCount.toLocaleString();
-                if (row.key === "goal") value = formatXLM(project.goalXLM);
-                if (row.key === "raised") value = formatXLM(project.raisedXLM);
-                if (row.key === "status") value = project.status;
-                if (row.key === "verified") value = project.verified ? "Yes" : "No";
+                if (row.key === "averageRating") {
+                  value = (project.averageRating || 0) > 0
+                    ? `${project.averageRating?.toFixed(1)} ★ (${project.ratingCount || 0})`
+                    : "No ratings";
+                }
+                if (row.key === "verified") value = project.verified ? "✓ Yes" : "No";
 
                 return (
                   <div key={`${project.id}-${row.key}`} className="py-2 border-t border-forest-100">
                     <p className="font-body text-sm text-forest-900">{value}</p>
-                    {row.key === "raised" && (
-                      <p className="font-body text-xs text-[#8aaa8a] dark:text-forest-300 mt-1">{formatCO2(project.co2OffsetKg)} offset</p>
-                    )}
                   </div>
                 );
               })}
