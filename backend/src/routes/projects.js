@@ -21,6 +21,7 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -1214,6 +1215,79 @@ router.patch("/:id/status", async (req, res, next) => {
     if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/webhook
+ *
+ * Register or update the webhook URL for milestone notifications.
+ * Body: { webhookUrl: string, adminAddress: string }
+ *
+ * Only the project owner (wallet_address === adminAddress) can set the webhook.
+ * webhookUrl is validated against SSRF (must be a public http/https address —
+ * no localhost, private ranges, or cloud metadata addresses).
+ * Returns the generated webhook secret once so the owner can verify signatures.
+ */
+router.post("/:id/webhook", async (req, res, next) => {
+  try {
+    const { webhookUrl, adminAddress } = req.body || {};
+
+    if (!adminAddress || typeof adminAddress !== "string") {
+      return res.status(400).json({ error: "adminAddress is required" });
+    }
+
+    if (!webhookUrl || typeof webhookUrl !== "string") {
+      return res.status(400).json({ error: "webhookUrl is required" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id, wallet_address, webhook_secret FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    const project = projectResult.rows[0];
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.wallet_address !== adminAddress) {
+      return res.status(403).json({ error: "Only the project owner can set a webhook" });
+    }
+
+    try {
+      await assertPublicHttpUrl(webhookUrl);
+    } catch (err) {
+      if (err instanceof SsrfValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+
+    // Generate a new secret on each update
+    const webhookSecret = crypto.randomBytes(32).toString("hex");
+
+    await pool.query(
+      `UPDATE projects
+       SET webhook_url = $1, webhook_secret = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [webhookUrl, webhookSecret, req.params.id],
+    );
+
+    logAdminAction({
+      actor: adminAddress,
+      action: "project.webhook.update",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { webhookUrl },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        webhookUrl,
+        webhookSecret,
+      },
+    });
   } catch (e) {
     next(e);
   }
