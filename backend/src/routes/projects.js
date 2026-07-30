@@ -149,6 +149,72 @@ router.get("/featured", async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/trending
+ * Returns fast-rising projects based on donation velocity over the last
+ * 7 days vs the last 30 days.  Projects with zero donations are included
+ * (they naturally sort last with a trending_score of 0).
+ *
+ * @route GET /api/projects/trending
+ * @param {import('express').Request} req - Express request object; optional ?limit= query.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the trending projects payload.
+ * @throws {Error} If the database query or cache write fails.
+ */
+router.get("/trending", async (req, res, next) => {
+  try {
+    const rawLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Math.min(Number.isFinite(rawLimit) ? rawLimit : 10, 50);
+
+    const cacheKey = "projects:trending:" + limit;
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const result = await pool.query(
+      `SELECT p.*,
+              COUNT(*) FILTER (WHERE d.created_at >= NOW() - INTERVAL '7 days')
+                AS donations_last_7_days,
+              COUNT(*) FILTER (WHERE d.created_at >= NOW() - INTERVAL '30 days')
+                AS donations_last_30_days,
+              ROUND(
+                (
+                  COUNT(*) FILTER (WHERE d.created_at >= NOW() - INTERVAL '7 days')::numeric
+                  / 7.0
+                )
+                / (
+                  COUNT(*) FILTER (WHERE d.created_at >= NOW() - INTERVAL '30 days')::numeric
+                  / 30.0 + 0.1
+                ),
+                4
+              ) AS trending_score
+       FROM projects p
+       LEFT JOIN donations d ON d.project_id = p.id
+       WHERE p.status = 'active'
+       GROUP BY p.id
+       ORDER BY trending_score DESC, p.raised_xlm DESC
+       LIMIT $1`,
+      [limit],
+    );
+
+    const data = result.rows.map((row) => ({
+      ...mapProjectRow(row),
+      trendingScore: Number(row.trending_score) || 0,
+      donationsLast7Days: Number(row.donations_last_7_days) || 0,
+      donationsLast30Days: Number(row.donations_last_30_days) || 0,
+    }));
+
+    const responseBody = { success: true, data };
+    await redis.set(cacheKey, responseBody, 300);
+
+    res.json(responseBody);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * List projects with optional filtering, pagination, and search.
  *
  * @route GET /api/projects
