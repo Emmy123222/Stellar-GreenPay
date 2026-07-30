@@ -14,7 +14,36 @@ router.get("/", async (req, res, next) => {
 
     const onlyVerified = req.query.onlyVerified === "true";
 
-    let query = `
+    const conditions = [];
+    const params = [limit];
+
+    if (period === "month") {
+      conditions.push(`d.created_at >= NOW() - INTERVAL '30 days'`);
+    } else if (period === "year") {
+      conditions.push(`d.created_at >= NOW() - INTERVAL '1 year'`);
+    }
+
+    if (onlyVerified) {
+      const verifiedSubQuery = `
+        NOT EXISTS (
+          SELECT 1 FROM donations d2
+          JOIN projects pr ON d2.project_id = pr.id
+          WHERE d2.donor_address = p.public_key AND pr.verified = false
+        )
+        AND EXISTS (
+          SELECT 1 FROM donations d3
+          JOIN projects pr2 ON d3.project_id = pr2.id
+          WHERE d3.donor_address = p.public_key AND pr2.verified = true
+        )
+      `;
+      conditions.push(`(${verifiedSubQuery})`);
+    }
+
+    const whereClause = conditions.length > 0
+      ? `WHERE ${conditions.join("\n  AND ")}`
+      : "";
+
+    const query = `
       SELECT p.public_key, p.display_name, p.badges,
              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
              COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported,
@@ -43,38 +72,15 @@ router.get("/", async (req, res, next) => {
              )::NUMERIC AS impact_score
       FROM profiles p
       LEFT JOIN donations d ON p.public_key = d.donor_address
-    `;
-
-    if (period === "month") {
-      query += " AND d.created_at >= NOW() - INTERVAL '30 days' ";
-    } else if (period === "year") {
-      query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
-    }
-
-    if (onlyVerified) {
-      query += `
-        WHERE NOT EXISTS (
-          SELECT 1 FROM donations d2
-          JOIN projects pr ON d2.project_id = pr.id
-          WHERE d2.donor_address = p.public_key AND pr.verified = false
-        )
-        AND EXISTS (
-          SELECT 1 FROM donations d3
-          JOIN projects pr2 ON d3.project_id = pr2.id
-          WHERE d3.donor_address = p.public_key AND pr2.verified = true
-        )
-      `;
-    }
-
-    query += `
       LEFT JOIN projects pr ON pr.id = d.project_id
+      ${whereClause}
       GROUP BY p.public_key, p.display_name, p.badges
       ORDER BY ${sortBy} DESC
       LIMIT $1
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
-    const result = await pool.query(query, [limit]);
+    const result = await pool.query(query, params);
     const entries = result.rows.map((p, i) => ({
       rank: i + 1,
       publicKey: p.public_key,
