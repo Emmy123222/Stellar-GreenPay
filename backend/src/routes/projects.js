@@ -21,6 +21,8 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { z } = require("zod");
+const { sanitizedStringField } = require("../middleware/validation");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -784,6 +786,42 @@ router.post("/admin/confirm", adminRequired, async (req, res) => {
  * @returns {Promise<void>} Sends the full project details payload.
  * @throws {Error} If the project lookup or related data fetch fails.
  */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { imageUrl, adminAddress } = req.body || {};
+    if (!imageUrl || typeof imageUrl !== "string") {
+      return res.status(400).json({ error: "imageUrl is required" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id, wallet_address FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (adminAddress && typeof adminAddress === "string" && projectResult.rows[0].wallet_address !== adminAddress) {
+      return res.status(403).json({ error: "Only the project owner can update the project image" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET image_url = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [imageUrl, req.params.id],
+    );
+
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query(

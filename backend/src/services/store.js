@@ -155,6 +155,7 @@ function mapProjectRow(row) {
     description: row.description,
     category: row.category,
     location: row.location,
+    imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",

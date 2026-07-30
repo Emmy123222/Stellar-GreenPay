@@ -785,3 +785,11 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   );
   return data.data;
 }
+
+export async function updateProjectImage(projectId: string, imageUrl: string, adminAddress: string) {
+  const { data } = await api.patch<{ success: boolean; data: ClimateProject }>(
+    `/api/projects/${projectId}`,
+    { imageUrl, adminAddress },
+  );
+  return data.data;
+}

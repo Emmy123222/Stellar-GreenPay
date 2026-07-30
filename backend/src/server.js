@@ -20,6 +20,8 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
+const projectsRouter = require("./routes/projects");
+const uploadsRouter = require("./routes/uploads");
 
 const app    = express();
 const PORT   = process.env.PORT || 4000;
@@ -63,6 +65,11 @@ app.use((req, res, next) => {
   }
   return csrfProtection(req, res, next);
 });
+
+app.use("/api/projects", projectsRouter);
+app.use("/api/uploads", uploadsRouter);
+app.use("/api/v1/projects", projectsRouter);
+app.use("/api/v1/uploads", uploadsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
