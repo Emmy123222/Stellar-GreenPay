@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
   raised_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   donor_count INTEGER NOT NULL DEFAULT 0,
   co2_offset_kg INTEGER NOT NULL DEFAULT 0,
+  co2_per_xlm NUMERIC(20, 7),
   status TEXT NOT NULL DEFAULT 'active',
   verified BOOLEAN NOT NULL DEFAULT FALSE,
   on_chain_verified BOOLEAN NOT NULL DEFAULT FALSE,

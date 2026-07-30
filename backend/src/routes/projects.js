@@ -21,6 +21,7 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { VALID_STATUSES, VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -30,30 +31,6 @@ const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
 function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
 }
-
-const VALID_STATUSES = ["active", "completed", "paused"];
-const VALID_CATEGORIES = [
-  "Reforestation",
-  "Solar Energy",
-  "Ocean Conservation",
-  "Clean Water",
-  "Wildlife Protection",
-  "Carbon Capture",
-  "Wind Energy",
-  "Sustainable Agriculture",
-  "Other",
-];
-const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
-
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
 
 /**
  * GET /api/projects/featured
@@ -339,10 +316,19 @@ router.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "wallet_address is required" });
     }
 
+    // Validate co2_per_xlm if provided
+    const co2PerXLM = req.body.co2_per_xlm;
+    if (co2PerXLM !== undefined && co2PerXLM !== null) {
+      const co2 = Number.parseFloat(co2PerXLM);
+      if (!Number.isFinite(co2) || co2 < 0) {
+        return res.status(400).json({ error: "co2_per_xlm must be a non-negative number" });
+      }
+    }
+
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, co2_per_xlm, tags)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         id,
@@ -352,6 +338,7 @@ router.post("/", async (req, res, next) => {
         location.trim(),
         wallet_address,
         goal_xlm,
+        req.body.co2_per_xlm || null,
         tags,
       ],
     );
