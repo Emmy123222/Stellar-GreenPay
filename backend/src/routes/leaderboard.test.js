@@ -167,3 +167,94 @@ describe("GET /api/leaderboard — limit handling", () => {
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
   });
 });
+
+describe("GET /api/leaderboard — onlyVerified filter", () => {
+  let app;
+
+  // Donor A: donations only to verified projects.
+  // Donor B: donations to both verified and unverified projects (must be excluded).
+  const DONOR_A = {
+    public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    display_name: "Donor A",
+    badges: [],
+    total_donated_xlm: "100",
+    projects_supported: 1,
+    impact_score: "70",
+    total_co2_offset_kg: "0",
+  };
+  const DONOR_B = {
+    public_key: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    display_name: "Donor B",
+    badges: [],
+    total_donated_xlm: "200",
+    projects_supported: 2,
+    impact_score: "140",
+    total_co2_offset_kg: "0",
+  };
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("includes SQL that excludes donors with any unverified-project donation", async () => {
+    pool.query.mockResolvedValue({ rows: [DONOR_A] });
+
+    await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toMatch(/NOT EXISTS/i);
+    expect(sql).toMatch(/verified\s*=\s*false/i);
+    expect(sql).toMatch(/EXISTS/i);
+    expect(sql).toMatch(/verified\s*=\s*true/i);
+    // WHERE must come after all JOINs (including projects)
+    const joinProjectsIdx = sql.search(/LEFT JOIN projects pr\b/i);
+    const whereIdx = sql.search(/\bWHERE\b/i);
+    expect(joinProjectsIdx).toBeGreaterThan(-1);
+    expect(whereIdx).toBeGreaterThan(joinProjectsIdx);
+  });
+
+  test("does not apply verified-only SQL when onlyVerified is omitted", async () => {
+    pool.query.mockResolvedValue({ rows: [DONOR_A, DONOR_B] });
+
+    await request(app).get("/api/leaderboard").expect(200);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).not.toMatch(/NOT EXISTS/i);
+    expect(sql).not.toMatch(/verified\s*=\s*false/i);
+  });
+
+  test("returns only Donor A when onlyVerified=true (Donor B has unverified donations)", async () => {
+    // DB applies the onlyVerified filter and returns Donor A only.
+    pool.query.mockResolvedValue({ rows: [DONOR_A] });
+
+    const res = await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].publicKey).toBe(DONOR_A.public_key);
+    expect(res.body.data[0].displayName).toBe("Donor A");
+    expect(res.body.data.map((e) => e.publicKey)).not.toContain(DONOR_B.public_key);
+  });
+
+  test("returns both donors when onlyVerified is not set", async () => {
+    pool.query.mockResolvedValue({ rows: [DONOR_B, DONOR_A] });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.map((e) => e.publicKey)).toEqual([
+      DONOR_B.public_key,
+      DONOR_A.public_key,
+    ]);
+  });
+
+  test("ignores onlyVerified when the value is not the string true", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    await request(app).get("/api/leaderboard?onlyVerified=false").expect(200);
+
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).not.toMatch(/NOT EXISTS/i);
+  });
+});

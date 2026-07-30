@@ -51,23 +51,29 @@ router.get("/", async (req, res, next) => {
       query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
     }
 
+    // JOINs must come before WHERE — onlyVerified filters donors who have any
+    // donation to an unverified project, while still requiring at least one
+    // verified-project donation.
+    query += `
+      LEFT JOIN projects pr ON pr.id = d.project_id
+    `;
+
     if (onlyVerified) {
       query += `
         WHERE NOT EXISTS (
           SELECT 1 FROM donations d2
-          JOIN projects pr ON d2.project_id = pr.id
-          WHERE d2.donor_address = p.public_key AND pr.verified = false
+          JOIN projects pr_unverified ON d2.project_id = pr_unverified.id
+          WHERE d2.donor_address = p.public_key AND pr_unverified.verified = false
         )
         AND EXISTS (
           SELECT 1 FROM donations d3
-          JOIN projects pr2 ON d3.project_id = pr2.id
-          WHERE d3.donor_address = p.public_key AND pr2.verified = true
+          JOIN projects pr_verified ON d3.project_id = pr_verified.id
+          WHERE d3.donor_address = p.public_key AND pr_verified.verified = true
         )
       `;
     }
 
     query += `
-      LEFT JOIN projects pr ON pr.id = d.project_id
       GROUP BY p.public_key, p.display_name, p.badges
       ORDER BY ${sortBy} DESC
       LIMIT $1
