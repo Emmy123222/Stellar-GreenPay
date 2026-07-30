@@ -15,6 +15,7 @@ import type {
   LeaderboardEntry,
   EscrowJob,
   ProjectCampaign,
+  VerificationRequest,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -784,6 +785,28 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   const { data } = await api.post<{ success: boolean; data: UploadedDocument }>(
     "/api/uploads",
     form,
+  );
+  return data.data;
+}
+
+export async function fetchVerificationRequests(
+  params?: { status?: string; limit?: number; page?: number }
+): Promise<VerificationRequestResponse[]> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
+    "/api/verification-requests",
+    { params },
+  );
+  return data.data;
+}
+
+export async function updateVerificationRequestStatus(
+  id: string,
+  status: "pending" | "in_review" | "approved" | "rejected",
+  reviewerNotes?: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}/status`,
+    { status, reviewerNotes },
   );
   return data.data;
 }
