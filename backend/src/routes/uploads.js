@@ -70,6 +70,12 @@ router.post("/", uploadRateLimiter, (req, res, next) => {
     }
 
     try {
+      const { fileTypeFromBuffer } = await import('file-type');
+      const type = await fileTypeFromBuffer(req.file.buffer);
+      if (!ALLOWED_MIME.has(type?.mime)) {
+        return res.status(400).json({ error: 'Invalid file content' });
+      }
+
       const stored = await uploadFile(req.file.buffer, req.file.originalname, req.file.mimetype);
       res.status(201).json({
         success: true,
