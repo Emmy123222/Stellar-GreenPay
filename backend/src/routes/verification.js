@@ -327,21 +327,14 @@ router.get("/:id", async (req, res, next) => {
 router.get("/", adminRequired, async (req, res, next) => {
   try {
     const { status, limit = "50", page = "1" } = req.query;
-    const where = [];
-    const values = [];
-
-    if (status && Object.keys(VALID_TRANSITIONS).includes(status)) {
-      values.push(status);
-      where.push(`status = $${values.length}`);
-    }
-
     const pageSize = Math.min(Number.parseInt(limit, 10) || 50, 200);
     const offset = (Math.max(Number.parseInt(page, 10) || 1, 1) - 1) * pageSize;
-    values.push(pageSize, offset);
 
-    let query = "SELECT * FROM verification_requests";
-    if (where.length) query += " WHERE " + where.join(" AND ");
-    query += ` ORDER BY submitted_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`;
+    const statusFilter = status && Object.keys(VALID_TRANSITIONS).includes(status);
+    const query = statusFilter
+      ? "SELECT * FROM verification_requests WHERE status = $1 ORDER BY submitted_at DESC LIMIT $2 OFFSET $3"
+      : "SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT $1 OFFSET $2";
+    const values = statusFilter ? [status, pageSize, offset] : [pageSize, offset];
 
     const result = await pool.query(query, values);
     res.json({
