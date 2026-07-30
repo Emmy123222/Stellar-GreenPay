@@ -21,6 +21,8 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { VALID_STATUSES, VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
+const { computeBadges } = require("../services/store");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -31,29 +33,7 @@ function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
 }
 
-const VALID_STATUSES = ["active", "completed", "paused"];
-const VALID_CATEGORIES = [
-  "Reforestation",
-  "Solar Energy",
-  "Ocean Conservation",
-  "Clean Water",
-  "Wildlife Protection",
-  "Carbon Capture",
-  "Wind Energy",
-  "Sustainable Agriculture",
-  "Other",
-];
-const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
-
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
+const KG_CO2_PER_TREE = 22; // heuristic for treesEquivalent
 
 /**
  * GET /api/projects/featured
@@ -1214,6 +1194,83 @@ router.patch("/:id/status", async (req, res, next) => {
     if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/social-card
+ * Returns a shareable impact summary card as JSON.
+ * Requires ?donorAddress=G...&amount=X query params.
+ */
+/**
+ * Generate a shareable social impact card for a donor's contribution.
+ *
+ * @route GET /api/projects/:id/social-card
+ * @param {import('express').Request} req - Express request with donorAddress and amount query params.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the social card payload.
+ * @throws {Error} If validation or database query fails.
+ */
+router.get("/:id/social-card", async (req, res, next) => {
+  try {
+    const { donorAddress, amount } = req.query;
+
+    if (!donorAddress || typeof donorAddress !== "string" || !STELLAR_PUBLIC_KEY_RE.test(donorAddress)) {
+      return res.status(400).json({ error: "donorAddress must be a valid Stellar public key" });
+    }
+    const donationAmount = Number.parseFloat(amount);
+    if (!amount || !Number.isFinite(donationAmount) || donationAmount <= 0) {
+      return res.status(400).json({ error: "amount must be a positive number" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT name, co2_offset_kg, raised_xlm FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const project = projectResult.rows[0];
+    const projectCo2OffsetKg = Number.parseFloat(project.co2_offset_kg?.toString() || "0");
+    const raisedXlm = Number.parseFloat(project.raised_xlm?.toString() || "0");
+
+    // Calculate CO2 offset proportionally
+    const kgPerXlm = raisedXlm > 0 ? projectCo2OffsetKg / raisedXlm : 0;
+    const co2OffsetKg = Math.round(donationAmount * kgPerXlm);
+    const treesEquivalent = co2OffsetKg > 0 ? (co2OffsetKg / KG_CO2_PER_TREE).toFixed(1) : "0";
+
+    // Determine badge tier for this donation amount
+    const badges = computeBadges(donationAmount);
+    const badge = badges.length > 0 ? badges[0] : null;
+    const BADGE_EMOJIS = { seedling: "🌱", tree: "🌳", forest: "🌲", earth: "🌍" };
+    const BADGE_LABELS = { seedling: "Seedling", tree: "Tree", forest: "Forest", earth: "Earth Guardian" };
+
+    const badgeEmoji = badge ? (BADGE_EMOJIS[badge.tier] || "🌟") : "🌟";
+    const badgeLabel = badge ? (BADGE_LABELS[badge.tier] || badge.tier) : "Supporter";
+
+    const socialText = [
+      `🌍 I donated ${donationAmount} XLM to ${project.name} on Stellar GreenPay`,
+      `💚 Offsetting ~${co2OffsetKg.toLocaleString()} kg CO₂ — equivalent to planting ${treesEquivalent} trees`,
+      `🏆 My badge: ${badgeLabel} ${badgeEmoji}`,
+    ].join("\n");
+
+    res.json({
+      success: true,
+      data: {
+        text: socialText,
+        projectName: project.name,
+        amount: donationAmount.toFixed(7),
+        co2OffsetKg,
+        treesEquivalent: Number.parseFloat(treesEquivalent),
+        badgeTier: badge ? badge.tier : null,
+        badgeEmoji,
+        badgeLabel,
+      },
+    });
   } catch (e) {
     next(e);
   }
