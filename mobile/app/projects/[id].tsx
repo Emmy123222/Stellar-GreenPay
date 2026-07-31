@@ -22,8 +22,8 @@ import {
   TouchableOpacity,
   Animated,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import { useTheme } from '../theme';
 import {
@@ -31,6 +31,24 @@ import {
   followProject,
   unfollowProject,
 } from '../../utils/notifications';
+import {
+  loadRecurringDonations,
+  type RecurringDonation,
+} from '../../utils/recurringDonations';
+
+export function formatNextPaymentDate(isoDate: string): string {
+  try {
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return isoDate;
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return isoDate;
+  }
+}
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -145,11 +163,33 @@ export default function ProjectDetailScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
+  const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+
+  const checkRecurringDonation = useCallback(async (projectId: string) => {
+    try {
+      const donations = await loadRecurringDonations();
+      const active = donations.find(
+        (d) => d.projectId === projectId && d.status === 'active'
+      );
+      setActiveDonation(active || null);
+    } catch {
+      setActiveDonation(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id) {
+        checkRecurringDonation(id as string);
+      }
+    }, [id, checkRecurringDonation])
+  );
 
   useEffect(() => {
     if (id) {
       loadProject(id as string);
+      checkRecurringDonation(id as string);
       initializeNotifications();
       markNotificationsSeen().then(() => {
         Notifications.setBadgeCountAsync(0).catch(() => undefined);
@@ -296,6 +336,45 @@ export default function ProjectDetailScreen() {
             📍 {project.location}
           </Text>
         </View>
+
+        {/* Active Recurring Donation Banner */}
+        {activeDonation && (
+          <View
+            testID="recurring-donation-banner"
+            style={[
+              styles.recurringBanner,
+              {
+                backgroundColor: colors.surface,
+                borderColor: '#227239',
+                shadowColor: colors.cardShadow,
+              },
+            ]}
+            accessibilityRole="region"
+            accessibilityLabel={`Active recurring donation banner for ${project.name}`}
+          >
+            <View style={styles.recurringBannerContent}>
+              <Text
+                style={[styles.recurringBannerText, { color: colors.primaryText }]}
+                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || 'monthly'} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
+              >
+                You have an active {(activeDonation as any).frequency || 'monthly'} donation of{' '}
+                <Text style={styles.recurringBannerBold}>{activeDonation.amountXLM} XLM</Text> — next payment:{' '}
+                <Text style={styles.recurringBannerBold}>
+                  {formatNextPaymentDate(activeDonation.nextDueDate)}
+                </Text>
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="manage-recurring-button"
+              style={styles.manageButton}
+              onPress={() => router.push('/recurring')}
+              accessibilityRole="button"
+              accessibilityLabel="Manage recurring donations"
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Stats */}
         <View
@@ -612,5 +691,42 @@ const styles = StyleSheet.create({
   donateButtonText: {
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  recurringBanner: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  recurringBannerContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  recurringBannerText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  recurringBannerBold: {
+    fontWeight: 'bold',
+  },
+  manageButton: {
+    backgroundColor: '#227239',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  manageButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

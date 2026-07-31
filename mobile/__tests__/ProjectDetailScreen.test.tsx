@@ -16,9 +16,11 @@ import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import axios from 'axios';
 
 // ── Router / Expo mocks ────────────────────────────────────────────────────────
+const mockPush = jest.fn();
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => ({ id: 'proj-1' }),
+  useFocusEffect: (cb: () => void) => cb(),
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -30,7 +32,12 @@ jest.mock('../utils/notifications', () => ({
   unfollowProject: jest.fn(),
 }));
 
+jest.mock('../utils/recurringDonations', () => ({
+  loadRecurringDonations: jest.fn(),
+}));
+
 import * as notifUtils from '../utils/notifications';
+import { loadRecurringDonations } from '../utils/recurringDonations';
 
 // ── Global fetch mock (used by checkFollowStatus) ──────────────────────────────
 const mockFetch = jest.fn();
@@ -62,7 +69,7 @@ function mockFollowsResponse(follows: object[] = []) {
 }
 
 import { ThemeProvider } from '../app/theme';
-import ProjectDetailScreen from '../app/projects/[id]';
+import ProjectDetailScreen, { formatNextPaymentDate } from '../app/projects/[id]';
 
 /** Wrap in ThemeProvider so useTheme() doesn't throw. */
 function renderWithTheme(ui: React.ReactElement) {
@@ -82,6 +89,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Default: follow/unfollow succeed
     (notifUtils.followProject as jest.Mock).mockResolvedValue(true);
     (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -288,5 +296,108 @@ describe('ProjectDetailScreen – Follow button', () => {
     await waitFor(() =>
       expect(getByTestId('follow-button').props.accessibilityState.busy).toBe(true)
     );
+  });
+});
+
+describe('ProjectDetailScreen – Recurring Donation Banner', () => {
+  const mockActiveDonation = {
+    id: 'rec-1',
+    projectId: 'proj-1',
+    projectName: 'Amazon Reforestation Initiative',
+    amountXLM: '25',
+    startDate: '2026-01-01T00:00:00.000Z',
+    nextDueDate: '2026-02-01T00:00:00.000Z',
+    durationMonths: null,
+    remainingMonths: null,
+    status: 'active' as const,
+    createdAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.clearAllMocks();
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECT } });
+    (notifUtils.getPushToken as jest.Mock).mockResolvedValue('expo-push-token-abc');
+    mockFollowsResponse([]);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('renders active recurring donation banner with amount, currency, frequency, and next date', async () => {
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([mockActiveDonation]);
+
+    const { getByTestId, getByText } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(getByTestId('recurring-donation-banner')).toBeTruthy());
+
+    expect(getByText(/You have an active monthly donation of/i)).toBeTruthy();
+    expect(getByText('25 XLM')).toBeTruthy();
+    expect(getByText('Feb 1, 2026')).toBeTruthy();
+  });
+
+  it('navigates to recurring management screen when Manage button is pressed', async () => {
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([mockActiveDonation]);
+
+    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(getByTestId('manage-recurring-button')).toBeTruthy());
+
+    await act(async () => {
+      fireEvent.press(getByTestId('manage-recurring-button'));
+    });
+
+    expect(mockPush).toHaveBeenCalledWith('/recurring');
+  });
+
+  it('does not render banner when no recurring donations exist', async () => {
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([]);
+
+    const { queryByTestId } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(queryByTestId('follow-button')).toBeTruthy());
+    expect(queryByTestId('recurring-donation-banner')).toBeNull();
+  });
+
+  it('does not render banner when recurring donation is cancelled or completed', async () => {
+    const cancelledDonation = { ...mockActiveDonation, status: 'cancelled' as const };
+    const completedDonation = { ...mockActiveDonation, status: 'completed' as const };
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([cancelledDonation, completedDonation]);
+
+    const { queryByTestId } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(queryByTestId('follow-button')).toBeTruthy());
+    expect(queryByTestId('recurring-donation-banner')).toBeNull();
+  });
+
+  it('does not render banner when active donation is for a different project', async () => {
+    const otherProjectDonation = { ...mockActiveDonation, projectId: 'proj-other' };
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([otherProjectDonation]);
+
+    const { queryByTestId } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(queryByTestId('follow-button')).toBeTruthy());
+    expect(queryByTestId('recurring-donation-banner')).toBeNull();
+  });
+
+  it('satisfies accessibility requirements for banner and manage button', async () => {
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([mockActiveDonation]);
+
+    const { getByTestId } = renderWithTheme(<ProjectDetailScreen />);
+
+    await waitFor(() => expect(getByTestId('recurring-donation-banner')).toBeTruthy());
+
+    const banner = getByTestId('recurring-donation-banner');
+    const manageBtn = getByTestId('manage-recurring-button');
+
+    expect(banner.props.accessibilityRole).toBe('region');
+    expect(manageBtn.props.accessibilityRole).toBe('button');
+    expect(manageBtn.props.accessibilityLabel).toBe('Manage recurring donations');
+  });
+
+  it('formats next payment date correctly', () => {
+    expect(formatNextPaymentDate('2026-02-01T00:00:00.000Z')).toBe('Feb 1, 2026');
+    expect(formatNextPaymentDate('invalid-date')).toBe('invalid-date');
   });
 });
