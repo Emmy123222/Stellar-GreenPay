@@ -1,4 +1,8 @@
 #![no_std]
+// The codebase (and its documented event schema in contracts/EVENTS.md) uses
+// the classic `env.events().publish(...)` API; `#[contractevent]` migration is
+// out of scope, so silence the SDK deprecation notice crate-wide.
+#![allow(deprecated)]
 #[cfg(all(test, feature = "testutils"))]
 mod fuzz_tests;
 
@@ -17,15 +21,15 @@ mod fuzz_tests;
  *   6. Community governance: badge holders vote to verify new projects
  *
  * Build:
- *   cargo build --target wasm32-unknown-unknown --release
+ *   cargo build --target wasm32v1-none --release
  *
  * Deploy:
  *   stellar contract deploy \
- *     --wasm target/wasm32-unknown-unknown/release/greenpay_contract.wasm \
+ *     --wasm target/wasm32v1-none/release/greenpay_contract.wasm \
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractimpl, contracttype,
+    contract, contractclient, contractimpl, contracttype,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
@@ -64,6 +68,7 @@ pub struct Project {
     pub total_raised: i128,
     pub donor_count: u32,
     pub active: bool,
+    pub paused: bool,
     pub registered_at: u32,
 }
 
@@ -166,6 +171,8 @@ pub enum DataKey {
     // Governance
     Proposal(String),
     HasVoted(String, Address),
+    // List of voter addresses that participated in a proposal
+    VoterList(String),
     // Per-donor per-project cumulative donation total for milestone NFT gating
     DonorProjectTotal(String, Address),
     // Per-project milestone NFT: one per (project_id, donor) pair
@@ -175,6 +182,8 @@ pub enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    // Off-chain project metadata (IPFS CID) keyed by project id
+    ProjectMetadata(String),
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -271,6 +280,7 @@ impl GreenPayContract {
             total_raised: 0,
             donor_count: 0,
             active: true,
+            paused: false,
             registered_at: env.ledger().sequence(),
         };
         env.storage()
@@ -285,6 +295,13 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::ProjectCount, &next_count);
+        let mut ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
+        ids.push_back(project_id.clone());
+        env.storage().instance().set(&DataKey::ProjectIds, &ids);
         env.events()
             .publish((symbol_short!("proj_reg"), admin), project_id);
     }
@@ -308,12 +325,20 @@ impl GreenPayContract {
                 total_raised: 0,
                 donor_count: 0,
                 active: true,
+                paused: false,
                 registered_at: env.ledger().sequence(),
             };
             env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
             let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
             env.storage().instance().set(&DataKey::ProjectCount, &next_count);
+            let mut ids: Vec<String> = env
+                .storage()
+                .instance()
+                .get(&DataKey::ProjectIds)
+                .unwrap_or(Vec::new(&env));
+            ids.push_back(project_id.clone());
+            env.storage().instance().set(&DataKey::ProjectIds, &ids);
             env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
         }
     }
@@ -339,6 +364,55 @@ impl GreenPayContract {
             .set(&DataKey::Project(project_id), &project);
     }
 
+    /// Deactivate every registered project in a single call. Admin only.
+    ///
+    /// Used for emergency response (e.g. a compromised admin key rotation or a
+    /// registry-wide compliance hold). Emits one `proj_deact` event per
+    /// deactivated project so indexers stay in sync.
+    pub fn deactivate_all_projects(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can deactivate projects");
+        }
+        let ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
+        for project_id in ids.iter() {
+            if let Some(mut project) = env
+                .storage()
+                .instance()
+                .get::<DataKey, Project>(&DataKey::Project(project_id.clone()))
+            {
+                if project.active {
+                    project.active = false;
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::Project(project_id.clone()), &project);
+                    env.events()
+                        .publish((symbol_short!("proj_deac"), admin.clone()), project_id);
+                }
+            }
+        }
+    }
+
+    /// Return the ids of every project registered via `register_project` or
+    /// `batch_register_projects` (registration order).
+    pub fn get_project_ids(env: Env) -> Vec<String> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env))
+    }
+
+    /// Update the CO₂ per XLM rate for a project. Admin only.
+    /// Emits a `co2_rate` event with the project id and new rate.
     pub fn update_project_co2_rate(env: Env, admin: Address, project_id: String, co2_per_xlm: u32) {
         admin.require_auth();
 
@@ -350,6 +424,10 @@ impl GreenPayContract {
 
         if stored_admin != admin {
             panic!("Only admin can update project rate");
+        }
+
+        if co2_per_xlm > MAX_CO2_PER_XLM {
+            panic!("CO2 per XLM exceeds maximum");
         }
 
         let mut project: Project = env
@@ -382,27 +460,44 @@ impl GreenPayContract {
         env.storage().instance().set(&DataKey::Project(project_id), &project);
     }
 
-    // ─── Admin functions ────────────────────────────────────────────────────────
-    /// Update the CO₂ per XLM rate for a project. Admin only.
-    pub fn update_project_co2_rate(
-        env: Env,
-        admin: Address,
-        project_id: String,
-        new_rate: u32,
-    ) {
+    /// Set the off-chain metadata pointer (IPFS CID) for a project. Admin only.
+    ///
+    /// Stores the CID under `DataKey::ProjectMetadata(project_id)` so frontends
+    /// and indexers can resolve rich project metadata (description, images,
+    /// documents) from IPFS.
+    ///
+    /// Emits a `meta_upd` event:
+    ///   topics: (symbol_short!("meta_upd"), admin)
+    ///   data:   (project_id, ipfs_cid)
+    pub fn set_project_metadata(env: Env, admin: Address, project_id: String, ipfs_cid: String) {
         admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can update project CO₂ rate"); }
-        // Validate rate bounds: 1 to 10_000 grams CO₂ per XLM
-        if new_rate == 0 || new_rate > 10_000 { panic!("CO₂ rate must be between 1 and 10,000"); }
-        // Load project
-        let mut project: Project = env.storage().instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-        project.co2_per_xlm = new_rate;
-        env.storage().instance().set(&DataKey::Project(project_id), &project);
-        env.events().publish((symbol_short!("proj_rate_update"), admin), (project_id, new_rate));
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set project metadata");
+        }
+        if !env
+            .storage()
+            .instance()
+            .has(&DataKey::Project(project_id.clone()))
+        {
+            panic!("Project not found");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectMetadata(project_id.clone()), &ipfs_cid);
+        env.events()
+            .publish((symbol_short!("meta_upd"), admin), (project_id, ipfs_cid));
+    }
+
+    /// Get the off-chain metadata pointer (IPFS CID) for a project, if set.
+    pub fn get_project_metadata(env: Env, project_id: String) -> Option<String> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProjectMetadata(project_id))
     }
 
     // ─── Donations ────────────────────────────────────────────────────────────
@@ -1205,12 +1300,9 @@ impl OracleInterface for MockOracle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, Env, String, Vec};
+    use soroban_sdk::{testutils::{Address as _, Events as _, Ledger as _}, Address, Env, String, Vec};
     use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::{
-        testutils::{Address as _, Ledger as _},
-        Address, Env, String,
-    };
+    use soroban_sdk::TryFromVal;
 
     // ─── Existing tests ───────────────────────────────────────────────────────
 
@@ -1227,17 +1319,20 @@ mod tests {
         assert_eq!(client.get_global_total(), 0);
     }
 
-        #[test]
+    #[test]
     fn test_get_donation_record() {
-        let (env, cid, client, admin, pid) = setup();
-        // Set up USDC token
+        let (env, _cid, client, admin, pid) = setup();
+        // Set up USDC token and price oracle (required by donate_usdc)
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        client.set_usdc_token(&env, &admin, &token);
+        client.set_usdc_token(&admin, &token);
+        let oracle = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle);
         let donor = Address::generate(&env);
         let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
-        client.donate_usdc(&env, &token, &donor, &pid, usdc_amount, 0);
-        let record = client.get_donation_record(&env, 0);
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        let record = client.get_donation_record(&0u32);
         assert_eq!(record.donor, donor);
         assert_eq!(record.project, pid);
         assert_eq!(record.amount, usdc_amount);
@@ -1465,6 +1560,25 @@ mod tests {
         });
     }
 
+    /// True when a raw XDR contract event's first topic equals `sym`.
+    ///
+    /// `Env::events().all()` returns XDR `ContractEvent`s in SDK 26, so topic
+    /// matching has to go through `ScVal` conversions rather than `Vec<Val>`.
+    fn first_topic_is_symbol(
+        env: &Env,
+        event: &soroban_sdk::xdr::ContractEvent,
+        sym: Symbol,
+    ) -> bool {
+        // `ContractEventBody` currently has a single variant (V0)
+        let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+        match body.topics.first() {
+            Some(topic) => Symbol::try_from_val(env, topic)
+                .map(|topic_sym| topic_sym == sym)
+                .unwrap_or(false),
+            None => false,
+        }
+    }
+
     #[test]
     fn test_upgrade_preserves_donation_state_and_storage_keys() {
         let (env, cid, client_v1, _admin, pid) = setup();
@@ -1668,19 +1782,27 @@ mod tests {
         env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
         client.resolve_proposal(&pid);
 
+        // Capture events BEFORE `get_proposal`: `events().all()` returns only
+        // the events of the last invocation, and the getter publishes none.
+        let events = env.events().all();
+
         let p = client.get_proposal(&pid);
         assert!(p.resolved);
         assert_eq!(p.votes_for,     1);
         assert_eq!(p.votes_against, 1);
 
-        let rejection_events = env.events().all().into_iter().filter(|(_, topics, _)| {
-            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("prop_rej")
-        }).count();
+        let rejection_events = events
+            .events()
+            .iter()
+            .filter(|e| first_topic_is_symbol(&env, e, symbol_short!("prop_rej")))
+            .count();
         assert_eq!(rejection_events, 1);
 
-        let approval_events = env.events().all().into_iter().filter(|(_, topics, _)| {
-            topics.len() == 1 && Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap() == symbol_short!("proj_ver")
-        }).count();
+        let approval_events = events
+            .events()
+            .iter()
+            .filter(|e| first_topic_is_symbol(&env, e, symbol_short!("proj_ver")))
+            .count();
         assert_eq!(approval_events, 0);
     }
 
@@ -1985,5 +2107,108 @@ mod tests {
         let nft = client.get_project_nft(&donor, &pid);
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
+
+    // ─── Project metadata (IPFS CID) ──────────────────────────────────────────
+
+    #[test]
+    fn test_set_project_metadata_emits_event_and_persists() {
+        let (env, _cid, client, admin, pid) = setup();
+
+        // No metadata before it is set
+        assert_eq!(client.get_project_metadata(&pid), None);
+
+        let ipfs_cid = String::from_str(
+            &env,
+            "bafybeigdyrzt5sfp7udm7hu76lz7gbk2c6mxf77pq2or7ftoy5wn37yyd4",
+        );
+        client.set_project_metadata(&admin, &pid, &ipfs_cid);
+
+        // Capture events BEFORE any further contract call: `events().all()`
+        // only returns the events of the last invocation (e.g. a getter that
+        // publishes nothing would shadow them).
+        let events = env.events().all();
+
+        // CID is persisted and retrievable
+        assert_eq!(client.get_project_metadata(&pid), Some(ipfs_cid.clone()));
+
+        // Exactly one `meta_upd` event with topics (meta_upd, admin) and
+        // data (project_id, ipfs_cid)
+        let mut match_count = 0u32;
+        for event in events.events().iter() {
+            // `ContractEventBody` currently has a single variant (V0)
+            let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+            if body.topics.len() != 2 {
+                continue;
+            }
+            let Ok(topic0) = Symbol::try_from_val(&env, &body.topics[0]) else {
+                continue;
+            };
+            if topic0 != symbol_short!("meta_upd") {
+                continue;
+            }
+            let topic_admin = Address::try_from_val(&env, &body.topics[1]).unwrap();
+            assert_eq!(topic_admin, admin);
+            let soroban_sdk::xdr::ScVal::Vec(Some(data_vec)) = &body.data else {
+                panic!("meta_upd data must be a (project_id, ipfs_cid) vec");
+            };
+            let ev_pid = String::try_from_val(&env, &data_vec[0]).unwrap();
+            let ev_cid = String::try_from_val(&env, &data_vec[1]).unwrap();
+            assert_eq!(ev_pid, pid);
+            assert_eq!(ev_cid, ipfs_cid);
+            match_count += 1;
+        }
+        assert_eq!(match_count, 1);
+    }
+
+    #[test]
+    fn test_set_project_metadata_overwrites_previous_cid() {
+        let (env, _cid, client, admin, pid) = setup();
+        let cid_v1 = String::from_str(&env, "bafy-cid-v1");
+        let cid_v2 = String::from_str(&env, "bafy-cid-v2");
+
+        client.set_project_metadata(&admin, &pid, &cid_v1);
+        let events_v1 = env.events().all();
+        client.set_project_metadata(&admin, &pid, &cid_v2);
+        let events_v2 = env.events().all();
+
+        assert_eq!(client.get_project_metadata(&pid), Some(cid_v2));
+
+        // Each call emits its own `meta_upd` event (events().all() returns the
+        // last invocation's events only, so check each capture separately)
+        let count_meta_upd = |events: &soroban_sdk::testutils::ContractEvents| {
+            events
+                .events()
+                .iter()
+                .filter(|e| first_topic_is_symbol(&env, e, symbol_short!("meta_upd")))
+                .count()
+        };
+        assert_eq!(count_meta_upd(&events_v1), 1);
+        assert_eq!(count_meta_upd(&events_v2), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can set project metadata")]
+    fn test_set_project_metadata_non_admin_fails() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let stranger = Address::generate(&env);
+        client.set_project_metadata(
+            &stranger,
+            &pid,
+            &String::from_str(&env, "bafy-cid"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Project not found")]
+    fn test_set_project_metadata_unknown_project_fails() {
+        let (env, _cid, client, admin, _pid) = setup();
+        client.set_project_metadata(
+            &admin,
+            &String::from_str(&env, "no-such-project"),
+            &String::from_str(&env, "bafy-cid"),
+        );
+    }
+
 }
+
 

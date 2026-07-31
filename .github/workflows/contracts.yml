@@ -1,3 +1,18 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PERSISTENT COPY of the fixed CI workflow.
+#
+# The workspace snapshot system excludes `.github/` (its ".git*" credential
+# filter also matches ".github"), so the file at its real location
+#   .github/workflows/contracts.yml
+# may not survive between sessions in this workspace. This root-level copy is
+# snapshot-safe — copy it over .github/workflows/contracts.yml in the real repo.
+#
+# Change vs upstream (2 lines): wasm32-unknown-unknown → wasm32v1-none.
+# Reason: soroban-sdk 26's build script hard-fails on wasm32-unknown-unknown
+# with Rust ≥1.82 ("reference-types, multi-value ... unsupported"); the
+# supported target on Rust ≥1.84 is wasm32v1-none. CI runs `toolchain: stable`
+# (currently ≥1.84), so the old target can never build.
+# ─────────────────────────────────────────────────────────────────────────────
 name: Contracts CI
 
 on:
@@ -16,7 +31,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-          target: wasm32-unknown-unknown
+          target: wasm32v1-none      # FIX: was wasm32-unknown-unknown
       - run: cargo test --features testutils
       - run: cargo clippy -- -D warnings
-      - run: cargo build --target wasm32-unknown-unknown --release
+      - run: cargo build --target wasm32v1-none --release   # FIX: was wasm32-unknown-unknown

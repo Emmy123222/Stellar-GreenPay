@@ -33,7 +33,7 @@ Every donation is recorded permanently on the Stellar blockchain. Anyone can que
 ## Build & Test
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 cargo test
 ```
 
