@@ -15,7 +15,24 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
+jest.mock('../utils/notifications', () => ({
+  getPushToken: jest.fn().mockResolvedValue(null),
+  getUnreadNotificationCount: jest.fn().mockResolvedValue(0),
+  setupNotificationListener: jest.fn(() => ({ remove: jest.fn() })),
+  setupNotificationResponseListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock('expo-notifications', () => ({
+  setBadgeCountAsync: jest.fn().mockResolvedValue(true),
+  getBadgeCountAsync: jest.fn().mockResolvedValue(0),
+}));
+
 import HomeScreen from '../app/index';
+import { ThemeProvider } from '../app/theme';
+
+function wrap(element: React.ReactElement) {
+  return <ThemeProvider>{element}</ThemeProvider>;
+}
 
 const MOCK_PROJECT = {
   id: 'proj-1',
@@ -27,69 +44,60 @@ const MOCK_PROJECT = {
   donorCount: 147,
 };
 
-const MOCK_STATS = {
-  totalDonations: 320,
-  totalXLMRaised: '45200',
-};
-
 describe('HomeScreen', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('shows a loading indicator before data arrives', () => {
-    (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECT } });
-    const { getByText } = render(<HomeScreen />);
-    expect(getByText('Loading...')).toBeTruthy();
+  it('shows the header before data arrives', () => {
+    (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
+    const { getByText, queryByText } = render(wrap(<HomeScreen />));
+    // Header renders during the initial load...
+    expect(getByText('Stellar GreenPay')).toBeTruthy();
+    // ...but no project card is shown until data arrives.
+    expect(queryByText('Amazon Reforestation Initiative')).toBeNull();
   });
 
   it('renders the app title', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(<HomeScreen />);
+    const { getByText } = render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
-  it('renders global stats after data loads', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+  it('renders project cards with progress after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(<HomeScreen />);
+    const { getByText } = render(wrap(<HomeScreen />));
     await waitFor(() => {
-      expect(getByText('320 donations')).toBeTruthy();
-      expect(getByText('45200 XLM raised')).toBeTruthy();
+      expect(getByText('Amazon Reforestation Initiative')).toBeTruthy();
+      expect(getByText('18420 / 50000 XLM')).toBeTruthy();
+      expect(getByText('147 donors')).toBeTruthy();
     });
   });
 
-  it('renders the featured project name after data loads', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+  it('renders the project name after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(<HomeScreen />);
+    const { getByText } = render(wrap(<HomeScreen />));
     await waitFor(() =>
       expect(getByText('Amazon Reforestation Initiative')).toBeTruthy()
     );
   });
 
-  it('renders the Browse All Projects button', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+  it('renders project cards with an accessible label', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(<HomeScreen />);
+    const { getByLabelText } = render(wrap(<HomeScreen />));
     await waitFor(() =>
-      expect(getByText('Browse All Projects')).toBeTruthy()
+      expect(getByLabelText('View Amazon Reforestation Initiative project')).toBeTruthy()
     );
   });
 
   it('still renders the title when the API call fails', async () => {
     (axios.get as jest.Mock).mockRejectedValue(new Error('network error'));
 
-    const { getByText } = render(<HomeScreen />);
+    const { getByText } = render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 });

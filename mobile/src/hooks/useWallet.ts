@@ -12,6 +12,9 @@ export function useWallet() {
   useEffect(() => {
     SecureStore.getItemAsync(WALLET_KEY)
       .then((stored) => setPublicKey(stored))
+      .catch(() => {
+        // Non-critical — default to a disconnected wallet if storage fails.
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -24,14 +27,25 @@ export function useWallet() {
       return false;
     }
 
-    await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+    try {
+      await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+    } catch {
+      // Persistence failed — stay disconnected rather than half-connected.
+      return false;
+    }
     setPublicKey(trimmed);
     return true;
   }, []);
 
   const disconnect = useCallback(async () => {
-    await SecureStore.deleteItemAsync(WALLET_KEY);
-    setPublicKey(null);
+    try {
+      await SecureStore.deleteItemAsync(WALLET_KEY);
+    } catch {
+      // Storage failure is non-fatal; still clear the in-memory key below so
+      // the user is never left "connected" after choosing to disconnect.
+    } finally {
+      setPublicKey(null);
+    }
   }, []);
 
   return { publicKey, loading, error, connect, disconnect };

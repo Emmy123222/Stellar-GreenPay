@@ -4,6 +4,18 @@
  */
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
+
+// The real @stellar/stellar-sdk touches Axios at module load and crashes the
+// harness if axios.defaults is undefined, so stub the single surface we use.
+// The fixtures below define the only "valid" address the tests exercise.
+const TEST_VALID_PUBLIC_KEY =
+  'GABCXYZ1234567890123456789012345678901234567890123456789012345';
+jest.mock('@stellar/stellar-sdk', () => ({
+  StrKey: {
+    isValidEd25519PublicKey: (key: unknown) => key === TEST_VALID_PUBLIC_KEY,
+  },
+}));
+
 import { useWallet } from '../src/hooks/useWallet';
 
 const VALID_PUBLIC_KEY = 'GABCXYZ1234567890123456789012345678901234567890123456789012345';

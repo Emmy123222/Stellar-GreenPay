@@ -9,7 +9,7 @@
  * Uses @testing-library/jest-native matchers via getAllByRole.
  */
 import React from 'react';
-import { render, waitFor } from '@testing-library/react-native';
+import { render, waitFor, fireEvent } from '@testing-library/react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider } from '../app/theme';
@@ -24,16 +24,32 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-jest.mock('expo-sharing', () => ({ shareAsync: jest.fn() }));
+jest.mock('expo-sharing', () => ({
+  shareAsync: jest.fn(),
+  isAvailableAsync: jest.fn().mockResolvedValue(true),
+}));
 
 jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn().mockResolvedValue('file:///tmp/cert.png'),
 }));
 
 jest.mock('../utils/notifications', () => ({
+  requestNotificationPermissions: jest.fn(),
   getPushToken: jest.fn().mockResolvedValue(null),
+  registerDeviceToken: jest.fn(),
   followProject: jest.fn(),
   unfollowProject: jest.fn(),
+  getFollowedProjects: jest.fn(),
+  getNotificationLastSeen: jest.fn(),
+  markNotificationsSeen: jest.fn().mockResolvedValue(''),
+  getUnreadNotificationCount: jest.fn().mockResolvedValue(0),
+  setupNotificationListener: jest.fn(() => ({ remove: jest.fn() })),
+  setupNotificationResponseListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock('expo-notifications', () => ({
+  setBadgeCountAsync: jest.fn().mockResolvedValue(true),
+  getBadgeCountAsync: jest.fn().mockResolvedValue(0),
 }));
 
 jest.mock('../hooks/useBiometricAuth', () => ({
@@ -168,6 +184,82 @@ describe('ProjectDetailScreen — accessibility', () => {
       buttons.forEach((btn) => {
         expect(btn.props.accessibilityLabel).toBeTruthy();
       });
+    });
+  });
+});
+
+// ─── RecurringScreen ─────────────────────────────────────────────────────────
+
+describe('RecurringScreen — accessibility', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
+  });
+
+  it('every touchable element has a non-empty accessibilityLabel', async () => {
+    const RecurringScreen = require('../app/recurring').default;
+    const { getAllByRole } = render(wrap(<RecurringScreen />));
+
+    await waitFor(() => {
+      const buttons = getAllByRole('button');
+      expect(buttons.length).toBeGreaterThan(0);
+      buttons.forEach((btn) => {
+        expect(btn.props.accessibilityLabel).toBeTruthy();
+        expect(btn.props.accessibilityRole).toBe('button');
+      });
+    });
+  });
+
+  it('amount input exposes a non-announced / numeric accessibility role', async () => {
+    const RecurringScreen = require('../app/recurring').default;
+    const { getByLabelText } = render(wrap(<RecurringScreen />));
+
+    await waitFor(() => {
+      const input = getByLabelText('Recurring donation amount in XLM');
+      // Either explicitly hidden from the reader ('none') or a numeric role.
+      expect(['none', 'adjustable', 'spinbutton']).toContain(
+        input.props.accessibilityRole
+      );
+    });
+  });
+
+  it('cancel button has a label distinct from the confirm button', async () => {
+    const RecurringScreen = require('../app/recurring').default;
+    const { getByLabelText } = render(wrap(<RecurringScreen />));
+
+    await waitFor(() => {
+      const confirmBtn = getByLabelText('Confirm recurring donation');
+      const cancelBtn = getByLabelText('Cancel recurring donation setup');
+      expect(confirmBtn.props.accessibilityLabel).toBeTruthy();
+      expect(cancelBtn.props.accessibilityLabel).toBeTruthy();
+      // The two controls must never share a label — screen-reader users rely
+      // on the distinction to avoid accidentally confirming a donation.
+      expect(confirmBtn.props.accessibilityLabel).not.toBe(
+        cancelBtn.props.accessibilityLabel
+      );
+    });
+  });
+
+  it('announces donation status changes via an alert live region', async () => {
+    const RecurringScreen = require('../app/recurring').default;
+    const { getByLabelText, getByRole } = render(wrap(<RecurringScreen />));
+
+    await waitFor(() => {
+      expect(getByLabelText('Confirm recurring donation')).toBeTruthy();
+    });
+
+    fireEvent.changeText(
+      getByLabelText('Recurring donation amount in XLM'),
+      '20'
+    );
+    fireEvent.press(getByLabelText('Confirm recurring donation'));
+
+    await waitFor(() => {
+      const alertRegion = getByRole('alert');
+      expect(alertRegion).toBeTruthy();
+      // Live region ensures the reader announces the status change without
+      // the user navigating to it.
+      expect(alertRegion.props.accessibilityLiveRegion).toBe('polite');
     });
   });
 });
