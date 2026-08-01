@@ -19,6 +19,8 @@
  *   - PATCH /api/verification-requests/:id/status   Approve / reject.
  *       Body: { status: "in_review" | "approved" | "rejected",
  *               reviewerNotes?: string, reviewerBy?: string }
+ *   - DELETE /api/verification-requests/:id   Hard-delete spam/test rows
+ *       (admin-only). Allowed only when status is pending or rejected.
  *
  * Admin endpoints expect a Bearer JWT issued by /api/admin/login, the same
  * mechanism already used by projects.admin/register (see middleware/auth.js).
@@ -408,6 +410,52 @@ router.patch("/:id/status", adminRequired, async (req, res, next) => {
     });
 
     res.json({ success: true, data: mapRequestRow(updated.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/verification-requests/:id
+ * Admin only. Hard-deletes spam or test submissions.
+ * Only pending or rejected rows may be deleted (not approved / in_review).
+ */
+router.delete("/:id", adminRequired, async (req, res, next) => {
+  try {
+    const existing = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [
+      req.params.id,
+    ]);
+    const row = existing.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    if (row.status !== "pending" && row.status !== "rejected") {
+      return res.status(400).json({
+        error: `Cannot delete verification request with status "${row.status}"; only pending or rejected rows may be deleted`,
+      });
+    }
+
+    await pool.query("DELETE FROM verification_requests WHERE id = $1", [req.params.id]);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.delete",
+      targetType: "verification_request",
+      targetId: req.params.id,
+      metadata: {
+        status: row.status,
+        organizationName: row.organization_name,
+        projectName: row.project_name,
+        walletAddress: row.wallet_address,
+        contactEmail: row.contact_email,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { id: req.params.id, deleted: true },
+    });
   } catch (e) {
     next(e);
   }

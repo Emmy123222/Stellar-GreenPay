@@ -1,5 +1,9 @@
 "use strict";
 
+jest.mock("uuid", () => ({
+  v4: () => "11111111-1111-1111-1111-111111111111",
+}));
+
 jest.mock("../db/pool", () => ({
   query: jest.fn(),
   connect: jest.fn(),
@@ -293,5 +297,81 @@ describe("PATCH /api/verification-requests/:id/status (admin)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ status: "shipped" });
     expect(res.status).toBe(400);
+  });
+});
+
+describe("DELETE /api/verification-requests/:id (admin)", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 401 without admin auth", async () => {
+    const res = await request(app).delete(`/api/verification-requests/${MOCK_DB_ROW.id}`);
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 404 when the row does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete("/api/verification-requests/missing-id")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  test("hard-deletes a pending submission", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "pending" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({ id: MOCK_DB_ROW.id, deleted: true });
+    expect(pool.query).toHaveBeenNthCalledWith(
+      2,
+      "DELETE FROM verification_requests WHERE id = $1",
+      [MOCK_DB_ROW.id],
+    );
+  });
+
+  test("hard-deletes a rejected submission", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "rejected" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.deleted).toBe(true);
+  });
+
+  test("rejects deletion of an approved submission", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/approved/);
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects deletion of an in_review submission", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/in_review/);
   });
 });
