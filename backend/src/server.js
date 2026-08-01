@@ -108,6 +108,9 @@ async function startServer() {
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
 
+  const { start: startWebhookQueue } = require("./services/webhook");
+  await startWebhookQueue();
+
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
