@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS donations (
   transaction_hash TEXT NOT NULL UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_donations_donor_project ON donations(donor_address, project_id);
 
 -- profiles: aggregated donor stats and public profile for a Stellar wallet.
 -- total_donated_xlm and projects_supported are computed counters kept in
