@@ -106,14 +106,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v3
+      - uses: azure/setup-helm@v4
         with:
-          version: latest
-      - uses: azure/setup-kubectl@v3
+          version: "v3.16.4"
+      - uses: azure/setup-kubectl@v4
         with:
-          version: latest
+          version: "v1.31.4"
       - run: helm lint helm/greenpay/
-      - run: helm template greenpay helm/greenpay/ | kubectl apply --dry-run=client -f -
+      - name: Render and dry-run
+        run: |
+          helm template greenpay helm/greenpay/ > /tmp/greenpay-manifests.yaml
+          kubectl apply --dry-run=client -f /tmp/greenpay-manifests.yaml
 
   gitleaks:
     name: Secret scanning
@@ -122,9 +125,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install gitleaks
         run: |
-          VER=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | sed -n 's/.*"tag_name": "v\([^"]*\)".*/\1/p' | head -1)
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz" | tar xz
+          GITLEAKS_VERSION=8.24.3
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xzf -
           sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
       - name: Secret scanning
         run: gitleaks detect --config .gitleaks.toml --source . --exit-code 1
 
