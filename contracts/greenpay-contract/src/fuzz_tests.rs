@@ -15,18 +15,26 @@ mod fuzz {
 
     use proptest::prelude::*;
     use soroban_sdk::{
-        testutils::Address as _,
+        testutils::{Address as _, EnvTestConfig},
         token::StellarAssetClient, Address, Env, String as SorobanString,
     };
-    use crate::{DataKey, GreenPayContract, GreenPayContractClient, Project};
+    use crate::{DataKey, GreenPayContract, GreenPayContractClient, MockOracle, Project};
 
     /// Upper bound for a single donation: 1 billion XLM in stroops (10^16).
     /// Chosen so that a single donation is large but a few thousand back-to-back
     /// still fit in an i128 without overflowing.
     const MAX_DONATION: i128 = 1_000_000_000 * 10_000_000; // 10^16
+    const FUZZ_STROOP: i128 = 10_000_000;
+    const MSG_HASH: u32 = 42;
+
+    fn test_env() -> Env {
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
 
     fn setup() -> (Env, Address, GreenPayContractClient<'static>, Address, SorobanString, Address) {
-        let env = Env::default();
+        let env = test_env();
         env.mock_all_auths();
 
         let contract_id = env.register_contract(None, GreenPayContract);
@@ -37,7 +45,7 @@ mod fuzz {
 
         let project_id = SorobanString::from_str(&env, "proj-fuzz-1");
         let wallet = Address::generate(&env);
-        client.register_project(&admin, &project_id, &SorobanString::from_str(&env, "Fuzz Project"), &wallet, &100u32);
+        client.register_project(&admin, &project_id, &SorobanString::from_str(&env, "Fuzz Project"), &wallet, &100u32, &1i128);
 
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
@@ -58,6 +66,63 @@ mod fuzz {
     fn mint_tokens(env: &Env, token: &Address, donor: &Address, amount: i128) {
         let token_client = StellarAssetClient::new(env, token);
         token_client.mint(donor, &amount);
+    }
+
+    fn setup_usdc(
+        co2_per_xlm: u32,
+    ) -> (
+        Env,
+        GreenPayContractClient<'static>,
+        SorobanString,
+        Address,
+    ) {
+        let env = test_env();
+        env.mock_all_auths();
+
+        let contract_id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let project_id = SorobanString::from_str(&env, "proj-usdc-fuzz");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin,
+            &project_id,
+            &SorobanString::from_str(&env, "USDC Fuzz Project"),
+            &wallet,
+            &co2_per_xlm.min(100_000),
+        );
+
+        // Some overflow tests intentionally need a rate above the public
+        // registration limit in order to exercise donate_usdc's checked math.
+        if co2_per_xlm > 100_000 {
+            env.as_contract(&contract_id, || {
+                let key = DataKey::Project(project_id.clone());
+                let mut project: Project = env
+                    .storage()
+                    .instance()
+                    .get(&key)
+                    .expect("project should exist");
+                project.co2_per_xlm = co2_per_xlm;
+                env.storage().instance().set(&key, &project);
+            });
+        }
+
+        let token_admin = Address::generate(&env);
+        let usdc_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        client.set_usdc_token(&admin, &usdc_token);
+
+        let oracle = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle);
+
+        (env, client, project_id, usdc_token)
+    }
+
+    fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
+        StellarAssetClient::new(env, token).mint(donor, amount);
     }
 
     #[test]
@@ -218,7 +283,7 @@ mod fuzz {
         /// available to call `deactivate_project`.
         #[test]
         fn prop_usdc_inactive_project(amount in 1i128..=100_000_000i128) {
-            let env = Env::default();
+            let env = test_env();
             env.mock_all_auths();
             let cid = env.register_contract(None, GreenPayContract);
             let client = GreenPayContractClient::new(&env, &cid);
@@ -233,6 +298,7 @@ mod fuzz {
                 &SorobanString::from_str(&env, "Inactive USDC Project"),
                 &wallet,
                 &100u32,
+                &1i128,
             );
 
             let token_admin = Address::generate(&env);
