@@ -585,6 +585,8 @@ export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
 export interface CategoryStats {
   category: string;
   count: number;
+  total_xlm: string;
+  total_donations: number;
 }
 
 export async function fetchCategoryStats(): Promise<CategoryStats[]> {
