@@ -20,10 +20,40 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
-const { isUrlSafeFromSsrf } = require("../services/ssrfCheck");
+const { adminRequired, adminKeyRequired, validateAdminAddress } = require("../middleware/auth");
 
-const WEBHOOK_URL_MAX_LENGTH = 2000;
+router.patch("/:id", validateAdminAddress, async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const { description, category, tags, location } = req.body;
+
+    const updateFields = {};
+    if (description) updateFields.description = description;
+    if (category) updateFields.category = category;
+    if (tags) updateFields.tags = tags;
+    if (location) updateFields.location = location;
+
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({ error: "No update fields provided" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET description = $1, category = $2, tags = $3, location = $4, updated_at = NOW()
+       WHERE id = $5
+       RETURNING *`,
+      [description, category, tags, location, projectId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";

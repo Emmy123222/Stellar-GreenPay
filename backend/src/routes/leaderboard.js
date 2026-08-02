@@ -3,7 +3,7 @@
  */
 "use strict";
 const express = require("express");
-const router  = express.Router();
+const router = express.Router();
 const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
@@ -14,41 +14,44 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
     const cursor = parseInt(req.query.cursor, 10) || 0;
-    const offset = cursor;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
-
     const onlyVerified = req.query.onlyVerified === "true";
 
     let query = `
-      SELECT p.public_key, p.display_name, p.badges,
-             COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
-             COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported,
-             COALESCE(
-               SUM(
-                 CASE
-                   WHEN pr.raised_xlm > 0 THEN (d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm))
-                   ELSE 0
-                 END
-               ),
-               0
-             )::NUMERIC AS total_co2_offset_kg,
-             (
-               COALESCE(SUM(d.amount_xlm), 0) * 0.7 +
-               (
-                 COALESCE(
-                   SUM(
-                     CASE
-                       WHEN pr.raised_xlm > 0 THEN (d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm))
-                       ELSE 0
-                     END
-                   ),
-                   0
-                 ) / 100
-               ) * 0.3
-             )::NUMERIC AS impact_score
-      FROM profiles p
-      LEFT JOIN donations d ON p.public_key = d.donor_address
+      WITH ranked_donors AS (
+        SELECT
+          p.public_key,
+          p.display_name,
+          p.badges,
+          COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
+          COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported,
+          COALESCE(
+            SUM(
+              CASE
+                WHEN pr.raised_xlm > 0 THEN (d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm))
+                ELSE 0
+              END
+            ),
+            0
+          )::NUMERIC AS total_co2_offset_kg,
+          (
+            COALESCE(SUM(d.amount_xlm), 0) * 0.7 +
+            (
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN pr.raised_xlm > 0 THEN (d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm))
+                    ELSE 0
+                  END
+                ),
+                0
+              ) / 100
+            ) * 0.3
+          )::NUMERIC AS impact_score,
+          ROW_NUMBER() OVER (ORDER BY ${sortBy} DESC) as rank
+        FROM profiles p
+        LEFT JOIN donations d ON p.public_key = d.donor_address
     `;
 
     if (period === "week") {
@@ -66,40 +69,29 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     const whereConditions = [];
 
     if (onlyVerified) {
-      whereConditions.push(`
-        NOT EXISTS (
-          SELECT 1 FROM donations d2
-          JOIN projects pr ON d2.project_id = pr.id
-          WHERE d2.donor_address = p.public_key AND pr.verified = false
-        )
-        AND EXISTS (
-          SELECT 1 FROM donations d3
-          JOIN projects pr2 ON d3.project_id = pr2.id
-          WHERE d3.donor_address = p.public_key AND pr2.verified = true
-        )
-      `);
-    }
-
-    if (whereConditions.length > 0) {
       query += `
-        WHERE ${whereConditions.join(" AND ")}
+        LEFT JOIN projects pr ON pr.id = d.project_id
+        WHERE pr.verified = true
+      `;
+    } else {
+      query += `
+        LEFT JOIN projects pr ON pr.id = d.project_id
       `;
     }
 
     query += `
-      GROUP BY p.public_key, p.display_name, p.badges
-      ORDER BY ${sortBy} DESC, p.public_key ASC
-      LIMIT $1 OFFSET $2
+        GROUP BY p.public_key, p.display_name, p.badges
+      )
+      SELECT *
+      FROM ranked_donors
+      WHERE rank > $1
+      ORDER BY rank ASC
+      LIMIT $2
     `;
 
-    // eslint-disable-next-line sql-injection/no-sql-injection
-    const result = await pool.query(query, [limit + 1, offset]);
-    
-    const hasMore = result.rows.length > limit;
-    const rows = hasMore ? result.rows.slice(0, limit) : result.rows;
-
-    const entries = rows.map((p, i) => ({
-      rank: offset + i + 1,
+    const result = await pool.query(query, [cursor, limit]);
+    const entries = result.rows.map((p) => ({
+      rank: p.rank,
       publicKey: p.public_key,
       displayName: p.display_name || null,
       totalDonatedXLM: p.total_donated_xlm?.toString() || "0",
@@ -109,67 +101,14 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       totalCO2OffsetKg: p.total_co2_offset_kg?.toString() || "0",
     }));
 
-    const nextCursor = hasMore ? offset + limit : null;
-
-    res.json({ 
-      success: true, 
-      data: entries,
-      has_more: hasMore,
-      next_cursor: nextCursor
-    });
-  } catch (e) {
-    next(e);
-  }
-});
-
-router.get("/me", async (req, res, next) => {
-  try {
-    const { publicKey } = req.query;
-    if (!publicKey || !/^G[A-Z0-9]{55}$/.test(publicKey)) {
-      return res.status(400).json({ error: "Invalid publicKey" });
-    }
-
-    const result = await pool.query(
-      `WITH ranked AS (
-        SELECT p.public_key, p.badges,
-               COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
-               (
-                 COALESCE(SUM(d.amount_xlm), 0) * 0.7 +
-                 (
-                   COALESCE(SUM(
-                     CASE WHEN pr.raised_xlm > 0
-                       THEN d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm)
-                       ELSE 0 END
-                   ), 0) / 100
-                 ) * 0.3
-               )::NUMERIC AS impact_score,
-               RANK() OVER (ORDER BY COALESCE(SUM(d.amount_xlm), 0) DESC) AS rank
-        FROM profiles p
-        LEFT JOIN donations d ON p.public_key = d.donor_address
-        LEFT JOIN projects pr ON pr.id = d.project_id
-        GROUP BY p.public_key, p.display_name, p.badges
-      )
-      SELECT rank, total_donated_xlm, impact_score, badges
-      FROM ranked
-      WHERE public_key = $1`,
-      [publicKey],
-    );
-
-    if (!result.rows[0]) {
-      return res.status(404).json({ error: "Donor not found" });
-    }
-
-    const row = result.rows[0];
-    const badge = row.badges?.[0]?.tier || null;
+    const hasMore = entries.length === limit;
+    const nextCursor = hasMore ? entries[entries.length - 1].rank : null;
 
     res.json({
       success: true,
-      data: {
-        rank: row.rank,
-        totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
-        impactScore: row.impact_score?.toString() || "0",
-        badge,
-      },
+      data: entries,
+      has_more: hasMore,
+      next_cursor: nextCursor,
     });
   } catch (e) {
     next(e);
