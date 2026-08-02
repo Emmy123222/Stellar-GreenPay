@@ -312,6 +312,33 @@ function mapProjectRatingRow(row) {
  */
 // exported as `mapProjectRatingRow`
 
+/**
+ * Update the webhook URL and secret for a project.
+ *
+ * @param {string} projectId - Project UUID.
+ * @param {string|null} webhookUrl - The webhook URL to set (or null to clear).
+ * @param {string|null} webhookSecret - The HMAC secret for signing payloads.
+ * @returns {Promise<{webhookUrl: string|null, webhookSecret: string|null}>} Updated webhook config.
+ */
+async function updateWebhook(projectId, webhookUrl, webhookSecret) {
+  const pool = require("../db/pool");
+  const result = await pool.query(
+    `UPDATE projects
+     SET webhook_url = $1,
+         webhook_secret = $2,
+         updated_at = NOW()
+     WHERE id = $3
+     RETURNING webhook_url, webhook_secret`,
+    [webhookUrl || null, webhookSecret || null, projectId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    webhookUrl: row.webhook_url || null,
+    webhookSecret: row.webhook_secret || null,
+  };
+}
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
@@ -325,4 +352,5 @@ module.exports = {
   mapJobRow,
   mapProjectMilestoneRow,
   mapProjectRatingRow,
+  updateWebhook,
 };
