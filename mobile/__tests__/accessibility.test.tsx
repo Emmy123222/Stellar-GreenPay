@@ -33,6 +33,7 @@ jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn().mockResolvedValue('file:///tmp/cert.png'),
 }));
 
+
 jest.mock('../utils/notifications', () => ({
   requestNotificationPermissions: jest.fn(),
   getPushToken: jest.fn().mockResolvedValue(null),
@@ -51,6 +52,15 @@ jest.mock('expo-notifications', () => ({
   setBadgeCountAsync: jest.fn().mockResolvedValue(true),
   getBadgeCountAsync: jest.fn().mockResolvedValue(0),
 }));
+
+// Opt into the shared auto-mock at `__mocks__/utils/notifications.js`.
+// Jest does NOT auto-apply sibling `__mocks__/foo.js` for application-
+// scoped (non-`node_modules`) modules — the test must explicitly call
+// `jest.mock(path)` (factory-less) to opt in. Provides stable defaults
+// including a `{ remove: jest.fn() }` subscription shape for HomeScreen's
+// notification listener unmount.
+jest.mock('../utils/notifications');
+
 
 jest.mock('../hooks/useBiometricAuth', () => ({
   authenticate: jest.fn().mockResolvedValue(true),
@@ -96,13 +106,21 @@ function wrap(element: React.ReactElement) {
 
 // ─── HomeScreen ─────────────────────────────────────────────────────────────
 
+
+// ── Animated mock ──────────────────────────────────────────────────────────────
+// Silences warnIfUpdatesNotWrappedWithActDEV from React Native Animated. The animation
+// module's update path uses rAF/setTimeout which fires outside any act() block, so the
+// only reliable fix is to stub the native helper at the bridge level. Mirrors
+// ProjectDetailScreen.test.tsx.
+jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+
 describe('HomeScreen — accessibility', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('project cards have accessibilityLabel and role=button', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
     const HomeScreen = require('../app/index').default;
-    const { getAllByRole } = render(wrap(<HomeScreen />));
+    const { getAllByRole } = await render(wrap(<HomeScreen />));
 
     await waitFor(() => {
       const buttons = getAllByRole('button');
@@ -122,7 +140,7 @@ describe('ProjectsScreen — accessibility', () => {
   it('project cards have accessibilityLabel and role=button', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
     const ProjectsScreen = require('../app/projects/index').default;
-    const { getAllByRole } = render(wrap(<ProjectsScreen />));
+    const { getAllByRole } = await render(wrap(<ProjectsScreen />));
 
     await waitFor(() => {
       const buttons = getAllByRole('button');
@@ -136,7 +154,7 @@ describe('ProjectsScreen — accessibility', () => {
   it('search input has accessibilityLabel', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
     const ProjectsScreen = require('../app/projects/index').default;
-    const { getByLabelText } = render(wrap(<ProjectsScreen />));
+    const { getByLabelText } = await render(wrap(<ProjectsScreen />));
 
     await waitFor(() => {
       expect(getByLabelText('Search projects')).toBeTruthy();
@@ -154,7 +172,7 @@ describe('ProjectDetailScreen — accessibility', () => {
 
   it('share button has accessibilityLabel and role=button', async () => {
     const ProjectDetailScreen = require('../app/projects/[id]').default;
-    const { getByLabelText } = render(wrap(<ProjectDetailScreen />));
+    const { getByLabelText } = await render(wrap(<ProjectDetailScreen />));
 
     await waitFor(() => {
       const shareBtn = getByLabelText(`Share ${MOCK_PROJECT.name}`);
@@ -165,7 +183,7 @@ describe('ProjectDetailScreen — accessibility', () => {
 
   it('donate button has accessibilityLabel and role=button', async () => {
     const ProjectDetailScreen = require('../app/projects/[id]').default;
-    const { getByLabelText } = render(wrap(<ProjectDetailScreen />));
+    const { getByLabelText } = await render(wrap(<ProjectDetailScreen />));
 
     await waitFor(() => {
       const donateBtn = getByLabelText(`Donate to ${MOCK_PROJECT.name}`);
@@ -176,7 +194,7 @@ describe('ProjectDetailScreen — accessibility', () => {
 
   it('all buttons have non-empty accessibilityLabel', async () => {
     const ProjectDetailScreen = require('../app/projects/[id]').default;
-    const { getAllByRole } = render(wrap(<ProjectDetailScreen />));
+    const { getAllByRole } = await render(wrap(<ProjectDetailScreen />));
 
     await waitFor(() => {
       const buttons = getAllByRole('button');
@@ -273,7 +291,7 @@ describe('ProjectsScreen — offline banner accessibility', () => {
     (axios.get as jest.Mock).mockRejectedValue(new Error('Network Error'));
 
     const ProjectsScreen = require('../app/projects/index').default;
-    const { getByLabelText } = render(wrap(<ProjectsScreen />));
+    const { getByLabelText } = await render(wrap(<ProjectsScreen />));
 
     await waitFor(() => {
       const banner = getByLabelText('Offline — showing cached data');

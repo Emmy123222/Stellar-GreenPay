@@ -31,8 +31,13 @@ import axios from 'axios';
 import {
   loadRecurringDonations,
   cancelRecurringDonation,
+
   createRecurringDonation,
+
+  loadPaymentHistory,
+
   type RecurringDonation,
+  type PaymentRecord,
 } from '../utils/recurringDonations';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -113,7 +118,9 @@ function DonationCard({
 
 export default function RecurringScreen() {
   const [donations, setDonations] = useState<RecurringDonation[]>([]);
+  const [history, setHistory] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
 
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -131,8 +138,11 @@ export default function RecurringScreen() {
   const loadData = useCallback(async () => {
     const all = await loadRecurringDonations();
     setDonations(all.filter((d) => d.status === 'active'));
+    const h = await loadPaymentHistory();
+    setHistory(h);
     setLoading(false);
   }, []);
+
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -160,6 +170,13 @@ export default function RecurringScreen() {
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
+
 
   const handleCancel = async (id: string) => {
     await cancelRecurringDonation(id);
@@ -217,6 +234,7 @@ export default function RecurringScreen() {
         <Text style={styles.headerTitle}>Monthly Giving</Text>
         <Text style={styles.headerSub}>Manage your recurring donations</Text>
       </View>
+
 
       {/* Set up a new recurring donation */}
       {!projectsLoading && projects.length > 0 && (
@@ -306,16 +324,63 @@ export default function RecurringScreen() {
 
       {/* Active recurring donations */}
       {donations.length === 0 ? (
+
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'active' && styles.tabActive]}
+          onPress={() => setActiveTab('active')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>Active</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'history' && styles.tabActive]}
+          onPress={() => setActiveTab('history')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>History</Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'active' ? (
+        donations.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>🌱</Text>
+            <Text style={styles.emptyTitle}>No active recurring donations</Text>
+            <Text style={styles.emptyText}>
+              Set up a monthly donation from any project page to support ongoing impact.
+            </Text>
+          </View>
+        ) : (
+          donations.map((donation) => (
+            <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} />
+          ))
+        )
+      ) : history.length === 0 ? (
+
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>🌱</Text>
-          <Text style={styles.emptyTitle}>No active recurring donations</Text>
+          <Text style={styles.emptyIcon}>📋</Text>
+          <Text style={styles.emptyTitle}>No payment history</Text>
           <Text style={styles.emptyText}>
-            Set up a monthly donation from any project page to support ongoing impact.
+            Your past donation payments will appear here.
           </Text>
         </View>
       ) : (
-        donations.map((donation) => (
-          <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} />
+        history.map((record) => (
+          <View key={record.id} style={styles.historyCard}>
+            <View style={styles.historyCardHeader}>
+              <Text style={styles.historyProjectName} numberOfLines={1}>
+                {record.projectName}
+              </Text>
+              <Text style={styles.historyAmount}>{record.amountXLM} XLM</Text>
+            </View>
+            <View style={styles.historyMeta}>
+              <Text style={styles.historyDate}>{formatNextDate(record.date)}</Text>
+              <Text style={[styles.historyStatus, record.status === 'completed' && styles.historyStatusSuccess]}>
+                {record.status}
+              </Text>
+            </View>
+          </View>
         ))
       )}
     </ScrollView>
@@ -529,5 +594,78 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#c62828',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tabActive: {
+    backgroundColor: '#227239',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5a7a5a',
+  },
+  tabTextActive: {
+    color: '#fff',
+  },
+  historyCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+  },
+  historyCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  historyProjectName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1a2e1a',
+    marginRight: 8,
+  },
+  historyAmount: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#227239',
+  },
+  historyMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  historyDate: {
+    fontSize: 13,
+    color: '#5a7a5a',
+  },
+  historyStatus: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#c62828',
+    textTransform: 'capitalize',
+  },
+  historyStatusSuccess: {
+    color: '#227239',
   },
 });

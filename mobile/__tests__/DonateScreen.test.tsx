@@ -22,7 +22,7 @@
  * without mocking the entire Stellar SDK.
  */
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent, waitFor , act} from '@testing-library/react-native';
 import axios from 'axios';
 import * as LocalAuthentication from 'expo-local-authentication';
 
@@ -54,6 +54,16 @@ jest.mock('../hooks/useBiometricAuth', () => {
 });
 
 import { useBiometricAuth } from '../hooks/useBiometricAuth';
+
+/**
+ * `expo-notifications` is imported transitively by the auth-gate code and
+ * runs a slow module-init path (~2 s on cold start) under our
+ * `expo-modules-core` Proxy stub. The default 5 s Jest test timeout is
+ * too tight for a suite that re-renders DonateScreen for every test
+ * block, so extend it here. Mirrors the same pattern as
+ * ProjectDetailScreen.test.tsx.
+ */
+jest.setTimeout(30000);
 
 const bioMock = useBiometricAuth as unknown as () => {
   available: boolean;
@@ -105,23 +115,31 @@ jest.mock('expo-linking', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-// The Stellar SDK touches Axios at module load time and crashes if its
-// default config is undefined. Stub the surface we use in the donate
-// screen so the test harness doesn't need a real Horizon URL.
-jest.mock('@stellar/stellar-sdk', () => ({
-  Keypair: {
-    fromSecret: jest.fn(() => ({
-      publicKey: () => 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
-      sign: jest.fn(),
-    })),
-  },
-  Server: jest.fn(),
-  TransactionBuilder: jest.fn(),
-  Networks: { TESTNET: 'Test SDF Network ; September 2015' },
-  Operation: { payment: jest.fn() },
-  Asset: { native: jest.fn() },
-  Memo: { text: jest.fn() },
+jest.mock('../app/theme', () => ({
+  useTheme: () => ({
+    colors: {
+      background: '#ffffff',
+      surface: '#ffffff',
+      primary: '#000000',
+      accent: '#000000',
+      header: '#000000',
+      headerText: '#ffffff',
+      buttonBackground: '#000000',
+      buttonText: '#ffffff',
+      cardBorder: '#eeeeee',
+      cardShadow: '#000000',
+      primaryText: '#000000',
+      secondaryText: '#555555',
+      muted: '#888888',
+      inputBackground: '#ffffff',
+      inputBorder: '#eeeeee',
+      placeholder: '#888888',
+      border: '#dddddd',
+      statusBarStyle: 'dark',
+    },
+  }),
 }));
+
 
 const MOCK_PROJECT = {
   id: 'proj-1',
@@ -146,22 +164,30 @@ beforeEach(() => {
   fresh.authenticate.mockReset();
 });
 
+
+// ── Animated mock ──────────────────────────────────────────────────────────────
+// Silences warnIfUpdatesNotWrappedWithActDEV from React Native Animated. The animation
+// module's update path uses rAF/setTimeout which fires outside any act() block, so the
+// only reliable fix is to stub the native helper at the bridge level. Mirrors
+// ProjectDetailScreen.test.tsx.
+jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+
 describe('DonateScreen – biometric auth gate (issue #481)', () => {
-  it('shows "Loading project..." before projects arrive', () => {
+  it('shows "Loading project..." before projects arrive', async () => {
     (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
-    const { getByText } = render(<DonateScreen />);
+    const { getByText } = await act(async () => render(<DonateScreen />));
     expect(getByText('Loading project...')).toBeTruthy();
   });
 
   it('renders the donate screen after projects are loaded', async () => {
-    const { getByText } = render(<DonateScreen />);
+    const { getByText } = await act(async () => render(<DonateScreen />));
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
   });
 
   it('renders the three preset amount chips (5, 10, 25 XLM)', async () => {
-    const { getByText } = render(<DonateScreen />);
+    const { getByText } = await act(async () => render(<DonateScreen />));
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
@@ -171,7 +197,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
   });
 
   it('does NOT call authenticate when the wallet is not connected', async () => {
-    const { getByText } = render(<DonateScreen />);
+    const { getByText } = await act(async () => render(<DonateScreen />));
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
@@ -193,7 +219,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     // Alert.alert and the wallet connect callback; instead of doing
     // that, assert that pressing Donate without preconditions does NOT
     // hit the auth gate. (Happy-path coverage is in the hook tests.)
-    const { getByText } = render(<DonateScreen />);
+    const { getByText } = await act(async () => render(<DonateScreen />));
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
@@ -202,14 +228,14 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     expect(bioMock().authenticate).not.toHaveBeenCalled();
   });
 
-  it('invokes useBiometricAuth.authenticate from the donate flow before any submission', () => {
+  it('invokes useBiometricAuth.authenticate from the donate flow before any submission', async () => {
     // Contract verification: the donate screen imports
     // `useBiometricAuth` and uses the hook's `authenticate` action,
     // confirming the biometric gate is wired into the donate handler.
     // A naked `expect(useBiometricAuth).toBeDefined()` would also pass
     // but says nothing about wiring — instead we render the screen and
     // confirm the rendered "🔒" hint and disabled-donate behaviour.
-    const { getByText, queryByText } = render(<DonateScreen />);
+    const { getByText, queryByText } = await act(async () => render(<DonateScreen />));
     return waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     ).then(() => {
@@ -219,6 +245,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
   });
 
   it('exposes the biometric gate via the lock icon hint', async () => {
+
     // The lock glyph in the hint row is decorative, so the screen hides it
     // from assistive technology (`accessibilityElementsHidden`). Assert the
     // accessible hint text that screen readers actually announce instead.
@@ -228,5 +255,18 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     );
     // Hint advertises the upcoming biometric prompt
     expect(getByText(/authenticate with Biometrics before signing/i)).toBeTruthy();
+
+    const { getByText, findByText } = await act(async () =>
+      render(<DonateScreen />)
+    );
+    await waitFor(() =>
+      expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
+    );
+    // The lock emoji is rendered inside a Text element with
+    // `accessibilityElementsHidden={true}` so screen-reader focus stays
+    // on the explanatory copy. RNTL@14's default text queries exclude
+    // accessibility-hidden nodes — opt back in via `{ hidden: true }`.
+    expect(await findByText('🔒', { hidden: true })).toBeTruthy();
+
   });
 });
