@@ -97,6 +97,60 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
   }
 });
 
+router.get("/me", async (req, res, next) => {
+  try {
+    const { publicKey } = req.query;
+    if (!publicKey || !/^G[A-Z0-9]{55}$/.test(publicKey)) {
+      return res.status(400).json({ error: "Invalid publicKey" });
+    }
+
+    const result = await pool.query(
+      `WITH ranked AS (
+        SELECT p.public_key, p.badges,
+               COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
+               (
+                 COALESCE(SUM(d.amount_xlm), 0) * 0.7 +
+                 (
+                   COALESCE(SUM(
+                     CASE WHEN pr.raised_xlm > 0
+                       THEN d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm)
+                       ELSE 0 END
+                   ), 0) / 100
+                 ) * 0.3
+               )::NUMERIC AS impact_score,
+               RANK() OVER (ORDER BY COALESCE(SUM(d.amount_xlm), 0) DESC) AS rank
+        FROM profiles p
+        LEFT JOIN donations d ON p.public_key = d.donor_address
+        LEFT JOIN projects pr ON pr.id = d.project_id
+        GROUP BY p.public_key, p.display_name, p.badges
+      )
+      SELECT rank, total_donated_xlm, impact_score, badges
+      FROM ranked
+      WHERE public_key = $1`,
+      [publicKey],
+    );
+
+    if (!result.rows[0]) {
+      return res.status(404).json({ error: "Donor not found" });
+    }
+
+    const row = result.rows[0];
+    const badge = row.badges?.[0]?.tier || null;
+
+    res.json({
+      success: true,
+      data: {
+        rank: row.rank,
+        totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
+        impactScore: row.impact_score?.toString() || "0",
+        badge,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 /**
  * GET /api/leaderboard/history
  * Returns the monthly leaderboard snapshots, grouped by month descending.
