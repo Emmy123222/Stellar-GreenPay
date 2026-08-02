@@ -57,11 +57,10 @@ router.get("/project/:id", async (req, res, next) => {
 
     const aggResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount"
        FROM donations d
-       WHERE d.project_id = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+       WHERE d.project_id = $1`,
       [req.params.id],
     );
 
@@ -97,12 +96,12 @@ router.get("/global", async (req, res, next) => {
 
     const totalsResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -110,18 +109,18 @@ router.get("/global", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE (d.currency = 'XLM' OR d.currency IS NULL)`,
+`,
     );
 
     const breakdownResult = await pool.query(
       `SELECT
         p.category AS category,
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -129,7 +128,6 @@ router.get("/global", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE (d.currency = 'XLM' OR d.currency IS NULL)
        GROUP BY p.category
        ORDER BY "totalDonationsXLM" DESC, p.category ASC`,
     );
@@ -172,12 +170,12 @@ router.get("/donor/:publicKey", async (req, res, next) => {
 
     const totalsResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonatedXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonatedXLM",
         COUNT(DISTINCT d.project_id)::int AS "projectsSupported",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -185,19 +183,17 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE d.donor_address = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+       WHERE d.donor_address = $1`,
       [req.params.publicKey],
     );
 
     const topCategoryResult = await pool.query(
       `SELECT
         p.category AS category,
-        COALESCE(SUM(d.amount_xlm), 0) AS total
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS total
        FROM donations d
        JOIN projects p ON p.id = d.project_id
        WHERE d.donor_address = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)
        GROUP BY p.category
        ORDER BY total DESC
        LIMIT 1`,

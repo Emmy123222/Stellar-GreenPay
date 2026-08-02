@@ -201,17 +201,8 @@ router.get("/", async (req, res, next) => {
       where.push("verified = true");
     }
     if (search && typeof search === "string") {
-      values.push(`%${search}%`);
-      where.push(`(
-        name ILIKE $${values.length}
-        OR description ILIKE $${values.length}
-        OR location ILIKE $${values.length}
-        OR EXISTS (
-          SELECT 1
-          FROM unnest(tags) AS tag
-          WHERE tag ILIKE $${values.length}
-        )
-      )`);
+      values.push(search.trim());
+      where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
     }
 
     if (cursor) {
@@ -236,11 +227,10 @@ router.get("/", async (req, res, next) => {
     values.push(pageSize + 1);
     const limitIdx = values.length;
 
-    let query = "SELECT * FROM projects ";
-    if (where.length) {
-      query += "WHERE " + where.join(" AND ") + " ";
-    }
-    query += `ORDER BY created_at DESC, id DESC LIMIT $${limitIdx}`;
+    // Build the SQL query: WHERE values are whitelisted enum strings;
+    // all user values use parameterized $N placeholders below.
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")} ` : "";
+    const query = `SELECT * FROM projects ${whereClause}ORDER BY created_at DESC, id DESC LIMIT $${limitIdx}`;
 
     // All user-controlled values (status, category, search, cursor fields) are
     // passed as parameterised $N placeholders in `values`. Dynamic WHERE clauses
@@ -342,8 +332,8 @@ router.post("/", async (req, res, next) => {
 
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($8, ' '), '')))
        RETURNING *`,
       [
         id,
