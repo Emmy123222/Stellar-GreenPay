@@ -49,7 +49,19 @@ router.get("/", async (req, res, next) => {
       queryStr += " WHERE " + conditions.join(" AND ");
     }
 
-    queryStr += " ORDER BY created_at DESC LIMIT 50";
+    const { limit = 50, cursor } = req.query;
+    const maxLimit = Math.min(limit, 100);
+    
+    if (cursor) {
+      const cursorDate = new Date(parseInt(cursor));
+      conditions.push(`created_at < $${paramIndex}`);
+      values.push(cursorDate);
+      paramIndex++;
+    }
+    
+    queryStr += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
+    values.push(maxLimit);
+    paramIndex++;
 
     const result = await pool.query(queryStr, values);
     res.json({ success: true, data: result.rows.map(mapJobRow) });
