@@ -12,6 +12,7 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
+const donationEvents = require("../services/donationEvents");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
 
 const donationSchema = z.object({
@@ -56,8 +57,9 @@ async function recordDonation(req, res, next) {
 
     client = await pool.connect();
 
-    const projectResult = await client.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await client.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectName = projectResult.rows[0].name || "Unknown Project";
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
@@ -187,7 +189,42 @@ async function recordDonation(req, res, next) {
       txHash: transactionHash,
     }, "Donation recorded");
 
+    // Fetch campaign progress for real-time update
+    const projectResult2 = await pool.query(
+      "SELECT goal_xlm, raised_xlm FROM projects WHERE id = $1",
+      [projectId],
+    );
+    const projectRow = projectResult2.rows[0];
+    const campaignGoalXLM = Number(projectRow.goal_xlm);
+    const campaignRaisedXLM = Number(projectRow.raised_xlm);
+    const activeCampaignProgressPercent = campaignGoalXLM > 0
+      ? Math.min(Math.round((campaignRaisedXLM / campaignGoalXLM) * 100), 100)
+      : 0;
+
     const io = req.app?.get("io");
+
+    // Compute donor badge for the SSE payload
+    let donorBadge = "";
+    try {
+      const profileResult = await pool.query(
+        "SELECT total_donated_xlm FROM profiles WHERE public_key = $1",
+        [donorAddress],
+      );
+      const totalXLM = profileResult.rows[0]
+        ? parseFloat(profileResult.rows[0].total_donated_xlm || "0")
+        : parsedAmount;
+      const badges = computeBadges(totalXLM);
+      donorBadge = badges.length > 0 ? badges[0].tier.charAt(0).toUpperCase() + badges[0].tier.slice(1) : "";
+    } catch {
+      // Badge computation is best-effort; don't fail the request
+    }
+
+    const ssePayload = {
+      projectName,
+      amountXLM: String(parsedAmount),
+      donorBadge,
+    };
+
     if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
@@ -195,13 +232,15 @@ async function recordDonation(req, res, next) {
         amountXLM: recordedDonation.amount_xlm,
         transactionHash,
         timestamp: new Date().toISOString(),
+        activeCampaignProgressPercent,
+        campaignGoalXLM,
+        campaignRaisedXLM,
       });
     }
 
-    const mappedDonation = mapDonationRow(donationResult.rows[0]);
-    donationEvents.emit("new_donation", mappedDonation);
+    donationEvents.emit("new_donation", ssePayload);
 
-    res.status(201).json({ success: true, data: mappedDonation });
+    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     next(e);
@@ -222,19 +261,31 @@ async function recordDonation(req, res, next) {
  */
 router.post("/", donationLimiter, recordDonation);
 
-// GET /api/donations/stream
+/**
+ * Stream new donation events as Server-Sent Events.
+ *
+ * Clients receive JSON payloads matching the shape:
+ *   {"projectName":"…","amountXLM":"…","donorBadge":"…"}
+ *
+ * A heartbeat comment is sent every 15 s to keep the connection alive.
+ *
+ * @route GET /api/donations/stream
+ * @param {import('express').Request} req - Express request.
+ * @param {import('express').Response} res - Express response (SSE).
+ */
 router.get("/stream", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
 
   const keepAlive = setInterval(() => {
-    res.write(":\\n\\n");
+    res.write(":\n\n");
   }, 15000);
 
   const onNewDonation = (donation) => {
-    res.write(`data: ${JSON.stringify(donation)}\\n\\n`);
+    res.write(`data: ${JSON.stringify(donation)}\n\n`);
   };
 
   donationEvents.on("new_donation", onNewDonation);

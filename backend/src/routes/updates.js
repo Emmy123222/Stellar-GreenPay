@@ -83,7 +83,7 @@ router.get("/:projectId", async (req, res, next) => {
 // POST /api/updates  (admin only)
 router.post("/", adminRequired, async (req, res, next) => {
   try {
-    const { projectId, title, body } = req.body;
+    const { projectId, title, body, image_url } = req.body;
 
     if (!projectId || typeof projectId !== "string") {
       return res.status(400).json({ error: "projectId is required" });
@@ -93,6 +93,20 @@ router.post("/", adminRequired, async (req, res, next) => {
     }
     if (!body || typeof body !== "string" || !body.trim()) {
       return res.status(400).json({ error: "body is required" });
+    }
+    if (image_url !== undefined && image_url !== null) {
+      if (typeof image_url !== "string" || !image_url.trim()) {
+        return res.status(400).json({ error: "image_url must be a non-empty string" });
+      }
+      // Basic URL validation — must be http or https
+      try {
+        const parsed = new URL(image_url.trim());
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          return res.status(400).json({ error: "image_url must use http or https" });
+        }
+      } catch {
+        return res.status(400).json({ error: "image_url must be a valid URL" });
+      }
     }
 
     // Verify project exists
@@ -106,11 +120,12 @@ router.post("/", adminRequired, async (req, res, next) => {
 
     // Insert update
     const id = uuidv4();
+    const imageUrlValue = (image_url && image_url.trim()) ? image_url.trim() : null;
     const insertResult = await pool.query(
-      `INSERT INTO project_updates (id, project_id, title, body)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO project_updates (id, project_id, title, body, image_url)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [id, projectId, title.trim(), body.trim()],
+      [id, projectId, title.trim(), body.trim(), imageUrlValue],
     );
     const update = mapProjectUpdateRow(insertResult.rows[0]);
 
