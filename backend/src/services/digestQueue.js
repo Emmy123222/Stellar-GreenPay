@@ -311,4 +311,9 @@ async function start() {
   logger.info({ event: "digest_scheduled", cron: cronSchedule }, `[digestQueue] Monthly digest scheduled: ${cronSchedule}`);
 }
 
-module.exports = { start, runDigest };
+module.exports = {
+  start,
+  runDigest,
+  buildDigestHtml,
+  buildDigestText,
+};

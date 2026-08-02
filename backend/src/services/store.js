@@ -237,6 +237,7 @@ function mapProjectUpdateRow(row) {
     projectId: row.project_id,
     title: row.title,
     body: row.body,
+    imageUrl: row.image_url || null,
     createdAt: toIso(row.created_at),
   };
 }
