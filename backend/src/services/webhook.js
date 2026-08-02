@@ -9,15 +9,36 @@ const https = require("https");
 const http = require("http");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { assertPublicHttpUrl } = require("../utils/ssrf");
 
 /**
  * POST a signed JSON payload to a webhook URL.
+ *
+ * Re-validates the URL against SSRF (private IPs, localhost, cloud metadata
+ * addresses) on every delivery, not just at registration time, since DNS
+ * answers can change between when a webhook was registered and when it's
+ * actually delivered.
  *
  * @param {string} url    - The webhook URL to deliver to.
  * @param {string} secret - HMAC-SHA256 secret for signing.
  * @param {object} payload - The JSON body to send.
  */
-function deliverPayload(url, secret, payload) {
+async function deliverPayload(url, secret, payload) {
+  try {
+    await assertPublicHttpUrl(url);
+  } catch (err) {
+    // Never reject: this is called fire-and-forget (no await/catch at the
+    // call site in checkAndDeliverMilestones), so any rejection here would
+    // become an unhandled promise rejection.
+    logger.error({
+      event: "webhook_blocked_ssrf",
+      url,
+      err: err.message,
+      payload: { projectId: payload.projectId, milestone: payload.milestone },
+    }, "Webhook delivery blocked by SSRF protection");
+    return;
+  }
+
   const body = JSON.stringify(payload);
   const signature = crypto
     .createHmac("sha256", secret)
@@ -158,3 +179,8 @@ async function checkAndDeliverMilestones(projectId) {
 module.exports = {
   checkAndDeliverMilestones,
 };
+
+// Export internal functions for testing
+if (process.env.NODE_ENV === "test") {
+  module.exports.deliverPayload = deliverPayload;
+}
