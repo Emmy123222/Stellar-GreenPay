@@ -55,4 +55,16 @@ async function deletePattern(pattern) {
   }
 }
 
-module.exports = { get, set, deletePattern };
+async function ping() {
+  const c = getClient();
+  if (c.status !== "ready") {
+    await c.connect();
+  }
+  const result = await c.ping();
+  if (result !== "PONG") {
+    throw new Error("Redis ping failed");
+  }
+  return result;
+}
+
+module.exports = { get, set, deletePattern, ping };

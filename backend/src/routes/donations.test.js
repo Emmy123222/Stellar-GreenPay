@@ -313,6 +313,121 @@ describe("POST /api/donations", () => {
     expect(updateProjectCall[1]).toEqual([5.5, "project-2"]);
   });
 
+  test("records and accounts for a matching donation from an active offer", async () => {
+    const donorAddress = makePublicKey("M");
+    const matcherAddress = makePublicKey("N");
+    const transactionHash = makeTxHash("5");
+    const donationRow = {
+      id: "donation-matched",
+      project_id: "project-matched",
+      donor_address: donorAddress,
+      amount_xlm: "12.5",
+      amount: "12.5",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-matched" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([{
+        id: "match-1",
+        matcher_address: matcherAddress,
+        cap_xlm: "100.0000000",
+        matched_xlm: "10.0000000",
+        multiplier: 2,
+      }]),
+      queryResult(),
+      queryResult(),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-matched",
+      donorAddress,
+      amountXLM: "12.5",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+
+    const donationInserts = client.query.mock.calls.filter(([sql]) =>
+      sql.includes("INSERT INTO donations"),
+    );
+    expect(donationInserts).toHaveLength(2);
+    expect(donationInserts[1][1]).toEqual([
+      expect.any(String),
+      "project-matched",
+      matcherAddress,
+      25,
+      25,
+      "XLM",
+      `Matching donation for donation from ${donorAddress}`,
+      `match-${transactionHash}-match-1`,
+    ]);
+
+    const matchUpdate = findQueryCall(client, "UPDATE donation_matches");
+    expect(matchUpdate[1]).toEqual([25, "match-1"]);
+  });
+
+  test("does not apply matching when the offer cap has already been reached", async () => {
+    const donorAddress = makePublicKey("S");
+    const transactionHash = makeTxHash("6");
+    const donationRow = {
+      id: "donation-cap-reached",
+      project_id: "project-cap-reached",
+      donor_address: donorAddress,
+      amount_xlm: "10",
+      amount: "10",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-cap-reached" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([{
+        id: "match-capped",
+        matcher_address: makePublicKey("T"),
+        cap_xlm: "50.0000000",
+        matched_xlm: "50.0000000",
+        multiplier: 3,
+      }]),
+      queryResult(),
+      queryResult([]),
+      queryResult([{ count: "1" }]),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-cap-reached",
+      donorAddress,
+      amountXLM: "10",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+
+    const donationInserts = client.query.mock.calls.filter(([sql]) =>
+      sql.includes("INSERT INTO donations"),
+    );
+    expect(donationInserts).toHaveLength(1);
+    expect(findQueryCall(client, "UPDATE donation_matches")).toBeUndefined();
+  });
+
   test("calculates badges from cumulative donations across multiple requests", async () => {
     const donorAddress = makePublicKey("F");
     const client = createMockClient(
