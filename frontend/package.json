@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@sentry/nextjs": "^7.51.0",
-    "@stellar/freighter-api": "^2.0.0",
+    "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^12.0.0",
     "axios": "^1.18.1",
     "clsx": "^2.1.1",
