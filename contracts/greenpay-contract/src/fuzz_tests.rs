@@ -336,5 +336,53 @@ mod fuzz {
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on CO2 overflow");
         }
+        /// With a platform fee configured, the fee recipient receives exactly
+        /// `amount * fee_bps / 10_000`, the project wallet the remainder, and
+        /// all accounting counters stay gross regardless of the rate.
+        #[test]
+        fn prop_fee_withholding_matches_rate(
+            amount in 1i128..=MAX_DONATION,
+            fee_bps in 0u32..=200u32,
+        ) {
+            let env = test_env();
+            env.mock_all_auths();
+            let cid = env.register_contract(None, GreenPayContract);
+            let client = GreenPayContractClient::new(&env, &cid);
+            let admin = Address::generate(&env);
+            client.initialize(&admin);
+
+            let project_id = SorobanString::from_str(&env, "proj-fee");
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &project_id,
+                &SorobanString::from_str(&env, "Fee Project"),
+                &wallet,
+                &100u32,
+                &1i128,
+            );
+
+            let token_admin = Address::generate(&env);
+            let token = env
+                .register_stellar_asset_contract_v2(token_admin)
+                .address();
+            let fee_recipient = Address::generate(&env);
+            client.set_fee_recipient(&admin, &fee_recipient, &fee_bps);
+
+            let donor = Address::generate(&env);
+            mint_tokens(&env, &token, &donor, amount);
+            client.donate(&token, &donor, &project_id, &amount, &42u32);
+
+            let expected_fee = amount.checked_mul(fee_bps as i128).unwrap() / 10_000;
+            let token_client = StellarAssetClient::new(&env, &token);
+            prop_assert_eq!(token_client.balance(&fee_recipient), expected_fee);
+            prop_assert_eq!(token_client.balance(&wallet), amount - expected_fee);
+            prop_assert_eq!(token_client.balance(&donor), 0);
+
+            // Accounting stays gross regardless of fee
+            prop_assert_eq!(client.get_global_total(), amount);
+            let project = client.get_project(&project_id);
+            prop_assert_eq!(project.total_raised, amount);
+        }
     }
 }
