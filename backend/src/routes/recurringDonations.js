@@ -1,181 +1,253 @@
 /**
  * src/routes/recurringDonations.js
  *
- * CRUD endpoints for recurring donation subscriptions.
+ * REST API for recurring monthly donation pledges.
+ *
+ * Routes
+ * ──────
+ * POST   /api/recurring-donations        Create a new recurring pledge
+ * GET    /api/recurring-donations        List pledges (filter by donor or project)
+ * DELETE /api/recurring-donations/:id    Cancel a pledge
  */
 "use strict";
-const express = require("express");
-const router = express.Router();
-const { v4: uuid } = require("uuid");
-const logger = require("../logger");
-const pool = require("../db/pool");
-const { createRateLimiter } = require("../middleware/rateLimiter");
-const { validateBody } = require("../middleware/validation");
 
-const recurringLimiter = createRateLimiter(10, 1);
+const express = require("express");
+const router  = express.Router();
+const { v4: uuid } = require("uuid");
+const { z }  = require("zod");
+const pool   = require("../db/pool");
+const logger = require("../logger");
+const { createRateLimiter } = require("../middleware/rateLimiter");
+
+const recurringLimiter = createRateLimiter(20, 1); // 20 req/min
+
+// ── Validation helpers ────────────────────────────────────────────────────────
+
+const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SKEY_RE   = /^G[A-Z0-9]{55}$/;
+const DATE_RE   = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidUuid(v) { return UUID_RE.test(v); }
 
 const createSchema = z.object({
-  projectId: z.string().min(1, "projectId is required"),
-  walletAddress: z.string().min(1, "walletAddress is required"),
-  amountXLM: z.union([z.string(), z.number()]).transform((v) => String(v)),
-  frequency: z.enum(["weekly", "monthly", "quarterly"]).default("monthly"),
-  durationMonths: z.number().int().positive().nullable().default(null),
+  donorAddress:   z.string().regex(SKEY_RE,  "Invalid Stellar public key"),
+  projectId:      z.string().regex(UUID_RE,  "Invalid project UUID"),
+  amountXlm:      z.union([z.string(), z.number()])
+                    .transform((v) => parseFloat(String(v)))
+                    .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number"),
+  currency:       z.string().min(1).max(10).optional().default("XLM"),
+  durationMonths: z.number().int().min(1).max(120),
+  startDate:      z.string()
+                    .regex(DATE_RE, "startDate must be YYYY-MM-DD")
+                    .optional(),
 });
 
-function validateKey(k) {
-  if (!k || !/^G[A-Z0-9]{55}$/.test(k)) {
-    const e = new Error("Invalid Stellar public key");
-    e.status = 400;
-    throw e;
-  }
-}
-
-function mapRecurringRow(row) {
-  return {
-    id: row.id,
-    projectId: row.project_id,
-    walletAddress: row.wallet_address,
-    amountXLM: row.amount_xlm,
-    frequency: row.frequency,
-    status: row.status,
-    startDate: row.start_date,
-    nextDueDate: row.next_due_date,
-    lastExecutedAt: row.last_executed_at,
-    durationMonths: row.duration_months,
-    remainingMonths: row.remaining_months,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function computeNextDueDate(startDate, frequency) {
-  const d = new Date(startDate);
-  switch (frequency) {
-    case "weekly":
-      d.setDate(d.getDate() + 7);
-      break;
-    case "quarterly":
-      d.setMonth(d.getMonth() + 3);
-      break;
-    case "monthly":
-    default:
-      d.setMonth(d.getMonth() + 1);
-      break;
-  }
-  return d.toISOString();
-}
+// ── POST /api/recurring-donations ─────────────────────────────────────────────
 
 /**
- * Create a recurring donation subscription.
+ * Create a recurring monthly donation pledge.
  *
  * @route POST /api/recurring-donations
+ * @body {string}  donorAddress    Stellar public key of the donor
+ * @body {string}  projectId       UUID of the target project
+ * @body {number}  amountXlm       XLM amount per monthly instalment
+ * @body {string}  [currency]      Currency code (default: XLM)
+ * @body {number}  durationMonths  Total number of monthly instalments (1–120)
+ * @body {string}  [startDate]     First due date YYYY-MM-DD (default: today)
  */
 router.post("/", recurringLimiter, async (req, res, next) => {
   try {
-    const { projectId, walletAddress, amountXLM, frequency, durationMonths } =
-      createSchema.parse(req.body);
-
-    validateKey(walletAddress);
-
-    const parsedAmount = parseFloat(amountXLM);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
-      const e = new Error("Invalid amount");
-      e.status = 400;
-      throw e;
+    const parsed = createSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        error: parsed.error.issues.map((i) => i.message).join("; "),
+      });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const { donorAddress, projectId, amountXlm, currency, durationMonths, startDate } =
+      parsed.data;
+
+    // Verify the project exists
+    const projectResult = await pool.query(
+      "SELECT id, name, status FROM projects WHERE id = $1",
+      [projectId]
+    );
     if (!projectResult.rows[0]) {
-      const e = new Error("Project not found");
-      e.status = 404;
-      throw e;
+      return res.status(404).json({ success: false, error: "Project not found" });
+    }
+    if (projectResult.rows[0].status !== "active") {
+      return res.status(400).json({ success: false, error: "Project is not active" });
     }
 
-    const now = new Date();
-    const nextDueDate = computeNextDueDate(now, frequency);
-    const id = uuid();
+    // Determine first due date
+    const firstDue = startDate || new Date().toISOString().slice(0, 10);
 
+    const id = uuid();
     const result = await pool.query(
       `INSERT INTO recurring_donations
-        (id, project_id, wallet_address, amount_xlm, frequency, status, start_date, next_due_date, duration_months, remaining_months, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, 'active', $6, $7, $8, $9, NOW(), NOW())
+         (id, donor_address, project_id, amount_xlm, currency,
+          next_due_date, duration_months, remaining_months, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6::date, $7, $7, 'active', NOW())
        RETURNING *`,
-      [id, projectId, walletAddress, parsedAmount, frequency, now.toISOString(), nextDueDate, durationMonths, durationMonths]
+      [id, donorAddress, projectId, amountXlm, currency, firstDue, durationMonths]
     );
 
-    logger.info({ event: "recurring_donation_created", id, projectId, walletAddress, amountXLM: parsedAmount, frequency });
+    const pledge = result.rows[0];
 
-    res.status(201).json({ success: true, data: mapRecurringRow(result.rows[0]) });
-  } catch (e) {
-    next(e);
+    logger.info(
+      {
+        event: "recurring_donation_created",
+        pledgeId: pledge.id,
+        donor: donorAddress,
+        project: projectId,
+        amountXlm,
+        durationMonths,
+      },
+      "[recurringDonations] Pledge created"
+    );
+
+    return res.status(201).json({ success: true, data: mapPledgeRow(pledge) });
+  } catch (err) {
+    next(err);
   }
 });
 
+// ── GET /api/recurring-donations ──────────────────────────────────────────────
+
 /**
- * List recurring donations for a wallet address.
+ * List recurring donation pledges.
  *
- * @route GET /api/recurring-donations?walletAddress=
+ * @route GET /api/recurring-donations
+ * @query {string}  [donor]    Filter by Stellar donor address
+ * @query {string}  [project]  Filter by project UUID
+ * @query {string}  [status]   Filter by status (active|paused|completed|cancelled)
  */
 router.get("/", async (req, res, next) => {
   try {
-    const { walletAddress, status } = req.query;
+    const { donor, project, status } = req.query;
 
-    if (walletAddress) validateKey(walletAddress);
+    const conditions = [];
+    const values     = [];
 
-    let query = "SELECT * FROM recurring_donations WHERE 1=1";
-    const params = [];
-
-    if (walletAddress) {
-      params.push(walletAddress);
-      query += ` AND wallet_address = $${params.length}`;
+    if (donor) {
+      if (!SKEY_RE.test(donor)) {
+        return res.status(400).json({ success: false, error: "Invalid donor address" });
+      }
+      conditions.push(`rd.donor_address = $${values.length + 1}`);
+      values.push(donor);
     }
+
+    if (project) {
+      if (!isValidUuid(project)) {
+        return res.status(400).json({ success: false, error: "Invalid project UUID" });
+      }
+      conditions.push(`rd.project_id = $${values.length + 1}`);
+      values.push(project);
+    }
+
+    const ALLOWED_STATUSES = new Set(["active", "paused", "completed", "cancelled"]);
     if (status) {
-      params.push(status);
-      query += ` AND status = $${params.length}`;
+      if (!ALLOWED_STATUSES.has(status)) {
+        return res.status(400).json({ success: false, error: "Invalid status value" });
+      }
+      conditions.push(`rd.status = $${values.length + 1}`);
+      values.push(status);
     }
 
-    query += " ORDER BY created_at DESC";
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const result = await pool.query(query, params);
-    res.json({ success: true, data: result.rows.map(mapRecurringRow) });
-  } catch (e) {
-    next(e);
+    const result = await pool.query(
+      `SELECT rd.*, p.name AS project_name
+       FROM recurring_donations rd
+       JOIN projects p ON rd.project_id = p.id
+       ${where}
+       ORDER BY rd.created_at DESC`,
+      values
+    );
+
+    return res.json({ success: true, data: result.rows.map(mapPledgeRow) });
+  } catch (err) {
+    next(err);
   }
 });
 
+// ── DELETE /api/recurring-donations/:id ───────────────────────────────────────
+
 /**
- * Cancel a recurring donation.
+ * Cancel a recurring donation pledge.
  *
  * @route DELETE /api/recurring-donations/:id
+ * @param {string} id  UUID of the pledge to cancel
  */
 router.delete("/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
-      const e = new Error("Invalid recurring donation ID");
-      e.status = 400;
-      throw e;
+
+    if (!isValidUuid(id)) {
+      return res.status(400).json({ success: false, error: "Invalid pledge ID" });
     }
 
     const result = await pool.query(
-      `UPDATE recurring_donations SET status = 'cancelled', updated_at = NOW()
-       WHERE id = $1 AND status = 'active'
+      `UPDATE recurring_donations
+       SET status = 'cancelled'
+       WHERE id = $1 AND status NOT IN ('completed', 'cancelled')
        RETURNING *`,
       [id]
     );
 
     if (!result.rows[0]) {
-      const e = new Error("Recurring donation not found or already cancelled");
-      e.status = 404;
-      throw e;
+      // Either not found or already terminal
+      const existing = await pool.query(
+        "SELECT id, status FROM recurring_donations WHERE id = $1",
+        [id]
+      );
+      if (!existing.rows[0]) {
+        return res.status(404).json({ success: false, error: "Pledge not found" });
+      }
+      return res.status(409).json({
+        success: false,
+        error: `Pledge is already ${existing.rows[0].status}`,
+      });
     }
 
-    logger.info({ event: "recurring_donation_cancelled", id });
+    logger.info(
+      { event: "recurring_donation_cancelled", pledgeId: id },
+      "[recurringDonations] Pledge cancelled"
+    );
 
-    res.json({ success: true, data: mapRecurringRow(result.rows[0]) });
-  } catch (e) {
-    next(e);
+    return res.json({ success: true, data: mapPledgeRow(result.rows[0]) });
+  } catch (err) {
+    next(err);
   }
 });
+
+// ── Row mapper ────────────────────────────────────────────────────────────────
+
+/**
+ * Map a recurring_donations DB row to a camelCase API response object.
+ *
+ * @param {object} row
+ * @returns {object}
+ */
+function mapPledgeRow(row) {
+  return {
+    id:              row.id,
+    donorAddress:    row.donor_address,
+    projectId:       row.project_id,
+    projectName:     row.project_name ?? undefined,
+    amountXlm:       parseFloat(row.amount_xlm),
+    currency:        row.currency,
+    nextDueDate:     row.next_due_date instanceof Date
+                       ? row.next_due_date.toISOString().slice(0, 10)
+                       : String(row.next_due_date).slice(0, 10),
+    durationMonths:  row.duration_months,
+    remainingMonths: row.remaining_months,
+    status:          row.status,
+    createdAt:       row.created_at instanceof Date
+                       ? row.created_at.toISOString()
+                       : row.created_at,
+  };
+}
 
 module.exports = router;

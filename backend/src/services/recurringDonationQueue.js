@@ -1,158 +1,116 @@
 /**
  * src/services/recurringDonationQueue.js
  *
- * Processes due recurring donations via pg-boss cron scheduling.
+ * Daily pg-boss cron job that queries recurring_donations where the next
+ * due date is within the next 24 hours and sends a push notification
+ * reminder via the push.js service.
  *
- * Runs daily at 01:00 UTC. For each active recurring donation where
- * next_due_date <= NOW(), logs the intended execution and advances
- * the schedule. Actual on-chain submission is out of scope for this
- * initial implementation — the backend records the pending donation
- * and the mobile/web client is notified to approve the transaction.
+ * The cron schedule is controlled by the RECURRING_REMINDER_CRON env var
+ * (default: daily at 09:00 UTC). Set RECURRING_REMINDER_CRON="disabled" to
+ * turn it off entirely.
  */
 "use strict";
 
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { sendRecurringReminder } = require("./push");
 
-const QUEUE = "recurring-donation-process";
-const DEFAULT_CRON = "0 1 * * *";
+const QUEUE = "recurring-donation-reminder";
+// Default: daily at 09:00 UTC
+const DEFAULT_CRON = "0 9 * * *";
 
 let boss = null;
 
 /**
- * Compute the next due date based on frequency.
+ * Run the recurring-donation reminder check.
+ * Queries active recurring donations due within the next 24 hours and sends
+ * push notifications to the donor's registered device tokens.
  */
-function computeNextDueDate(current, frequency) {
-  const d = new Date(current);
-  switch (frequency) {
-    case "weekly":
-      d.setDate(d.getDate() + 7);
-      break;
-    case "quarterly":
-      d.setMonth(d.getMonth() + 3);
-      break;
-    case "monthly":
-    default:
-      d.setMonth(d.getMonth() + 1);
-      break;
-  }
-  return d;
-}
+async function runReminderCheck() {
+  logger.info({ event: "recurring_reminder_run_start" }, "[recurringDonationQueue] Starting reminder check");
 
-/**
- * Process all recurring donations that are due.
- */
-async function processDueRecurring() {
-  logger.info({ event: "recurring_donation_process_start" }, "[recurringDonationQueue] Processing due recurring donations");
-
-  const dueResult = await pool.query(
-    `SELECT rd.*, p.name AS project_name
+  const result = await pool.query(
+    `SELECT rd.id, rd.donor_address, rd.amount_xlm, rd.frequency,
+            p.id AS project_id, p.name AS project_name
      FROM recurring_donations rd
-     JOIN projects p ON rd.project_id = p.id
+     JOIN projects p ON p.id = rd.project_id
      WHERE rd.status = 'active'
-       AND rd.next_due_date <= NOW()
-     ORDER BY rd.next_due_date ASC
-     LIMIT 100`
+       AND rd.next_due_date BETWEEN NOW() AND NOW() + INTERVAL '24 hours'`,
   );
 
-  let processed = 0;
+  if (result.rows.length === 0) {
+    logger.info({ event: "recurring_reminder_no_donations" }, "[recurringDonationQueue] No donations due in the next 24 hours");
+    return;
+  }
+
+  let sent = 0;
   let errors = 0;
 
-  for (const row of dueResult.rows) {
+  for (const row of result.rows) {
     try {
-      const now = new Date();
-      const newRemainingMonths =
-        row.remaining_months != null ? row.remaining_months - 1 : null;
-
-      // If duration exhausted, mark as completed
-      if (newRemainingMonths !== null && newRemainingMonths <= 0) {
-        await pool.query(
-          `UPDATE recurring_donations
-           SET status = 'completed', updated_at = NOW()
-           WHERE id = $1`,
-          [row.id]
-        );
-        logger.info({
-          event: "recurring_donation_completed",
-          id: row.id,
-          projectId: row.project_id,
-        });
-        processed++;
-        continue;
-      }
-
-      const nextDue = computeNextDueDate(now, row.frequency);
-
-      await pool.query(
-        `UPDATE recurring_donations
-         SET next_due_date = $1,
-             remaining_months = $2,
-             updated_at = NOW()
-         WHERE id = $3`,
-        [nextDue.toISOString(), newRemainingMonths, row.id]
+      await sendRecurringReminder(
+        row.donor_address,
+        row.project_name,
+        Number.parseFloat(row.amount_xlm),
+        row.project_id,
       );
-
+      sent++;
       logger.info({
-        event: "recurring_donation_advanced",
-        id: row.id,
+        event: "recurring_reminder_sent",
+        recurringDonationId: row.id,
+        donorAddress: row.donor_address,
         projectId: row.project_id,
-        walletAddress: row.wallet_address,
-        amountXLM: row.amount_xlm,
-        nextDueDate: nextDue.toISOString(),
-        remainingMonths: newRemainingMonths,
-      });
-
-      processed++;
+      }, "[recurringDonationQueue] Reminder sent");
     } catch (err) {
       errors++;
-      logger.error(
-        { event: "recurring_donation_process_error", id: row.id, err },
-        err.message
-      );
+      logger.error({
+        event: "recurring_reminder_error",
+        recurringDonationId: row.id,
+        err: err.message,
+      }, "[recurringDonationQueue] Failed to send reminder");
     }
   }
 
-  logger.info(
-    { event: "recurring_donation_process_complete", processed, errors },
-    "[recurringDonationQueue] Processing complete"
-  );
+  logger.info({
+    event: "recurring_reminder_run_complete",
+    sent,
+    errors,
+  }, `[recurringDonationQueue] Reminder check complete — ${sent} sent, ${errors} errors`);
 }
 
 /**
- * Start the recurring donation processor.
- * Registers a pg-boss cron job and worker.
+ * Start the pg-boss scheduler and register the recurring-donation reminder
+ * worker. Safe to call multiple times (guards with module-level `boss`).
  */
 async function start() {
-  const cronOverride = process.env.RECURRING_DONATION_CRON;
+  const cronOverride = process.env.RECURRING_REMINDER_CRON;
   if (cronOverride === "disabled") {
-    logger.info(
-      { event: "recurring_donation_queue_disabled" },
-      "[recurringDonationQueue] Disabled via env"
-    );
+    logger.info({ event: "recurring_reminder_disabled" }, "[recurringDonationQueue] Reminder queue disabled via env");
     return;
   }
 
   const cronSchedule = cronOverride || DEFAULT_CRON;
   const connectionString =
-    process.env.DATABASE_URL ||
-    "postgres://postgres:postgres@localhost:5432/greenpay";
+    process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
 
   boss = new PgBoss(connectionString);
-  boss.on("error", (err) =>
-    logger.error({ event: "recurring_donation_pgboss_error", err }, err.message)
-  );
+  boss.on("error", (err) => logger.error({ event: "recurring_reminder_pgboss_error", err }, err.message));
 
   await boss.start();
+
+  // Register the cron schedule (idempotent — pg-boss deduplicates by name)
   await boss.schedule(QUEUE, cronSchedule, {}, { tz: "UTC" });
+
+  // Register the worker
   await boss.work(QUEUE, { teamSize: 1, teamConcurrency: 1 }, async () => {
-    await processDueRecurring();
+    await runReminderCheck();
   });
 
-  logger.info(
-    { event: "recurring_donation_queue_scheduled", cron: cronSchedule },
-    `[recurringDonationQueue] Scheduled: ${cronSchedule}`
-  );
+  logger.info({
+    event: "recurring_reminder_scheduled",
+    cron: cronSchedule,
+  }, `[recurringDonationQueue] Recurring donation reminder scheduled: ${cronSchedule}`);
 }
 
-module.exports = { start, processDueRecurring };
+module.exports = { start, runReminderCheck };
