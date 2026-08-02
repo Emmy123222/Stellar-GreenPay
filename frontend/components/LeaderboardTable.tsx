@@ -2,8 +2,9 @@
  * components/LeaderboardTable.tsx
  */
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { fetchLeaderboard } from "@/lib/api";
-import { formatXLM, formatUSDEquivalent, shortenAddress, badgeEmoji } from "@/utils/format";
+import { formatXLM, formatUSDEquivalent, formatCO2, shortenAddress, badgeEmoji } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import { useXlmPrice } from "@/lib/priceContext";
 import type { LeaderboardEntry } from "@/utils/types";
@@ -82,8 +83,12 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   if (entries.length === 0) return (
     <div className="text-center py-12">
-      <p className="text-3xl mb-3">🌱</p>
-      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No donors yet — be the first!</p>
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        🌱 No donations yet — be the first donor on the leaderboard!
+      </p>
+      <Link href="/projects" className="btn-primary">
+        Browse Projects
+      </Link>
     </div>
   );
 
@@ -128,17 +133,25 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
             </div>
           </div>
 
-          {/* Total donated */}
-          <div className="text-right flex-shrink-0">
-            <p className="font-mono font-semibold text-forest-600 text-sm">
-              {formatXLM(entry.totalDonatedXLM)}
-            </p>
-            {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
-              <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
-                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+          {/* Totals */}
+          <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
+            <div>
+              <p className="font-mono font-semibold text-forest-600 text-sm">
+                {formatXLM(entry.totalDonatedXLM)}
               </p>
-            )}
-            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
+              {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+                <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
+                  {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+                </p>
+              )}
+              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
+            </div>
+            <div>
+              <p className="font-mono font-semibold text-forest-600 text-sm">
+                {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
+              </p>
+              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
+            </div>
           </div>
         </div>
       ))}
