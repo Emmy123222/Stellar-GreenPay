@@ -37,9 +37,7 @@ const BADGE_ICONS: Record<string, string> = {
 const RANK_MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 
 function monthLabel(ym: string) {
-  const [year, month] = ym.split("-");
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  return date.toLocaleString("default", { month: "long", year: "numeric" });
+  return new Date(ym + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' });
 }
 
 /**
