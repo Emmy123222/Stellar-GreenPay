@@ -36,9 +36,6 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
-
 -- donations: immutable donation ledger. Each row is a single
 -- contribution from donor_address to a project. transaction_hash must be
 -- unique (one Stellar payment → one donation). No updated_at column —
