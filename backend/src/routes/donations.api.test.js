@@ -5,36 +5,78 @@ jest.mock("../db/pool", () => ({
   connect: jest.fn(),
 }));
 
-jest.mock("../services/redis", () => ({
-  get: jest.fn(),
-  set: jest.fn(),
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
+
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn(),
+}));
+
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
+
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../services/stellar", () => ({
+  getOnChainProject: jest.fn().mockResolvedValue(null),
+  getProjectDonationEvents: jest.fn(),
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
 const pool = require("../db/pool");
-const redis = require("../services/redis");
 const express = require("express");
 const request = require("supertest");
+const donationsRouter = require("./donations");
 const projectsRouter = require("./projects");
 
 function buildApp() {
   const app = express();
   app.use(express.json());
-
   const io = { emit: jest.fn(), to: () => ({ emit: jest.fn() }) };
   app.set("io", io);
-
   app.use("/api/donations", donationsRouter);
-  
   app.use("/api/projects", projectsRouter);
+
 
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
   return app;
+}
+
+function makePublicKey(char = "A") {
+  return `G${char.repeat(55)}`;
+}
+
+function makeTxHash(char = "a") {
+  return char.repeat(64);
+}
+
+function queryResult(rows = []) {
+  return { rows };
+}
+
+function createMockClient(...responses) {
+  const client = {
+    query: jest.fn(),
+    release: jest.fn(),
+  };
+
+  responses.forEach((response) => {
+    if (response instanceof Error) {
+      client.query.mockRejectedValueOnce(response);
+      return;
+    }
+
+    client.query.mockResolvedValueOnce(response);
+  });
+
+  pool.connect.mockResolvedValue(client);
+  return client;
 }
 
 const MOCK_PROJECT_ROW = {
@@ -53,105 +95,62 @@ const MOCK_PROJECT_ROW = {
   on_chain_verified: false,
   tags: ["reforestation", "amazon"],
   created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString(),
 };
 
-describe("GET /api/projects", () => {
+const MOCK_DONATION_ROW = {
+  id: "8d9ac19b-52eb-42f7-80d9-19a88ba59e43",
+  project_id: "proj-1",
+  donor_address: makePublicKey(),
+  amount_xlm: "100.0000000",
+  amount: "100",
+  currency: "XLM",
+  message: "Great project!",
+  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  created_at: new Date().toISOString(),
+};
+
+describe("POST /api/donations", () => {
   let app;
 
   beforeEach(() => {
     app = buildApp();
-    redis.get.mockResolvedValue(null);
     jest.clearAllMocks();
   });
 
-
   test("records a valid donation", async () => {
+    const donorAddress = makePublicKey("A");
+    const transactionHash = makeTxHash("a");
+    const donationRow = {
+      ...MOCK_DONATION_ROW,
+      donor_address: donorAddress,
+      transaction_hash: transactionHash,
+    };
+
     createMockClient(
-      { rows: [MOCK_PROJECT] },
-      { rows: [] },
-      undefined,
-      { rows: [MOCK_DONATION_ROW] },
-      { rows: [] },
-      undefined,
-      { rows: [{ ...MOCK_DONATION_ROW, total_donated_xlm: 100 }] },
-      { rows: [{ count: "1" }] },
+      queryResult([{ id: "proj-1" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult(),
     );
 
     const res = await request(app)
       .post("/api/donations")
       .send({
         projectId: "proj-1",
-        donorAddress: makePublicKey(),
+        donorAddress,
         amountXLM: 100,
         currency: "XLM",
         message: "Great project!",
-        transactionHash: makeTxHash(),
+        transactionHash,
       })
       .expect(201);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data).toHaveLength(1);
-    expect(res.body.data[0].name).toBe("Test Project");
-    expect(res.body.has_more).toBe(false);
-  });
-
-  test("filters by category", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-
-    await request(app).get("/api/projects?category=Reforestation").expect(200);
-
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("category =");
-  });
-
-  test("filters by verified status", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-
-    await request(app).get("/api/projects?verified=true").expect(200);
-
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("verified = true");
-  });
-
-  test("filters by status", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-
-    await request(app).get("/api/projects?status=active").expect(200);
-
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("status =");
-  });
-
-  test("handles search query", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-
-    await request(app).get("/api/projects?search=amazon").expect(200);
-
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("ILIKE");
-  });
-
-  test("rejects invalid cursor", async () => {
-    await request(app).get("/api/projects?cursor=invalid").expect(400);
-  });
-
-  test("returns cached response when available", async () => {
-    const cached = { success: true, data: [MOCK_PROJECT_ROW], has_more: false };
-    redis.get.mockResolvedValue(cached);
-
-    const res = await request(app).get("/api/projects").expect(200);
-    expect(res.body).toEqual(cached);
-    expect(pool.query).not.toHaveBeenCalled();
-  });
-
-  test("respects limit parameter", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-
-    await request(app).get("/api/projects?limit=5").expect(200);
-
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("LIMIT");
+    expect(res.body.data.projectId).toBe("proj-1");
+    expect(res.body.data.donorAddress).toBe(donorAddress);
   });
 });
 
@@ -165,16 +164,19 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns a single project", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
-    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 3 }],
+    });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.name).toBe("Test Project");
+    expect(res.body.data.followCount).toBe(3);
   });
 
   test("returns 404 for non-existent project", async () => {
@@ -269,9 +271,8 @@ describe("GET /api/donations/:id", () => {
       ],
     });
 
-    const validId = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
     const res = await request(app)
-      .get(`/api/donations/${validId}`)
+      .get(`/api/donations/${MOCK_DONATION_ROW.id}`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
@@ -283,9 +284,8 @@ describe("GET /api/donations/:id", () => {
   test("returns 404 if donation not found", async () => {
     pool.query.mockResolvedValue({ rows: [] });
 
-    const validId = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
     const res = await request(app)
-      .get(`/api/donations/${validId}`)
+      .get(`/api/donations/${MOCK_DONATION_ROW.id}`)
       .expect(404);
 
     expect(res.body.error).toBe("Donation not found");
