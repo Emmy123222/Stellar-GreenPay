@@ -294,4 +294,39 @@ describe("PATCH /api/verification-requests/:id/status (admin)", () => {
       .send({ status: "shipped" });
     expect(res.status).toBe(400);
   });
+
+  test("transitions in_review \u2192 approved", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] })
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "approved" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe("approved");
+  });
+
+  test("rejects approved \u2192 rejected with 400 (no valid transitions out of approved)", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "rejected" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Cannot transition/);
+  });
+
+  test("rejects a same-status transition (pending \u2192 pending) with 400", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "pending" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "pending" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Request is already in "pending" state');
+  });
 });
