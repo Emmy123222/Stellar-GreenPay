@@ -226,4 +226,18 @@ router.get("/:updateId/likes", async (req, res, next) => {
   }
 });
 
+// GET /api/updates/:projectId — list updates for a project
+router.get("/:projectId", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM project_updates WHERE project_id = $1 ORDER BY created_at DESC",
+      [req.params.projectId]
+    );
+    res.json({ success: true, data: result.rows.map(mapProjectUpdateRow) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
+
