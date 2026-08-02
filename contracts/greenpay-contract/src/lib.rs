@@ -61,6 +61,7 @@ pub struct Project {
     pub name: String,
     pub wallet: Address,
     pub co2_per_xlm: u32,
+    pub min_donation_amount: i128,
     pub total_raised: i128,
     pub donor_count: u32,
     pub active: bool,
@@ -75,6 +76,7 @@ pub struct ProjectInit {
     pub name:        String,
     pub wallet:      Address,
     pub co2_per_xlm: u32,
+    pub min_donation_amount: i128,
 }
 
 #[contracttype]
@@ -247,6 +249,7 @@ impl GreenPayContract {
         name: String,
         wallet: Address,
         co2_per_xlm: u32,
+        min_donation_amount: i128,
     ) {
         admin.require_auth();
         let stored_admin: Address = env
@@ -272,6 +275,7 @@ impl GreenPayContract {
             name,
             wallet,
             co2_per_xlm,
+            min_donation_amount,
             total_raised: 0,
             donor_count: 0,
             active: true,
@@ -316,6 +320,7 @@ impl GreenPayContract {
                 name: init.name.clone(),
                 wallet: init.wallet.clone(),
                 co2_per_xlm: init.co2_per_xlm,
+                min_donation_amount: init.min_donation_amount,
                 total_raised: 0,
                 donor_count: 0,
                 active: true,
@@ -439,6 +444,9 @@ impl GreenPayContract {
             .expect("Project not found");
         if !project.active {
             panic!("Project is not accepting donations");
+        }
+        if amount < project.min_donation_amount {
+            panic!("Donation below minimum");
         }
 
         // Pre-compute CO2 increment with checked multiplication so an attacker
@@ -1087,6 +1095,9 @@ impl GreenPayContract {
         if !project.active {
             panic!("Project is not accepting donations");
         }
+        if usdc_amount < project.min_donation_amount {
+            panic!("Donation below minimum");
+        }
 
         // Pre-compute CO2 increment using XLM-equivalent
         let xlm_units = xlm_equivalent / STROOP;
@@ -1493,7 +1504,7 @@ mod tests {
         client.register_project(
             &admin, &pid,
             &String::from_str(&env, "Stats Project"),
-            &wallet, &200u32,
+            &wallet, &200u32, &1i128,
         );
 
         // Mint tokens and donate
@@ -1572,18 +1583,21 @@ mod tests {
             name:        String::from_str(&env, "Forest Restore"),
             wallet:      wallet1.clone(),
             co2_per_xlm: 100,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          String::from_str(&env, "proj-002"),
             name:        String::from_str(&env, "Ocean Cleanup"),
             wallet:      wallet2.clone(),
             co2_per_xlm: 200,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          String::from_str(&env, "proj-003"),
             name:        String::from_str(&env, "Solar Schools"),
             wallet:      wallet3.clone(),
             co2_per_xlm: 150,
+            min_donation_amount: 1,
         });
 
         client.batch_register_projects(&admin, &projects);
@@ -1618,12 +1632,14 @@ mod tests {
             name:        String::from_str(&env, "First"),
             wallet:      wallet.clone(),
             co2_per_xlm: 100,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          pid,
             name:        String::from_str(&env, "Duplicate"),
             wallet:      wallet,
             co2_per_xlm: 50,
+            min_donation_amount: 1,
         });
 
         client.batch_register_projects(&admin, &projects);
@@ -1653,6 +1669,7 @@ mod tests {
             &String::from_str(&env, "Test Project"),
             &wallet,
             &100u32,
+            &1i128,
         );
         (env, cid, client, admin, pid)
     }
@@ -2001,6 +2018,7 @@ mod tests {
             &String::from_str(&env, "Bad Project"),
             &wallet,
             &(MAX_CO2_PER_XLM + 1),
+            &1i128,
         );
     }
 
@@ -2015,6 +2033,7 @@ mod tests {
             &String::from_str(&env, "Second Project"),
             &wallet,
             &100u32,
+            &1i128,
         );
 
         assert!(client.get_project(&pid1).active);
@@ -2155,7 +2174,7 @@ mod tests {
         client.register_project(
             &admin, &pid2,
             &String::from_str(&env, "Project 2"),
-            &wallet2, &50u32,
+            &wallet2, &50u32, &1i128,
         );
 
         let donor        = Address::generate(&env);

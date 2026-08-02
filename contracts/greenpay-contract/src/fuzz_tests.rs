@@ -45,7 +45,7 @@ mod fuzz {
 
         let project_id = SorobanString::from_str(&env, "proj-fuzz-1");
         let wallet = Address::generate(&env);
-        client.register_project(&admin, &project_id, &SorobanString::from_str(&env, "Fuzz Project"), &wallet, &100u32);
+        client.register_project(&admin, &project_id, &SorobanString::from_str(&env, "Fuzz Project"), &wallet, &100u32, &1i128);
 
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
@@ -298,6 +298,7 @@ mod fuzz {
                 &SorobanString::from_str(&env, "Inactive USDC Project"),
                 &wallet,
                 &100u32,
+                &1i128,
             );
 
             let token_admin = Address::generate(&env);
