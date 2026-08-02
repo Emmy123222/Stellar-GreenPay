@@ -28,6 +28,7 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
+const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
@@ -157,6 +158,7 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+  await startRecurringDonationQueue();
 
   startIndexer(io).catch((err) => logger.error({ event: "indexer_startup_error", err }, err.message));
 
