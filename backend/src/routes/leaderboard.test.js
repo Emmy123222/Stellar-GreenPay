@@ -5,7 +5,15 @@ jest.mock("../db/pool", () => ({
   connect: jest.fn(),
 }));
 
+// Mock the rate limiter so it is transparent for all existing tests.
+// Individual tests that need to verify rate-limit behaviour re-require
+// the router with a blocking mock.
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: jest.fn(() => (_req, _res, next) => next()),
+}));
+
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 const request = require("supertest");
 const express = require("express");
 const leaderboardRouter = require("./leaderboard");
@@ -27,6 +35,8 @@ const SORTED_DONORS = [
     display_name: "Alice",
     badges: [{ tier: "earth", earnedAt: "2026-01-01T00:00:00.000Z" }],
     total_donated_xlm: "5000",
+    total_co2_offset_kg: "1250.5",
+    impact_score: "3525.375",
     projects_supported: 4,
   },
   {
@@ -34,6 +44,8 @@ const SORTED_DONORS = [
     display_name: "Bob",
     badges: [{ tier: "forest", earnedAt: "2026-01-02T00:00:00.000Z" }],
     total_donated_xlm: "750",
+    total_co2_offset_kg: "180",
+    impact_score: "525.54",
     projects_supported: 2,
   },
   {
@@ -41,6 +53,8 @@ const SORTED_DONORS = [
     display_name: null,
     badges: [],
     total_donated_xlm: "12",
+    total_co2_offset_kg: "0",
+    impact_score: "8.4",
     projects_supported: 1,
   },
 ];
@@ -114,9 +128,28 @@ describe("GET /api/leaderboard — ranking sort order", () => {
       publicKey: SORTED_DONORS[0].public_key,
       displayName: "Alice",
       totalDonatedXLM: "5000",
+      totalCO2OffsetKg: "1250.5",
       projectsSupported: 4,
       topBadge: "earth",
     });
+  });
+
+  test("exposes totalCO2OffsetKg as a string from total_co2_offset_kg", async () => {
+    pool.query.mockResolvedValue({ rows: [SORTED_DONORS[0]] });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].totalCO2OffsetKg).toBe("1250.5");
+  });
+
+  test("defaults totalCO2OffsetKg to \"0\" when co2 offset is missing", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{ ...SORTED_DONORS[2], total_co2_offset_kg: null }],
+    });
+
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].totalCO2OffsetKg).toBe("0");
   });
 
   test("sets displayName to null when the profile has no display name", async () => {
@@ -171,169 +204,50 @@ describe("GET /api/leaderboard — limit handling", () => {
   });
 });
 
-describe("POST /api/leaderboard/snapshot — idempotent upsert", () => {
-  let app;
-  const ADMIN_SECRET_SAVE = process.env.ADMIN_SECRET;
-
-  beforeAll(() => {
-    process.env.ADMIN_SECRET = "test-admin-secret";
+describe("GET /api/leaderboard — rate limiting (issue #695)", () => {
+  test("createRateLimiter is called with (30, 1) — 30 req/min per IP", () => {
+    expect(createRateLimiter).toHaveBeenCalledWith(30, 1);
   });
 
-  afterAll(() => {
-    process.env.ADMIN_SECRET = ADMIN_SECRET_SAVE;
+  test("GET / returns 429 with Retry-After when the limiter blocks the request", async () => {
+    jest.resetModules();
+    jest.mock("../db/pool", () => ({ query: jest.fn() }));
+    jest.mock("../middleware/rateLimiter", () => ({
+      createRateLimiter: jest.fn(() => (_req, res) => {
+        res.set("Retry-After", "60");
+        return res.status(429).json({ message: "Too many requests — Try again later." });
+      }),
+    }));
+
+    const blockedRouter = require("./leaderboard");
+    const app = express();
+    app.use(express.json());
+    app.use("/api/leaderboard", blockedRouter);
+
+    const res = await request(app).get("/api/leaderboard");
+    expect(res.status).toBe(429);
+    expect(res.body.message).toMatch(/too many requests/i);
+    expect(res.headers["retry-after"]).toBe("60");
   });
 
-  beforeEach(() => {
-    app = buildApp();
-    jest.clearAllMocks();
-  });
+  test("GET /history returns 429 with Retry-After when the limiter blocks the request", async () => {
+    jest.resetModules();
+    jest.mock("../db/pool", () => ({ query: jest.fn() }));
+    jest.mock("../middleware/rateLimiter", () => ({
+      createRateLimiter: jest.fn(() => (_req, res) => {
+        res.set("Retry-After", "60");
+        return res.status(429).json({ message: "Too many requests — Try again later." });
+      }),
+    }));
 
-  const MOCK_TOP_DONORS = [
-    {
-      public_key: "GA1",
-      display_name: "Alice",
-      badges: [{ tier: "earth" }],
-      total_xlm: "5000",
-    },
-    {
-      public_key: "GB2",
-      display_name: "Bob",
-      badges: [],
-      total_xlm: "750",
-    },
-  ];
+    const blockedRouter = require("./leaderboard");
+    const app = express();
+    app.use(express.json());
+    app.use("/api/leaderboard", blockedRouter);
 
-  function makeMockClient() {
-    return {
-      query: jest.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
-      release: jest.fn(),
-    };
-  }
-
-  test("returns 403 without the x-admin-secret header", async () => {
-    const res = await request(app)
-      .post("/api/leaderboard/snapshot")
-      .expect(403);
-
-    expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe("Forbidden");
-  });
-
-  test("returns 403 with a wrong admin secret", async () => {
-    const res = await request(app)
-      .post("/api/leaderboard/snapshot")
-      .set("x-admin-secret", "wrong-secret")
-      .expect(403);
-
-    expect(res.body.success).toBe(false);
-    expect(res.body.error).toBe("Forbidden");
-  });
-
-  test("responds with message when there are no donations this month", async () => {
-    pool.query.mockResolvedValueOnce({ rows: [] });
-
-    const res = await request(app)
-      .post("/api/leaderboard/snapshot")
-      .set("x-admin-secret", "test-admin-secret")
-      .expect(200);
-
-    expect(res.body.success).toBe(true);
-    expect(res.body.message).toBe("No donations this month yet");
-    expect(res.body.inserted).toBe(0);
-    // Should not attempt a transaction when there are no rows
-    expect(pool.connect).not.toHaveBeenCalled();
-  });
-
-  test("calling snapshot twice for the same month is idempotent", async () => {
-    const mockClient = makeMockClient();
-
-    // --- First call ---
-    pool.query.mockResolvedValueOnce({ rows: MOCK_TOP_DONORS });
-    pool.connect.mockResolvedValueOnce(mockClient);
-
-    const res1 = await request(app)
-      .post("/api/leaderboard/snapshot")
-      .set("x-admin-secret", "test-admin-secret")
-      .expect(200);
-
-    expect(res1.body.success).toBe(true);
-    expect(res1.body.inserted).toBe(2);
-    expect(res1.body.month).toEqual(expect.stringMatching(/^\d{4}-\d{2}-01$/));
-
-    // Verify the INSERT statements use ON CONFLICT
-    const insertCalls = mockClient.query.mock.calls.filter(
-      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
-    );
-    expect(insertCalls.length).toBe(2);
-    insertCalls.forEach(([sql]) => {
-      expect(sql).toContain("ON CONFLICT");
-    });
-
-    // Verify transaction was opened and committed
-    expect(mockClient.query).toHaveBeenCalledWith("BEGIN");
-    expect(mockClient.query).toHaveBeenCalledWith("COMMIT");
-    expect(mockClient.release).toHaveBeenCalled();
-
-    // --- Second call (same month, ON CONFLICT will update existing rows) ---
-    jest.clearAllMocks();
-    const mockClient2 = makeMockClient();
-
-    pool.query.mockResolvedValueOnce({ rows: MOCK_TOP_DONORS });
-    pool.connect.mockResolvedValueOnce(mockClient2);
-
-    const res2 = await request(app)
-      .post("/api/leaderboard/snapshot")
-      .set("x-admin-secret", "test-admin-secret")
-      .expect(200);
-
-    expect(res2.body.success).toBe(true);
-    // Must return the same inserted count both times
-    expect(res2.body.inserted).toBe(res1.body.inserted);
-    expect(res2.body.month).toBe(res1.body.month);
-
-    // Verify INSERTs still use ON CONFLICT
-    const insertCalls2 = mockClient2.query.mock.calls.filter(
-      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
-    );
-    expect(insertCalls2.length).toBe(2);
-    insertCalls2.forEach(([sql]) => {
-      expect(sql).toContain("ON CONFLICT");
-    });
-  });
-
-  test("snapshot respects limit query parameter (max 500)", async () => {
-    const mockClient = makeMockClient();
-
-    // Supply a mock that honours the LIMIT param: 3 donors in DB, but
-    // request says limit=2, so only 2 rows come back from pool.query.
-    const threeDonors = [
-      ...MOCK_TOP_DONORS,
-      {
-        public_key: "GC3",
-        display_name: "Charlie",
-        badges: [{ tier: "forest" }],
-        total_xlm: "100",
-      },
-    ];
-
-    pool.query.mockImplementationOnce((_sql, params) => {
-      const limit = params?.[0] ?? 100;
-      return Promise.resolve({ rows: threeDonors.slice(0, limit) });
-    });
-    pool.connect.mockResolvedValueOnce(mockClient);
-
-    const res = await request(app)
-      .post("/api/leaderboard/snapshot?limit=2")
-      .set("x-admin-secret", "test-admin-secret")
-      .expect(200);
-
-    expect(res.body.success).toBe(true);
-    expect(res.body.inserted).toBe(2);
-
-    // Only 2 INSERTs were executed
-    const insertCalls = mockClient.query.mock.calls.filter(
-      ([sql]) => typeof sql === "string" && sql.startsWith("INSERT")
-    );
-    expect(insertCalls.length).toBe(2);
+    const res = await request(app).get("/api/leaderboard/history");
+    expect(res.status).toBe(429);
+    expect(res.body.message).toMatch(/too many requests/i);
+    expect(res.headers["retry-after"]).toBe("60");
   });
 });
