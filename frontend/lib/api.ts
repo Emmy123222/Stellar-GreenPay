@@ -15,6 +15,7 @@ import type {
   LeaderboardEntry,
   EscrowJob,
   ProjectCampaign,
+  VerificationRequest,
 } from "@/utils/types";
 
 const api = axios.create({
@@ -131,13 +132,14 @@ export async function fetchProjects(params?: {
  * Fetch a single project by its id.
  *
  * @param id - Project id.
+ * @param walletAddress - Optional viewer wallet for personalized project fields.
  * @returns The project.
  * @throws If the request fails (including 404s for missing projects).
  */
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
-    { params },
+    walletAddress ? { params: { walletAddress } } : undefined,
   );
   return data.data;
 }
@@ -324,10 +326,14 @@ export async function upsertProfile(
  * Fetch top donors.
  *
  * @param limit - Maximum number of entries to return (default: 20).
+ * @param period - Time window for donation totals (default: "all").
  * @returns Leaderboard entries.
  * @throws If the request fails.
  */
-export async function fetchLeaderboard(limit = 20) {
+export async function fetchLeaderboard(
+  limit = 20,
+  period: "all" | "month" | "year" = "all",
+) {
   const { data } = await api.get<{
     success: boolean;
     data: LeaderboardEntry[];
@@ -580,6 +586,8 @@ export async function fetchFeaturedProject(): Promise<ClimateProject | null> {
 export interface CategoryStats {
   category: string;
   count: number;
+  total_xlm: string;
+  total_donations: number;
 }
 
 export async function fetchCategoryStats(): Promise<CategoryStats[]> {
@@ -759,6 +767,50 @@ export async function fetchVerificationRequest(
   return data.data;
 }
 
+/**
+ * Fetch a single verification request as an admin (sends Bearer token).
+ * Uses the Authorization header so no wallet query param is required.
+ *
+ * @param id - Verification request id.
+ * @param adminToken - Bearer JWT issued by /api/admin/login.
+ * @returns The verification request row.
+ * @throws If the request fails or the token is invalid / expired.
+ */
+export async function fetchVerificationRequestAdmin(
+  id: string,
+  adminToken: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}`,
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data;
+}
+
+/**
+ * Transition a verification request to a new status (admin-only).
+ *
+ * @param id - Verification request id.
+ * @param status - Target status: "in_review" | "approved" | "rejected".
+ * @param adminToken - Bearer JWT issued by /api/admin/login.
+ * @param reviewerNotes - Optional notes recorded alongside the status change.
+ * @returns The updated verification request row.
+ * @throws If the transition is not permitted by the backend state machine.
+ */
+export async function updateVerificationRequestStatus(
+  id: string,
+  status: "pending" | "in_review" | "approved" | "rejected",
+  adminToken: string,
+  reviewerNotes?: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}/status`,
+    { status, ...(reviewerNotes !== undefined ? { reviewerNotes } : {}) },
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data;
+}
+
 export interface UploadedDocument {
   key: string;
   url: string;
@@ -782,6 +834,28 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   const { data } = await api.post<{ success: boolean; data: UploadedDocument }>(
     "/api/uploads",
     form,
+  );
+  return data.data;
+}
+
+export async function fetchVerificationRequests(
+  params?: { status?: string; limit?: number; page?: number }
+): Promise<VerificationRequestResponse[]> {
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
+    "/api/verification-requests",
+    { params },
+  );
+  return data.data;
+}
+
+export async function updateVerificationRequestStatus(
+  id: string,
+  status: "pending" | "in_review" | "approved" | "rejected",
+  reviewerNotes?: string,
+): Promise<VerificationRequestResponse> {
+  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
+    `/api/verification-requests/${id}/status`,
+    { status, reviewerNotes },
   );
   return data.data;
 }

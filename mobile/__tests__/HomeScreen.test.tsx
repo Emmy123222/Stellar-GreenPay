@@ -15,6 +15,32 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
+jest.mock('../app/theme', () => ({
+  useTheme: () => ({
+    colors: {
+      background: '#ffffff',
+      surface: '#ffffff',
+      primary: '#000000',
+      accent: '#000000',
+      header: '#000000',
+      headerText: '#ffffff',
+      buttonBackground: '#000000',
+      buttonText: '#ffffff',
+      cardBorder: '#eeeeee',
+      cardShadow: '#000000',
+      primaryText: '#000000',
+      secondaryText: '#555555',
+      muted: '#888888',
+      inputBackground: '#ffffff',
+      inputBorder: '#eeeeee',
+      placeholder: '#888888',
+      border: '#dddddd',
+      statusBarStyle: 'dark',
+    },
+  }),
+}));
+
+
 import HomeScreen from '../app/index';
 
 const MOCK_PROJECT = {
@@ -25,11 +51,8 @@ const MOCK_PROJECT = {
   goalXLM: '50000',
   raisedXLM: '18420',
   donorCount: 147,
-};
-
-const MOCK_STATS = {
-  totalDonations: 320,
-  totalXLMRaised: '45200',
+  verified: true,
+  status: 'active',
 };
 
 describe('HomeScreen', () => {
@@ -38,52 +61,27 @@ describe('HomeScreen', () => {
   });
 
   it('shows a loading indicator before data arrives', () => {
-    (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECT } });
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
     const { getByText } = render(<HomeScreen />);
     expect(getByText('Loading...')).toBeTruthy();
   });
 
   it('renders the app title', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
     const { getByText } = render(<HomeScreen />);
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
-  it('renders global stats after data loads', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
+  it('renders live projects list after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
     const { getByText } = render(<HomeScreen />);
     await waitFor(() => {
-      expect(getByText('320 donations')).toBeTruthy();
-      expect(getByText('45200 XLM raised')).toBeTruthy();
+      expect(getByText('Amazon Reforestation Initiative')).toBeTruthy();
+      expect(getByText('18420 / 50000 XLM')).toBeTruthy();
+      expect(getByText('147 donors')).toBeTruthy();
     });
-  });
-
-  it('renders the featured project name after data loads', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
-
-    const { getByText } = render(<HomeScreen />);
-    await waitFor(() =>
-      expect(getByText('Amazon Reforestation Initiative')).toBeTruthy()
-    );
-  });
-
-  it('renders the Browse All Projects button', async () => {
-    (axios.get as jest.Mock)
-      .mockResolvedValueOnce({ data: { data: MOCK_PROJECT } })
-      .mockResolvedValueOnce({ data: { data: MOCK_STATS } });
-
-    const { getByText } = render(<HomeScreen />);
-    await waitFor(() =>
-      expect(getByText('Browse All Projects')).toBeTruthy()
-    );
   });
 
   it('still renders the title when the API call fails', async () => {
@@ -93,3 +91,4 @@ describe('HomeScreen', () => {
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 });
+
