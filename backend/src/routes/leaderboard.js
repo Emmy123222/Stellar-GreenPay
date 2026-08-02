@@ -13,6 +13,8 @@ const leaderboardLimiter = createRateLimiter(30, 1);
 router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const cursor = parseInt(req.query.cursor, 10) || 0;
+    const offset = cursor;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
 
@@ -86,14 +88,18 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
 
     query += `
       GROUP BY p.public_key, p.display_name, p.badges
-      ORDER BY ${sortBy} DESC
-      LIMIT $1
+      ORDER BY ${sortBy} DESC, p.public_key ASC
+      LIMIT $1 OFFSET $2
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
-    const result = await pool.query(query, [limit]);
-    const entries = result.rows.map((p, i) => ({
-      rank: i + 1,
+    const result = await pool.query(query, [limit + 1, offset]);
+    
+    const hasMore = result.rows.length > limit;
+    const rows = hasMore ? result.rows.slice(0, limit) : result.rows;
+
+    const entries = rows.map((p, i) => ({
+      rank: offset + i + 1,
       publicKey: p.public_key,
       displayName: p.display_name || null,
       totalDonatedXLM: p.total_donated_xlm?.toString() || "0",
@@ -102,7 +108,15 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       impactScore: p.impact_score?.toString() || "0",
       totalCO2OffsetKg: p.total_co2_offset_kg?.toString() || "0",
     }));
-    res.json({ success: true, data: entries });
+
+    const nextCursor = hasMore ? offset + limit : null;
+
+    res.json({ 
+      success: true, 
+      data: entries,
+      has_more: hasMore,
+      next_cursor: nextCursor
+    });
   } catch (e) {
     next(e);
   }
