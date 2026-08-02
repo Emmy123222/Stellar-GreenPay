@@ -2,6 +2,7 @@
  * components/LeaderboardTable.tsx
  */
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { fetchLeaderboard } from "@/lib/api";
 import { formatXLM, formatUSDEquivalent, shortenAddress, badgeEmoji } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
@@ -82,8 +83,12 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   if (entries.length === 0) return (
     <div className="text-center py-12">
-      <p className="text-3xl mb-3">🌱</p>
-      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No donors yet — be the first!</p>
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        🌱 No donations yet — be the first donor on the leaderboard!
+      </p>
+      <Link href="/projects" className="btn-primary">
+        Browse Projects
+      </Link>
     </div>
   );
 
