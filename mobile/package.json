@@ -17,7 +17,7 @@
     "expo": "~51.0.0",
     "expo-barcode-scanner": "^13.0.1",
     "expo-linking": "~6.3.0",
-    "expo-local-authentication": "~14.0.0",
+    "expo-local-authentication": "~57.0.2",
     "expo-notifications": "~0.28.0",
     "expo-router": "~3.5.0",
     "expo-secure-store": "^56.0.4",
