@@ -19,6 +19,8 @@
  *
  * GET /api/uploads/:key
  *   - Serves files written by the local backend from backend/uploads/<key>.
+ *   - Sets Content-Disposition: attachment so browsers prompt a download
+ *     instead of rendering PDFs/images inline (issue #696).
  *   - Other backends simply point callers at absolute URLs, so this
  *     static-serve route returns 404 by design for non-local backends.
  */
@@ -163,6 +165,34 @@ router.post("/presign", presignRateLimiter, async (req, res, next) => {
 });
 
 /**
+ * Derive a safe Content-Disposition header value from a storage key.
+ *
+ * Keys are built by storage.js as "<24-char hex>-<sanitized-original-name>",
+ * e.g. "a1b2c3d4e5f6a1b2c3d4e5f6-report_2026.pdf".
+ * We strip the hex prefix to recover the original filename, then emit both
+ * an ASCII quoted-string fallback (for older UAs) and an RFC 5987
+ * percent-encoded filename* parameter (for full Unicode support).
+ *
+ * @param {string} key - URL-decoded storage key from req.params.key.
+ * @returns {string} Complete Content-Disposition header value.
+ */
+function buildContentDisposition(key) {
+  const match = key.match(/^[0-9a-f]{24}-(.+)$/i);
+  const filename = match ? match[1] : key;
+
+  // ASCII fallback: replace anything outside printable ASCII and RFC 6266
+  // forbidden chars (double-quote, backslash) with underscores.
+  const asciiFilename = filename
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/["\\]/g, "_");
+
+  // RFC 5987 value for full Unicode filenames.
+  const encodedFilename = encodeURIComponent(filename).replace(/'/g, "%27");
+
+  return `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`;
+}
+
+/**
  * Serve files persisted by the "local" backend. S3/IPFS callers
  * should use the URLs returned at upload time — this route only exists
  * for the local fallback to make documents reachable from the browser.
@@ -183,6 +213,8 @@ router.get("/:key", (req, res) => {
   if (!fs.existsSync(fullPath)) {
     return res.status(404).json({ error: "File not found" });
   }
+  // Issue #696 — prompt download instead of inline rendering.
+  res.setHeader("Content-Disposition", buildContentDisposition(key));
   res.sendFile(fullPath);
 });
 
