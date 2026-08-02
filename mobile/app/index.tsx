@@ -179,10 +179,13 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ opacity: 0, position: 'absolute', width: 0, height: 0 }}>Loading...</Text>
         {renderSkeleton()}
       </View>
     );
   }
+
+
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
