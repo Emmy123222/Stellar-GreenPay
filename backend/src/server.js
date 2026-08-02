@@ -28,6 +28,7 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
+const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
@@ -56,10 +57,14 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-  next();
-});
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  })
+);
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -153,6 +158,7 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+  await startRecurringDonationQueue();
 
   startIndexer(io).catch((err) => logger.error({ event: "indexer_startup_error", err }, err.message));
 
