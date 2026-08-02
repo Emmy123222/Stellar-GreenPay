@@ -1,20 +1,13 @@
-"use strict";
-
 /**
- * Migration 003: Add recurring_donations table.
+ * 003_recurring_donations.js — Recurring donation schedules
  *
- * Stores recurring donation pledges made by donors. Each row represents a
- * pledge to donate `amount_xlm` (in `currency`) to a project every calendar
- * month for `duration_months` months. The pg-boss daily job in
- * recurringDonationQueue.js drives the payment schedule by inspecting
- * `next_due_date` and decrementing `remaining_months` after each cycle.
- *
- * Status lifecycle:
- *   active   → normal, payments due according to next_due_date
- *   paused   → temporarily suspended by the donor
- *   completed → remaining_months reached 0
- *   cancelled → explicitly cancelled via DELETE /api/recurring-donations/:id
+ * Adds a recurring_donations table so that donors can set up weekly,
+ * bi-weekly, or monthly recurring donations to their favourite projects.
+ * The recurring-donation reminder queue (recurringDonationQueue.js) polls
+ * next_due_date daily and sends push notifications when a payment is
+ * due within the next 24 hours.
  */
+"use strict";
 
 module.exports = {
   name: "003_recurring_donations",
@@ -22,44 +15,29 @@ module.exports = {
   async up(client) {
     await client.query(`
       CREATE TABLE IF NOT EXISTS recurring_donations (
-        id               UUID PRIMARY KEY,
-        donor_address    TEXT NOT NULL,
-        project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        amount_xlm       NUMERIC(20, 7) NOT NULL CHECK (amount_xlm > 0),
-        currency         TEXT NOT NULL DEFAULT 'XLM',
-        next_due_date    DATE NOT NULL,
-        duration_months  INTEGER NOT NULL CHECK (duration_months >= 1),
-        remaining_months INTEGER NOT NULL CHECK (remaining_months >= 0),
-        status           TEXT NOT NULL DEFAULT 'active',
-        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        CONSTRAINT recurring_donations_status_check
-          CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
-        CONSTRAINT recurring_donations_remaining_lte_duration
-          CHECK (remaining_months <= duration_months)
+        id UUID PRIMARY KEY,
+        project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        donor_address TEXT NOT NULL,
+        amount_xlm NUMERIC(20, 7) NOT NULL,
+        frequency TEXT NOT NULL DEFAULT 'monthly'
+          CHECK (frequency IN ('weekly', 'biweekly', 'monthly')),
+        next_due_date TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active'
+          CHECK (status IN ('active', 'paused', 'cancelled')),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
 
-    // Index for the daily scheduler: find all active pledges due today or earlier
     await client.query(`
-      CREATE INDEX IF NOT EXISTS recurring_donations_due_idx
-        ON recurring_donations (next_due_date, status)
+      CREATE INDEX IF NOT EXISTS idx_recurring_donations_next_due
+        ON recurring_donations (next_due_date)
         WHERE status = 'active'
-    `);
-
-    // Index for donor-centric queries (GET /api/recurring-donations?donor=...)
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS recurring_donations_donor_idx
-        ON recurring_donations (donor_address)
-    `);
-
-    // Index for project-centric queries
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS recurring_donations_project_idx
-        ON recurring_donations (project_id)
     `);
   },
 
   async down(client) {
-    await client.query(`DROP TABLE IF EXISTS recurring_donations`);
+    await client.query("DROP INDEX IF EXISTS idx_recurring_donations_next_due");
+    await client.query("DROP TABLE IF EXISTS recurring_donations");
   },
 };

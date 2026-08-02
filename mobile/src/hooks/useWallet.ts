@@ -11,7 +11,7 @@ export function useWallet() {
 
   useEffect(() => {
     SecureStore.getItemAsync(WALLET_KEY)
-      .then((stored) => setPublicKey(stored))
+      .then((stored: string | null) => setPublicKey(stored))
       .finally(() => setLoading(false));
   }, []);
 
