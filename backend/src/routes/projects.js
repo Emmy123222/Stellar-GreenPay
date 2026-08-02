@@ -21,7 +21,9 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
-const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
+const { isUrlSafeFromSsrf } = require("../services/ssrfCheck");
+
+const WEBHOOK_URL_MAX_LENGTH = 2000;
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -1144,6 +1146,59 @@ router.get("/:id/matching", async (req, res, next) => {
     }));
 
     res.json({ success: true, data: matches });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PATCH /api/projects/:id
+ * Update mutable project fields. Currently supports `webhook_url`, which is
+ * validated to prevent SSRF: it must be HTTPS, must not resolve to a
+ * private/loopback/link-local address, and must be a reasonable length.
+ */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { webhook_url: webhookUrl } = req.body || {};
+
+    if (webhookUrl === undefined) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    if (webhookUrl !== null) {
+      if (typeof webhookUrl !== "string" || !webhookUrl.startsWith("https://")) {
+        return res.status(400).json({ error: "webhook_url must be a valid https:// URL" });
+      }
+
+      if (webhookUrl.length > WEBHOOK_URL_MAX_LENGTH) {
+        return res
+          .status(400)
+          .json({ error: `webhook_url must be at most ${WEBHOOK_URL_MAX_LENGTH} characters` });
+      }
+
+      const safe = await isUrlSafeFromSsrf(webhookUrl);
+      if (!safe) {
+        return res
+          .status(400)
+          .json({ error: "webhook_url must not resolve to a private, loopback, or link-local address" });
+      }
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET webhook_url = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [webhookUrl, req.params.id],
+    );
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
     next(e);
   }
