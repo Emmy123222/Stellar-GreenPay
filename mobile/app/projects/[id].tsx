@@ -26,13 +26,9 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
 import { useTheme } from '../theme';
-import {
-  getPushToken,
-  followProject,
-  unfollowProject,
-  markNotificationsSeen,
-} from '../../utils/notifications';
+import { markNotificationsSeen } from '../../utils/notifications';
 import * as Notifications from 'expo-notifications';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -178,6 +174,7 @@ export default function ProjectDetailScreen() {
   const { id } = useLocalSearchParams();
 
   const [project, setProject] = useState<ClimateProject | null>(null);
+  const [updates, setUpdates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -187,6 +184,7 @@ export default function ProjectDetailScreen() {
   useEffect(() => {
     if (id) {
       loadProject(id as string);
+      loadUpdates(id as string);
       initializeNotifications();
       // markNotificationsSeen / Notifications may be stripped from the
       // module mocks during tests; optional-chaining the call sites keeps
@@ -197,11 +195,15 @@ export default function ProjectDetailScreen() {
     }
   }, [id]);
 
-  // ── helpers ────────────────────────────────────────────────────────────────
-
-  const showToast = (message: string, variant: ToastVariant = 'success') => {
-    setToast({ message, variant });
+  const loadUpdates = async (projectId: string) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/updates/${projectId}`);
+      setUpdates(res.data.data || []);
+    } catch (error) {
+      console.error('Error loading updates:', error);
+    }
   };
+
 
   const initializeNotifications = async () => {
     try {
@@ -479,152 +481,24 @@ export default function ProjectDetailScreen() {
           </Text>
         </View>
 
-        {/* Updates — recent project activity derived from existing fields.
-            Real implementation of the "Display: ... updates" line in
-            /workspaces/Stellar-GreenPay/issue-168 (closes the AC gap that
-            the original ticket flagged but the first pass omitted). */}
-        <View
-          style={[
-            styles.updatesCard,
-            {
-              backgroundColor: colors.surface,
-              shadowColor: colors.cardShadow,
-              borderColor: colors.cardBorder,
-            },
-          ]}
-          accessibilityRole="summary"
-          accessibilityLabel={`Updates for ${project.name}`}
-        >
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
-            📰 Updates
-          </Text>
-
-          {project.donorCount > 0 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                🎉
+      {updates.length > 0 && (
+        <View style={[styles.updatesCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Latest Updates</Text>
+          {updates.map((update) => (
+            <View key={update.id} style={[styles.updateItem, { borderTopColor: colors.border }]}>
+              <Text style={[styles.updateTitle, { color: colors.primaryText }]}>{update.title}</Text>
+              <Text style={[styles.updateDate, { color: colors.muted }]}>
+                {new Date(update.createdAt).toLocaleDateString()}
               </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  {project.donorCount}{' '}
-                  {project.donorCount === 1 ? 'donor has' : 'donors have'} contributed
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  The project is actively receiving community support.
-                </Text>
-              </View>
+              <Text style={[styles.updateBody, { color: colors.secondaryText }]}>{update.body}</Text>
             </View>
-          )}
-
-          {project.co2OffsetKg > 0 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                🌱
-              </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  {project.co2OffsetKg.toLocaleString()} kg CO₂ offset
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  Estimated environmental impact to date.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {pct >= 25 && pct < 50 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                ⭐
-              </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  25% milestone reached
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
-                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {pct >= 50 && pct < 75 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                ⭐⭐
-              </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  50% milestone reached — halfway!
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
-                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {pct >= 75 && pct < 100 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                🔥
-              </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  75% milestone — almost there
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
-                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {pct >= 100 && (
-            <View style={styles.updateRow}>
-              <Text style={styles.updateBullet} accessibilityElementsHidden>
-                🏆
-              </Text>
-              <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  Goal fully funded
-                </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {project.donorCount}{' '}
-                  {project.donorCount === 1 ? 'donor has' : 'donors have'} hit the{' '}
-                  {parseFloat(project.goalXLM).toFixed(0)} XLM goal.
-                </Text>
-              </View>
-            </View>
-          )}
-
-          <View style={styles.updateRow}>
-            <Text style={styles.updateBullet} accessibilityElementsHidden>
-              {project.status === 'active'
-                ? '✅'
-                : project.status === 'completed'
-                ? '🏁'
-                : '⏸️'}
-            </Text>
-            <View style={styles.updateText}>
-              <Text
-                style={[styles.updateTitle, { color: colors.primaryText }]}
-                accessibilityLabel={`Project status ${project.status}`}
-              >
-                Project {project.status}
-              </Text>
-              <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                Verified {project.category.toLowerCase()} project.
-              </Text>
-            </View>
-          </View>
+          ))}
         </View>
+      )}
 
         {/* Follow button — visible whenever we have a push token, OR show a
             softer prompt when we don't so the user knows the feature exists */}
+      {pushToken && (
         <TouchableOpacity
           testID="follow-button"
           style={[
@@ -865,25 +739,23 @@ const styles = StyleSheet.create({
     elevation: 3,
     borderWidth: 1,
   },
-  updateRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-    gap: 10,
-  },
-  updateBullet: {
-    fontSize: 18,
-    lineHeight: 22,
-  },
-  updateText: {
-    flex: 1,
+  updateItem: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    paddingTop: 12,
   },
   updateTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
-  updateSubtitle: {
+  updateDate: {
     fontSize: 12,
     marginTop: 2,
+    marginBottom: 6,
+  },
+  updateBody: {
+    fontSize: 14,
+    lineHeight: 20,
   },
 });
+

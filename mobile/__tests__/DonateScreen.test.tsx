@@ -115,23 +115,31 @@ jest.mock('expo-linking', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-// The Stellar SDK touches Axios at module load time and crashes if its
-// default config is undefined. Stub the surface we use in the donate
-// screen so the test harness doesn't need a real Horizon URL.
-jest.mock('@stellar/stellar-sdk', () => ({
-  Keypair: {
-    fromSecret: jest.fn(() => ({
-      publicKey: () => 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
-      sign: jest.fn(),
-    })),
-  },
-  Server: jest.fn(),
-  TransactionBuilder: jest.fn(),
-  Networks: { TESTNET: 'Test SDF Network ; September 2015' },
-  Operation: { payment: jest.fn() },
-  Asset: { native: jest.fn() },
-  Memo: { text: jest.fn() },
+jest.mock('../app/theme', () => ({
+  useTheme: () => ({
+    colors: {
+      background: '#ffffff',
+      surface: '#ffffff',
+      primary: '#000000',
+      accent: '#000000',
+      header: '#000000',
+      headerText: '#ffffff',
+      buttonBackground: '#000000',
+      buttonText: '#ffffff',
+      cardBorder: '#eeeeee',
+      cardShadow: '#000000',
+      primaryText: '#000000',
+      secondaryText: '#555555',
+      muted: '#888888',
+      inputBackground: '#ffffff',
+      inputBorder: '#eeeeee',
+      placeholder: '#888888',
+      border: '#dddddd',
+      statusBarStyle: 'dark',
+    },
+  }),
 }));
+
 
 const MOCK_PROJECT = {
   id: 'proj-1',

@@ -11,7 +11,7 @@ export function useWallet() {
 
   useEffect(() => {
     SecureStore.getItemAsync(WALLET_KEY)
-      .then((stored) => setPublicKey(stored))
+      .then((stored: string | null) => setPublicKey(stored))
       // `finally` alone does not consume the rejection — without `.catch`,
       // any storage error (e.g. Keychain unavailable on a stale device)
       // would surface as an `UnhandledPromiseRejection`, which Jest treats

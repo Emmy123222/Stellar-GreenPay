@@ -5,8 +5,8 @@
 import { renderHook } from '@testing-library/react-native';
 
 const mockPush = jest.fn();
-const mockGetInitialURL = jest.fn(() => Promise.resolve(null));
-const mockAddEventListener = jest.fn(() => ({ remove: jest.fn() }));
+const mockGetInitialURL = jest.fn((): Promise<string | null> => Promise.resolve(null));
+const mockAddEventListener = jest.fn((_event: string, _handler: any) => ({ remove: jest.fn() }));
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
@@ -14,7 +14,7 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-linking', () => ({
   getInitialURL: () => mockGetInitialURL(),
-  addEventListener: (...args: unknown[]) => mockAddEventListener(...args),
+  addEventListener: (event: string, handler: any) => mockAddEventListener(event, handler),
   parse: (url: string) => {
     const match = url.match(/^greenpay:\/\/(.+)/);
     return { path: match ? match[1] : null };
