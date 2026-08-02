@@ -158,6 +158,7 @@ pub enum DataKey {
     ImpactNFT(Address, BadgeTier),
     DonationCount,
     DonationRecord(u32),
+    DonorDonations(Address),
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
     // Tracks whether `donor` has ever donated to `project` — used so
@@ -539,6 +540,15 @@ impl GreenPayContract {
         };
         env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
 
+        // Track this donation index in the donor's history list.
+        let mut donor_donations: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor.clone()))
+            .unwrap_or(Vec::new(&env));
+        donor_donations.push_back(dc);
+        env.storage().instance().set(&DataKey::DonorDonations(donor.clone()), &donor_donations);
+
         let gr: i128 = env
             .storage()
             .instance()
@@ -663,6 +673,31 @@ impl GreenPayContract {
     /// Retrieve a donation record by its index.
     pub fn get_donation_record(env: Env, index: u32) -> DonationRecord {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
+    }
+
+    /// Returns a paginated list of donation records for a given donor.
+    /// Results are ordered chronologically (oldest first).
+    pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
+        let indices: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor))
+            .unwrap_or(Vec::new(&env));
+        let total = indices.len();
+        let mut result: Vec<DonationRecord> = Vec::new(&env);
+        let end = (offset + limit).min(total);
+        let mut i = offset;
+        while i < end {
+            let idx = indices.get(i).unwrap();
+            let record: DonationRecord = env
+                .storage()
+                .instance()
+                .get(&DataKey::DonationRecord(idx))
+                .expect("Donation record not found");
+            result.push_back(record);
+            i += 1;
+        }
+        result
     }
 
     pub fn get_admin(env: Env) -> Address {
@@ -1140,6 +1175,15 @@ impl GreenPayContract {
         };
         env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
 
+        // Track this donation index in the donor's history list.
+        let mut donor_donations: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor.clone()))
+            .unwrap_or(Vec::new(&env));
+        donor_donations.push_back(dc);
+        env.storage().instance().set(&DataKey::DonorDonations(donor.clone()), &donor_donations);
+
         let gr: i128 = env
             .storage()
             .instance()
@@ -1378,6 +1422,42 @@ mod tests {
         assert_eq!(record.project, pid);
         assert_eq!(record.amount, usdc_amount);
         assert_eq!(record.currency, symbol_short!("USDC"));
+    }
+
+    #[test]
+    fn test_get_donor_history() {
+        let (env, cid, client, admin, pid) = setup();
+        env.mock_all_auths();
+        let donor = Address::generate(&env);
+        let wallet = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(wallet.clone()).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+        token_client.mint(&donor, &i128::MAX);
+
+        // No donations yet — empty result.
+        let history = client.get_donor_history(&env, &donor, &0, &10);
+        assert_eq!(history.len(), 0);
+
+        // Donate XLM three times.
+        for i in 1..=3 {
+            client.donate(&env, &token, &donor, &pid, &(i * 100 * STROOP), &0);
+        }
+
+        let history = client.get_donor_history(&env, &donor, &0, &10);
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.get(0).unwrap().amount, 100 * STROOP);
+        assert_eq!(history.get(1).unwrap().amount, 200 * STROOP);
+        assert_eq!(history.get(2).unwrap().amount, 300 * STROOP);
+
+        // Pagination: offset=1, limit=2 → gets second and third donation.
+        let page = client.get_donor_history(&env, &donor, &1, &2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.get(0).unwrap().amount, 200 * STROOP);
+        assert_eq!(page.get(1).unwrap().amount, 300 * STROOP);
+
+        // Pagination: offset=5 → empty.
+        let empty = client.get_donor_history(&env, &donor, &5, &10);
+        assert_eq!(empty.len(), 0);
     }
 
     #[test]
