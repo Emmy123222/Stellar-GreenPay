@@ -302,7 +302,7 @@ router.get("/:id", async (req, res, next) => {
       try {
         const { verifyToken } = require("../middleware/auth");
         const decoded = verifyToken(auth.slice(7));
-        if (decoded && decoded.role === "admin") {
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
           return res.json({ success: true, data: mapRequestRow(row) });
         }
       } catch (_err) {
