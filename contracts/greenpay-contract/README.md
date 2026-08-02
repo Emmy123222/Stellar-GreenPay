@@ -11,6 +11,8 @@ Every donation is recorded permanently on the Stellar blockchain. Anyone can que
 | Function | Who calls it | Description |
 |----------|-------------|-------------|
 | `initialize(admin)` | Deployer | One-time setup |
+| `propose_new_admin(admin, new_admin)` | Admin | Start a two-step admin rotation |
+| `accept_admin(new_admin)` | Pending admin | Accept the proposed admin role |
 | `register_project(admin, id, name, wallet, co2_per_xlm)` | Admin | Register a verified project |
 | `deactivate_project(admin, id)` | Admin | Stop new donations to a project |
 | `donate(token, donor, project_id, amount, msg_hash)` | Donor | Send XLM + record donation |
@@ -20,6 +22,15 @@ Every donation is recorded permanently on the Stellar blockchain. Anyone can que
 | `get_global_total()` | Anyone | Total XLM raised platform-wide |
 | `get_global_co2()` | Anyone | Total CO₂ offset in grams |
 | `get_donation_count()` | Anyone | Total donations recorded |
+
+## Admin Rotation
+
+Admin rotation is a two-step flow to avoid accidental lockout:
+
+1. Current admin calls `propose_new_admin(admin, new_admin)`
+2. Proposed admin calls `accept_admin(new_admin)`
+
+The current admin remains unchanged until the second step succeeds.
 
 ## Badge Tiers
 

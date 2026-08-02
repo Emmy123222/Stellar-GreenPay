@@ -14,9 +14,15 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
 const cache = require("../services/cache");
+const redis = require("../services/redis");
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const PROJECT_IMPACT_CACHE_TTL_SECONDS = 5 * 60;
 const KG_CO2_PER_TREE = 21.77; // heuristic, used for treesEquivalent
+
+function projectImpactCacheKey(projectId) {
+  return `impact:project:${projectId}`;
+}
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) {
@@ -41,10 +47,16 @@ function sendCached(req, res, payload) {
   return res.json(payload);
 }
 
+async function sendProjectImpactCached(projectId, res, payload) {
+  await redis.set(projectImpactCacheKey(projectId), payload, PROJECT_IMPACT_CACHE_TTL_SECONDS);
+  res.set("Cache-Control", "public, max-age=300");
+  return res.json(payload);
+}
+
 // GET /api/impact/project/:id
 router.get("/project/:id", async (req, res, next) => {
   try {
-    const hit = cache.get(cacheKey(req));
+    const hit = await redis.get(projectImpactCacheKey(req.params.id));
     if (hit) return res.json(hit);
 
     const projectResult = await pool.query(
@@ -57,11 +69,10 @@ router.get("/project/:id", async (req, res, next) => {
 
     const aggResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount"
        FROM donations d
-       WHERE d.project_id = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+       WHERE d.project_id = $1`,
       [req.params.id],
     );
 
@@ -74,7 +85,7 @@ router.get("/project/:id", async (req, res, next) => {
     const kgPerXlm = raisedXlm > 0 ? projectCo2OffsetKg / raisedXlm : 0;
     const co2OffsetKg = Math.round(totalDonationsXLM * kgPerXlm);
 
-    return sendCached(req, res, {
+    return await sendProjectImpactCached(req.params.id, res, {
       success: true,
       data: {
         totalDonationsXLM: totalDonationsXLM.toFixed(7),
@@ -97,12 +108,12 @@ router.get("/global", async (req, res, next) => {
 
     const totalsResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -110,18 +121,18 @@ router.get("/global", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE (d.currency = 'XLM' OR d.currency IS NULL)`,
+`,
     );
 
     const breakdownResult = await pool.query(
       `SELECT
         p.category AS category,
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -129,7 +140,6 @@ router.get("/global", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE (d.currency = 'XLM' OR d.currency IS NULL)
        GROUP BY p.category
        ORDER BY "totalDonationsXLM" DESC, p.category ASC`,
     );
@@ -172,12 +182,12 @@ router.get("/donor/:publicKey", async (req, res, next) => {
 
     const totalsResult = await pool.query(
       `SELECT
-        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonatedXLM",
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS "totalDonatedXLM",
         COUNT(DISTINCT d.project_id)::int AS "projectsSupported",
         COALESCE(
           SUM(
             CASE
-              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              WHEN p.raised_xlm > 0 THEN (COALESCE(d.amount_xlm, d.amount) * (p.co2_offset_kg::numeric / p.raised_xlm))
               ELSE 0
             END
           ),
@@ -185,19 +195,17 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         ) AS "co2OffsetKg"
        FROM donations d
        JOIN projects p ON p.id = d.project_id
-       WHERE d.donor_address = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+       WHERE d.donor_address = $1`,
       [req.params.publicKey],
     );
 
     const topCategoryResult = await pool.query(
       `SELECT
         p.category AS category,
-        COALESCE(SUM(d.amount_xlm), 0) AS total
+        COALESCE(SUM(COALESCE(d.amount_xlm, d.amount)), 0) AS total
        FROM donations d
        JOIN projects p ON p.id = d.project_id
        WHERE d.donor_address = $1
-         AND (d.currency = 'XLM' OR d.currency IS NULL)
        GROUP BY p.category
        ORDER BY total DESC
        LIMIT 1`,
@@ -224,5 +232,18 @@ router.get("/donor/:publicKey", async (req, res, next) => {
   }
 });
 
+/**
+ * Invalidate the cached impact summary for a project, e.g. after a new
+ * donation is recorded for it.
+ *
+ * @param {string} projectId - The project whose cached impact data is stale.
+ * @returns {Promise<void>}
+ */
+async function invalidateProjectImpactCache(projectId) {
+  await redis.deletePattern(projectImpactCacheKey(projectId));
+}
+
 module.exports = router;
+module.exports.invalidateProjectImpactCache = invalidateProjectImpactCache;
+module.exports.projectImpactCacheKey = projectImpactCacheKey;
 
