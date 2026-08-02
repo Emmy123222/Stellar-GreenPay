@@ -161,6 +161,16 @@ pub struct GlobalStats {
     pub project_count:   u32,
 }
 
+/// Platform fee configuration returned by `get_fee_config`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeeConfig {
+    /// Address that receives the withheld platform fee on every donation.
+    pub recipient: Option<Address>,
+    /// Fee rate in basis points — 0 disables the fee, 100 = 1%, max 200 = 2%.
+    pub fee_bps: u32,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -191,6 +201,10 @@ pub enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    // Platform fee: address receiving the fee withheld from each donation and
+    // the fee rate in basis points (see MAX_FEE_BPS).
+    FeeRecipient,
+    FeeBps,
     PendingAdmin,
 }
 
@@ -212,6 +226,10 @@ const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 // panics and misleading impact figures from misconfigured projects.
 const MAX_CO2_PER_XLM: u32 = 100_000;
 
+// Upper bound on the platform fee in basis points: 200 bps = 2%. One basis
+// point is 1/10_000th, so the withheld fee is `amount * fee_bps / 10_000`.
+const MAX_FEE_BPS: u32 = 200;
+
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
     if xlm >= 2000 {
@@ -225,6 +243,34 @@ fn calculate_badge(total_stroops: i128) -> BadgeTier {
     } else {
         BadgeTier::None
     }
+}
+
+/// Compute the platform fee withheld from a donation of `amount`.
+///
+/// Returns 0 when no fee is configured (either no recipient set or
+/// `fee_bps == 0`), otherwise `amount * fee_bps / 10_000` truncated toward
+/// zero. `checked_mul` guards against silent wrapping for pathological
+/// amounts.
+fn compute_donation_fee(env: &Env, amount: i128) -> i128 {
+    let fee_bps: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::FeeBps)
+        .unwrap_or(0);
+    if fee_bps == 0 {
+        return 0;
+    }
+    let fee_recipient: Option<Address> = env
+        .storage()
+        .instance()
+        .get(&DataKey::FeeRecipient);
+    if fee_recipient.is_none() {
+        return 0;
+    }
+    amount
+        .checked_mul(fee_bps as i128)
+        .expect("Fee calculation overflow")
+        / 10_000
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -433,6 +479,45 @@ impl GreenPayContract {
         }
     }
 
+    // ─── Platform fee ─────────────────────────────────────────────────────────
+
+    /// Admin-only: Configure the platform fee recipient and rate.
+    ///
+    /// `fee_bps` is expressed in basis points: 0 disables the fee entirely,
+    /// 100 = 1%, and the maximum allowed is 200 (= 2%). On every subsequent
+    /// `donate` / `donate_usdc` call, `fee_bps / 10_000 × amount` is sent to
+    /// `recipient` first and the remainder to the project wallet. Accounting
+    /// counters (`Project.total_raised`, donor stats, global totals and the
+    /// `donated` event) always record the gross donation amount.
+    pub fn set_fee_recipient(env: Env, admin: Address, recipient: Address, fee_bps: u32) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set fee recipient");
+        }
+        if fee_bps > MAX_FEE_BPS {
+            panic!("Fee exceeds maximum allowed");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeRecipient, &recipient);
+        env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+        env.events()
+            .publish((symbol_short!("fee_set"), admin), (recipient, fee_bps));
+    }
+
+    /// Get the current platform fee configuration.
+    pub fn get_fee_config(env: Env) -> FeeConfig {
+        FeeConfig {
+            recipient: env.storage().instance().get(&DataKey::FeeRecipient),
+            fee_bps: env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0),
+        }
+    }
+
     // ─── Donations ────────────────────────────────────────────────────────────
 
     pub fn donate(
@@ -588,9 +673,22 @@ impl GreenPayContract {
             .instance()
             .set(&DataKey::GlobalCO2OffsetGrams, &new_gc);
 
-        // ── Interaction: external call happens after every effect is durable.
+        // ── Interaction: external calls happen after every effect is durable.
         let token_client = token::Client::new(&env, &token);
-        token_client.transfer(&donor, &project.wallet, &amount);
+        let fee = compute_donation_fee(&env, amount);
+        if fee > 0 {
+            let fee_recipient: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeRecipient)
+                .expect("Fee recipient not set");
+            token_client.transfer(&donor, &fee_recipient, &fee);
+        }
+        token_client.transfer(
+            &donor,
+            &project.wallet,
+            &amount.checked_sub(fee).expect("Fee exceeds donation amount"),
+        );
 
         env.events().publish(
             (symbol_short!("donated"), donor.clone(), project_id.clone()),
@@ -1262,7 +1360,20 @@ impl GreenPayContract {
 
         let token_client = token::Client::new(&env, &usdc_token);
         let project_wallet = project.wallet;
-        token_client.transfer(&donor, &project_wallet, &usdc_amount);
+        let fee = compute_donation_fee(&env, usdc_amount);
+        if fee > 0 {
+            let fee_recipient: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::FeeRecipient)
+                .expect("Fee recipient not set");
+            token_client.transfer(&donor, &fee_recipient, &fee);
+        }
+        token_client.transfer(
+            &donor,
+            &project_wallet,
+            &usdc_amount.checked_sub(fee).expect("Fee exceeds donation amount"),
+        );
 
         env.events().publish(
             (symbol_short!("donated"), donor.clone(), project_id),
@@ -2283,6 +2394,146 @@ mod tests {
         assert_eq!(nft.tier, BadgeTier::Seedling);
         assert_eq!(nft.total_donated, amount);
         assert_eq!(nft.minted_at_ledger, mint_ledger);
+    }
+
+    // ─── Platform fee tests ───────────────────────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "Only admin can set fee recipient")]
+    fn test_set_fee_recipient_requires_admin() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        let attacker = Address::generate(&env);
+        let recipient = Address::generate(&env);
+        client.set_fee_recipient(&attacker, &recipient, &100u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Fee exceeds maximum allowed")]
+    fn test_set_fee_recipient_rejects_fee_above_max() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let recipient = Address::generate(&env);
+        client.set_fee_recipient(&admin, &recipient, &(MAX_FEE_BPS + 1));
+    }
+
+    #[test]
+    fn test_set_fee_recipient_round_trips_and_zero_bps_disables() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let recipient = Address::generate(&env);
+
+        // Default: no fee configured.
+        assert_eq!(
+            client.get_fee_config(),
+            FeeConfig { recipient: None, fee_bps: 0 }
+        );
+
+        // Max rate is accepted.
+        client.set_fee_recipient(&admin, &recipient, &MAX_FEE_BPS);
+        assert_eq!(
+            client.get_fee_config(),
+            FeeConfig { recipient: Some(recipient.clone()), fee_bps: MAX_FEE_BPS }
+        );
+
+        // 0 bps keeps the recipient stored but disables the withholding.
+        client.set_fee_recipient(&admin, &recipient, &0u32);
+        assert_eq!(
+            client.get_fee_config(),
+            FeeConfig { recipient: Some(recipient), fee_bps: 0 }
+        );
+    }
+
+    #[test]
+    fn test_donate_withholds_platform_fee() {
+        let (env, _cid, client, admin, pid) = setup();
+        let wallet = client.get_project(&pid).wallet;
+
+        let fee_recipient = Address::generate(&env);
+        client.set_fee_recipient(&admin, &fee_recipient, &100u32); // 1%
+
+        let donor = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        let amount = 100 * STROOP; // 100 XLM
+        token_client.mint(&donor, &amount);
+        client.donate(&token, &donor, &pid, &amount, &42u32);
+
+        // 1% of 100 XLM: fee recipient gets 1 XLM, project wallet 99 XLM.
+        assert_eq!(token_client.balance(&fee_recipient), 1 * STROOP);
+        assert_eq!(token_client.balance(&wallet), 99 * STROOP);
+        assert_eq!(token_client.balance(&donor), 0);
+
+        // Accounting stays gross.
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, amount);
+        let donor_stats = client.get_donor_stats(&donor);
+        assert_eq!(donor_stats.total_donated, amount);
+        assert_eq!(client.get_global_total(), amount);
+        let record = client.get_donation_record(&0u32);
+        assert_eq!(record.amount, amount);
+    }
+
+    #[test]
+    fn test_fee_truncates_and_zero_bps_sends_full_amount() {
+        let (env, _cid, client, admin, pid) = setup();
+        let wallet = client.get_project(&pid).wallet;
+        let fee_recipient = Address::generate(&env);
+
+        let donor = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        // 10_000_009 × 200 bps / 10_000 = 200_000.18 → truncated to 200_000.
+        let amount = 10_000_009i128;
+        token_client.mint(&donor, &amount);
+        client.set_fee_recipient(&admin, &fee_recipient, &200u32); // 2%
+
+        client.donate(&token, &donor, &pid, &amount, &0u32);
+        assert_eq!(token_client.balance(&fee_recipient), 200_000);
+        assert_eq!(token_client.balance(&wallet), amount - 200_000);
+
+        // Disabling via 0 bps: the full amount reaches the project wallet.
+        client.set_fee_recipient(&admin, &fee_recipient, &0u32);
+        let donor2 = Address::generate(&env);
+        token_client.mint(&donor2, &amount);
+        client.donate(&token, &donor2, &pid, &amount, &1u32);
+        assert_eq!(token_client.balance(&fee_recipient), 200_000); // unchanged
+        assert_eq!(token_client.balance(&wallet), amount - 200_000 + amount);
+    }
+
+    #[test]
+    fn test_donate_usdc_withholds_platform_fee() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let usdc_token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
+        client.set_usdc_token(&admin, &usdc_token);
+        let oracle_id = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle_id);
+
+        let fee_recipient = Address::generate(&env);
+        client.set_fee_recipient(&admin, &fee_recipient, &100u32); // 1%
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 100i128 * 1_000_000; // 100 USDC (6 decimals)
+        StellarAssetClient::new(&env, &usdc_token).mint(&donor, &usdc_amount);
+
+        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amount, &0u32);
+
+        let usdc_client = StellarAssetClient::new(&env, &usdc_token);
+        // 1% of 100 USDC → 1 USDC to the fee recipient.
+        assert_eq!(usdc_client.balance(&fee_recipient), 1_000_000);
+        assert_eq!(usdc_client.balance(&donor), 0);
+
+        // Project wallet receives the remainder.
+        let wallet = client.get_project(&pid).wallet;
+        assert_eq!(usdc_client.balance(&wallet), usdc_amount - 1_000_000);
     }
 }
 
