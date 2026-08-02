@@ -66,6 +66,8 @@ export interface ClimateProject {
   // passed to the fetch; defaults to false when omitted.
   followCount?: number;
   isFollowing?: boolean;
+  webhookUrl?: string | null;
+  webhookSecret?: string | null;
 }
 
 /**
@@ -249,4 +251,27 @@ export interface MonthlySubscription {
   status: "active" | "completed";
   createdAt: string;
   history: MonthlyDonationHistoryItem[];
+}
+
+export interface VerificationRequest {
+  id: string;
+  organizationName: string;
+  organizationWebsite: string | null;
+  organizationCountry: string | null;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription: string | null;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2: string | null;
+  supportingDocuments: any[];
+  storageBackend: string;
+  notes: string | null;
+  status: "pending" | "in_review" | "approved" | "rejected";
+  reviewerNotes: string | null;
+  reviewedBy: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
 }

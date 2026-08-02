@@ -2,7 +2,15 @@
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
 
+// Mock the rate limiter so it is transparent for all existing tests.
+// Individual tests that need to verify rate-limit behaviour re-require
+// the router with a blocking mock.
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: jest.fn(() => (_req, _res, next) => next()),
+}));
+
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 const request = require("supertest");
 const express = require("express");
 const leaderboardRouter = require("./leaderboard");
@@ -165,5 +173,53 @@ describe("GET /api/leaderboard — limit handling", () => {
     await request(app).get("/api/leaderboard?limit=abc").expect(200);
 
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+  });
+});
+
+describe("GET /api/leaderboard — rate limiting (issue #695)", () => {
+  test("createRateLimiter is called with (30, 1) — 30 req/min per IP", () => {
+    expect(createRateLimiter).toHaveBeenCalledWith(30, 1);
+  });
+
+  test("GET / returns 429 with Retry-After when the limiter blocks the request", async () => {
+    jest.resetModules();
+    jest.mock("../db/pool", () => ({ query: jest.fn() }));
+    jest.mock("../middleware/rateLimiter", () => ({
+      createRateLimiter: jest.fn(() => (_req, res) => {
+        res.set("Retry-After", "60");
+        return res.status(429).json({ message: "Too many requests — Try again later." });
+      }),
+    }));
+
+    const blockedRouter = require("./leaderboard");
+    const app = express();
+    app.use(express.json());
+    app.use("/api/leaderboard", blockedRouter);
+
+    const res = await request(app).get("/api/leaderboard");
+    expect(res.status).toBe(429);
+    expect(res.body.message).toMatch(/too many requests/i);
+    expect(res.headers["retry-after"]).toBe("60");
+  });
+
+  test("GET /history returns 429 with Retry-After when the limiter blocks the request", async () => {
+    jest.resetModules();
+    jest.mock("../db/pool", () => ({ query: jest.fn() }));
+    jest.mock("../middleware/rateLimiter", () => ({
+      createRateLimiter: jest.fn(() => (_req, res) => {
+        res.set("Retry-After", "60");
+        return res.status(429).json({ message: "Too many requests — Try again later." });
+      }),
+    }));
+
+    const blockedRouter = require("./leaderboard");
+    const app = express();
+    app.use(express.json());
+    app.use("/api/leaderboard", blockedRouter);
+
+    const res = await request(app).get("/api/leaderboard/history");
+    expect(res.status).toBe(429);
+    expect(res.body.message).toMatch(/too many requests/i);
+    expect(res.headers["retry-after"]).toBe("60");
   });
 });

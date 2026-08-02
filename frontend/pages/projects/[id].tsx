@@ -42,6 +42,7 @@ interface ProjectDetailProps {
   publicKey: string | null;
   onConnect: (pk: string) => void;
   ogProject?: {
+    id?: string;
     name: string;
     description: string;
     imageUrl?: string;
@@ -722,7 +723,9 @@ export default function ProjectDetail({
   const ogDescription = ogProject
     ? `${ogProject.description.slice(0, 160).trimEnd()}… Support this ${ogProject.category} project on Stellar GreenPay.`
     : "Donate XLM directly to verified climate projects on Stellar.";
-  const ogImage = ogProject?.imageUrl || `${appUrl}/og-default.png`;
+  const ogImage = ogProject?.id
+    ? `${appUrl}/api/og?id=${ogProject.id}`
+    : ogProject?.imageUrl || `${appUrl}/og-default.png`;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
@@ -1725,6 +1728,7 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
     return {
       props: {
         ogProject: {
+          id: p.id ?? undefined,
           name: p.name ?? "",
           description: p.description ?? "",
           imageUrl: p.imageUrl ?? null,
