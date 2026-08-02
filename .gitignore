@@ -17,6 +17,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+*.broken.bak
 Cargo.lock
 
 # Uploaded documents via /api/uploads (local storage backend).

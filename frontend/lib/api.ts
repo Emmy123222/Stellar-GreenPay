@@ -131,13 +131,14 @@ export async function fetchProjects(params?: {
  * Fetch a single project by its id.
  *
  * @param id - Project id.
+ * @param walletAddress - Optional viewer wallet for personalized project fields.
  * @returns The project.
  * @throws If the request fails (including 404s for missing projects).
  */
-export async function fetchProject(id: string) {
+export async function fetchProject(id: string, walletAddress?: string) {
   const { data } = await api.get<{ success: boolean; data: ClimateProject }>(
     `/api/projects/${id}`,
-    { params },
+    walletAddress ? { params: { walletAddress } } : undefined,
   );
   return data.data;
 }
@@ -324,10 +325,14 @@ export async function upsertProfile(
  * Fetch top donors.
  *
  * @param limit - Maximum number of entries to return (default: 20).
+ * @param period - Time window for donation totals (default: "all").
  * @returns Leaderboard entries.
  * @throws If the request fails.
  */
-export async function fetchLeaderboard(limit = 20) {
+export async function fetchLeaderboard(
+  limit = 20,
+  period: "all" | "month" | "year" = "all",
+) {
   const { data } = await api.get<{
     success: boolean;
     data: LeaderboardEntry[];
