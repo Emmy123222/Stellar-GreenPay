@@ -6,6 +6,7 @@
 require("dotenv").config();
 const Sentry = require("@sentry/node");
 const Tracing = require("@sentry/tracing");
+void Tracing;
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN || "",
@@ -27,6 +28,7 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
+const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 
@@ -40,20 +42,29 @@ app.use(Sentry.Handlers.tracingHandler());
 
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
-  const swaggerUi = require("swagger-ui-express");
-  const yaml = require("js-yaml");
-  const fs = require("fs");
-  const path = require("path");
-  const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
-  const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
-  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+  try {
+    const swaggerUi = require("swagger-ui-express");
+    const yaml = require("js-yaml");
+    const fs = require("fs");
+    const path = require("path");
+    const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
+    const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
+    app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+  } catch (err) {
+    // Missing js-yaml/openapi must not crash require("../server") during tests
+    console.warn("[swagger] docs unavailable:", err.message);
+  }
 }
 
 app.use(helmet());
-app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-  next();
-});
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  })
+);
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -149,6 +160,7 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+  await startRecurringDonationQueue();
 
   startIndexer(io).catch((err) => logger.error({ event: "indexer_startup_error", err }, err.message));
 

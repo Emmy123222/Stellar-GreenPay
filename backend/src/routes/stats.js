@@ -68,7 +68,9 @@ router.get("/categories", async (req, res, next) => {
     const result = await pool.query(`
       SELECT
         category,
-        COUNT(*)::int AS count
+        COUNT(*)::int AS count,
+        COALESCE(SUM(raised_xlm), 0) AS total_xlm,
+        COALESCE(SUM(donor_count), 0)::int AS total_donations
       FROM projects
       WHERE status = 'active'
       GROUP BY category
