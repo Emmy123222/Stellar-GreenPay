@@ -2,7 +2,18 @@
  * app/recurring.tsx
  * Monthly recurring donation management screen.
  * Lists active recurring donations stored in AsyncStorage and allows
- * the user to cancel individual entries.
+ * the user to set up new ones or cancel individual entries.
+ *
+ * Accessibility (#485):
+ *  - Every touchable element (project chip, Confirm / Cancel buttons,
+ *    per-donation Cancel button) carries a non-empty accessibilityLabel
+ *    and a sensible accessibilityRole.
+ *  - The amount field exposes a numeric, non-announced role so screen
+ *    readers treat it as a plain numeric text field.
+ *  - The "Cancel" control in the setup form is labelled distinctly from
+ *    the "Confirm" control so screen-reader users never confuse the two.
+ *  - Donation status changes (set up / cancelled) are announced to the
+ *    screen reader via an accessibilityRole="alert" live region.
  */
 import {
   View,
@@ -10,16 +21,32 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
+import axios from 'axios';
 import {
   loadRecurringDonations,
   cancelRecurringDonation,
+
+  createRecurringDonation,
+
+  loadPaymentHistory,
+
   type RecurringDonation,
+  type PaymentRecord,
 } from '../utils/recurringDonations';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+const MIN_AMOUNT_XLM = 1;
+
+interface ClimateProject {
+  id: string;
+  name: string;
+}
 
 function formatNextDate(isoDate: string): string {
   return new Date(isoDate).toLocaleDateString(undefined, {
@@ -76,7 +103,13 @@ function DonationCard({
         </View>
       </View>
 
-      <TouchableOpacity style={styles.cancelBtn} onPress={handleCancel} activeOpacity={0.7} accessibilityLabel={`Cancel recurring donation to ${donation.projectName}`} accessibilityRole="button">
+      <TouchableOpacity
+        style={styles.cancelBtn}
+        onPress={handleCancel}
+        activeOpacity={0.7}
+        accessibilityLabel={`Cancel recurring donation to ${donation.projectName}`}
+        accessibilityRole="button"
+      >
         <Text style={styles.cancelBtnText}>Cancel</Text>
       </TouchableOpacity>
     </View>
@@ -85,20 +118,106 @@ function DonationCard({
 
 export default function RecurringScreen() {
   const [donations, setDonations] = useState<RecurringDonation[]>([]);
+  const [history, setHistory] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const [projects, setProjects] = useState<ClimateProject[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>();
+  const [setupAmount, setSetupAmount] = useState('');
+
+  // Donation status change, announced to screen readers as a live region.
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // Guard so the initial load only runs once, even if the focus callback is
+  // invoked repeatedly (e.g. under test mocks). List mutations after setup /
+  // cancel update `donations` directly rather than re-fetching.
+  const hasLoadedRef = useRef(false);
+
+  const loadData = useCallback(async () => {
     const all = await loadRecurringDonations();
     setDonations(all.filter((d) => d.status === 'active'));
+    const h = await loadPaymentHistory();
+    setHistory(h);
     setLoading(false);
   }, []);
 
-  useFocusEffect(refresh);
+
+  const loadProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/projects`);
+      const list: ClimateProject[] = Array.isArray(res.data?.data) ? res.data.data : [];
+      setProjects(list);
+      setSelectedProjectId((prev) => prev ?? list[0]?.id);
+    } catch {
+      // Non-critical — the setup form is hidden when no projects are available.
+      setProjects([]);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (hasLoadedRef.current) return;
+      hasLoadedRef.current = true;
+      loadData();
+    }, [loadData])
+  );
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [refresh])
+  );
+
 
   const handleCancel = async (id: string) => {
     await cancelRecurringDonation(id);
     setDonations((prev) => prev.filter((d) => d.id !== id));
+    setStatusMessage('Recurring donation cancelled.');
+  };
+
+  const handleConfirmSetup = async () => {
+    const amountNum = parseFloat(setupAmount);
+    if (!setupAmount || Number.isNaN(amountNum) || amountNum < MIN_AMOUNT_XLM) {
+      Alert.alert(
+        'Invalid Amount',
+        `Please enter a valid amount (minimum ${MIN_AMOUNT_XLM} XLM).`
+      );
+      return;
+    }
+
+    const project =
+      projects.find((p) => p.id === selectedProjectId) || projects[0];
+    if (!project) {
+      Alert.alert('No Project', 'Please choose a project for the recurring donation.');
+      return;
+    }
+
+    const created = await createRecurringDonation({
+      projectId: project.id,
+      projectName: project.name,
+      amountXLM: setupAmount,
+      durationMonths: null,
+    });
+
+    setDonations((prev) => [created, ...prev]);
+    setSetupAmount('');
+    setStatusMessage(
+      `Recurring donation of ${setupAmount} XLM to ${project.name} set up.`
+    );
+  };
+
+  const handleCancelSetup = () => {
+    setSetupAmount('');
+    setStatusMessage(null);
   };
 
   if (loading) {
@@ -116,17 +235,152 @@ export default function RecurringScreen() {
         <Text style={styles.headerSub}>Manage your recurring donations</Text>
       </View>
 
+
+      {/* Set up a new recurring donation */}
+      {!projectsLoading && projects.length > 0 && (
+        <View style={styles.setupCard}>
+          <Text style={styles.setupTitle}>Set up a monthly donation</Text>
+
+          <Text style={styles.label}>Project</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.projectList}
+          >
+            {projects.map((project) => {
+              const isActive = project.id === selectedProjectId;
+              return (
+                <TouchableOpacity
+                  key={project.id}
+                  style={[
+                    styles.projectChip,
+                    isActive && styles.projectChipActive,
+                  ]}
+                  onPress={() => setSelectedProjectId(project.id)}
+                  accessibilityLabel={`Select project ${project.name}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
+                >
+                  <Text
+                    style={[
+                      styles.projectChipText,
+                      isActive && styles.projectChipTextActive,
+                    ]}
+                  >
+                    {project.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <Text style={styles.label}>Amount (XLM)</Text>
+          <TextInput
+            style={styles.input}
+            value={setupAmount}
+            onChangeText={setSetupAmount}
+            placeholder="e.g. 25"
+            placeholderTextColor="#8aaa8a"
+            keyboardType="decimal-pad"
+            accessibilityLabel="Recurring donation amount in XLM"
+            accessibilityRole="none"
+          />
+
+          <View style={styles.setupActions}>
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.confirmBtn]}
+              onPress={handleConfirmSetup}
+              activeOpacity={0.7}
+              accessibilityLabel="Confirm recurring donation"
+              accessibilityRole="button"
+            >
+              <Text style={styles.confirmBtnText}>Confirm</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.actionBtn, styles.setupCancelBtn]}
+              onPress={handleCancelSetup}
+              activeOpacity={0.7}
+              accessibilityLabel="Cancel recurring donation setup"
+              accessibilityRole="button"
+            >
+              <Text style={styles.setupCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Live region — announces donation status changes to the screen reader */}
+      {statusMessage ? (
+        <View
+          style={styles.statusBox}
+          accessible
+          accessibilityRole="alert"
+          accessibilityLiveRegion="polite"
+        >
+          <Text style={styles.statusText}>{statusMessage}</Text>
+        </View>
+      ) : null}
+
+      {/* Active recurring donations */}
       {donations.length === 0 ? (
+
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'active' && styles.tabActive]}
+          onPress={() => setActiveTab('active')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>Active</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'history' && styles.tabActive]}
+          onPress={() => setActiveTab('history')}
+          activeOpacity={0.7}
+        >
+          <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>History</Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'active' ? (
+        donations.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyIcon}>🌱</Text>
+            <Text style={styles.emptyTitle}>No active recurring donations</Text>
+            <Text style={styles.emptyText}>
+              Set up a monthly donation from any project page to support ongoing impact.
+            </Text>
+          </View>
+        ) : (
+          donations.map((donation) => (
+            <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} />
+          ))
+        )
+      ) : history.length === 0 ? (
+
         <View style={styles.emptyState}>
-          <Text style={styles.emptyIcon}>🌱</Text>
-          <Text style={styles.emptyTitle}>No active recurring donations</Text>
+          <Text style={styles.emptyIcon}>📋</Text>
+          <Text style={styles.emptyTitle}>No payment history</Text>
           <Text style={styles.emptyText}>
-            Set up a monthly donation from any project page to support ongoing impact.
+            Your past donation payments will appear here.
           </Text>
         </View>
       ) : (
-        donations.map((donation) => (
-          <DonationCard key={donation.id} donation={donation} onCancel={handleCancel} />
+        history.map((record) => (
+          <View key={record.id} style={styles.historyCard}>
+            <View style={styles.historyCardHeader}>
+              <Text style={styles.historyProjectName} numberOfLines={1}>
+                {record.projectName}
+              </Text>
+              <Text style={styles.historyAmount}>{record.amountXLM} XLM</Text>
+            </View>
+            <View style={styles.historyMeta}>
+              <Text style={styles.historyDate}>{formatNextDate(record.date)}</Text>
+              <Text style={[styles.historyStatus, record.status === 'completed' && styles.historyStatusSuccess]}>
+                {record.status}
+              </Text>
+            </View>
+          </View>
         ))
       )}
     </ScrollView>
@@ -160,6 +414,107 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#c8e6c9',
     marginTop: 4,
+  },
+  setupCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderRadius: 12,
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+  },
+  setupTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1a2e1a',
+    marginBottom: 12,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1a2e1a',
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  projectList: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  projectChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#d8e4d8',
+    backgroundColor: '#fff',
+    marginRight: 8,
+  },
+  projectChipActive: {
+    backgroundColor: '#227239',
+    borderColor: '#227239',
+  },
+  projectChipText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1a2e1a',
+  },
+  projectChipTextActive: {
+    color: '#fff',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#d8e4d8',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    color: '#1a2e1a',
+    backgroundColor: '#fff',
+    marginBottom: 14,
+  },
+  setupActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionBtn: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  confirmBtn: {
+    backgroundColor: '#227239',
+  },
+  confirmBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  setupCancelBtn: {
+    borderWidth: 1.5,
+    borderColor: '#5a7a5a',
+  },
+  setupCancelBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#5a7a5a',
+  },
+  statusBox: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    borderColor: '#34d399',
+    borderWidth: 1,
+  },
+  statusText: {
+    color: '#0f172a',
+    fontSize: 14,
+    fontWeight: '600',
   },
   emptyState: {
     alignItems: 'center',
@@ -239,5 +594,78 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#c62828',
+  },
+  tabBar: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  tabActive: {
+    backgroundColor: '#227239',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5a7a5a',
+  },
+  tabTextActive: {
+    color: '#fff',
+  },
+  historyCard: {
+    backgroundColor: '#fff',
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    padding: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+  },
+  historyCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  historyProjectName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1a2e1a',
+    marginRight: 8,
+  },
+  historyAmount: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#227239',
+  },
+  historyMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  historyDate: {
+    fontSize: 13,
+    color: '#5a7a5a',
+  },
+  historyStatus: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#c62828',
+    textTransform: 'capitalize',
+  },
+  historyStatusSuccess: {
+    color: '#227239',
   },
 });

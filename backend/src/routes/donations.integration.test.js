@@ -88,10 +88,10 @@ describe("Donation flow integration (testcontainers)", () => {
       // Ensure cleanup
       try {
         if (testPool) await testPool.end();
-      } catch {}
+      } catch { /* ignore */ }
       try {
         if (container) await container.stop();
-      } catch {}
+      } catch { /* ignore */ }
       container = null;
       testPool = null;
     }
@@ -100,13 +100,13 @@ describe("Donation flow integration (testcontainers)", () => {
   afterAll(async () => {
     try {
       if (pool) await pool.end();
-    } catch {}
+    } catch { /* ignore */ }
     try {
       if (testPool) await testPool.end();
-    } catch {}
+    } catch { /* ignore */ }
     try {
       if (container) await container.stop({ timeout: 5000 });
-    } catch {}
+    } catch { /* ignore */ }
   });
 
   async function cleanDb() {
@@ -254,7 +254,7 @@ describe("Donation flow integration (testcontainers)", () => {
 
     const projectId = "22222222-2222-2222-2222-222222222222";
     await testPool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address) VALUES ($1,$2,$3,$4,$5,$6)`,
+      "INSERT INTO projects (id, name, description, category, location, wallet_address) VALUES ($1,$2,$3,$4,$5,$6)",
       [projectId, "Dedupe Test", "x", "Solar Energy", "Kenya", makePublicKey("X")]
     );
 

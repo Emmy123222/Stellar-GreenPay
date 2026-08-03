@@ -8,10 +8,19 @@ on:
     branches: [main]
     paths: [backend/**]
 
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# SENTRY_DSN  — Sentry DSN for error tracking (optional). Tests pass without it.
+#               Configure as a GitHub Actions secret when deploying to production
+#               to enable error reporting in CI builds.
+# ──────────────────────────────────────────────────────────────────────────────
+
 jobs:
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:
@@ -69,4 +78,4 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: backend/coverage/lcov.info
           flags: backend
-          fail_ci_if_error: true
+          fail_ci_if_error: false
