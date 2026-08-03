@@ -36,7 +36,12 @@ jest.mock('../utils/notifications', () => ({
   unfollowProject: jest.fn(),
 }));
 
+jest.mock('../utils/recurringDonations', () => ({
+  loadRecurringDonations: jest.fn(),
+}));
+
 import * as notifUtils from '../utils/notifications';
+import { loadRecurringDonations } from '../utils/recurringDonations';
 
 // ── Global fetch mock (used by checkFollowStatus) ──────────────────────────────
 const mockFetch = jest.fn();
@@ -68,7 +73,7 @@ function mockFollowsResponse(follows: object[] = []) {
 }
 
 import { ThemeProvider } from '../app/theme';
-import ProjectDetailScreen from '../app/projects/[id]';
+import ProjectDetailScreen, { formatNextPaymentDate } from '../app/projects/[id]';
 
 /**
  * expo-notifications is imported by the screen and runs a slow module-init
@@ -96,6 +101,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Default: follow/unfollow succeed
     (notifUtils.followProject as jest.Mock).mockResolvedValue(true);
     (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([]);
   });
 
   // see file header: fake timers removed (broke waitFor() polling)

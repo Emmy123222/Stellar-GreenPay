@@ -23,8 +23,8 @@ import {
   Animated,
   Share,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
 import { useTheme } from '../theme';
@@ -179,7 +179,28 @@ export default function ProjectDetailScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
+  const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+
+  const checkRecurringDonation = useCallback(async (projectId: string) => {
+    try {
+      const donations = await loadRecurringDonations();
+      const active = donations.find(
+        (d) => d.projectId === projectId && d.status === 'active'
+      );
+      setActiveDonation(active || null);
+    } catch {
+      setActiveDonation(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id) {
+        checkRecurringDonation(id as string);
+      }
+    }, [id, checkRecurringDonation])
+  );
 
   useEffect(() => {
     if (id) {
@@ -396,6 +417,45 @@ export default function ProjectDetailScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Active Recurring Donation Banner */}
+        {activeDonation && (
+          <View
+            testID="recurring-donation-banner"
+            style={[
+              styles.recurringBanner,
+              {
+                backgroundColor: colors.surface,
+                borderColor: '#227239',
+                shadowColor: colors.cardShadow,
+              },
+            ]}
+            accessibilityRole="region"
+            accessibilityLabel={`Active recurring donation banner for ${project.name}`}
+          >
+            <View style={styles.recurringBannerContent}>
+              <Text
+                style={[styles.recurringBannerText, { color: colors.primaryText }]}
+                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || 'monthly'} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
+              >
+                You have an active {(activeDonation as any).frequency || 'monthly'} donation of{' '}
+                <Text style={styles.recurringBannerBold}>{activeDonation.amountXLM} XLM</Text> — next payment:{' '}
+                <Text style={styles.recurringBannerBold}>
+                  {formatNextPaymentDate(activeDonation.nextDueDate)}
+                </Text>
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="manage-recurring-button"
+              style={styles.manageButton}
+              onPress={() => router.push('/recurring')}
+              accessibilityRole="button"
+              accessibilityLabel="Manage recurring donations"
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Stats */}
         <View
