@@ -20,6 +20,7 @@
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { signUnsubscribeToken } = require("./unsubscribeToken");
 
 const QUEUE = "monthly-impact-digest";
 // Default: 1st of every month at 08:00 UTC
@@ -28,6 +29,7 @@ const DEFAULT_CRON = "0 8 1 * *";
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const FROM_ADDRESS   = process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>";
 const APP_URL        = process.env.APP_URL || "http://localhost:3000";
+const API_URL        = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
 
 let boss = null;
 
@@ -41,7 +43,7 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-function buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel }) {
+function buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }) {
   const milestonesHtml = milestones.length
     ? `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1a3a1a;">🏆 New Milestones</p><ul style="margin:0 0 24px;padding-left:20px;">${milestones.map(m => `<li style="color:#3a5a3a;font-size:14px;line-height:1.7;">${escHtml(m.title)} (${m.percentage}%)</li>`).join("")}</ul>`
     : "";
@@ -86,6 +88,7 @@ function buildDigestHtml({ project, stats, milestones, updates, projectUrl, mont
         </td></tr>
         <tr><td style="padding:16px 32px;border-top:1px solid #e8f0e8;">
           <p style="margin:0;font-size:12px;color:#8aaa8a;">You're receiving this monthly digest because you subscribed to <strong>${escHtml(project.name)}</strong>.</p>
+          <p style="margin:8px 0 0;font-size:12px;color:#8aaa8a;"><a href="${escHtml(unsubscribeUrl)}" style="color:#5a7a5a;">Unsubscribe</a> from these digests.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -94,7 +97,7 @@ function buildDigestHtml({ project, stats, milestones, updates, projectUrl, mont
 </html>`;
 }
 
-function buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel }) {
+function buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }) {
   const lines = [
     `Stellar GreenPay — Monthly Impact Digest (${monthLabel})`,
     `Project: ${project.name}`,
@@ -119,6 +122,7 @@ function buildDigestText({ project, stats, milestones, updates, projectUrl, mont
   lines.push(`View the project: ${projectUrl}`);
   lines.push("");
   lines.push(`You're receiving this because you subscribed to ${project.name}.`);
+  lines.push(`Unsubscribe: ${unsubscribeUrl}`);
   return lines.join("\n");
 }
 
@@ -133,8 +137,6 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
 
   const projectUrl = `${APP_URL}/projects/${project.id}`;
   const subject    = `Your ${monthLabel} Impact Digest — ${project.name}`;
-  const html       = buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel });
-  const text       = buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel });
 
   for (const email of emails) {
     try {
@@ -297,4 +299,9 @@ async function start() {
   logger.info({ event: "digest_scheduled", cron: cronSchedule }, `[digestQueue] Monthly digest scheduled: ${cronSchedule}`);
 }
 
-module.exports = { start, runDigest };
+module.exports = {
+  start,
+  runDigest,
+  buildDigestHtml,
+  buildDigestText,
+};
