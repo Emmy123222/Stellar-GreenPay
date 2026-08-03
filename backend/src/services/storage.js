@@ -42,15 +42,13 @@ const UPLOAD_DIR = path.join(__dirname, "..", "..", "uploads");
 
 // Lazy-require AWS SDK so projects that don't use S3 don't need it.
 function getAwsS3() {
-  // The AWS SDK v3 ships modular packages, so use the bundled v2 client
-  // (which is small and works without a build step) when present.
   try {
     // eslint-disable-next-line global-require
-    return require("aws-sdk");
+    return require("@aws-sdk/client-s3");
   } catch (err) {
     logger.warn(
       { event: "storage_s3_sdk_missing", err: err.message },
-      "STORAGE_BACKEND=s3 but aws-sdk is not installed — falling back to local"
+      "STORAGE_BACKEND=s3 but @aws-sdk/client-s3 is not installed — falling back to local"
     );
     return null;
   }
@@ -65,9 +63,15 @@ function ensureUploadDir() {
 function buildKey(originalName) {
   const sanitized = String(originalName || "upload")
     .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(0, 80);
+    .replace(/^\.+/, "")
+    .replace(/\.{2,}/g, "_")
+    .slice(0, 80) || "upload";
   const id = crypto.randomBytes(12).toString("hex");
-  return `${id}-${sanitized}`;
+  const key = `${id}-${sanitized}`;
+  if (key.startsWith(".") || key.includes("/") || key.includes("\\")) {
+    throw new Error("Invalid upload key generated from filename");
+  }
+  return key;
 }
 
 async function uploadLocal(buffer, originalName, contentType) {
@@ -86,8 +90,8 @@ async function uploadLocal(buffer, originalName, contentType) {
 }
 
 async function uploadS3(buffer, originalName, contentType) {
-  const AWS = getAwsS3();
-  if (!AWS) return uploadLocal(buffer, originalName, contentType);
+  const S3Module = getAwsS3();
+  if (!S3Module) return uploadLocal(buffer, originalName, contentType);
 
   const required = ["AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET"];
   const missing = required.filter((k) => !process.env[k]);
@@ -99,21 +103,24 @@ async function uploadS3(buffer, originalName, contentType) {
     return uploadLocal(buffer, originalName, contentType);
   }
 
-  const s3 = new AWS.S3({
+  const { S3Client, PutObjectCommand } = S3Module;
+  const s3 = new S3Client({
     region: process.env.AWS_REGION,
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    credentials: {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    },
   });
   const key = buildKey(originalName);
-  await s3
-    .putObject({
+  await s3.send(
+    new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
       Key: key,
       Body: buffer,
       ContentType: contentType || "application/octet-stream",
       ACL: "public-read",
     })
-    .promise();
+  );
   const publicUrl = process.env.S3_PUBLIC_URL
     ? `${process.env.S3_PUBLIC_URL.replace(/\/$/, "")}/${key}`
     : `https://${process.env.S3_BUCKET}.s3.${process.env.AWS_REGION}.amazonaws.com/${key}`;
@@ -211,4 +218,4 @@ function backendName() {
   return STORAGE_BACKEND;
 }
 
-module.exports = { uploadFile, backendName, UPLOAD_DIR };
+module.exports = { uploadFile, backendName, UPLOAD_DIR, buildKey };
