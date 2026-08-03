@@ -48,4 +48,15 @@ router.get("/project/:id/timeline", async (req, res, next) => {
   }
 });
 
+/**
+ * Invalidate the cached impact summary for a project, e.g. after a new
+ * donation is recorded for it.
+ *
+ * @param {string} projectId - The project whose cached impact data is stale.
+ * @returns {Promise<void>}
+ */
+async function invalidateProjectImpactCache(projectId) {
+  await redis.deletePattern(projectImpactCacheKey(projectId));
+}
+
 module.exports = router;
