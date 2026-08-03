@@ -1,6 +1,9 @@
 /**
  * backend/src/services/webhook.js
  * Webhook delivery service for project milestone notifications.
+ *
+ * Deliveries are persisted in `webhook_deliveries` and processed via pg-boss
+ * with exponential backoff: retry at 1m, 5m, 30m, 2h. Marked failed after 5 attempts.
  */
 "use strict";
 
@@ -11,6 +14,14 @@ const http = require("http");
 const net = require("net");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { assertPublicHttpUrl } = require("../utils/ssrf");
+
+const QUEUE = "webhook-delivery";
+const MAX_ATTEMPTS = 5;
+/** Delay (seconds) before the next attempt after failures 1–4. */
+const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200]; // 1m, 5m, 30m, 2h
+
+let boss = null;
 
 // ---------------------------------------------------------------------------
 // Private & reserved IPv4 CIDR ranges (SSRF blacklist)
@@ -326,10 +337,13 @@ async function validateUrl(url, dnsTimeout) {
 
 /**
  * POST a signed JSON payload to a webhook URL.
+ * Resolves with the HTTP status code on success (2xx).
+ * Rejects on network error, timeout, or non-2xx response.
  *
- * @param {string} url    - The webhook URL to deliver to.
- * @param {string} secret - HMAC-SHA256 secret for signing.
- * @param {object} payload - The JSON body to send.
+ * @param {string} url
+ * @param {string} secret
+ * @param {object} payload
+ * @returns {Promise<number>}
  */
 async function deliverPayload(url, secret, payload) {
   // Validate the URL before making any outbound request.
@@ -399,7 +413,7 @@ async function deliverPayload(url, secret, payload) {
 
 /**
  * Check project milestones after a donation and deliver webhooks for any
- * newly reached milestones. Runs asynchronously (fire-and-forget).
+ * newly reached milestones. Runs asynchronously (fire-and-forget enqueue).
  *
  * @param {string} projectId - Project UUID.
  */
@@ -490,6 +504,7 @@ async function checkAndDeliverMilestones(projectId) {
 }
 
 module.exports = {
+  start,
   checkAndDeliverMilestones,
   // Exported for unit testing
   validateUrl,
@@ -500,3 +515,8 @@ module.exports = {
   stripBrackets,
   PRIVATE_IPV4_RANGES,
 };
+
+// Export internal functions for testing
+if (process.env.NODE_ENV === "test") {
+  module.exports.deliverPayload = deliverPayload;
+}
