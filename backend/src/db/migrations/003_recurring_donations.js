@@ -32,8 +32,8 @@ module.exports = {
   },
 
   async down(client) {
-    await client.query(`DROP INDEX IF EXISTS idx_recurring_donations_donor`);
-    await client.query(`DROP INDEX IF EXISTS idx_recurring_donations_next_due`);
-    await client.query(`DROP TABLE IF EXISTS recurring_donations`);
+    await client.query("DROP INDEX IF EXISTS idx_recurring_donations_donor");
+    await client.query("DROP INDEX IF EXISTS idx_recurring_donations_next_due");
+    await client.query("DROP TABLE IF EXISTS recurring_donations");
   },
 };

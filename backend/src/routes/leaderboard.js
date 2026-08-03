@@ -22,9 +22,9 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     const params = [limit];
 
     if (period === "month") {
-      conditions.push(`d.created_at >= NOW() - INTERVAL '30 days'`);
+      conditions.push("d.created_at >= NOW() - INTERVAL '30 days'");
     } else if (period === "year") {
-      conditions.push(`d.created_at >= NOW() - INTERVAL '1 year'`);
+      conditions.push("d.created_at >= NOW() - INTERVAL '1 year'");
     }
 
     if (onlyVerified) {

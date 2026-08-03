@@ -504,7 +504,6 @@ async function checkAndDeliverMilestones(projectId) {
 }
 
 module.exports = {
-  start,
   checkAndDeliverMilestones,
   // Exported for unit testing
   validateUrl,

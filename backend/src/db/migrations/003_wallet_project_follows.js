@@ -31,15 +31,15 @@ module.exports = {
 
   async down(client) {
     await client.query(
-      `DROP INDEX IF EXISTS project_follows_wallet_lookup_idx`,
+      "DROP INDEX IF EXISTS project_follows_wallet_lookup_idx",
     );
     await client.query(
-      `DROP INDEX IF EXISTS project_follows_project_wallet_uidx`,
+      "DROP INDEX IF EXISTS project_follows_project_wallet_uidx",
     );
 
     // Remove wallet-only rows before restoring NOT NULL on device_token_id.
     await client.query(
-      `DELETE FROM project_follows WHERE device_token_id IS NULL`,
+      "DELETE FROM project_follows WHERE device_token_id IS NULL",
     );
     await client.query(`
       ALTER TABLE project_follows

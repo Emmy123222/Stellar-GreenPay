@@ -14,6 +14,7 @@ import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
 import WalletAddressQRCode from "@/components/WalletAddressQRCode";
+import ProjectProgressBar from "@/components/ProjectProgressBar";
 import {
   fetchProject,
   fetchProjectUpdates,

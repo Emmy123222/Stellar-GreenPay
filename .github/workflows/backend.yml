@@ -18,6 +18,9 @@ jobs:
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:

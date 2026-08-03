@@ -7,7 +7,6 @@ const router  = express.Router();
 const EventEmitter = require("events");
 const { v4: uuid } = require("uuid");
 const { z } = require("zod");
-const { EventEmitter } = require("events");
 const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
@@ -17,8 +16,8 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
-const donationEvents = new EventEmitter();
 
 function resolveDonorCountry(ip) {
   if (!ip || typeof ip !== "string") return null;
@@ -241,28 +240,28 @@ async function recordDonation(req, res, next) {
       const totalXLM = profileResult.rows[0]
         ? parseFloat(profileResult.rows[0].total_donated_xlm || "0")
         : parsedAmount;
-      const badges = computeBadges(totalXLM);
-      donorBadge = badges.length > 0 ? badges[0].tier.charAt(0).toUpperCase() + badges[0].tier.slice(1) : "";
+      if (totalXLM >= 10000) donorBadge = "EarthGuardian";
+      else if (totalXLM >= 1000) donorBadge = "Forest";
+      else if (totalXLM >= 100) donorBadge = "Tree";
+      else if (totalXLM >= 10) donorBadge = "Seedling";
     } catch {
       // Badge computation is best-effort; don't fail the request
     }
 
-    const ssePayload = {
-      projectName,
-      amountXLM: String(parsedAmount),
-      donorBadge,
-    };
+    const projectName = (projectResult.rows[0] && projectResult.rows[0].name) || "GreenPay Project";
 
     if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
+        projectName,
         donorAddress,
         amountXLM: donationRow.amount_xlm ?? parsedAmount,
         transactionHash,
         timestamp: new Date().toISOString(),
-        activeCampaignProgressPercent,
-        campaignGoalXLM,
-        campaignRaisedXLM,
+        activeCampaignProgressPercent: null,
+        campaignGoalXLM: null,
+        campaignRaisedXLM: null,
+        donorBadge,
       });
     }
     const donationPayload = {

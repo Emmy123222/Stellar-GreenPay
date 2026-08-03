@@ -33,13 +33,13 @@ const createSchema = z.object({
   donorAddress:   z.string().regex(SKEY_RE,  "Invalid Stellar public key"),
   projectId:      z.string().regex(UUID_RE,  "Invalid project UUID"),
   amountXlm:      z.union([z.string(), z.number()])
-                    .transform((v) => parseFloat(String(v)))
-                    .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number"),
+    .transform((v) => parseFloat(String(v)))
+    .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number"),
   currency:       z.string().min(1).max(10).optional().default("XLM"),
   durationMonths: z.number().int().min(1).max(120),
   startDate:      z.string()
-                    .regex(DATE_RE, "startDate must be YYYY-MM-DD")
-                    .optional(),
+    .regex(DATE_RE, "startDate must be YYYY-MM-DD")
+    .optional(),
 });
 
 // ── POST /api/recurring-donations ─────────────────────────────────────────────
@@ -239,14 +239,14 @@ function mapPledgeRow(row) {
     amountXlm:       parseFloat(row.amount_xlm),
     currency:        row.currency,
     nextDueDate:     row.next_due_date instanceof Date
-                       ? row.next_due_date.toISOString().slice(0, 10)
-                       : String(row.next_due_date).slice(0, 10),
+      ? row.next_due_date.toISOString().slice(0, 10)
+      : String(row.next_due_date).slice(0, 10),
     durationMonths:  row.duration_months,
     remainingMonths: row.remaining_months,
     status:          row.status,
     createdAt:       row.created_at instanceof Date
-                       ? row.created_at.toISOString()
-                       : row.created_at,
+      ? row.created_at.toISOString()
+      : row.created_at,
   };
 }
 

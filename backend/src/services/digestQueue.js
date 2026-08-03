@@ -146,7 +146,7 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
           Authorization: `Bearer ${RESEND_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ from: FROM_ADDRESS, to: FROM_ADDRESS, bcc: batch, subject, html, text }),
+        body: JSON.stringify({ from: FROM_ADDRESS, to: email, subject, html: buildDigestHtml({ project, stats, milestones, updates, email }), text: buildDigestText({ project, stats, milestones, updates, email }) }),
       });
       if (!res.ok) {
         const body = await res.text();

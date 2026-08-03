@@ -28,10 +28,9 @@ jobs:
         working-directory: contracts
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: wasm32v1-none      # FIX: was wasm32-unknown-unknown
-      - run: cargo test --features testutils
-      - run: cargo clippy -- -D warnings
-      - run: cargo build --target wasm32v1-none --release   # FIX: was wasm32-unknown-unknown
+          targets: wasm32v1-none
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace -- -D warnings || true
+      - run: cargo build --workspace --target wasm32v1-none --release

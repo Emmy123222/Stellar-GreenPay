@@ -113,9 +113,9 @@ async function sendRecurringDonationReminder({ token, donation }) {
 
     const frequencyLabel =
       donation.frequency === "monthly" ? "monthly" :
-      donation.frequency === "weekly" ? "weekly" :
-      donation.frequency === "yearly" ? "yearly" :
-      donation.frequency;
+        donation.frequency === "weekly" ? "weekly" :
+          donation.frequency === "yearly" ? "yearly" :
+            donation.frequency;
 
     const message = {
       to: token,

@@ -13,6 +13,14 @@ jest.mock("../services/profileQueue", () => ({
   enqueueProfileUpdate: jest.fn(),
 }));
 
+jest.mock("../services/redis", () => ({
+  get: jest.fn(),
+  set: jest.fn(),
+  del: jest.fn(),
+}));
+
+const redis = require("../services/redis");
+
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));

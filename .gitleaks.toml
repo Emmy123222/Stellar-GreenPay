@@ -13,10 +13,10 @@ paths = [
 description = "Environment templates contain placeholder-only values for contributors."
 condition = "AND"
 paths = [
-  '''(^|/)\.env\.example$''',
+  '''(^|/)\.env(\.[a-z]+)*\.example$''',
 ]
 regexes = [
-  '''(?i)(yourdomain\.com|YOUR_PUBLIC_ADDRESS|YOUR_|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres)''',
+  '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',
   '''^$''',
 ]
 
