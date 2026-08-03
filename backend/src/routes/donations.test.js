@@ -12,7 +12,12 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("geoip-lite", () => ({
+  lookup: jest.fn(),
+}));
+
 const { server } = require("../services/stellar");
+const geoip = require("geoip-lite");
 const pool = require("../db/pool");
 const { computeBadges } = require("../services/store");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
@@ -64,8 +69,8 @@ function createMockResponse() {
   };
 }
 
-async function invokeRecordDonation(body) {
-  const req = { body };
+async function invokeRecordDonation(body, overrides = {}) {
+  const req = { body, ...overrides };
   const res = createMockResponse();
   const next = jest.fn((err) => {
     if (err) {
@@ -170,12 +175,17 @@ describe("POST /api/donations", () => {
       queryResult(),                           // COMMIT
     );
 
-    const { res, next } = await invokeRecordDonation({
-      projectId: "project-1",
-      donorAddress,
-      amountXLM: "10",
-      transactionHash,
-    });
+    geoip.lookup.mockReturnValue({ country: "US" });
+
+    const { res, next } = await invokeRecordDonation(
+      {
+        projectId: "project-1",
+        donorAddress,
+        amountXLM: "10",
+        transactionHash,
+      },
+      { ip: "8.8.8.8" },
+    );
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
@@ -191,6 +201,7 @@ describe("POST /api/donations", () => {
         transactionHash,
       }),
     );
+    expect(client.query.mock.calls[3][1][8]).toBe("US");
     expect(client.release).toHaveBeenCalledTimes(1);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });

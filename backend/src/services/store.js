@@ -199,6 +199,10 @@ function mapDonationRow(row) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
   }
 
+  if (row.donor_country) {
+    data.donorCountry = row.donor_country;
+  }
+
   return data;
 }
 
