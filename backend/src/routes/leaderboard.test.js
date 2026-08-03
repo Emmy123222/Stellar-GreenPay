@@ -58,7 +58,15 @@ function createApp() {
 
 function resetQueries() {
   queries.length = 0;
-  pool.query.mockClear();
+  // mockClear() only wipes call history — it does NOT restore an
+  // implementation overridden by mockResolvedValue()/mockResolvedValueOnce()
+  // in a previous test. Re-installing the recording implementation here
+  // guarantees every test starts from the same clean state regardless of
+  // what a prior test did to the mock.
+  pool.query.mockReset().mockImplementation((sql) => {
+    queries.push({ sql });
+    return { rows: [] };
+  });
 }
 
 // Rows are already in DESC order by total_donated_xlm, simulating what the
