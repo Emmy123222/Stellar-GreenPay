@@ -9,8 +9,7 @@ const { v4: uuid } = require("uuid");
 const QRCode = require("qrcode");
 const pool = require("../db/pool");
 const { logAdminAction } = require("../services/audit");
-const { adminKeyRequired } = require("../middleware/auth");
-const { mapProjectRow, mapProjectMilestoneRow } = require("../services/store");
+const { mapProjectRow, mapProjectMilestoneRow, updateWebhook } = require("../services/store");
 const {
   getOnChainProject,
   CONTRACT_ID,
@@ -21,6 +20,8 @@ const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
 const { adminRequired } = require("../middleware/auth");
+const { z } = require("zod");
+const { sanitizedStringField } = require("../middleware/validation");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -44,16 +45,6 @@ const VALID_CATEGORIES = [
   "Other",
 ];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
-
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
 
 /**
  * GET /api/projects/featured
@@ -200,17 +191,8 @@ router.get("/", async (req, res, next) => {
       where.push("verified = true");
     }
     if (search && typeof search === "string") {
-      values.push(`%${search}%`);
-      where.push(`(
-        name ILIKE $${values.length}
-        OR description ILIKE $${values.length}
-        OR location ILIKE $${values.length}
-        OR EXISTS (
-          SELECT 1
-          FROM unnest(tags) AS tag
-          WHERE tag ILIKE $${values.length}
-        )
-      )`);
+      values.push(search.trim());
+      where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
     }
 
     if (cursor) {
@@ -235,11 +217,10 @@ router.get("/", async (req, res, next) => {
     values.push(pageSize + 1);
     const limitIdx = values.length;
 
-    let query = "SELECT * FROM projects ";
-    if (where.length) {
-      query += "WHERE " + where.join(" AND ") + " ";
-    }
-    query += `ORDER BY created_at DESC, id DESC LIMIT $${limitIdx}`;
+    // Build the SQL query: WHERE values are whitelisted enum strings;
+    // all user values use parameterized $N placeholders below.
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")} ` : "";
+    const query = `SELECT * FROM projects ${whereClause}ORDER BY created_at DESC, id DESC LIMIT $${limitIdx}`;
 
     // All user-controlled values (status, category, search, cursor fields) are
     // passed as parameterised $N placeholders in `values`. Dynamic WHERE clauses
@@ -341,8 +322,8 @@ router.post("/", async (req, res, next) => {
 
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($8, ' '), '')))
        RETURNING *`,
       [
         id,
@@ -784,22 +765,74 @@ router.post("/admin/confirm", adminRequired, async (req, res) => {
  * @returns {Promise<void>} Sends the full project details payload.
  * @throws {Error} If the project lookup or related data fetch fails.
  */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { imageUrl, adminAddress } = req.body || {};
+    if (!imageUrl || typeof imageUrl !== "string") {
+      return res.status(400).json({ error: "imageUrl is required" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id, wallet_address FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (adminAddress && typeof adminAddress === "string" && projectResult.rows[0].wallet_address !== adminAddress) {
+      return res.status(403).json({ error: "Only the project owner can update the project image" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET image_url = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [imageUrl, req.params.id],
+    );
+
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.get("/:id", async (req, res, next) => {
   try {
     const projectResult = await pool.query(
-      "SELECT * FROM projects WHERE id = $1",
+      `SELECT p.*, COUNT(pf.id)::int AS follow_count
+       FROM projects p
+       LEFT JOIN project_follows pf ON pf.project_id = p.id
+       WHERE p.id = $1
+       GROUP BY p.id`,
       [req.params.id],
     );
     if (!projectResult.rows[0])
       return res.status(404).json({ error: "Project not found" });
 
+    const { walletAddress } = req.query;
+    const hasWalletQuery =
+      typeof walletAddress === "string" && walletAddress.trim().length > 0;
+    const normalizedWallet = hasWalletQuery ? walletAddress.trim() : null;
+
     const updatedAt = projectResult.rows[0].updated_at;
     const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
     const lastModified = new Date(updatedAt).toUTCString();
-    res.set("ETag", etag);
-    res.set("Last-Modified", lastModified);
-    if (req.headers["if-none-match"] === etag) {
-      return res.status(304).end();
+    // Personalized ?walletAddress= responses must not be cached via ETag —
+    // isFollowing can change without projects.updated_at changing, and Express
+    // would otherwise auto-304 on res.json() when If-None-Match matches.
+    if (hasWalletQuery) {
+      res.set("Cache-Control", "private, no-store");
+    } else {
+      res.set("ETag", etag);
+      res.set("Last-Modified", lastModified);
+      if (req.headers["if-none-match"] === etag) {
+        return res.status(304).end();
+      }
     }
 
     const campaigns = await fetchCampaignsForProject(req.params.id);
@@ -823,23 +856,33 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
-    // Fetch follower count and, when ?walletAddress=G... is provided, whether
-    // that wallet is currently following this project.
-    const followCountResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
-      [req.params.id],
+    // Follower count + optional isFollowing from wallet-only project_follows rows.
+    // When ?walletAddress=G... is passed, include whether that wallet follows.
+    // Device-token (push) rows are excluded so web Follow state stays consistent
+    // with POST/DELETE /follow.
+    const followStatsResult = await pool.query(
+      `SELECT
+         (
+           SELECT COUNT(*)::int
+           FROM project_follows pf
+           WHERE pf.project_id = $1
+             AND pf.device_token_id IS NULL
+             AND pf.wallet_address IS NOT NULL
+         ) AS follow_count,
+         EXISTS (
+           SELECT 1
+           FROM project_follows pf
+           WHERE pf.project_id = $1
+             AND pf.device_token_id IS NULL
+             AND pf.wallet_address = $2
+         ) AS is_following`,
+      [req.params.id, normalizedWallet],
     );
-    const followCount = parseInt(followCountResult.rows[0].count, 10) || 0;
-
-    let isFollowing = false;
-    const { walletAddress } = req.query;
-    if (walletAddress && typeof walletAddress === "string") {
-      const followResult = await pool.query(
-        "SELECT 1 FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
-        [req.params.id, walletAddress],
-      );
-      isFollowing = followResult.rowCount > 0;
-    }
+    const followCount =
+      parseInt(followStatsResult.rows[0]?.follow_count, 10) || 0;
+    const isFollowing = hasWalletQuery
+      ? Boolean(followStatsResult.rows[0]?.is_following)
+      : false;
 
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
@@ -886,14 +929,19 @@ router.get("/:id", async (req, res, next) => {
 
 /**
  * POST /api/projects/:id/follow
+ * POST /api/projects/:id/follows  (alias used by mobile)
  * Follow a project. Body: { walletAddress: "G..." }
  * Idempotent — re-following a project that is already followed is a no-op.
  */
-router.post("/:id/follow", async (req, res, next) => {
+async function followProjectHandler(req, res, next) {
   try {
     const { walletAddress } = req.body || {};
     if (!walletAddress || typeof walletAddress !== "string") {
       return res.status(400).json({ error: "walletAddress is required" });
+    }
+    const normalizedWallet = walletAddress.trim();
+    if (!STELLAR_PUBLIC_KEY_RE.test(normalizedWallet)) {
+      return res.status(400).json({ error: "walletAddress must be a valid Stellar address" });
     }
 
     const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
@@ -901,16 +949,22 @@ router.post("/:id/follow", async (req, res, next) => {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    // INSERT … ON CONFLICT DO NOTHING makes this idempotent.
+    // Wallet-only follow row (device_token_id NULL). Partial unique index makes this idempotent.
     await pool.query(
-      `INSERT INTO project_follows (project_id, wallet_address, created_at)
-       VALUES ($1, $2, NOW())
-       ON CONFLICT (project_id, wallet_address) DO NOTHING`,
-      [req.params.id, walletAddress],
+      `INSERT INTO project_follows (id, project_id, device_token_id, wallet_address, created_at)
+       VALUES ($1, $2, NULL, $3, NOW())
+       ON CONFLICT (project_id, wallet_address)
+         WHERE device_token_id IS NULL AND wallet_address IS NOT NULL
+       DO NOTHING`,
+      [uuid(), req.params.id, normalizedWallet],
     );
 
     const countResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      `SELECT COUNT(*)::int AS count
+       FROM project_follows
+       WHERE project_id = $1
+         AND device_token_id IS NULL
+         AND wallet_address IS NOT NULL`,
       [req.params.id],
     );
 
@@ -924,32 +978,46 @@ router.post("/:id/follow", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
-});
+}
+
+router.post("/:id/follow", followProjectHandler);
+router.post("/:id/follows", followProjectHandler);
 
 /**
  * DELETE /api/projects/:id/follow
+ * DELETE /api/projects/:id/follows  (alias used by mobile)
  * Unfollow a project. Body: { walletAddress: "G..." }
  * Idempotent — unfollowing a project not currently followed is a no-op.
  */
-router.delete("/:id/follow", async (req, res, next) => {
+async function unfollowProjectHandler(req, res, next) {
   try {
     const { walletAddress } = req.body || {};
     if (!walletAddress || typeof walletAddress !== "string") {
       return res.status(400).json({ error: "walletAddress is required" });
     }
+    const normalizedWallet = walletAddress.trim();
 
     const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
 
+    // Remove wallet-only follow rows. Device-token push follows are managed via
+    // /api/notifications/unfollow and are left intact.
     await pool.query(
-      "DELETE FROM project_follows WHERE project_id = $1 AND wallet_address = $2",
-      [req.params.id, walletAddress],
+      `DELETE FROM project_follows
+       WHERE project_id = $1
+         AND wallet_address = $2
+         AND device_token_id IS NULL`,
+      [req.params.id, normalizedWallet],
     );
 
     const countResult = await pool.query(
-      "SELECT COUNT(*) AS count FROM project_follows WHERE project_id = $1",
+      `SELECT COUNT(*)::int AS count
+       FROM project_follows
+       WHERE project_id = $1
+         AND device_token_id IS NULL
+         AND wallet_address IS NOT NULL`,
       [req.params.id],
     );
 
@@ -963,7 +1031,10 @@ router.delete("/:id/follow", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
-});
+}
+
+router.delete("/:id/follow", unfollowProjectHandler);
+router.delete("/:id/follows", unfollowProjectHandler);
 
 /**
  * POST /api/projects/:id/generate-summary
@@ -1159,6 +1230,59 @@ router.get("/:id/matching", async (req, res, next) => {
 });
 
 /**
+ * PATCH /api/projects/:id
+ * Update mutable project fields. Currently supports `webhook_url`, which is
+ * validated to prevent SSRF: it must be HTTPS, must not resolve to a
+ * private/loopback/link-local address, and must be a reasonable length.
+ */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { webhook_url: webhookUrl } = req.body || {};
+
+    if (webhookUrl === undefined) {
+      return res.status(400).json({ error: "No updatable fields provided" });
+    }
+
+    if (webhookUrl !== null) {
+      if (typeof webhookUrl !== "string" || !webhookUrl.startsWith("https://")) {
+        return res.status(400).json({ error: "webhook_url must be a valid https:// URL" });
+      }
+
+      if (webhookUrl.length > WEBHOOK_URL_MAX_LENGTH) {
+        return res
+          .status(400)
+          .json({ error: `webhook_url must be at most ${WEBHOOK_URL_MAX_LENGTH} characters` });
+      }
+
+      const safe = await isUrlSafeFromSsrf(webhookUrl);
+      if (!safe) {
+        return res
+          .status(400)
+          .json({ error: "webhook_url must not resolve to a private, loopback, or link-local address" });
+      }
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+       SET webhook_url = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [webhookUrl, req.params.id],
+    );
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * PATCH /api/projects/:id/status
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
@@ -1220,6 +1344,79 @@ router.patch("/:id/status", async (req, res, next) => {
 });
 
 /**
+ * POST /api/projects/:id/webhook
+ *
+ * Register or update the webhook URL for milestone notifications.
+ * Body: { webhookUrl: string, adminAddress: string }
+ *
+ * Only the project owner (wallet_address === adminAddress) can set the webhook.
+ * webhookUrl is validated against SSRF (must be a public http/https address —
+ * no localhost, private ranges, or cloud metadata addresses).
+ * Returns the generated webhook secret once so the owner can verify signatures.
+ */
+router.post("/:id/webhook", async (req, res, next) => {
+  try {
+    const { webhookUrl, adminAddress } = req.body || {};
+
+    if (!adminAddress || typeof adminAddress !== "string") {
+      return res.status(400).json({ error: "adminAddress is required" });
+    }
+
+    if (!webhookUrl || typeof webhookUrl !== "string") {
+      return res.status(400).json({ error: "webhookUrl is required" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id, wallet_address, webhook_secret FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    const project = projectResult.rows[0];
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.wallet_address !== adminAddress) {
+      return res.status(403).json({ error: "Only the project owner can set a webhook" });
+    }
+
+    try {
+      await assertPublicHttpUrl(webhookUrl);
+    } catch (err) {
+      if (err instanceof SsrfValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+      throw err;
+    }
+
+    // Generate a new secret on each update
+    const webhookSecret = crypto.randomBytes(32).toString("hex");
+
+    await pool.query(
+      `UPDATE projects
+       SET webhook_url = $1, webhook_secret = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [webhookUrl, webhookSecret, req.params.id],
+    );
+
+    logAdminAction({
+      actor: adminAddress,
+      action: "project.webhook.update",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { webhookUrl },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        webhookUrl,
+        webhookSecret,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/projects/:id/badge-holders
  * Returns the community of badge-holding donors for each project.
  */
@@ -1256,6 +1453,109 @@ router.get("/:id/badge-holders", async (req, res, next) => {
     }));
 
     res.json({ success: true, data: badgeHolders });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PATCH /api/projects/:id/webhook
+ * Update the webhook URL and secret for a project. Auto-generates a secret
+ * when one is not provided. Returns the updated webhook config.
+ */
+router.patch("/:id/webhook", async (req, res, next) => {
+  try {
+    const { webhookUrl, webhookSecret } = req.body || {};
+
+    if (webhookUrl !== null && webhookUrl !== undefined && webhookUrl !== "") {
+      try {
+        new URL(webhookUrl);
+      } catch {
+        return res.status(400).json({ error: "Invalid webhook URL" });
+      }
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const url = webhookUrl || null;
+    let secret = webhookSecret || null;
+    if (url && !secret) {
+      secret = crypto.randomBytes(32).toString("hex");
+    }
+
+    const updated = await updateWebhook(req.params.id, url, secret);
+    res.json({ success: true, data: updated });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/projects/:id/webhook/test
+ * Sends a test event to the project's configured webhook URL.
+ * Returns the HTTP status code from the remote endpoint.
+ */
+router.post("/:id/webhook/test", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query(
+      "SELECT id, webhook_url, webhook_secret FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    const project = projectResult.rows[0];
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+    if (!project.webhook_url || !project.webhook_secret) {
+      return res.status(400).json({ error: "No webhook configured for this project" });
+    }
+
+    const payload = {
+      event: "webhook.test",
+      projectId: req.params.id,
+      message: "This is a test webhook delivery from GreenPay.",
+      timestamp: new Date().toISOString(),
+    };
+
+    const body = JSON.stringify(payload);
+    const urlObj = new URL(project.webhook_url);
+    const lib = urlObj.protocol === "https:" ? require("https") : require("http");
+
+    const statusCode = await new Promise((resolve, reject) => {
+      const options = {
+        hostname: urlObj.hostname,
+        port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
+        path: urlObj.pathname + urlObj.search,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(body),
+          "User-Agent": "GreenPay-Webhook/1.0",
+        },
+        timeout: 10000,
+      };
+
+      const req = lib.request(options, (response) => {
+        response.on("data", () => {});
+        response.on("end", () => resolve(response.statusCode));
+      });
+
+      req.on("error", (err) => reject(err));
+      req.on("timeout", () => {
+        req.destroy();
+        reject(new Error("Request timed out"));
+      });
+
+      req.write(body);
+      req.end();
+    });
+
+    res.json({ success: true, statusCode });
   } catch (e) {
     next(e);
   }

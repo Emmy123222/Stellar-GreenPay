@@ -3,15 +3,19 @@
  */
 "use strict";
 const express = require("express");
-const router  = express.Router();
+const router = express.Router();
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 
-router.get("/", async (req, res, next) => {
+// 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
+const leaderboardLimiter = createRateLimiter(30, 1);
+
+router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const cursor = parseInt(req.query.cursor, 10) || 0;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
-
     const onlyVerified = req.query.onlyVerified === "true";
 
     const conditions = [];
@@ -91,7 +95,16 @@ router.get("/", async (req, res, next) => {
       impactScore: p.impact_score?.toString() || "0",
       totalCO2OffsetKg: p.total_co2_offset_kg?.toString() || "0",
     }));
-    res.json({ success: true, data: entries });
+
+    const hasMore = entries.length === limit;
+    const nextCursor = hasMore ? entries[entries.length - 1].rank : null;
+
+    res.json({
+      success: true,
+      data: entries,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+    });
   } catch (e) {
     next(e);
   }
@@ -103,7 +116,7 @@ router.get("/", async (req, res, next) => {
  * Query params:
  *   - months (int, max 24, default 12): how many past months to return
  */
-router.get("/history", async (req, res, next) => {
+router.get("/history", leaderboardLimiter, async (req, res, next) => {
   try {
     const months = Math.min(parseInt(req.query.months, 10) || 12, 24);
     const result = await pool.query(
