@@ -13,6 +13,7 @@ const http = require("http");
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
+const { assertPublicHttpUrl } = require("../utils/ssrf");
 
 const QUEUE = "webhook-delivery";
 const MAX_ATTEMPTS = 5;
@@ -366,3 +367,8 @@ module.exports = {
   RETRY_DELAYS_SECONDS,
   QUEUE,
 };
+
+// Export internal functions for testing
+if (process.env.NODE_ENV === "test") {
+  module.exports.deliverPayload = deliverPayload;
+}
