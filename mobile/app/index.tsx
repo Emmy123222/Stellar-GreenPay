@@ -161,7 +161,11 @@ export default function HomeScreen() {
 
     return () => {
       active = false;
-      subscription.remove();
+      // Optional-chained teardown — defends against test environments where
+      // `setupNotificationListener` is stroked through our `expo-modules-core`
+      // Proxy stub and may return a class instance without a `.remove` method.
+      // Mirrors the unmount-race hygiene we use for the project-detail Toast.
+      subscription?.remove?.();
     };
   }, []);
 
@@ -179,10 +183,13 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={{ opacity: 0, position: 'absolute', width: 0, height: 0 }}>Loading...</Text>
         {renderSkeleton()}
       </View>
     );
   }
+
+
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

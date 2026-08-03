@@ -88,4 +88,31 @@ function adminRequired(req, res, next) {
   }
 }
 
-module.exports = { signToken, verifyToken, adminRequired, adminKeyRequired, isValidAdminKey };
+const pool = require("../db/pool");
+
+async function validateAdminAddress(req, res, next) {
+  const projectId = req.params.id;
+  const adminAddress = req.headers["x-admin-address"];
+
+  if (!adminAddress) {
+    return res.status(401).json({ error: "Missing X-Admin-Address header" });
+  }
+
+  try {
+    const result = await pool.query("SELECT wallet_address FROM projects WHERE id = $1", [projectId]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const projectOwnerAddress = result.rows[0].wallet_address;
+    if (adminAddress !== projectOwnerAddress) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+module.exports = { signToken, verifyToken, adminRequired, adminKeyRequired, isValidAdminKey, validateAdminAddress };

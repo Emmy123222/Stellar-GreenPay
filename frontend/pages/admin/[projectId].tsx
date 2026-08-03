@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
-import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch } from "@/lib/api";
+import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
@@ -63,6 +63,13 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [widgetCurrency, setWidgetCurrency] = useState<"XLM" | "USDC">("XLM");
   const [copied, setCopied] = useState(false);
 
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookState, setWebhookState] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [webhookMessage, setWebhookMessage] = useState<string | null>(null);
+  const [testState, setTestState] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [testMessage, setTestMessage] = useState<string | null>(null);
+
   const widgetEmbedCode = useMemo(() => {
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
     const params = new URLSearchParams({
@@ -96,6 +103,48 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     }
   };
 
+  const saveWebhook = async () => {
+    if (!project) return;
+    setWebhookState("saving");
+    setWebhookMessage(null);
+    try {
+      const updated = await updateProjectWebhook(project.id, {
+        webhookUrl: webhookUrl.trim() || null,
+        webhookSecret: webhookSecret.trim() || null,
+      });
+      setWebhookUrl(updated.webhookUrl || "");
+      setWebhookSecret(updated.webhookSecret || "");
+      setProject({ ...project, webhookUrl: updated.webhookUrl, webhookSecret: updated.webhookSecret });
+      setWebhookMessage("Webhook configuration saved.");
+      setWebhookState("success");
+      setTimeout(() => setWebhookState("idle"), 3000);
+    } catch (e: any) {
+      setWebhookMessage(e.message || "Failed to save webhook configuration");
+      setWebhookState("error");
+    }
+  };
+
+  const generateSecret = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    setWebhookSecret(Array.from(array, (b) => b.toString(16).padStart(2, "0")).join(""));
+  };
+
+  const sendTestWebhook = async () => {
+    if (!project) return;
+    setTestState("testing");
+    setTestMessage(null);
+    try {
+      const result = await testProjectWebhook(project.id);
+      setTestMessage(`Test event sent. Status: ${result.statusCode}`);
+      setTestState("success");
+      setTimeout(() => setTestState("idle"), 4000);
+    } catch (e: any) {
+      setTestMessage(e.message || "Failed to send test event");
+      setTestState("error");
+    }
+  };
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
     setLoading(true);
@@ -112,6 +161,8 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         setDonations(d);
         setMilestones(m.data || []);
         setMatches(mt);
+        setWebhookUrl(p.webhookUrl || "");
+        setWebhookSecret(p.webhookSecret || "");
       })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
       .finally(() => setLoading(false));
@@ -791,6 +842,76 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
               {copied ? "✓ Copied!" : "Copy Embed Code"}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Webhooks */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Webhooks</h2>
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+          Configure a webhook URL to receive signed POST notifications when milestones are reached.
+        </p>
+
+        {webhookMessage && (
+          <div className={`p-3 rounded-xl text-sm font-body mb-4 ${webhookState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+            {webhookMessage}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+              Webhook URL
+            </label>
+            <input
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              className="input-field"
+              placeholder="https://example.com/webhook"
+              type="url"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+              Signing Secret
+            </label>
+            <div className="flex gap-2">
+              <input
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                className="input-field flex-1 font-mono text-xs"
+                placeholder="Auto-generated if left empty"
+                type="text"
+              />
+              <button
+                onClick={generateSecret}
+                className="px-4 py-2 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all whitespace-nowrap"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={saveWebhook}
+              disabled={webhookState === "saving"}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              {webhookState === "saving" ? "Saving…" : "Save Webhook"}
+            </button>
+            <button
+              onClick={sendTestWebhook}
+              disabled={testState === "testing" || !webhookUrl.trim()}
+              className="flex-1 bg-forest-100 hover:bg-forest-200 text-forest-900 font-semibold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {testState === "testing" ? "Sending…" : "Send Test Event"}
+            </button>
+          </div>
+          {testMessage && (
+            <div className={`p-3 rounded-xl text-sm font-body ${testState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+              {testMessage}
+            </div>
+          )}
         </div>
       </div>
     </div>
