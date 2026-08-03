@@ -110,17 +110,10 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                   className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
                   aria-label="CO2 offset estimate methodology info"
                 >
-                  <button
-                    type="button"
-                    className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
-                    aria-label="CO2 offset estimate methodology info"
-                  >
-                    ℹ️
-                  </button>
-                  <span className="tooltip-text" role="tooltip">
-                    Estimated CO₂ offset based on this project&apos;s declared impact
-                    rate per XLM donated. Actual results may vary.
-                  </span>
+                  ?
+                </button>
+                <span className="tooltip-text" role="tooltip">
+                  Estimated based on {project.co2PerXLM || project.co2PerXlm || 0} g CO₂ offset per XLM donated to this project
                 </span>
               </span>
             </div>
