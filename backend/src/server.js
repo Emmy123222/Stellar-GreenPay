@@ -94,40 +94,7 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-// ── Health / readiness (unversioned + versioned) ────────────────────
-const healthRouter = require("./routes/health");
-const readinessRouter = require("./routes/readiness");
-app.use("/health", healthRouter);
-app.use("/api/health", healthRouter);
-app.use("/api/v1/health", healthRouter);
-app.use("/ready", readinessRouter);
-app.use("/api/ready", readinessRouter);
-app.use("/api/v1/ready", readinessRouter);
-
-// ── API routes (legacy /api + versioned /api/v1) ────────────────────
-function mountApi(resourcePath, router) {
-  app.use(`/api${resourcePath}`, router);
-  app.use(`/api/v1${resourcePath}`, router);
-}
-
-mountApi("/projects", require("./routes/projects"));
-mountApi("/donations", require("./routes/donations"));
-mountApi("/profiles", require("./routes/profiles"));
-mountApi("/leaderboard", require("./routes/leaderboard"));
-mountApi("/updates", require("./routes/updates"));
-mountApi("/subscriptions", require("./routes/subscriptions"));
-mountApi("/jobs", require("./routes/jobs"));
-mountApi("/stats", require("./routes/stats"));
-mountApi("/impact", require("./routes/impact"));
-mountApi("/ratings", require("./routes/ratings"));
-mountApi("/admin", require("./routes/admin"));
-mountApi("/notifications", require("./routes/notifications"));
-mountApi("/uploads", require("./routes/uploads"));
-mountApi("/verification-requests", require("./routes/verification"));
-mountApi("/recurring-donations", require("./routes/recurringDonations"));
-
-app.use("/api/webhooks", require("./routes/webhooks"));
-
+app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
