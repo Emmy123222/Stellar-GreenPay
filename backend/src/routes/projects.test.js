@@ -265,6 +265,32 @@ describe("GET /api/projects/:id", () => {
   });
 });
 
+describe("PATCH /api/projects/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  test("updates the project image when the owner requests it", async () => {
+    const updatedImageUrl = "https://example.com/banner.png";
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1", wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" }] })
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_PROJECT_ROW, image_url: updatedImageUrl }] });
+
+    const res = await request(app)
+      .patch("/api/projects/proj-1")
+      .send({ imageUrl: updatedImageUrl, adminAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.imageUrl).toBe(updatedImageUrl);
+    expect(pool.query).toHaveBeenCalled();
+  });
+});
+
 describe("GET /api/projects/:id/badge-holders", () => {
   let app;
 

@@ -15,12 +15,11 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
-const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
+const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
-const requestLogger = require("./middleware/requestLogger");
-const { createRateLimiter } = require("./middleware/rateLimiter");
-const logger = require("./logger");
+const projectsRouter = require("./routes/projects");
+const uploadsRouter = require("./routes/uploads");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -74,6 +73,11 @@ app.use((req, res, next) => {
   return csrfProtection(req, res, next);
 });
 
+app.use("/api/projects", projectsRouter);
+app.use("/api/uploads", uploadsRouter);
+app.use("/api/v1/projects", projectsRouter);
+app.use("/api/v1/uploads", uploadsRouter);
+
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
 
@@ -94,40 +98,7 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-// ── Health / readiness (unversioned + versioned) ────────────────────
-const healthRouter = require("./routes/health");
-const readinessRouter = require("./routes/readiness");
-app.use("/health", healthRouter);
-app.use("/api/health", healthRouter);
-app.use("/api/v1/health", healthRouter);
-app.use("/ready", readinessRouter);
-app.use("/api/ready", readinessRouter);
-app.use("/api/v1/ready", readinessRouter);
-
-// ── API routes (legacy /api + versioned /api/v1) ────────────────────
-function mountApi(resourcePath, router) {
-  app.use(`/api${resourcePath}`, router);
-  app.use(`/api/v1${resourcePath}`, router);
-}
-
-mountApi("/projects", require("./routes/projects"));
-mountApi("/donations", require("./routes/donations"));
-mountApi("/profiles", require("./routes/profiles"));
-mountApi("/leaderboard", require("./routes/leaderboard"));
-mountApi("/updates", require("./routes/updates"));
-mountApi("/subscriptions", require("./routes/subscriptions"));
-mountApi("/jobs", require("./routes/jobs"));
-mountApi("/stats", require("./routes/stats"));
-mountApi("/impact", require("./routes/impact"));
-mountApi("/ratings", require("./routes/ratings"));
-mountApi("/admin", require("./routes/admin"));
-mountApi("/notifications", require("./routes/notifications"));
-mountApi("/uploads", require("./routes/uploads"));
-mountApi("/verification-requests", require("./routes/verification"));
-mountApi("/recurring-donations", require("./routes/recurringDonations"));
-
-app.use("/api/webhooks", require("./routes/webhooks"));
-
+app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
@@ -146,9 +117,15 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+  await startStatsRefreshQueue();
+
+  const { start: startWebhookQueue } = require("./services/webhook");
+  await startWebhookQueue();
+
+  const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
   await startRecurringDonationQueue();
 
-  startIndexer(io).catch((err) => logger.error({ event: "indexer_startup_error", err }, err.message));
+  startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
     logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);

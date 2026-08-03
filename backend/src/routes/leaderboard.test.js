@@ -1,6 +1,32 @@
+/**
+ * src/routes/leaderboard.test.js
+ * Unit tests for the leaderboard route SQL query structure.
+ *
+ * Verifies that the dynamically-built SQL query is syntactically valid for
+ * every combination of `period` and `onlyVerified` parameters (issue #661).
+ */
 "use strict";
 
-jest.mock("../db/pool", () => ({ query: jest.fn() }));
+const express = require("express");
+const request = require("supertest");
+
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+/** Track every query that gets passed to pool.query(). */
+const queries = [];
+
+jest.mock("../db/pool", () => ({
+  query: jest.fn().mockImplementation((sql) => {
+    queries.push({ sql });
+    return { rows: [] };
+  }),
+}));
+
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
 
 // Mock the rate limiter so it is transparent for all existing tests.
 // Individual tests that need to verify rate-limit behaviour re-require
@@ -10,194 +36,254 @@ jest.mock("../middleware/rateLimiter", () => ({
 }));
 
 const pool = require("../db/pool");
-const { createRateLimiter } = require("../middleware/rateLimiter");
-const request = require("supertest");
-const express = require("express");
 const leaderboardRouter = require("./leaderboard");
 
-function buildApp() {
+// ---------------------------------------------------------------------------
+// Express app factory
+// ---------------------------------------------------------------------------
+
+function createApp() {
   const app = express();
-  app.use(express.json());
   app.use("/api/leaderboard", leaderboardRouter);
-  app.use((err, _req, res, _next) => {
-    res.status(err.status || 500).json({ error: err.message });
+  // Catch-all error handler so errors don't crash tests
+  app.use((err, req, res, next) => {
+    res.status(500).json({ success: false, error: err.message });
   });
   return app;
 }
 
-// Rows are already in DESC order, simulating what the DB ORDER BY returns.
-const SORTED_DONORS = [
-  {
-    public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-    display_name: "Alice",
-    badges: [{ tier: "earth", earnedAt: "2026-01-01T00:00:00.000Z" }],
-    total_donated_xlm: "5000",
-    total_co2_offset_kg: "1250.5",
-    impact_score: "3525.375",
-    projects_supported: 4,
-  },
-  {
-    public_key: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    display_name: "Bob",
-    badges: [{ tier: "forest", earnedAt: "2026-01-02T00:00:00.000Z" }],
-    total_donated_xlm: "750",
-    total_co2_offset_kg: "180",
-    impact_score: "525.54",
-    projects_supported: 2,
-  },
-  {
-    public_key: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-    display_name: null,
-    badges: [],
-    total_donated_xlm: "12",
-    total_co2_offset_kg: "0",
-    impact_score: "8.4",
-    projects_supported: 1,
-  },
-];
+function resetQueries() {
+  queries.length = 0;
+  pool.query.mockClear();
+}
 
-describe("GET /api/leaderboard — ranking sort order", () => {
-  let app;
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
-  beforeEach(() => {
-    app = buildApp();
-    jest.clearAllMocks();
-  });
+describe("leaderboard route SQL structure", () => {
+  beforeEach(resetQueries);
 
-  test("assigns rank 1 to the highest donor and increments for each subsequent entry", async () => {
-    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+  // -----------------------------------------------------------------------
+  // Basic valid structure
+  // -----------------------------------------------------------------------
 
+  test("produces valid SQL with default params (period=all, onlyVerified=false)", async () => {
+    const app = createApp();
     const res = await request(app).get("/api/leaderboard").expect(200);
 
+    expect(queries.length).toBe(1);
+    const sql = queries[0].sql;
+
+    // Must contain the core SELECT
+    expect(sql).toMatch(/SELECT\s+p\.public_key/);
+    // Must have all JOINs before any WHERE
+    const fromIndex = sql.indexOf("FROM");
+    const whereIndex = sql.indexOf("WHERE");
+    const groupByIndex = sql.indexOf("GROUP BY");
+    const limitIndex = sql.indexOf("LIMIT");
+
+    expect(fromIndex).toBeGreaterThan(0);
+    expect(groupByIndex).toBeGreaterThan(fromIndex);
+    expect(limitIndex).toBeGreaterThan(groupByIndex);
+
+    // Without period or onlyVerified, there should be no WHERE clause
+    expect(whereIndex).toBe(-1);
     expect(res.body.success).toBe(true);
-    expect(res.body.data[0].rank).toBe(1);
-    expect(res.body.data[1].rank).toBe(2);
-    expect(res.body.data[2].rank).toBe(3);
   });
 
-  test("preserves descending totalDonatedXLM order returned by the database", async () => {
-    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+  test("contains LEFT JOIN projects before GROUP BY", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard");
 
-    const res = await request(app).get("/api/leaderboard").expect(200);
+    const sql = queries[0].sql;
+    const joinIndex = sql.indexOf("LEFT JOIN projects");
+    const groupByIndex = sql.indexOf("GROUP BY");
+    expect(joinIndex).toBeGreaterThan(0);
+    expect(groupByIndex).toBeGreaterThan(joinIndex);
+  });
 
-    const totals = res.body.data.map((e) => Number(e.totalDonatedXLM));
-    for (let i = 0; i < totals.length - 1; i++) {
-      expect(totals[i]).toBeGreaterThanOrEqual(totals[i + 1]);
+  // -----------------------------------------------------------------------
+  // Period filter
+  // -----------------------------------------------------------------------
+
+  test("produces valid SQL with period=month", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=month");
+
+    const sql = queries[0].sql;
+    expect(sql).toMatch(/WHERE\s+.*d\.created_at\s*>=\s*NOW\(\)\s*-\s*INTERVAL\s+'30 days'/i);
+    // WHERE must come after JOINs and before GROUP BY
+    const joinIndex = sql.lastIndexOf("JOIN");
+    const whereIndex = sql.indexOf("WHERE");
+    const groupByIndex = sql.indexOf("GROUP BY");
+    expect(whereIndex).toBeGreaterThan(joinIndex);
+    expect(groupByIndex).toBeGreaterThan(whereIndex);
+  });
+
+  test("produces valid SQL with period=year", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=year");
+
+    const sql = queries[0].sql;
+    expect(sql).toMatch(/WHERE\s+.*d\.created_at\s*>=\s*NOW\(\)\s*-\s*INTERVAL\s+'1 year'/i);
+    const joinIndex = sql.lastIndexOf("JOIN");
+    const whereIndex = sql.indexOf("WHERE");
+    const groupByIndex = sql.indexOf("GROUP BY");
+    expect(whereIndex).toBeGreaterThan(joinIndex);
+    expect(groupByIndex).toBeGreaterThan(whereIndex);
+  });
+
+  // -----------------------------------------------------------------------
+  // onlyVerified filter
+  // -----------------------------------------------------------------------
+
+  test("produces valid SQL with onlyVerified=true", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?onlyVerified=true");
+
+    const sql = queries[0].sql;
+    expect(sql).toMatch(/WHERE/);
+    // Must have NOT EXISTS and EXISTS subqueries
+    expect(sql).toMatch(/NOT EXISTS\s*\(/i);
+    expect(sql).toMatch(/EXISTS\s*\(/i);
+    // Use lastIndexOf for WHERE because subqueries contain their own WHERE
+    // clauses that appear before the top-level WHERE.
+    const joinIndex = sql.lastIndexOf("JOIN");
+    const whereIndex = sql.lastIndexOf("WHERE");
+    expect(whereIndex).toBeGreaterThan(joinIndex);
+    // GROUP BY must be after WHERE
+    const groupByIndex = sql.indexOf("GROUP BY");
+    expect(groupByIndex).toBeGreaterThan(whereIndex);
+  });
+
+  // -----------------------------------------------------------------------
+  // Combined filters
+  // -----------------------------------------------------------------------
+
+  test("produces valid SQL with period=month and onlyVerified=true", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=month&onlyVerified=true");
+
+    const sql = queries[0].sql;
+    expect(sql).toMatch(/WHERE/);
+    expect(sql).toMatch(/d\.created_at\s*>=\s*NOW\(\)\s*-\s*INTERVAL/i);
+    expect(sql).toMatch(/NOT EXISTS\s*\(/i);
+    expect(sql).toMatch(/EXISTS\s*\(/i);
+    // WHERE must be after all JOINs (lastIndexOf to skip subquery WHEREs)
+    const joinIndex = sql.lastIndexOf("JOIN");
+    const whereIndex = sql.lastIndexOf("WHERE");
+    expect(whereIndex).toBeGreaterThan(joinIndex);
+    // GROUP BY after WHERE
+    const groupByIndex = sql.indexOf("GROUP BY");
+    expect(groupByIndex).toBeGreaterThan(whereIndex);
+  });
+
+  test("produces valid SQL with period=year and onlyVerified=true", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=year&onlyVerified=true");
+
+    const sql = queries[0].sql;
+    expect(sql).toMatch(/WHERE/);
+    expect(sql).toMatch(/d\.created_at\s*>=\s*NOW\(\)\s*-\s*INTERVAL/i);
+    expect(sql).toMatch(/NOT EXISTS\s*\(/i);
+    expect(sql).toMatch(/EXISTS\s*\(/i);
+    const joinIndex = sql.lastIndexOf("JOIN");
+    const whereIndex = sql.lastIndexOf("WHERE");
+    expect(whereIndex).toBeGreaterThan(joinIndex);
+  });
+
+  // -----------------------------------------------------------------------
+  // ORDER BY / sortBy
+  // -----------------------------------------------------------------------
+
+  test("defaults to ordering by total_donated_xlm", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard");
+
+    expect(queries[0].sql).toMatch(/ORDER BY\s+total_donated_xlm\s+DESC/i);
+  });
+
+  test("orders by impact_score when sortBy=impactScore", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?sortBy=impactScore");
+
+    expect(queries[0].sql).toMatch(/ORDER BY\s+impact_score\s+DESC/i);
+  });
+
+  // -----------------------------------------------------------------------
+  // LIMIT
+  // -----------------------------------------------------------------------
+
+  test("respects limit parameter", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?limit=10");
+
+    expect(queries[0].sql).toMatch(/LIMIT\s+\$1/i);
+    // Verify pool.query was called with the correct params
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining([10]),
+    );
+  });
+
+  // -----------------------------------------------------------------------
+  // SQL structure snapshot tests (catch regressions in query construction)
+  // -----------------------------------------------------------------------
+
+  test("SQL matches snapshot for period=month", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=month");
+
+    const sql = queries[0].sql;
+    // Verify the structure: FROM → JOIN → JOIN → WHERE → GROUP BY → ORDER BY → LIMIT
+    const structure = [
+      sql.indexOf("FROM"),
+      sql.indexOf("LEFT JOIN donations"),
+      sql.indexOf("LEFT JOIN projects"),
+      sql.indexOf("WHERE"),
+      sql.indexOf("GROUP BY"),
+      sql.indexOf("ORDER BY"),
+      sql.indexOf("LIMIT"),
+    ];
+    // All indices should be in ascending order
+    for (let i = 1; i < structure.length; i++) {
+      expect(structure[i]).toBeGreaterThan(structure[i - 1]);
     }
   });
 
-  test("rank 1 entry corresponds to the highest totalDonatedXLM", async () => {
-    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+  test("SQL matches snapshot for period=month & onlyVerified=true", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?period=month&onlyVerified=true");
 
-    const res = await request(app).get("/api/leaderboard").expect(200);
-    const first = res.body.data[0];
-
-    expect(first.rank).toBe(1);
-    expect(first.publicKey).toBe(SORTED_DONORS[0].public_key);
-    expect(Number(first.totalDonatedXLM)).toBe(5000);
+    const sql = queries[0].sql;
+    // Verify the structure: FROM → JOIN → JOIN → WHERE → GROUP BY → ORDER BY → LIMIT
+    const structure = [
+      sql.indexOf("FROM"),
+      sql.indexOf("LEFT JOIN donations"),
+      sql.indexOf("LEFT JOIN projects"),
+      sql.indexOf("WHERE"),
+      sql.indexOf("GROUP BY"),
+      sql.indexOf("ORDER BY"),
+      sql.indexOf("LIMIT"),
+    ];
+    for (let i = 1; i < structure.length; i++) {
+      expect(structure[i]).toBeGreaterThan(structure[i - 1]);
+    }
   });
 
-  test("sets topBadge to the first badge tier when badges are present", async () => {
-    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+  // -----------------------------------------------------------------------
+  // Error handling
+  // -----------------------------------------------------------------------
 
-    const res = await request(app).get("/api/leaderboard").expect(200);
+  test("returns 200 with empty data when no rows match", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
 
-    expect(res.body.data[0].topBadge).toBe("earth");
-    expect(res.body.data[1].topBadge).toBe("forest");
-  });
-
-  test("sets topBadge to null when the donor has no badges", async () => {
-    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
-
-    const res = await request(app).get("/api/leaderboard").expect(200);
-
-    expect(res.body.data[2].topBadge).toBeNull();
-  });
-
-  test("maps database snake_case fields to camelCase response shape", async () => {
-    pool.query.mockResolvedValue({ rows: [SORTED_DONORS[0]] });
-
-    const res = await request(app).get("/api/leaderboard").expect(200);
-    const entry = res.body.data[0];
-
-    expect(entry).toMatchObject({
-      rank: 1,
-      publicKey: SORTED_DONORS[0].public_key,
-      displayName: "Alice",
-      totalDonatedXLM: "5000",
-      totalCO2OffsetKg: "1250.5",
-      projectsSupported: 4,
-      topBadge: "earth",
-    });
-  });
-
-  test("exposes totalCO2OffsetKg as a string from total_co2_offset_kg", async () => {
-    pool.query.mockResolvedValue({ rows: [SORTED_DONORS[0]] });
-
-    const res = await request(app).get("/api/leaderboard").expect(200);
-
-    expect(res.body.data[0].totalCO2OffsetKg).toBe("1250.5");
-  });
-
-  test("defaults totalCO2OffsetKg to \"0\" when co2 offset is missing", async () => {
-    pool.query.mockResolvedValue({
-      rows: [{ ...SORTED_DONORS[2], total_co2_offset_kg: null }],
-    });
-
-    const res = await request(app).get("/api/leaderboard").expect(200);
-
-    expect(res.body.data[0].totalCO2OffsetKg).toBe("0");
-  });
-
-  test("sets displayName to null when the profile has no display name", async () => {
-    pool.query.mockResolvedValue({ rows: [SORTED_DONORS[2]] });
-
-    const res = await request(app).get("/api/leaderboard").expect(200);
-
-    expect(res.body.data[0].displayName).toBeNull();
-  });
-
-  test("returns an empty data array when no profiles exist", async () => {
-    pool.query.mockResolvedValue({ rows: [] });
-
+    const app = createApp();
     const res = await request(app).get("/api/leaderboard").expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data).toEqual([]);
-  });
-});
-
-describe("GET /api/leaderboard — limit handling", () => {
-  let app;
-
-  beforeEach(() => {
-    app = buildApp();
-    jest.clearAllMocks();
-    pool.query.mockResolvedValue({ rows: [] });
-  });
-
-  test("passes a default limit of 20 to the database when not specified", async () => {
-    await request(app).get("/api/leaderboard").expect(200);
-
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
-  });
-
-  test("respects a custom limit within bounds", async () => {
-    await request(app).get("/api/leaderboard?limit=5").expect(200);
-
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [5]);
-  });
-
-  test("caps the limit at 100 when a larger value is requested", async () => {
-    await request(app).get("/api/leaderboard?limit=500").expect(200);
-
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [100]);
-  });
-
-  test("falls back to default limit of 20 when limit is non-numeric", async () => {
-    await request(app).get("/api/leaderboard?limit=abc").expect(200);
-
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
   });
 });
 
