@@ -15,7 +15,7 @@ const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
-const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
+const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
@@ -113,7 +113,7 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
-  await startRecurringDonationQueue();
+  await startStatsRefreshQueue();
 
   const { start: startWebhookQueue } = require("./services/webhook");
   await startWebhookQueue();

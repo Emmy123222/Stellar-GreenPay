@@ -292,19 +292,14 @@ CREATE INDEX IF NOT EXISTS verification_requests_status_idx
 CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
   ON verification_requests (wallet_address);
 
--- monthly_leaderboard: monthly snapshots of the top donors, written by
--- POST /api/leaderboard/snapshot and read by GET /api/leaderboard/history.
--- UNIQUE(month, donor_address) backs the snapshot's upsert (ON CONFLICT).
-CREATE TABLE IF NOT EXISTS monthly_leaderboard (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  month DATE NOT NULL,
-  donor_address TEXT NOT NULL,
-  display_name TEXT,
-  total_xlm_that_month NUMERIC(20, 7) NOT NULL DEFAULT 0,
-  badge TEXT,
-  rank INTEGER NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(month, donor_address)
-);
-CREATE INDEX IF NOT EXISTS monthly_leaderboard_month_rank_idx
-  ON monthly_leaderboard (month DESC, rank ASC);
+-- global_stats_mv: pre-aggregated landing-page totals refreshed by pg-boss.
+CREATE MATERIALIZED VIEW IF NOT EXISTS global_stats_mv AS
+SELECT
+  1 AS id,
+  COALESCE(SUM(raised_xlm), 0) AS total_xlm_raised,
+  COALESCE(SUM(co2_offset_kg), 0)::int AS total_co2_offset_kg,
+  COUNT(*)::int AS total_projects,
+  COALESCE(SUM(donor_count), 0)::int AS total_donors,
+  (SELECT COUNT(*)::int FROM donations) AS total_donations
+FROM projects;
+CREATE UNIQUE INDEX IF NOT EXISTS global_stats_mv_id_uidx ON global_stats_mv (id);
