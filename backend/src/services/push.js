@@ -101,43 +101,50 @@ async function sendUpdatePushNotifications({ project, update }) {
 }
 
 /**
- * Send a recurring-donation reminder push notification to a donor.
- * Looks up the donor's registered device tokens and sends the reminder.
- *
- * @param {string} donorAddress - Stellar wallet address of the donor
- * @param {string} projectName  - Name of the project
- * @param {number} amountXlm    - Donation amount in XLM
- * @param {string} projectId    - Project UUID (for deep-link data)
+ * Send a push notification reminder for an upcoming recurring donation
+ * @param {Object} params - { token, donation }
  */
-async function sendRecurringReminder(donorAddress, projectName, amountXlm, projectId) {
+async function sendRecurringDonationReminder({ token, donation }) {
   try {
-    const result = await pool.query(
-      "SELECT token FROM device_tokens WHERE wallet_address = $1",
-      [donorAddress],
-    );
-
-    if (result.rows.length === 0) {
-      console.log(`[Push] No device tokens for donor ${donorAddress.slice(0, 8)}...`);
+    if (!Expo.isExpoPushToken(token)) {
+      console.error(`[Push] Invalid push token: ${token}`);
       return;
     }
 
-    const title = "Recurring Donation Reminder";
-    const body = "Your " + amountXlm + " XLM donation to " + projectName + " is due tomorrow. Tap to donate.";
-    const data = {
-      projectId,
-      type: "recurring_reminder",
+    const frequencyLabel =
+      donation.frequency === "monthly" ? "monthly" :
+        donation.frequency === "weekly" ? "weekly" :
+          donation.frequency === "yearly" ? "yearly" :
+            donation.frequency;
+
+    const message = {
+      to: token,
+      sound: "default",
+      title: "💚 Recurring Donation Due Tomorrow",
+      body: `Your ${frequencyLabel} donation of ${donation.amount_xlm} XLM to ${donation.project_name} is due tomorrow. Tap to donate.`,
+      data: {
+        projectId: donation.project_id,
+        recurringDonationId: donation.id,
+        type: "recurring_donation_reminder",
+      },
     };
 
-    for (const row of result.rows) {
-      await sendPushToToken(row.token, title, body, data);
+    const chunks = expo.chunkPushNotifications([message]);
+    for (const chunk of chunks) {
+      try {
+        const tickets = await expo.sendPushNotificationsAsync(chunk);
+        console.log(`[Push] Sent recurring donation reminder for ${donation.id}`);
+      } catch (error) {
+        console.error("[Push] Error sending recurring donation reminder chunk:", error);
+      }
     }
   } catch (error) {
-    console.error("[Push] Error sending recurring reminder:", error);
+    console.error("[Push] Error sending recurring donation reminder:", error);
   }
 }
 
 module.exports = {
   sendPushToToken,
   sendUpdatePushNotifications,
-  sendRecurringReminder,
+  sendRecurringDonationReminder,
 };

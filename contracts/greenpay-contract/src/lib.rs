@@ -1481,28 +1481,28 @@ mod tests {
         token_client.mint(&donor, &i128::MAX);
 
         // No donations yet — empty result.
-        let history = client.get_donor_history(&env, &donor, &0, &10);
+        let history = client.get_donor_history(&donor, &0, &10);
         assert_eq!(history.len(), 0);
 
         // Donate XLM three times.
         for i in 1..=3 {
-            client.donate(&env, &token, &donor, &pid, &(i * 100 * STROOP), &0);
+            client.donate(&token, &donor, &pid, &(i * 100 * STROOP), &0);
         }
 
-        let history = client.get_donor_history(&env, &donor, &0, &10);
+        let history = client.get_donor_history(&donor, &0, &10);
         assert_eq!(history.len(), 3);
         assert_eq!(history.get(0).unwrap().amount, 100 * STROOP);
         assert_eq!(history.get(1).unwrap().amount, 200 * STROOP);
         assert_eq!(history.get(2).unwrap().amount, 300 * STROOP);
 
         // Pagination: offset=1, limit=2 → gets second and third donation.
-        let page = client.get_donor_history(&env, &donor, &1, &2);
+        let page = client.get_donor_history(&donor, &1, &2);
         assert_eq!(page.len(), 2);
         assert_eq!(page.get(0).unwrap().amount, 200 * STROOP);
         assert_eq!(page.get(1).unwrap().amount, 300 * STROOP);
 
         // Pagination: offset=5 → empty.
-        let empty = client.get_donor_history(&env, &donor, &5, &10);
+        let empty = client.get_donor_history(&donor, &5, &10);
         assert_eq!(empty.len(), 0);
     }
 

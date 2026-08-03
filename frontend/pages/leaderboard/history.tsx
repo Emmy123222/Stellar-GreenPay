@@ -145,7 +145,7 @@ export default function LeaderboardHistoryPage() {
                     />
                     <YAxis tick={{ fontSize: 12 }} label={{ value: "XLM", angle: -90, position: "insideLeft" }} />
                     <Tooltip 
-                      formatter={(value: number) => [`${value.toFixed(2)} XLM`, "Donated"]}
+                      formatter={(value: any) => [`${Number(value || 0).toFixed(2)} XLM`, "Donated"]}
                       contentStyle={{ backgroundColor: "#f0fdf4", border: "1px solid #227239", borderRadius: "8px" }}
                     />
                     <Line 
