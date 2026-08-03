@@ -399,6 +399,7 @@ export async function upsertProfile(
  * @returns Leaderboard entries.
  * @throws If the request fails.
  */
+export async function fetchLeaderboard(limit = 20, period: "all" | "week" | "month" | "year" = "all") {
 export async function fetchLeaderboard(
   limit = 20,
   period: "all" | "month" | "year" = "all",

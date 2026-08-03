@@ -194,9 +194,59 @@ describe("GET /api/leaderboard — limit handling", () => {
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [100]);
   });
 
-  test("falls back to default limit of 20 when limit is non-numeric", async () => {
-    await request(app).get("/api/leaderboard?limit=abc").expect(200);
+   test("falls back to default limit of 20 when limit is non-numeric", async () => {
+     await request(app).get("/api/leaderboard?limit=abc").expect(200);
 
+     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+   });
+ });
+
+ describe("GET /api/leaderboard — period parameter", () => {
+   let app;
+
+   beforeEach(() => {
+     app = buildApp();
+     jest.clearAllMocks();
+     pool.query.mockResolvedValue({ rows: [] });
+   });
+
+   test("defaults to period=all when no period is specified", async () => {
+     await request(app).get("/api/leaderboard").expect(200);
+
+     const query = pool.query.mock.calls[0][0];
+     expect(query).not.toContain("INTERVAL '7 days'");
+     expect(query).not.toContain("INTERVAL '30 days'");
+     expect(query).not.toContain("INTERVAL '1 year'");
+   });
+
+   test("applies 7-day filter when period=week", async () => {
+     await request(app).get("/api/leaderboard?period=week").expect(200);
+
+     const query = pool.query.mock.calls[0][0];
+     expect(query).toContain("INTERVAL '7 days'");
+   });
+
+   test("applies 30-day filter when period=month", async () => {
+     await request(app).get("/api/leaderboard?period=month").expect(200);
+
+     const query = pool.query.mock.calls[0][0];
+     expect(query).toContain("INTERVAL '30 days'");
+   });
+
+   test("applies 1-year filter when period=year", async () => {
+     await request(app).get("/api/leaderboard?period=year").expect(200);
+
+     const query = pool.query.mock.calls[0][0];
+     expect(query).toContain("INTERVAL '1 year'");
+   });
+
+   test("applies no date filter when period=all", async () => {
+     await request(app).get("/api/leaderboard?period=all").expect(200);
+
+     const query = pool.query.mock.calls[0][0];
+     expect(query).not.toContain("INTERVAL");
+   });
+ });
     expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
   });
 });
