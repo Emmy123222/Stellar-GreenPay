@@ -1,4 +1,4 @@
-/**
+﻿/**
  * src/routes/stats.js
  * GET /api/stats/global — landing-page aggregate platform totals.
  */
@@ -30,27 +30,14 @@ router.get("/global", async (req, res, next) => {
     }
 
     const result = await pool.query(`
-      WITH project_totals AS (
-        SELECT
-          COALESCE(SUM(raised_xlm), 0)      AS total_xlm_raised,
-          COALESCE(SUM(co2_offset_kg), 0)::int AS total_co2_offset_kg,
-          COUNT(*)::int                    AS total_projects,
-          COALESCE(SUM(donor_count), 0)::int AS total_donors
-        FROM projects
-      ),
-      donation_totals AS (
-        SELECT
-          COUNT(*)::int AS total_donations
-        FROM donations
-      )
       SELECT
-        p.total_xlm_raised     AS "totalXLMRaised",
-        p.total_co2_offset_kg  AS "totalCO2OffsetKg",
-        d.total_donations      AS "totalDonations",
-        p.total_projects       AS "totalProjects",
-        p.total_donors         AS "totalDonors"
-      FROM project_totals p
-      CROSS JOIN donation_totals d
+        total_xlm_raised     AS "totalXLMRaised",
+        total_co2_offset_kg  AS "totalCO2OffsetKg",
+        total_donations      AS "totalDonations",
+        total_projects       AS "totalProjects",
+        total_donors         AS "totalDonors"
+      FROM global_stats_mv
+      LIMIT 1
     `);
 
     const stats = mapGlobalStatsRow(result.rows[0]);
@@ -68,7 +55,9 @@ router.get("/categories", async (req, res, next) => {
     const result = await pool.query(`
       SELECT
         category,
-        COUNT(*)::int AS count
+        COUNT(*)::int AS count,
+        COALESCE(SUM(raised_xlm), 0) AS total_xlm,
+        COALESCE(SUM(donor_count), 0)::int AS total_donations
       FROM projects
       WHERE status = 'active'
       GROUP BY category

@@ -14,7 +14,18 @@ import CircularProgress from "@/components/CircularProgress";
 import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
 import WalletAddressQRCode from "@/components/WalletAddressQRCode";
-import { fetchProject, fetchProjectUpdates, subscribeToProject, fetchSubscriberCount, createProjectCampaign, fetchProjectMatches, generateProjectSummary, toggleUpdateLike } from "@/lib/api";
+import {
+  fetchProject,
+  fetchProjectUpdates,
+  subscribeToProject,
+  fetchSubscriberCount,
+  createProjectCampaign,
+  fetchProjectMatches,
+  generateProjectSummary,
+  toggleUpdateLike,
+  followProject,
+  unfollowProject,
+} from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
@@ -31,6 +42,7 @@ interface ProjectDetailProps {
   publicKey: string | null;
   onConnect: (pk: string) => void;
   ogProject?: {
+    id?: string;
     name: string;
     description: string;
     imageUrl?: string;
@@ -111,7 +123,7 @@ export default function ProjectDetail({
       })
       .catch(() => router.push("/projects"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, publicKey, router]);
 
   useEffect(() => {
     if (!project) return;
@@ -128,6 +140,46 @@ export default function ProjectDetail({
       .then(setSubscriberCount)
       .catch(() => null);
   }, [id]);
+
+  // Subscribe to badge_earned WebSocket events for this project
+  useEffect(() => {
+    if (!project) return;
+    let socket: any = null;
+    let mounted = true;
+
+    (async () => {
+      try {
+        const { io } = await import("socket.io-client");
+        const base = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+        socket = io(base, { path: "/socket.io", transports: ["websocket"] });
+
+        socket.on("badge_earned", (payload: { donorAddress: string; badge: string; projectId: string }) => {
+          if (!mounted) return;
+          if (payload.projectId !== project.id) return;
+          setToasts((prev) => [
+            ...prev,
+            {
+              id: `badge-${Date.now()}-${payload.donorAddress}`,
+              title: "New badge earned!",
+              description: `${shortenAddress(payload.donorAddress)} earned a ${payload.badge} badge`,
+              createdAt: Date.now(),
+            },
+          ]);
+        });
+      } catch (e) {
+        // ignore client-side load failures
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      try {
+        if (socket && typeof socket.disconnect === "function") socket.disconnect();
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, [project?.id]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
@@ -711,7 +763,9 @@ export default function ProjectDetail({
   const ogDescription = ogProject
     ? `${ogProject.description.slice(0, 160).trimEnd()}… Support this ${ogProject.category} project on Stellar GreenPay.`
     : "Donate XLM directly to verified climate projects on Stellar.";
-  const ogImage = ogProject?.imageUrl || `${appUrl}/og-default.png`;
+  const ogImage = ogProject?.id
+    ? `${appUrl}/api/og?id=${ogProject.id}`
+    : ogProject?.imageUrl || `${appUrl}/og-default.png`;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
@@ -1425,6 +1479,10 @@ export default function ProjectDetail({
                 ]);
               }}
             />
+            <ToastNotification
+              toasts={toasts}
+              onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
+            />
           </div>
 
           {/* Donor discussion (on-chain memos) */}
@@ -1714,6 +1772,7 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
     return {
       props: {
         ogProject: {
+          id: p.id ?? undefined,
           name: p.name ?? "",
           description: p.description ?? "",
           imageUrl: p.imageUrl ?? null,

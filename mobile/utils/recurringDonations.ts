@@ -4,8 +4,18 @@
  * Mirrors the structure used by the web app's monthlyGiving.ts (localStorage).
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 
 export const RECURRING_DONATIONS_KEY = 'greenpay_recurring_donations';
+
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+
+export class RecurringDonationValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecurringDonationValidationError';
+  }
+}
 
 export interface RecurringDonation {
   id: string;
@@ -41,6 +51,24 @@ export async function createRecurringDonation(input: {
   amountXLM: string;
   durationMonths: number | null;
 }): Promise<RecurringDonation> {
+  if (typeof input.projectId !== 'string' || input.projectId.trim().length === 0) {
+    throw new RecurringDonationValidationError('projectId must be a non-empty string');
+  }
+
+  const parsedAmount = Number(input.amountXLM);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    throw new RecurringDonationValidationError('amountXLM must be a valid positive number');
+  }
+
+  try {
+    await axios.get(`${API_URL}/api/projects/${input.projectId}`);
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 404) {
+      throw new RecurringDonationValidationError(`Project ${input.projectId} does not exist`);
+    }
+    throw new RecurringDonationValidationError('Unable to verify project before creating recurring donation');
+  }
+
   const now = new Date().toISOString();
   const donation: RecurringDonation = {
     id: `rec_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
@@ -59,10 +87,44 @@ export async function createRecurringDonation(input: {
   return donation;
 }
 
-export async function cancelRecurringDonation(id: string): Promise<void> {
-  const all = await loadRecurringDonations();
-  const updated = all.map((d) =>
-    d.id === id ? { ...d, status: 'cancelled' as const } : d,
-  );
-  await saveRecurringDonations(updated);
+export interface PaymentRecord {
+  id: string;
+  donationId: string;
+  amountXLM: string;
+  projectName: string;
+  date: string;
+  status: 'completed' | 'failed' | 'pending';
+}
+
+export async function loadPaymentHistory(): Promise<PaymentRecord[]> {
+  try {
+    const raw = await AsyncStorage.getItem('greenpay_payment_history');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function savePaymentHistory(records: PaymentRecord[]): Promise<void> {
+  await AsyncStorage.setItem('greenpay_payment_history', JSON.stringify(records));
+}
+
+export async function recordPayment(
+  donationId: string,
+  amountXLM: string,
+  projectName: string
+): Promise<PaymentRecord> {
+  const record: PaymentRecord = {
+    id: `pay_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
+    donationId,
+    amountXLM,
+    projectName,
+    date: new Date().toISOString(),
+    status: 'completed',
+  };
+  const all = await loadPaymentHistory();
+  await savePaymentHistory([record, ...all]);
+  return record;
 }
