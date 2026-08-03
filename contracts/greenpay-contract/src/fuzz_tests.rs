@@ -68,6 +68,28 @@ mod fuzz {
         token_client.mint(donor, &amount);
     }
 
+
+    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
+    const FUZZ_STROOP: i128 = 10_000_000;
+
+    /// Fixed donation-message hash used for USDC fuzz donations.
+    const MSG_HASH: u32 = 42;
+
+    /// Mint `amount` of a USDC-like stellar asset to `donor`.
+    fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
+        let token_client = StellarAssetClient::new(env, token);
+        token_client.mint(donor, amount);
+    }
+
+    /// Build an env with the GreenPay contract initialised, one project
+    /// registered, a USDC-like asset configured, and the mock price oracle set.
+    ///
+    /// When `co2_per_xlm` exceeds the registration-time MAX_CO2_PER_XLM bound
+    /// (e.g. `u32::MAX`), it is patched directly into storage so the overflow
+    /// guards inside `donate_usdc` can be exercised.
+    fn setup_usdc(co2_per_xlm: u32) -> (Env, GreenPayContractClient<'static>, SorobanString, Address) {
+        let env = Env::default();
+
     fn setup_usdc(
         co2_per_xlm: u32,
     ) -> (
@@ -77,10 +99,12 @@ mod fuzz {
         Address,
     ) {
         let env = test_env();
+
         env.mock_all_auths();
 
         let contract_id = env.register_contract(None, GreenPayContract);
         let client = GreenPayContractClient::new(&env, &contract_id);
+
         let admin = Address::generate(&env);
         client.initialize(&admin);
 
@@ -91,6 +115,22 @@ mod fuzz {
             &project_id,
             &SorobanString::from_str(&env, "USDC Fuzz Project"),
             &wallet,
+
+            &100u32,
+        );
+
+        if co2_per_xlm != 100u32 {
+            env.as_contract(&contract_id, || {
+                let mut project: Project = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::Project(project_id.clone()))
+                    .expect("project should exist");
+                project.co2_per_xlm = co2_per_xlm;
+                env.storage()
+                    .instance()
+                    .set(&DataKey::Project(project_id.clone()), &project);
+
             &co2_per_xlm.min(100_000),
         );
 
@@ -106,16 +146,24 @@ mod fuzz {
                     .expect("project should exist");
                 project.co2_per_xlm = co2_per_xlm;
                 env.storage().instance().set(&key, &project);
+
             });
         }
 
         let token_admin = Address::generate(&env);
+
+        let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
+        client.set_usdc_token(&admin, &usdc_token);
+
+        let oracle = env.register_contract(None, crate::MockOracle);
+
         let usdc_token = env
             .register_stellar_asset_contract_v2(token_admin)
             .address();
         client.set_usdc_token(&admin, &usdc_token);
 
         let oracle = env.register_contract(None, MockOracle);
+
         client.set_oracle(&admin, &oracle);
 
         (env, client, project_id, usdc_token)
