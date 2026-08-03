@@ -93,6 +93,16 @@ async function recordDonation(req, res, next) {
     await client.query("BEGIN");
     inTransaction = true;
 
+    // Calculate previous donated total so we can detect badge tier changes
+    const prevTotalResult = await client.query(
+      `SELECT COALESCE(SUM(amount_xlm), 0)::numeric AS total
+       FROM donations
+       WHERE donor_address = $1
+         AND amount_xlm IS NOT NULL`,
+      [donorAddress],
+    );
+    const prevTotalDonated = parseFloat(prevTotalResult.rows[0]?.total || "0");
+
     const donationResult = await client.query(
       `INSERT INTO donations (
         id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
@@ -248,7 +258,27 @@ async function recordDonation(req, res, next) {
       });
     }
 
-    donationEvents.emit("new_donation", ssePayload);
+    // Detect badge tier upgrades caused by this donation and emit badge_earned
+    try {
+      const prevBadges = computeBadges(prevTotalDonated);
+      const newTotal = prevTotalDonated + (currency === "XLM" ? parsedAmount : 0);
+      const newBadges = computeBadges(newTotal);
+      const prevTier = prevBadges[0]?.tier || null;
+      const newTier = newBadges[0]?.tier || null;
+      if (newTier && prevTier !== newTier && io && typeof io.emit === "function") {
+        io.emit("badge_earned", {
+          donorAddress,
+          badge: newTier,
+          projectId,
+        });
+      }
+    } catch (err) {
+      // Do not let badge emit failures break donation flow
+      logger.error({ event: "badge_emit_failed", err, donorAddress, projectId }, "Failed to emit badge_earned");
+    }
+
+    const mappedDonation = mapDonationRow(donationResult.rows[0]);
+    donationEvents.emit("new_donation", mappedDonation);
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
