@@ -5,13 +5,36 @@ const router = express.Router();
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 
-/**
- * GET /api/impact/project/:id/timeline
- * Time-series view of a project's impact
- */
-router.get("/project/:id/timeline", async (req, res, next) => {
+const CACHE_TTL_SECONDS = 5 * 60;
+const KG_CO2_PER_TREE = 21.77; // heuristic, used for treesEquivalent
+
+function validateKey(k) {
+  if (!k || !/^G[A-Z0-9]{55}$/.test(k)) {
+    const e = new Error("Invalid Stellar public key");
+    e.status = 400;
+    throw e;
+  }
+}
+
+function treesEquivalentFromKg(kg) {
+  if (!Number.isFinite(kg) || kg <= 0) return 0;
+  return Number((kg / KG_CO2_PER_TREE).toFixed(2));
+}
+
+function cacheKey(req) {
+  return req.originalUrl;
+}
+
+async function sendCached(req, res, payload) {
+  await redis.set(cacheKey(req), payload, CACHE_TTL_SECONDS);
+  res.set("Cache-Control", "public, max-age=300");
+  return res.json(payload);
+}
+
+// GET /api/impact/project/:id
+router.get("/project/:id", async (req, res, next) => {
   try {
-    const hit = cache.get(cacheKey(req));
+    const hit = await redis.get(cacheKey(req));
     if (hit) return res.json(hit);
 
     const projectResult = await pool.query(
@@ -44,7 +67,7 @@ router.get("/project/:id/timeline", async (req, res, next) => {
     const kgPerXlm = raisedXlm > 0 ? projectCo2OffsetKg / raisedXlm : 0;
     const co2OffsetKg = Math.round(totalDonationsXLM * kgPerXlm);
 
-    return sendCached(req, res, {
+    return await sendCached(req, res, {
       success: true,
       data: {
         totalDonationsXLM: totalDonationsXLM.toFixed(7),
@@ -62,7 +85,7 @@ router.get("/project/:id/timeline", async (req, res, next) => {
 // GET /api/impact/global
 router.get("/global", async (req, res, next) => {
   try {
-    const hit = cache.get(cacheKey(req));
+    const hit = await redis.get(cacheKey(req));
     if (hit) return res.json(hit);
 
     const totalsResult = await pool.query(
@@ -131,13 +154,7 @@ router.get("/global", async (req, res, next) => {
       co2OffsetKg: Math.round(Number.parseFloat(row.co2OffsetKg || "0")),
     }));
 
-    const countryBreakdown = countryBreakdownResult.rows.map((row) => ({
-      country: row.country,
-      totalDonationsXLM: Number.parseFloat(row.totalDonationsXLM || "0").toFixed(7),
-      donorCount: row.donorCount || 0,
-    }));
-
-    return sendCached(req, res, {
+    return await sendCached(req, res, {
       success: true,
       data: {
         totalDonationsXLM: totalDonationsXLM.toFixed(7),
@@ -154,15 +171,66 @@ router.get("/global", async (req, res, next) => {
   }
 });
 
-/**
- * Invalidate the cached impact summary for a project, e.g. after a new
- * donation is recorded for it.
- *
- * @param {string} projectId - The project whose cached impact data is stale.
- * @returns {Promise<void>}
- */
-async function invalidateProjectImpactCache(projectId) {
-  await redis.deletePattern(projectImpactCacheKey(projectId));
-}
+// GET /api/impact/donor/:publicKey
+router.get("/donor/:publicKey", async (req, res, next) => {
+  try {
+    validateKey(req.params.publicKey);
+
+    const hit = await redis.get(cacheKey(req));
+    if (hit) return res.json(hit);
+
+    const totalsResult = await pool.query(
+      `SELECT
+        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonatedXLM",
+        COUNT(DISTINCT d.project_id)::int AS "projectsSupported",
+        COALESCE(
+          SUM(
+            CASE
+              WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
+              ELSE 0
+            END
+          ),
+          0
+        ) AS "co2OffsetKg"
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+      [req.params.publicKey],
+    );
+
+    const topCategoryResult = await pool.query(
+      `SELECT
+        p.category AS category,
+        COALESCE(SUM(d.amount_xlm), 0) AS total
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)
+       GROUP BY p.category
+       ORDER BY total DESC
+       LIMIT 1`,
+      [req.params.publicKey],
+    );
+
+    const row = totalsResult.rows[0] || {};
+    const totalDonatedXLM = Number.parseFloat(row.totalDonatedXLM || "0");
+    const projectsSupported = row.projectsSupported || 0;
+    const co2OffsetKg = Math.round(Number.parseFloat(row.co2OffsetKg || "0"));
+    const topCategory = topCategoryResult.rows[0]?.category || null;
+
+    return await sendCached(req, res, {
+      success: true,
+      data: {
+        totalDonatedXLM: totalDonatedXLM.toFixed(7),
+        co2OffsetKg,
+        projectsSupported,
+        topCategory,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
 
 module.exports = router;
