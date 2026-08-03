@@ -191,6 +191,8 @@ pub enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    // Contract-wide emergency pause status
+    Paused,
     PendingAdmin,
 }
 
@@ -249,6 +251,43 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::GlobalCO2OffsetGrams, &0i128);
+    }
+
+    // ─── Emergency Pause (Circuit Breaker) ───────────────────────────────────
+
+    pub fn pause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can pause contract");
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish((symbol_short!("paused"), admin), ());
+    }
+
+    pub fn unpause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can unpause contract");
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish((symbol_short!("unpaused"), admin), ());
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     // ─── Project management ───────────────────────────────────────────────────
@@ -373,36 +412,7 @@ impl GreenPayContract {
             .set(&DataKey::Project(project_id), &project);
     }
 
-    pub fn update_project_co2_rate(env: Env, admin: Address, project_id: String, co2_per_xlm: u32) {
-        admin.require_auth();
 
-        let stored_admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .expect("Not initialized");
-
-        if stored_admin != admin {
-            panic!("Only admin can update project rate");
-        }
-
-        let mut project: Project = env
-            .storage()
-            .instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-
-        project.co2_per_xlm = co2_per_xlm;
-
-        env.storage()
-            .instance()
-            .set(&DataKey::Project(project_id.clone()), &project);
-
-        env.events().publish(
-            (symbol_short!("co2_rate"), admin),
-            (project_id, co2_per_xlm),
-        );
-    }
 
     pub fn pause_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
@@ -444,6 +454,9 @@ impl GreenPayContract {
         msg_hash: u32,
     ) {
         donor.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
         if amount <= 0 {
             panic!("Donation amount must be positive");
         }
@@ -951,6 +964,9 @@ impl GreenPayContract {
     /// Badge holders (≥ Seedling) cast a vote. One vote per address per proposal.
     pub fn vote_verify_project(env: Env, voter: Address, project_id: String, approve: bool) {
         voter.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
 
         let stats: DonorStats = env
             .storage()
@@ -1103,6 +1119,9 @@ impl GreenPayContract {
         msg_hash: u32,
     ) {
         donor.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
         if usdc_amount <= 0 {
             panic!("Donation amount must be positive");
         }
@@ -2246,6 +2265,74 @@ mod tests {
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
 
+    // ─── Emergency Pause Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_pause_unpause_is_paused() {
+        let (env, _cid, client, admin, _pid) = setup();
+        assert!(!client.is_paused());
+
+        client.pause(&admin);
+        assert!(client.is_paused());
+
+        client.unpause(&admin);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can pause contract")]
+    fn test_non_admin_cannot_pause() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        let non_admin = Address::generate(&env);
+        client.pause(&non_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can unpause contract")]
+    fn test_non_admin_cannot_unpause() {
+        let (env, _cid, client, admin, _pid) = setup();
+        client.pause(&admin);
+        let non_admin = Address::generate(&env);
+        client.unpause(&non_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_donate_fails_when_paused() {
+        let (env, _cid, client, admin, pid) = setup();
+        let donor = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        StellarAssetClient::new(&env, &token).mint(&donor, &(100 * STROOP));
+
+        client.pause(&admin);
+        client.donate(&token, &donor, &pid, &(10 * STROOP), &1u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_donate_usdc_fails_when_paused() {
+        let (env, _cid, client, admin, pid) = setup();
+        let usdc_token = Address::generate(&env);
+        client.set_usdc_token(&admin, &usdc_token);
+        let oracle = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle);
+
+        let donor = Address::generate(&env);
+        client.pause(&admin);
+        client.donate_usdc(&usdc_token, &donor, &pid, &1000, &1u32);
+    }
+
+    #[test]
+    #[should_panic(expected = "Contract is paused")]
+    fn test_vote_verify_project_fails_when_paused() {
+        let (env, cid, client, admin, pid) = setup();
+        client.create_proposal(&admin, &pid, &0u32);
+        let voter = Address::generate(&env);
+        grant_badge(&env, &cid, &voter);
+
+        client.pause(&admin);
+        client.vote_verify_project(&voter, &pid, &true);
     // ─── Impact NFT getter tests ──────────────────────────────────────────────
 
     #[test]
@@ -2285,4 +2372,5 @@ mod tests {
         assert_eq!(nft.minted_at_ledger, mint_ledger);
     }
 }
+
 
