@@ -18,6 +18,9 @@ const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
+const requestLogger = require("./middleware/requestLogger");
+const { createRateLimiter } = require("./middleware/rateLimiter");
+const logger = require("./logger");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
 

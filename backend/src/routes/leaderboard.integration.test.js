@@ -65,9 +65,9 @@ describe("Leaderboard period integration", () => {
   });
 
   afterAll(async () => {
-    try { if (pool) await pool.end(); } catch {}
-    try { if (testPool) await testPool.end(); } catch {}
-    try { if (container) await container.stop({ timeout: 5000 }); } catch {}
+    try { if (pool) await pool.end(); } catch { /* ignore */ }
+    try { if (testPool) await testPool.end(); } catch { /* ignore */ }
+    try { if (container) await container.stop({ timeout: 5000 }); } catch { /* ignore */ }
   });
 
   beforeEach(async () => {
@@ -81,7 +81,7 @@ describe("Leaderboard period integration", () => {
 
     const projectId = "11111111-1111-1111-1111-111111111111";
     await testPool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, raised_xlm) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      "INSERT INTO projects (id, name, description, category, location, wallet_address, raised_xlm) VALUES ($1, $2, $3, $4, $5, $6, $7)",
       [projectId, "Test Project", "Desc", "Cat", "Loc", makePublicKey("P"), "0"]
     );
 
@@ -89,7 +89,7 @@ describe("Leaderboard period integration", () => {
     const donorB = makePublicKey("B");
     const donorC = makePublicKey("C");
     
-    await testPool.query(`INSERT INTO profiles (public_key, display_name) VALUES ($1, $2), ($3, $4), ($5, $6)`, [donorA, "Alice", donorB, "Bob", donorC, "Charlie"]);
+    await testPool.query("INSERT INTO profiles (public_key, display_name) VALUES ($1, $2), ($3, $4), ($5, $6)", [donorA, "Alice", donorB, "Bob", donorC, "Charlie"]);
 
     // donorA: today
     await testPool.query(

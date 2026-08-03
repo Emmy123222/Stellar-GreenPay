@@ -22,9 +22,9 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     const params = [limit];
 
     if (period === "month") {
-      conditions.push(`d.created_at >= NOW() - INTERVAL '30 days'`);
+      conditions.push("d.created_at >= NOW() - INTERVAL '30 days'");
     } else if (period === "year") {
-      conditions.push(`d.created_at >= NOW() - INTERVAL '1 year'`);
+      conditions.push("d.created_at >= NOW() - INTERVAL '1 year'");
     }
 
     if (onlyVerified) {
@@ -183,9 +183,10 @@ router.post("/snapshot", async (req, res, next) => {
       return res.json({ success: true, message: "No donations this month yet", inserted: 0 });
     }
 
-    // Use UTC to avoid timezone offset shifting into the previous month.
-    const now = new Date();
-    const monthStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`; // "YYYY-MM-01"
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+    const monthStr = monthStart.toISOString().slice(0, 10); // "YYYY-MM-01"
 
     const client = await pool.connect();
     try {

@@ -147,6 +147,12 @@ router.get("/global", async (req, res, next) => {
        LIMIT 20`,
     );
 
+    const countryBreakdown = countryBreakdownResult.rows.map((row) => ({
+      country: row.country,
+      totalDonationsXLM: Number.parseFloat(row.totalDonationsXLM || "0").toFixed(7),
+      donorCount: row.donorCount || 0,
+    }));
+
     const breakdownByCategory = breakdownResult.rows.map((row) => ({
       category: row.category,
       totalDonationsXLM: Number.parseFloat(row.totalDonationsXLM || "0").toFixed(7),

@@ -23,7 +23,7 @@ module.exports = {
   },
 
   async down(client) {
-    await client.query(`DROP INDEX IF EXISTS global_stats_mv_id_uidx`);
-    await client.query(`DROP MATERIALIZED VIEW IF EXISTS global_stats_mv`);
+    await client.query("DROP INDEX IF EXISTS global_stats_mv_id_uidx");
+    await client.query("DROP MATERIALIZED VIEW IF EXISTS global_stats_mv");
   },
 };
