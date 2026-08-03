@@ -12,7 +12,12 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("geoip-lite", () => ({
+  lookup: jest.fn(),
+}));
+
 const { server } = require("../services/stellar");
+const geoip = require("geoip-lite");
 const pool = require("../db/pool");
 const { computeBadges } = require("../services/store");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
@@ -64,8 +69,8 @@ function createMockResponse() {
   };
 }
 
-async function invokeRecordDonation(body) {
-  const req = { body };
+async function invokeRecordDonation(body, overrides = {}) {
+  const req = { body, ...overrides };
   const res = createMockResponse();
   const next = jest.fn((err) => {
     if (err) {
@@ -163,18 +168,24 @@ describe("POST /api/donations", () => {
       queryResult([{ id: "project-1" }]),   // SELECT project
       queryResult([]),                         // dedup check
       queryResult(),                           // BEGIN
+      queryResult([{ total: "0" }]),         // previous total donated
       queryResult([donationRow]),              // INSERT donation
       queryResult([]),                         // SELECT donation_matches (empty)
       queryResult(),                           // UPDATE projects
       queryResult(),                           // COMMIT
     );
 
-    const { res, next } = await invokeRecordDonation({
-      projectId: "project-1",
-      donorAddress,
-      amountXLM: "10",
-      transactionHash,
-    });
+    geoip.lookup.mockReturnValue({ country: "US" });
+
+    const { res, next } = await invokeRecordDonation(
+      {
+        projectId: "project-1",
+        donorAddress,
+        amountXLM: "10",
+        transactionHash,
+      },
+      { ip: "8.8.8.8" },
+    );
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
@@ -190,6 +201,7 @@ describe("POST /api/donations", () => {
         transactionHash,
       }),
     );
+    expect(client.query.mock.calls[3][1][8]).toBe("US");
     expect(client.release).toHaveBeenCalledTimes(1);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
@@ -277,11 +289,62 @@ describe("POST /api/donations", () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
+  test("emits badge_earned when donation crosses badge threshold", async () => {
+    const donorAddress = makePublicKey("Z");
+    const transactionHash = makeTxHash("z");
+    const donationRow = {
+      id: "donation-badge",
+      project_id: "project-b",
+      donor_address: donorAddress,
+      amount_xlm: "1",
+      amount: "1",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    const ioStub = { emit: jest.fn() };
+
+    const client = createMockClient(
+      queryResult([{ id: "project-b" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([{ total: "9" }]), // previous total donated
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult(),
+    );
+
+    const req = { body: { projectId: "project-b", donorAddress, amountXLM: "1", transactionHash }, app: { get: () => ioStub }, log: { info: jest.fn() } };
+    const res = createMockResponse();
+    const next = jest.fn((err) => {
+      if (err) res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+    });
+
+    await recordDonation(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    // donation_event and badge_earned should be emitted
+    expect(ioStub.emit).toHaveBeenCalledWith(
+      "donation_event",
+      expect.objectContaining({ projectId: "project-b", donorAddress }),
+    );
+    expect(ioStub.emit).toHaveBeenCalledWith(
+      "badge_earned",
+      expect.objectContaining({ projectId: "project-b", donorAddress, badge: "seedling" }),
+    );
+    expect(client.release).toHaveBeenCalledTimes(1);
+  });
+
   test("updates project totals after a donation", async () => {
     const client = createMockClient(
       queryResult([{ id: "project-2" }]),    // SELECT project
       queryResult([]),                          // dedup check
       queryResult(),                            // BEGIN
+      queryResult([{ total: "0" }]),         // previous total donated
       queryResult([{
         id: "donation-2",
         project_id: "project-2",
@@ -434,6 +497,7 @@ describe("POST /api/donations", () => {
       queryResult([{ id: "project-3" }]),    // SELECT project
       queryResult([]),                          // dedup check
       queryResult(),                            // BEGIN
+      queryResult([{ total: "0" }]),         // previous total donated
       queryResult([{
         id: "donation-3",
         project_id: "project-3",
@@ -524,6 +588,7 @@ describe("POST /api/donations", () => {
       queryResult([{ id: "project-h" }]),
       queryResult([]),
       queryResult(),
+      queryResult([{ total: "0" }]),
       queryResult([donationRow]),
       queryResult([]),
       queryResult(),
@@ -551,6 +616,7 @@ describe("POST /api/donations", () => {
       queryResult([{ id: "project-4" }]),
       queryResult([]),
       queryResult(),
+      queryResult([{ total: "0" }]),
       queryResult([{
         id: "donation-4",
         project_id: "project-4",
@@ -608,6 +674,7 @@ describe("profile upsert on first donation", () => {
       queryResult([{ id: "project-p" }]),
       queryResult([]),
       queryResult(),
+      queryResult([{ total: "0" }]),
       queryResult([donationRow]),
       queryResult([]),
       queryResult(),
@@ -647,6 +714,7 @@ describe("profile upsert on first donation", () => {
       queryResult([{ id: "project-q" }]),
       queryResult([]),
       queryResult(),
+      queryResult([{ total: "90" }]),
       queryResult([donationRow]),
       queryResult([]),
       queryResult(),
@@ -691,6 +759,7 @@ describe("profile upsert on first donation", () => {
       queryResult([{ id: "project-r" }]),
       queryResult([]),
       queryResult(),
+      queryResult([{ total: "0" }]),
       queryResult([donationRow]),
       // no donation_matches query for non-XLM
       queryResult(),                          // UPDATE projects (raises_xlm += 0)

@@ -141,6 +141,46 @@ export default function ProjectDetail({
       .catch(() => null);
   }, [id]);
 
+  // Subscribe to badge_earned WebSocket events for this project
+  useEffect(() => {
+    if (!project) return;
+    let socket: any = null;
+    let mounted = true;
+
+    (async () => {
+      try {
+        const { io } = await import("socket.io-client");
+        const base = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+        socket = io(base, { path: "/socket.io", transports: ["websocket"] });
+
+        socket.on("badge_earned", (payload: { donorAddress: string; badge: string; projectId: string }) => {
+          if (!mounted) return;
+          if (payload.projectId !== project.id) return;
+          setToasts((prev) => [
+            ...prev,
+            {
+              id: `badge-${Date.now()}-${payload.donorAddress}`,
+              title: "New badge earned!",
+              description: `${shortenAddress(payload.donorAddress)} earned a ${payload.badge} badge`,
+              createdAt: Date.now(),
+            },
+          ]);
+        });
+      } catch (e) {
+        // ignore client-side load failures
+      }
+    })();
+
+    return () => {
+      mounted = false;
+      try {
+        if (socket && typeof socket.disconnect === "function") socket.disconnect();
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, [project?.id]);
+
   useEffect(() => {
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -864,6 +904,15 @@ export default function ProjectDetail({
         <div className="lg:col-span-2 space-y-6">
           {/* Header card */}
           <div className="card">
+            {project.imageUrl ? (
+              <div className="mb-5 overflow-hidden rounded-3xl border border-forest-100 bg-forest-50">
+                <img
+                  src={project.imageUrl}
+                  alt={project.name}
+                  className="h-56 w-full object-cover"
+                />
+              </div>
+            ) : null}
             <div className="flex items-start gap-4 mb-5">
               <div className="w-14 h-14 rounded-2xl bg-forest-100 flex items-center justify-center text-3xl border border-forest-200 flex-shrink-0">
                 {CATEGORY_ICONS[project.category] || "🌿"}
@@ -1438,6 +1487,10 @@ export default function ProjectDetail({
                   },
                 ]);
               }}
+            />
+            <ToastNotification
+              toasts={toasts}
+              onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))}
             />
           </div>
 

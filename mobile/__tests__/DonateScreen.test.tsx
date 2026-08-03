@@ -245,6 +245,17 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
   });
 
   it('exposes the biometric gate via the lock icon hint', async () => {
+
+    // The lock glyph in the hint row is decorative, so the screen hides it
+    // from assistive technology (`accessibilityElementsHidden`). Assert the
+    // accessible hint text that screen readers actually announce instead.
+    const { getByText } = render(<DonateScreen />);
+    await waitFor(() =>
+      expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
+    );
+    // Hint advertises the upcoming biometric prompt
+    expect(getByText(/authenticate with Biometrics before signing/i)).toBeTruthy();
+
     const { getByText, findByText } = await act(async () =>
       render(<DonateScreen />)
     );
@@ -256,5 +267,6 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     // on the explanatory copy. RNTL@14's default text queries exclude
     // accessibility-hidden nodes — opt back in via `{ hidden: true }`.
     expect(await findByText('🔒', { hidden: true })).toBeTruthy();
+
   });
 });

@@ -29,6 +29,8 @@
     "recharts": "^3.10.1",
     "@vercel/og": "^0.6.4",
     "sonner": "^2.0.7"
+    ,
+    "socket.io-client": "^4.7.2"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",

@@ -399,6 +399,7 @@ export async function upsertProfile(
  * @returns Leaderboard entries.
  * @throws If the request fails.
  */
+export async function fetchLeaderboard(limit = 20, period: "all" | "week" | "month" | "year" = "all") {
 export async function fetchLeaderboard(
   limit = 20,
   period: "all" | "month" | "year" = "all",
@@ -682,8 +683,15 @@ export interface ImpactCategoryBreakdownItem {
   co2OffsetKg: number;
 }
 
+export interface ImpactCountryBreakdownItem {
+  country: string;
+  totalDonationsXLM: string;
+  donorCount: number;
+}
+
 export interface ImpactGlobalStats extends ImpactProjectStats {
   breakdownByCategory: ImpactCategoryBreakdownItem[];
+  countryBreakdown: ImpactCountryBreakdownItem[];
 }
 
 export interface ImpactDonorStats {
@@ -934,24 +942,10 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   return data.data;
 }
 
-export async function fetchVerificationRequests(
-  params?: { status?: string; limit?: number; page?: number }
-): Promise<VerificationRequestResponse[]> {
-  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
-    "/api/verification-requests",
-    { params },
-  );
-  return data.data;
-}
-
-export async function updateVerificationRequestStatus(
-  id: string,
-  status: "pending" | "in_review" | "approved" | "rejected",
-  reviewerNotes?: string,
-): Promise<VerificationRequestResponse> {
-  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
-    `/api/verification-requests/${id}/status`,
-    { status, reviewerNotes },
+export async function updateProjectImage(projectId: string, imageUrl: string, adminAddress: string) {
+  const { data } = await api.patch<{ success: boolean; data: ClimateProject }>(
+    `/api/projects/${projectId}`,
+    { imageUrl, adminAddress },
   );
   return data.data;
 }
