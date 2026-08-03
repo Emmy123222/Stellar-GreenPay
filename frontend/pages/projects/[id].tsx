@@ -904,6 +904,15 @@ export default function ProjectDetail({
         <div className="lg:col-span-2 space-y-6">
           {/* Header card */}
           <div className="card">
+            {project.imageUrl ? (
+              <div className="mb-5 overflow-hidden rounded-3xl border border-forest-100 bg-forest-50">
+                <img
+                  src={project.imageUrl}
+                  alt={project.name}
+                  className="h-56 w-full object-cover"
+                />
+              </div>
+            ) : null}
             <div className="flex items-start gap-4 mb-5">
               <div className="w-14 h-14 rounded-2xl bg-forest-100 flex items-center justify-center text-3xl border border-forest-200 flex-shrink-0">
                 {CATEGORY_ICONS[project.category] || "🌿"}
