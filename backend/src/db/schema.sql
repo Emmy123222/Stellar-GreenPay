@@ -275,6 +275,33 @@ CREATE INDEX IF NOT EXISTS verification_requests_status_idx
 CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
   ON verification_requests (wallet_address);
 
+-- webhook_deliveries: history of outbound webhook delivery attempts.
+-- Populated when milestone.reached (and similar) events are sent to a
+-- project's webhook_url. Used by GET /api/webhooks/:projectId/history.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  event TEXT,
+  payload_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_attempt_at TIMESTAMPTZ,
+  next_attempt_at TIMESTAMPTZ,
+  response_status INTEGER,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+  ON webhook_deliveries (status);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_id
+  ON webhook_deliveries (project_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_created
+  ON webhook_deliveries (project_id, created_at DESC);
+
 -- global_stats_mv: pre-aggregated landing-page totals refreshed by pg-boss.
 CREATE MATERIALIZED VIEW IF NOT EXISTS global_stats_mv AS
 SELECT

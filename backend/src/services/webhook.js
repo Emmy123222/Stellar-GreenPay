@@ -412,6 +412,61 @@ async function deliverPayload(url, secret, payload) {
 }
 
 /**
+ * Persist a delivery row, attempt the HTTP POST, then update status/history fields.
+ *
+ * @param {{ projectId: string, url: string, secret: string, payload: object }} opts
+ * @returns {Promise<void>}
+ */
+async function recordAndDeliver({ projectId, url, secret, payload }) {
+  const id = crypto.randomUUID();
+  const body = JSON.stringify(payload);
+  const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+  const event = typeof payload?.event === "string" ? payload.event : null;
+
+  await pool.query(
+    `INSERT INTO webhook_deliveries (
+       id, project_id, url, payload, event, payload_hash, status, attempt_count
+     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', 0)`,
+    [id, projectId, url, body, event, payloadHash],
+  );
+
+  try {
+    const { statusCode } = await deliverPayload(url, secret, payload);
+    const delivered = statusCode >= 200 && statusCode < 300;
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = $2,
+           attempt_count = 1,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           delivered_at = CASE WHEN $4 THEN NOW() ELSE NULL END,
+           last_error = CASE WHEN $4 THEN NULL ELSE $5 END,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [
+        id,
+        delivered ? "delivered" : "failed",
+        statusCode,
+        delivered,
+        delivered ? null : `Webhook responded with HTTP ${statusCode}`,
+      ],
+    );
+  } catch (err) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'failed',
+           attempt_count = 1,
+           last_attempt_at = NOW(),
+           last_error = $2,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, err.message],
+    );
+    throw err;
+  }
+}
+
+/**
  * Check project milestones after a donation and deliver webhooks for any
  * newly reached milestones. Runs asynchronously (fire-and-forget enqueue).
  *
@@ -470,7 +525,7 @@ async function checkAndDeliverMilestones(projectId) {
 
     if (project.webhook_url && project.webhook_secret) {
       // Fire all webhook deliveries concurrently so a slow DNS timeout on one
-      // URL doesn't block the rest.
+      // URL doesn't block the rest. Each attempt is persisted for history.
       const deliveries = milestones.map((milestone) => {
         const payload = {
           event: "milestone.reached",
@@ -481,15 +536,19 @@ async function checkAndDeliverMilestones(projectId) {
           timestamp: new Date().toISOString(),
         };
 
-        return deliverPayload(project.webhook_url, project.webhook_secret, payload)
-          .catch((err) => {
-            logger.error({
-              event: "webhook_url_rejected",
-              projectId,
-              url: project.webhook_url,
-              reason: err.message,
-            }, "Skipping webhook delivery — URL rejected");
-          });
+        return recordAndDeliver({
+          projectId,
+          url: project.webhook_url,
+          secret: project.webhook_secret,
+          payload,
+        }).catch((err) => {
+          logger.error({
+            event: "webhook_url_rejected",
+            projectId,
+            url: project.webhook_url,
+            reason: err.message,
+          }, "Skipping webhook delivery — URL rejected");
+        });
       });
 
       await Promise.allSettled(deliveries);
@@ -503,8 +562,18 @@ async function checkAndDeliverMilestones(projectId) {
   }
 }
 
+/**
+ * No-op queue start — delivery history is recorded inline.
+ * Kept so server.js can await start() without a separate pg-boss worker.
+ * @returns {Promise<void>}
+ */
+async function start() {
+  return;
+}
+
 module.exports = {
   checkAndDeliverMilestones,
+  start,
   // Exported for unit testing
   validateUrl,
   checkPrivateIPv4,
@@ -513,6 +582,7 @@ module.exports = {
   ip4ToInt,
   stripBrackets,
   PRIVATE_IPV4_RANGES,
+  recordAndDeliver,
 };
 
 // Export internal functions for testing
