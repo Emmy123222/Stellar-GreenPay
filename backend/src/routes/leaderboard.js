@@ -3,18 +3,51 @@
  */
 "use strict";
 const express = require("express");
-const router  = express.Router();
+const router = express.Router();
 const pool = require("../db/pool");
+const { createRateLimiter } = require("../middleware/rateLimiter");
 
-router.get("/", async (req, res, next) => {
+// 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
+const leaderboardLimiter = createRateLimiter(30, 1);
+
+router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const cursor = parseInt(req.query.cursor, 10) || 0;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
-
     const onlyVerified = req.query.onlyVerified === "true";
 
-    let query = `
+    const conditions = [];
+    const params = [limit];
+
+    if (period === "month") {
+      conditions.push(`d.created_at >= NOW() - INTERVAL '30 days'`);
+    } else if (period === "year") {
+      conditions.push(`d.created_at >= NOW() - INTERVAL '1 year'`);
+    }
+
+    if (onlyVerified) {
+      const verifiedSubQuery = `
+        NOT EXISTS (
+          SELECT 1 FROM donations d2
+          JOIN projects pr ON d2.project_id = pr.id
+          WHERE d2.donor_address = p.public_key AND pr.verified = false
+        )
+        AND EXISTS (
+          SELECT 1 FROM donations d3
+          JOIN projects pr2 ON d3.project_id = pr2.id
+          WHERE d3.donor_address = p.public_key AND pr2.verified = true
+        )
+      `;
+      conditions.push(`(${verifiedSubQuery})`);
+    }
+
+    const whereClause = conditions.length > 0
+      ? `WHERE ${conditions.join("\n  AND ")}`
+      : "";
+
+    const query = `
       SELECT p.public_key, p.display_name, p.badges,
              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
              COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported,
@@ -43,49 +76,15 @@ router.get("/", async (req, res, next) => {
              )::NUMERIC AS impact_score
       FROM profiles p
       LEFT JOIN donations d ON p.public_key = d.donor_address
-    `;
-
-    if (period === "month") {
-      query += " AND d.created_at >= NOW() - INTERVAL '30 days' ";
-    } else if (period === "year") {
-      query += " AND d.created_at >= NOW() - INTERVAL '1 year' ";
-    }
-
-    query += `
       LEFT JOIN projects pr ON pr.id = d.project_id
-    `;
-
-    const whereConditions = [];
-
-    if (onlyVerified) {
-      whereConditions.push(`
-        NOT EXISTS (
-          SELECT 1 FROM donations d2
-          JOIN projects pr ON d2.project_id = pr.id
-          WHERE d2.donor_address = p.public_key AND pr.verified = false
-        )
-        AND EXISTS (
-          SELECT 1 FROM donations d3
-          JOIN projects pr2 ON d3.project_id = pr2.id
-          WHERE d3.donor_address = p.public_key AND pr2.verified = true
-        )
-      `);
-    }
-
-    if (whereConditions.length > 0) {
-      query += `
-        WHERE ${whereConditions.join(" AND ")}
-      `;
-    }
-
-    query += `
+      ${whereClause}
       GROUP BY p.public_key, p.display_name, p.badges
       ORDER BY ${sortBy} DESC
       LIMIT $1
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
-    const result = await pool.query(query, [limit]);
+    const result = await pool.query(query, params);
     const entries = result.rows.map((p, i) => ({
       rank: i + 1,
       publicKey: p.public_key,
@@ -96,7 +95,16 @@ router.get("/", async (req, res, next) => {
       impactScore: p.impact_score?.toString() || "0",
       totalCO2OffsetKg: p.total_co2_offset_kg?.toString() || "0",
     }));
-    res.json({ success: true, data: entries });
+
+    const hasMore = entries.length === limit;
+    const nextCursor = hasMore ? entries[entries.length - 1].rank : null;
+
+    res.json({
+      success: true,
+      data: entries,
+      has_more: hasMore,
+      next_cursor: nextCursor,
+    });
   } catch (e) {
     next(e);
   }
@@ -108,7 +116,7 @@ router.get("/", async (req, res, next) => {
  * Query params:
  *   - months (int, max 24, default 12): how many past months to return
  */
-router.get("/history", async (req, res, next) => {
+router.get("/history", leaderboardLimiter, async (req, res, next) => {
   try {
     const months = Math.min(parseInt(req.query.months, 10) || 12, 24);
     const result = await pool.query(

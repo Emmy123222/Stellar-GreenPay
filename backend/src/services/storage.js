@@ -63,9 +63,15 @@ function ensureUploadDir() {
 function buildKey(originalName) {
   const sanitized = String(originalName || "upload")
     .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .slice(0, 80);
+    .replace(/^\.+/, "")
+    .replace(/\.{2,}/g, "_")
+    .slice(0, 80) || "upload";
   const id = crypto.randomBytes(12).toString("hex");
-  return `${id}-${sanitized}`;
+  const key = `${id}-${sanitized}`;
+  if (key.startsWith(".") || key.includes("/") || key.includes("\\")) {
+    throw new Error("Invalid upload key generated from filename");
+  }
+  return key;
 }
 
 async function uploadLocal(buffer, originalName, contentType) {
@@ -212,4 +218,4 @@ function backendName() {
   return STORAGE_BACKEND;
 }
 
-module.exports = { uploadFile, backendName, UPLOAD_DIR };
+module.exports = { uploadFile, backendName, UPLOAD_DIR, buildKey };

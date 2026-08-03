@@ -1,13 +1,3 @@
-/**
- * src/routes/impact.js
- * Impact aggregation endpoints.
- *
- * - GET /api/impact/project/:id
- * - GET /api/impact/global
- * - GET /api/impact/donor/:publicKey
- *
- * All endpoints are cached for 5 minutes (process-local).
- */
 "use strict";
 
 const express = require("express");
@@ -58,8 +48,10 @@ router.get("/project/:id", async (req, res, next) => {
     const aggResult = await pool.query(
       `SELECT
         COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
-        COUNT(DISTINCT d.donor_address)::int AS "donorCount"
+        COUNT(DISTINCT d.donor_address)::int AS "donorCount",
+        COUNT(DISTINCT d.donor_country)::int AS "uniqueCountries"
        FROM donations d
+       JOIN projects p ON d.project_id = p.id
        WHERE d.project_id = $1
          AND (d.currency = 'XLM' OR d.currency IS NULL)`,
       [req.params.id],
@@ -68,6 +60,7 @@ router.get("/project/:id", async (req, res, next) => {
     const p = projectResult.rows[0];
     const totalDonationsXLM = Number.parseFloat(aggResult.rows[0].totalDonationsXLM || "0");
     const donorCount = aggResult.rows[0].donorCount || 0;
+    const uniqueCountries = aggResult.rows[0].uniqueCountries || 0;
 
     const raisedXlm = Number.parseFloat(p.raised_xlm?.toString() || "0");
     const projectCo2OffsetKg = Number.parseFloat(p.co2_offset_kg?.toString() || "0");
@@ -81,7 +74,7 @@ router.get("/project/:id", async (req, res, next) => {
         donorCount,
         co2OffsetKg,
         treesEquivalent: treesEquivalentFromKg(co2OffsetKg),
-        uniqueCountries: 0,
+        uniqueCountries,
       },
     });
   } catch (e) {
@@ -99,6 +92,7 @@ router.get("/global", async (req, res, next) => {
       `SELECT
         COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
         COUNT(DISTINCT d.donor_address)::int AS "donorCount",
+        COUNT(DISTINCT d.donor_country)::int AS "uniqueCountries",
         COALESCE(
           SUM(
             CASE
@@ -139,6 +133,20 @@ router.get("/global", async (req, res, next) => {
     const donorCount = totalsRow.donorCount || 0;
     const co2OffsetKg = Math.round(Number.parseFloat(totalsRow.co2OffsetKg || "0"));
 
+    const countryBreakdownResult = await pool.query(
+      `SELECT
+        d.donor_country AS country,
+        COALESCE(SUM(d.amount_xlm), 0) AS "totalDonationsXLM",
+        COUNT(DISTINCT d.donor_address)::int AS "donorCount"
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE (d.currency = 'XLM' OR d.currency IS NULL)
+         AND d.donor_country IS NOT NULL
+       GROUP BY d.donor_country
+       ORDER BY "totalDonationsXLM" DESC
+       LIMIT 20`,
+    );
+
     const breakdownByCategory = breakdownResult.rows.map((row) => ({
       category: row.category,
       totalDonationsXLM: Number.parseFloat(row.totalDonationsXLM || "0").toFixed(7),
@@ -153,8 +161,9 @@ router.get("/global", async (req, res, next) => {
         donorCount,
         co2OffsetKg,
         treesEquivalent: treesEquivalentFromKg(co2OffsetKg),
-        uniqueCountries: 0,
+        uniqueCountries: totalsRow.uniqueCountries || 0,
         breakdownByCategory,
+        countryBreakdown,
       },
     });
   } catch (e) {
@@ -225,4 +234,3 @@ router.get("/donor/:publicKey", async (req, res, next) => {
 });
 
 module.exports = router;
-
