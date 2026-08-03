@@ -173,7 +173,11 @@ impl EscrowContract {
             panic!("Invalid milestone index");
         }
 
+<<<<<<< HEAD
         let milestone = &job.milestones.get(milestone_index).unwrap();
+=======
+        let milestone = job.milestones.get(milestone_index).unwrap();
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
         if milestone.released {
             panic!("Milestone already released");
         }
@@ -186,6 +190,7 @@ impl EscrowContract {
         let contract_addr = env.current_contract_address();
         token_client.transfer(&contract_addr, &job.freelancer, &release_amount);
 
+<<<<<<< HEAD
         // Mark milestone as released (soroban Vec has no iter_mut/get_mut —
         // mutate via index-based get/set)
         let mut updated_milestones = job.milestones.clone();
@@ -194,18 +199,37 @@ impl EscrowContract {
         while i < updated_milestones.len() {
             let mut m = updated_milestones.get(i).unwrap();
             if i == milestone_index {
+=======
+        // Mark milestone as released and count total released
+        let mut updated_milestones: Vec<Milestone> = Vec::new(&env);
+        let mut released_count = 0u32;
+        let len = job.milestones.len();
+        let mut idx = 0u32;
+        while idx < len {
+            let mut m = job.milestones.get(idx).unwrap();
+            if idx == milestone_index {
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
                 m.released = true;
             }
             if m.released {
                 released_count = released_count.checked_add(1).expect("released_count overflow");
             }
+<<<<<<< HEAD
             updated_milestones.set(i, m);
             i = i.checked_add(1).expect("milestone index overflow");
+=======
+            updated_milestones.push_back(m);
+            idx += 1;
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
         }
         job.milestones = updated_milestones;
 
         // Update job status
+<<<<<<< HEAD
         if released_count == job.milestones.len() {
+=======
+        if released_count == len {
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
             job.status = JobStatus::Completed;
         } else {
             job.status = JobStatus::PartiallyReleased;
@@ -309,7 +333,11 @@ impl EscrowContract {
         if milestone_index >= job.milestones.len() {
             panic!("Invalid milestone index");
         }
+<<<<<<< HEAD
         let milestone = &job.milestones.get(milestone_index).unwrap();
+=======
+        let milestone = job.milestones.get(milestone_index).unwrap();
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
         if milestone.released {
             panic!("Milestone already released");
         }
@@ -321,14 +349,31 @@ impl EscrowContract {
         token_client.transfer(&contract_addr, &job.freelancer, &release_amount);
 
         // Mark as released
+<<<<<<< HEAD
         let mut updated_milestones = job.milestones.clone();
         let mut m = updated_milestones.get(milestone_index).unwrap();
         m.released = true;
         updated_milestones.set(milestone_index, m);
+=======
+        let mut updated_milestones: Vec<Milestone> = Vec::new(&env);
+        let len = job.milestones.len();
+        let mut all_released = true;
+        let mut i = 0u32;
+        while i < len {
+            let mut m = job.milestones.get(i).unwrap();
+            if i == milestone_index {
+                m.released = true;
+            }
+            if !m.released {
+                all_released = false;
+            }
+            updated_milestones.push_back(m);
+            i += 1;
+        }
+>>>>>>> 827cfd4 (fix: resolve 9 CI failures across backend, frontend, contracts, helm, and security scans)
         job.milestones = updated_milestones;
 
         // Update status
-        let all_released = job.milestones.iter().all(|m| m.released);
         job.status = if all_released { JobStatus::Completed } else { JobStatus::PartiallyReleased };
 
         env.storage().instance().set(&DataKey::Job(job_id), &job);
