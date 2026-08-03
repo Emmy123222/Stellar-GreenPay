@@ -36,6 +36,29 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
+-- webhook_deliveries: tracks each outbound webhook attempt with retry state.
+-- status lifecycle: pending → delivered | failed (failed after 5 attempts).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_attempt_at TIMESTAMPTZ,
+  next_attempt_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+  ON webhook_deliveries (status);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_id
+  ON webhook_deliveries (project_id);
+
 -- donations: immutable donation ledger. Each row is a single
 -- contribution from donor_address to a project. transaction_hash must be
 -- unique (one Stellar payment → one donation). No updated_at column —

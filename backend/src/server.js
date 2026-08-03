@@ -148,7 +148,10 @@ async function startServer() {
   await startDigestQueue();
   await startRecurringDonationQueue();
 
-  startIndexer(io).catch((err) => logger.error({ event: "indexer_startup_error", err }, err.message));
+  const { start: startWebhookQueue } = require("./services/webhook");
+  await startWebhookQueue();
+
+  startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
     logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);
