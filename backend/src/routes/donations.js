@@ -4,14 +4,19 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
+const EventEmitter = require("events");
 const { v4: uuid } = require("uuid");
+const { z } = require("zod");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { invalidateProjectImpactCache } = require("./impact");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
+const donationEvents = require("../services/donationEvents");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const donationEvents = new EventEmitter();
 
 const donationStreamSubscribers = new Set();
 
@@ -95,6 +100,16 @@ async function recordDonation(req, res, next) {
 
     await client.query("BEGIN");
     inTransaction = true;
+
+    // Calculate previous donated total so we can detect badge tier changes
+    const prevTotalResult = await client.query(
+      `SELECT COALESCE(SUM(amount_xlm), 0)::numeric AS total
+       FROM donations
+       WHERE donor_address = $1
+         AND amount_xlm IS NOT NULL`,
+      [donorAddress],
+    );
+    const prevTotalDonated = parseFloat(prevTotalResult.rows[0]?.total || "0");
 
     const donationResult = await client.query(
       `INSERT INTO donations (
@@ -203,6 +218,29 @@ async function recordDonation(req, res, next) {
 
     const donationRow = donationResult?.rows?.[0] || {};
     const io = req.app?.get("io");
+
+    // Compute donor badge for the SSE payload
+    let donorBadge = "";
+    try {
+      const profileResult = await pool.query(
+        "SELECT total_donated_xlm FROM profiles WHERE public_key = $1",
+        [donorAddress],
+      );
+      const totalXLM = profileResult.rows[0]
+        ? parseFloat(profileResult.rows[0].total_donated_xlm || "0")
+        : parsedAmount;
+      const badges = computeBadges(totalXLM);
+      donorBadge = badges.length > 0 ? badges[0].tier.charAt(0).toUpperCase() + badges[0].tier.slice(1) : "";
+    } catch {
+      // Badge computation is best-effort; don't fail the request
+    }
+
+    const ssePayload = {
+      projectName,
+      amountXLM: String(parsedAmount),
+      donorBadge,
+    };
+
     if (io && typeof io.emit === "function") {
       io.emit("donation_event", {
         projectId,
@@ -210,6 +248,9 @@ async function recordDonation(req, res, next) {
         amountXLM: donationRow.amount_xlm ?? parsedAmount,
         transactionHash,
         timestamp: new Date().toISOString(),
+        activeCampaignProgressPercent,
+        campaignGoalXLM,
+        campaignRaisedXLM,
       });
     }
     const donationPayload = {
