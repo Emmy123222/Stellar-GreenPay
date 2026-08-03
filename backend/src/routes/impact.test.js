@@ -1,14 +1,12 @@
 "use strict";
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
-jest.mock("../services/cache", () => ({
-  get: jest.fn(() => null),
-  set: jest.fn((_, v) => v),
-}));
+jest.mock("../services/cache", () => ({ get: jest.fn(), set: jest.fn() }));
 
-const pool = require("../db/pool");
 const request = require("supertest");
 const express = require("express");
+const pool = require("../db/pool");
+const cache = require("../services/cache");
 const impactRouter = require("./impact");
 
 function buildApp() {
@@ -21,9 +19,7 @@ function buildApp() {
   return app;
 }
 
-const ZERO_DONOR_KEY = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-
-describe("GET /api/impact/donor/:publicKey — no donations", () => {
+describe("GET /api/impact/global", () => {
   let app;
 
   beforeEach(() => {
@@ -31,50 +27,68 @@ describe("GET /api/impact/donor/:publicKey — no donations", () => {
     jest.clearAllMocks();
   });
 
-  test("returns 200 (not 404) with the zero-value shape when the donor has no donation history", async () => {
+  test("returns category breakdown with one entry per donated category and excludes empty categories", async () => {
+    cache.get.mockReturnValue(null);
     pool.query
       .mockResolvedValueOnce({
         rows: [
-          { totalDonatedXLM: "0", projectsSupported: 0, co2OffsetKg: "0" },
+          {
+            totalDonationsXLM: "350",
+            donorCount: 6,
+            co2OffsetKg: 127,
+          },
         ],
       })
-      .mockResolvedValueOnce({ rows: [] });
+      .mockResolvedValueOnce({
+        rows: [
+          {
+            category: "Reforestation",
+            totalDonationsXLM: "150",
+            donorCount: 3,
+            co2OffsetKg: 60,
+          },
+          {
+            category: "Solar",
+            totalDonationsXLM: "125",
+            donorCount: 2,
+            co2OffsetKg: 45,
+          },
+          {
+            category: "Education",
+            totalDonationsXLM: "75",
+            donorCount: 1,
+            co2OffsetKg: 22,
+          },
+        ],
+      });
 
-    const res = await request(app)
-      .get(`/api/impact/donor/${ZERO_DONOR_KEY}`)
-      .expect(200);
+    const res = await request(app).get("/api/impact/global").expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(res.body.data).toEqual({
-      totalDonatedXLM: "0.0000000",
-      co2OffsetKg: 0,
-      projectsSupported: 0,
-      topCategory: null,
-    });
-  });
+    expect(res.body.data.breakdownByCategory).toHaveLength(3);
+    expect(res.body.data.breakdownByCategory).toEqual([
+      {
+        category: "Reforestation",
+        totalDonationsXLM: "150.0000000",
+        donorCount: 3,
+        co2OffsetKg: 60,
+      },
+      {
+        category: "Solar",
+        totalDonationsXLM: "125.0000000",
+        donorCount: 2,
+        co2OffsetKg: 45,
+      },
+      {
+        category: "Education",
+        totalDonationsXLM: "75.0000000",
+        donorCount: 1,
+        co2OffsetKg: 22,
+      },
+    ]);
 
-  test("does not return a 404 or an empty body for a donor with zero donations", async () => {
-    pool.query
-      .mockResolvedValueOnce({
-        rows: [
-          { totalDonatedXLM: "0", projectsSupported: 0, co2OffsetKg: "0" },
-        ],
-      })
-      .mockResolvedValueOnce({ rows: [] });
-
-    const res = await request(app).get(
-      `/api/impact/donor/${ZERO_DONOR_KEY}`,
-    );
-
-    expect(res.status).not.toBe(404);
-    expect(res.body.data).toBeDefined();
-  });
-
-  test("returns 400 for an invalid public key", async () => {
-    const res = await request(app)
-      .get("/api/impact/donor/not-a-valid-key")
-      .expect(400);
-
-    expect(res.body.error).toBe("Invalid Stellar public key");
+    expect(res.body.data.totalDonationsXLM).toBe("350.0000000");
+    expect(res.body.data.co2OffsetKg).toBe(127);
+    expect(cache.set).toHaveBeenCalledWith("/api/impact/global", res.body, 300000);
   });
 });
