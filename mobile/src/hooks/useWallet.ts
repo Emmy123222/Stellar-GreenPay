@@ -11,7 +11,21 @@ export function useWallet() {
 
   useEffect(() => {
     SecureStore.getItemAsync(WALLET_KEY)
+
       .then((stored) => setPublicKey(stored))
+      .catch(() => {
+        // Non-critical — default to a disconnected wallet if storage fails.
+      })
+
+      .then((stored: string | null) => setPublicKey(stored))
+      // `finally` alone does not consume the rejection — without `.catch`,
+      // any storage error (e.g. Keychain unavailable on a stale device)
+      // would surface as an `UnhandledPromiseRejection`, which Jest treats
+      // as a test failure even when we set `loading=false` correctly. Swallow
+      // the error here; production code still sees the next render cycle
+      // with `loading=false` and can fall back to "Connect wallet" UI.
+      .catch(() => undefined)
+
       .finally(() => setLoading(false));
   }, []);
 
@@ -24,14 +38,53 @@ export function useWallet() {
       return false;
     }
 
-    await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+
+    try {
+      await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+    } catch {
+      // Persistence failed — stay disconnected rather than half-connected.
+      return false;
+    }
+
+    // Storage write is best-effort — same posture as `disconnect`. If the
+    // Keychain entry can't be written (stale device, OS-level migration,
+    // or spoofed CI test rejection) we surface the failure to the caller
+    // and refuse to flip `publicKey` so the UI stays on "Connect wallet".
+    try {
+      await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+    } catch {
+      // intentionally unused — see comment block above; UI surfaces
+      // the failure via `error` and the returned `false`.
+      setError('Could not save wallet to secure storage. Please try again.');
+      return false;
+    }
+
+
     setPublicKey(trimmed);
     return true;
   }, []);
 
   const disconnect = useCallback(async () => {
-    await SecureStore.deleteItemAsync(WALLET_KEY);
+
+    try {
+      await SecureStore.deleteItemAsync(WALLET_KEY);
+    } catch {
+      // Storage failure is non-fatal; still clear the in-memory key below so
+      // the user is never left "connected" after choosing to disconnect.
+    } finally {
+      setPublicKey(null);
+    }
+
+    // Storage delete is best-effort — local state must still reset so the
+    // "Connect wallet" UI becomes reachable even if the Keychain entry
+    // couldn't be removed (stale device, OS-level migration, etc.).
+    try {
+      await SecureStore.deleteItemAsync(WALLET_KEY);
+    } catch {
+      // intentionally swallowed; see comment above
+    }
     setPublicKey(null);
+
   }, []);
 
   return { publicKey, loading, error, connect, disconnect };

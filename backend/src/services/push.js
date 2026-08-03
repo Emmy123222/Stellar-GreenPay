@@ -9,7 +9,42 @@ const pool = require("../db/pool");
 const expo = new Expo();
 
 /**
- * Send push notification to device tokens following a project
+ * Push a single message to a single Expo push token.
+ * Validates the token before sending.
+ *
+ * @param {string}  token  - Expo push token
+ * @param {string}  title  - Notification title
+ * @param {string}  body   - Notification body
+ * @param {object}  [data] - Optional payload data
+ */
+async function sendPushToToken(token, title, body, data = {}) {
+  if (!Expo.isExpoPushToken(token)) {
+    console.error(`[Push] Invalid expo push token: ${token}`);
+    return;
+  }
+
+  const message = {
+    to: token,
+    sound: "default",
+    title,
+    body,
+    data,
+  };
+
+  try {
+    const chunk = expo.chunkPushNotifications([message]);
+    if (chunk.length > 0) {
+      await expo.sendPushNotificationsAsync(chunk[0]);
+      console.log(`[Push] Sent notification to token ${token.slice(0, 16)}...`);
+    }
+  } catch (error) {
+    console.error("[Push] Error sending to token:", error);
+  }
+}
+
+/**
+ * Send push notifications to all device tokens following a project.
+ *
  * @param {Object} params - { project, update }
  */
 async function sendUpdatePushNotifications({ project, update }) {
@@ -109,6 +144,7 @@ async function sendRecurringDonationReminder({ token, donation }) {
 }
 
 module.exports = {
+  sendPushToToken,
   sendUpdatePushNotifications,
   sendRecurringDonationReminder,
 };
