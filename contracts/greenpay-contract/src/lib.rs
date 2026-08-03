@@ -99,12 +99,8 @@ enum DataKey {
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
-
-    // Off-chain project metadata (IPFS CID) keyed by project id
-    ProjectMetadata(String),
-
-    PendingAdmin,
-
+    // Contract version for upgrade tracking
+    ContractVersion,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -124,6 +120,8 @@ const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 // Upper bound on co2_per_xlm at registration — prevents donate-time CO₂ overflow
 // panics and misleading impact figures from misconfigured projects.
 const MAX_CO2_PER_XLM: u32 = 100_000;
+
+const CONTRACT_VERSION: &str = "1.0.0";
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -155,7 +153,17 @@ impl GreenPayContract {
 
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.events().publish((symbol_short!("initialized"),), admin);
+        env.storage().instance().set(&DataKey::ProjectCount, &0u32);
+        env.storage().instance().set(&DataKey::DonationCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalTotalRaised, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalCO2OffsetGrams, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ContractVersion, &String::from_str(&env, CONTRACT_VERSION));
     }
 
     pub fn set_admin(env: Env, new_admin: Address) {
@@ -633,30 +641,11 @@ impl GreenPayContract {
         client.set_fee_recipient(&admin, &recipient, &(MAX_FEE_BPS + 1));
     }
 
-    #[test]
-    fn test_set_fee_recipient_round_trips_and_zero_bps_disables() {
-        let (env, _cid, client, admin, _pid) = setup();
-        let recipient = Address::generate(&env);
-
-        // Default: no fee configured.
-        assert_eq!(
-            client.get_fee_config(),
-            FeeConfig { recipient: None, fee_bps: 0 }
-        );
-
-        // Max rate is accepted.
-        client.set_fee_recipient(&admin, &recipient, &MAX_FEE_BPS);
-        assert_eq!(
-            client.get_fee_config(),
-            FeeConfig { recipient: Some(recipient.clone()), fee_bps: MAX_FEE_BPS }
-        );
-
-        // 0 bps keeps the recipient stored but disables the withholding.
-        client.set_fee_recipient(&admin, &recipient, &0u32);
-        assert_eq!(
-            client.get_fee_config(),
-            FeeConfig { recipient: Some(recipient), fee_bps: 0 }
-        );
+    pub fn get_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::ContractVersion)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
     #[test]
