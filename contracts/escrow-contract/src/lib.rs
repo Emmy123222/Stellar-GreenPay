@@ -43,9 +43,9 @@ pub enum DataKey {
     ProposedAdmin,
 }
 
-#[contract]
 pub const RELEASE_AFTER_LEDGERS: u32 = 10;
 
+#[contract]
 pub struct EscrowContract;
 
 #[contractimpl]
@@ -169,11 +169,11 @@ impl EscrowContract {
         if job.disputed {
             panic!("Job is disputed; admin must resolve");
         }
-        if milestone_index >= job.milestones.len() as u32 {
+        if milestone_index >= job.milestones.len() {
             panic!("Invalid milestone index");
         }
 
-        let milestone = &job.milestones.get(milestone_index as usize).unwrap();
+        let milestone = &job.milestones.get(milestone_index).unwrap();
         if milestone.released {
             panic!("Milestone already released");
         }
@@ -186,21 +186,26 @@ impl EscrowContract {
         let contract_addr = env.current_contract_address();
         token_client.transfer(&contract_addr, &job.freelancer, &release_amount);
 
-        // Mark milestone as released
+        // Mark milestone as released (soroban Vec has no iter_mut/get_mut —
+        // mutate via index-based get/set)
         let mut updated_milestones = job.milestones.clone();
         let mut released_count = 0u32;
-        for (i, m) in updated_milestones.iter_mut().enumerate() {
-            if i as u32 == milestone_index {
+        let mut i: u32 = 0;
+        while i < updated_milestones.len() {
+            let mut m = updated_milestones.get(i).unwrap();
+            if i == milestone_index {
                 m.released = true;
             }
             if m.released {
                 released_count = released_count.checked_add(1).expect("released_count overflow");
             }
+            updated_milestones.set(i, m);
+            i = i.checked_add(1).expect("milestone index overflow");
         }
         job.milestones = updated_milestones;
 
         // Update job status
-        if released_count as usize == job.milestones.len() {
+        if released_count == job.milestones.len() {
             job.status = JobStatus::Completed;
         } else {
             job.status = JobStatus::PartiallyReleased;
@@ -301,10 +306,10 @@ impl EscrowContract {
         if env.ledger().sequence() < job.release_after {
             panic!("Release period not reached");
         }
-        if milestone_index >= job.milestones.len() as u32 {
+        if milestone_index >= job.milestones.len() {
             panic!("Invalid milestone index");
         }
-        let milestone = &job.milestones.get(milestone_index as usize).unwrap();
+        let milestone = &job.milestones.get(milestone_index).unwrap();
         if milestone.released {
             panic!("Milestone already released");
         }
@@ -317,7 +322,9 @@ impl EscrowContract {
 
         // Mark as released
         let mut updated_milestones = job.milestones.clone();
-        updated_milestones.get_mut(milestone_index as usize).unwrap().released = true;
+        let mut m = updated_milestones.get(milestone_index).unwrap();
+        m.released = true;
+        updated_milestones.set(milestone_index, m);
         job.milestones = updated_milestones;
 
         // Update status
@@ -408,7 +415,10 @@ mod tests {
 
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
-        let token = Address::generate(&env);
+        // Use a real Stellar asset token so create_job's transfer succeeds
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-1");
 
         // Create 3 milestones: 50%, 30%, 20%
@@ -482,7 +492,10 @@ mod tests {
 
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
-        let token = Address::generate(&env);
+        // Use a real Stellar asset token so create_job's transfer succeeds
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-dispute");
 
         let mut milestones = Vec::new(&env);

@@ -44,7 +44,7 @@ The current admin remains unchanged until the second step succeeds.
 ## Build & Test
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 cargo test
 ```
 

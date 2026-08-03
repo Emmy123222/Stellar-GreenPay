@@ -16,6 +16,7 @@ jest.mock("../middleware/rateLimiter", () => ({
 jest.mock("../services/email", () => ({
   sendUpdateNotifications: jest.fn().mockResolvedValue(undefined),
   sendAdminVerificationNotification: jest.fn().mockResolvedValue(undefined),
+  sendVerificationStatusNotification: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../services/storage", () => ({

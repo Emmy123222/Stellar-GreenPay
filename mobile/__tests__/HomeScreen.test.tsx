@@ -25,6 +25,20 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
+
+jest.mock('../utils/notifications', () => ({
+  getPushToken: jest.fn().mockResolvedValue(null),
+  getUnreadNotificationCount: jest.fn().mockResolvedValue(0),
+  setupNotificationListener: jest.fn(() => ({ remove: jest.fn() })),
+  setupNotificationResponseListener: jest.fn(() => ({ remove: jest.fn() })),
+}));
+
+jest.mock('expo-notifications', () => ({
+  setBadgeCountAsync: jest.fn().mockResolvedValue(true),
+  getBadgeCountAsync: jest.fn().mockResolvedValue(0),
+}));
+
+
 // Opt into the shared auto-mock at `__mocks__/utils/notifications.js`. Jest
 // does NOT auto-apply sibling `__mocks__/foo.js` for application-scoped
 // (non-`node_modules`) modules — the test must explicitly call
@@ -50,7 +64,13 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import { ThemeProvider } from '../app/theme';
+
 import HomeScreen from '../app/index';
+import { ThemeProvider } from '../app/theme';
+
+function wrap(element: React.ReactElement) {
+  return <ThemeProvider>{element}</ThemeProvider>;
+}
 
 /** Wrap in ThemeProvider so useTheme() doesn't throw. */
 async function renderWithTheme(ui: React.ReactElement) {
@@ -79,6 +99,7 @@ const MOCK_PROJECT = {
   status: 'active',
 };
 
+
 const MOCK_PROJECTS = [MOCK_PROJECT];
 
 // ── Animated mock ────────────────────────────────────────────────────────────
@@ -88,6 +109,7 @@ const MOCK_PROJECTS = [MOCK_PROJECT];
 // bridge level. Mirrors ProjectDetailScreen.test.tsx.
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 
+
 describe('HomeScreen', () => {
   beforeEach(() => {
     // `jest.clearAllMocks()` preserves implementations, so a previous
@@ -96,6 +118,39 @@ describe('HomeScreen', () => {
     jest.clearAllMocks();
     (axios.get as jest.Mock).mockReset();
   });
+
+
+  it('shows the header before data arrives', () => {
+    (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
+    const { getByText, queryByText } = render(wrap(<HomeScreen />));
+    // Header renders during the initial load...
+    expect(getByText('Stellar GreenPay')).toBeTruthy();
+    // ...but no project card is shown until data arrives.
+    expect(queryByText('Amazon Reforestation Initiative')).toBeNull();
+  });
+
+  it('renders the app title', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
+
+    const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
+  });
+
+  it('renders project cards with progress after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
+
+    const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => {
+      expect(getByText('Amazon Reforestation Initiative')).toBeTruthy();
+      expect(getByText('18420 / 50000 XLM')).toBeTruthy();
+      expect(getByText('147 donors')).toBeTruthy();
+    });
+  });
+
+  it('renders the project name after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
+
+    const { getByText } = render(wrap(<HomeScreen />));
 
   it('renders the header chrome while projects are loading', async () => {
     // Make the API never resolve so `loading` stays true and the skeleton
@@ -121,6 +176,7 @@ describe('HomeScreen', () => {
 
     const { getByText } = await act(async () => renderWithTheme(<HomeScreen />));
 
+
     await waitFor(() =>
       expect(getByText(MOCK_PROJECT.name)).toBeTruthy()
     );
@@ -132,11 +188,20 @@ describe('HomeScreen', () => {
     );
   });
 
+
+  it('renders project cards with an accessible label', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
+
+    const { getByLabelText } = render(wrap(<HomeScreen />));
+    await waitFor(() =>
+      expect(getByLabelText('View Amazon Reforestation Initiative project')).toBeTruthy()
+
   it('survives a network failure without rendering project data', async () => {
     (axios.get as jest.Mock).mockRejectedValue(new Error('network error'));
 
     const { queryByText, findByText } = await act(async () =>
       renderWithTheme(<HomeScreen />)
+
     );
 
     // Source has two failure branches: `networkError: true` shows
@@ -160,6 +225,11 @@ describe('HomeScreen', () => {
     const view = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() => expect(view.getByText(MOCK_PROJECT.name)).toBeTruthy());
 
+
+    const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
+
     expect(() => view.unmount()).not.toThrow();
+
   });
 });
