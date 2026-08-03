@@ -5,6 +5,16 @@
 import { renderHook, act, waitFor } from '@testing-library/react-native';
 import * as SecureStore from 'expo-secure-store';
 
+
+// The real @stellar/stellar-sdk touches Axios at module load and crashes the
+// harness if axios.defaults is undefined, so stub the single surface we use.
+// The fixtures below define the only "valid" address the tests exercise.
+const TEST_VALID_PUBLIC_KEY =
+  'GABCXYZ1234567890123456789012345678901234567890123456789012345';
+jest.mock('@stellar/stellar-sdk', () => ({
+  StrKey: {
+    isValidEd25519PublicKey: (key: unknown) => key === TEST_VALID_PUBLIC_KEY,
+
 // useWallet.ts imports `StrKey` from `@stellar/stellar-sdk` at module-load
 // time. The real package pulls axios into Horizon-baked call paths and
 // breaks under jest-expo@57's jsdom-light env. We only need the one method
@@ -15,6 +25,7 @@ jest.mock('@stellar/stellar-sdk', () => ({
   StrKey: {
     isValidEd25519PublicKey: (key: string) =>
       typeof key === 'string' && key.startsWith('G') && key.length === 56,
+
   },
 }));
 

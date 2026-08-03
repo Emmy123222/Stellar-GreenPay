@@ -11,6 +11,12 @@ export function useWallet() {
 
   useEffect(() => {
     SecureStore.getItemAsync(WALLET_KEY)
+
+      .then((stored) => setPublicKey(stored))
+      .catch(() => {
+        // Non-critical — default to a disconnected wallet if storage fails.
+      })
+
       .then((stored: string | null) => setPublicKey(stored))
       // `finally` alone does not consume the rejection — without `.catch`,
       // any storage error (e.g. Keychain unavailable on a stale device)
@@ -19,6 +25,7 @@ export function useWallet() {
       // the error here; production code still sees the next render cycle
       // with `loading=false` and can fall back to "Connect wallet" UI.
       .catch(() => undefined)
+
       .finally(() => setLoading(false));
   }, []);
 
@@ -28,6 +35,14 @@ export function useWallet() {
 
     if (!StrKey.isValidEd25519PublicKey(trimmed)) {
       setError('Invalid Stellar address. Must start with G and be 56 characters.');
+      return false;
+    }
+
+
+    try {
+      await SecureStore.setItemAsync(WALLET_KEY, trimmed);
+    } catch {
+      // Persistence failed — stay disconnected rather than half-connected.
       return false;
     }
 
@@ -44,11 +59,22 @@ export function useWallet() {
       return false;
     }
 
+
     setPublicKey(trimmed);
     return true;
   }, []);
 
   const disconnect = useCallback(async () => {
+
+    try {
+      await SecureStore.deleteItemAsync(WALLET_KEY);
+    } catch {
+      // Storage failure is non-fatal; still clear the in-memory key below so
+      // the user is never left "connected" after choosing to disconnect.
+    } finally {
+      setPublicKey(null);
+    }
+
     // Storage delete is best-effort — local state must still reset so the
     // "Connect wallet" UI becomes reachable even if the Keychain entry
     // couldn't be removed (stale device, OS-level migration, etc.).
@@ -58,6 +84,7 @@ export function useWallet() {
       // intentionally swallowed; see comment above
     }
     setPublicKey(null);
+
   }, []);
 
   return { publicKey, loading, error, connect, disconnect };

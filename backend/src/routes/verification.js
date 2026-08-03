@@ -34,7 +34,7 @@ const pool = require("../db/pool");
 const { adminRequired } = require("../middleware/auth");
 const { logAdminAction } = require("../services/audit");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { sendAdminVerificationNotification } = require("../services/email");
+const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
 
 const submitLimiter = createRateLimiter(10, 15); // 10 submissions / 15 min / IP
@@ -402,7 +402,18 @@ router.patch("/:id/status", adminRequired, async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, data: mapRequestRow(updated.rows[0]) });
+    const updatedRow = mapRequestRow(updated.rows[0]);
+
+    // Fire-and-forget status-change email to the submitter; failures here must
+    // NOT block the PATCH success response.
+    if (["approved", "rejected", "in_review"].includes(status)) {
+      sendVerificationStatusNotification(updatedRow, status).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[verification] status-change notification failed:", err.message);
+      });
+    }
+
+    res.json({ success: true, data: updatedRow });
   } catch (e) {
     next(e);
   }
