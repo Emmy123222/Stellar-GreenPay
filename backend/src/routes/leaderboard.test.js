@@ -15,6 +15,14 @@ const request = require("supertest");
 const express = require("express");
 const leaderboardRouter = require("./leaderboard");
 
+// leaderboard.js calls createRateLimiter(30, 1) exactly once, at module load
+// time (`const leaderboardLimiter = createRateLimiter(30, 1);`). That call
+// already happened on the `require` above. jest.clearAllMocks() in later
+// beforeEach hooks wipes createRateLimiter.mock.calls, so we snapshot the
+// call args here, before any clearAllMocks runs, and assert against the
+// snapshot instead of the live mock history.
+const rateLimiterInitCall = createRateLimiter.mock.calls[0];
+
 function buildApp() {
   const app = express();
   app.use(express.json());
@@ -25,7 +33,9 @@ function buildApp() {
   return app;
 }
 
-// Rows are already in DESC order, simulating what the DB ORDER BY returns.
+// Rows are already in DESC order by total_donated_xlm, simulating what the
+// DB's ROW_NUMBER()-based query returns. `rank` is included on each row
+// because leaderboard.js reads it directly from the query result (p.rank).
 const SORTED_DONORS = [
   {
     public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
@@ -35,6 +45,7 @@ const SORTED_DONORS = [
     total_co2_offset_kg: "1250.5",
     impact_score: "3525.375",
     projects_supported: 4,
+    rank: 1,
   },
   {
     public_key: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
@@ -44,6 +55,7 @@ const SORTED_DONORS = [
     total_co2_offset_kg: "180",
     impact_score: "525.54",
     projects_supported: 2,
+    rank: 2,
   },
   {
     public_key: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
@@ -53,6 +65,7 @@ const SORTED_DONORS = [
     total_co2_offset_kg: "0",
     impact_score: "8.4",
     projects_supported: 1,
+    rank: 3,
   },
 ];
 
@@ -176,28 +189,45 @@ describe("GET /api/leaderboard — limit handling", () => {
     pool.query.mockResolvedValue({ rows: [] });
   });
 
-  test("passes a default limit of 20 to the database when not specified", async () => {
+  // The route reads `cursor` (default 0) and `limit` (default 20, capped at
+  // 100), then calls pool.query(sql, [cursor, limit]) — cursor-based
+  // pagination. Every assertion below checks the full two-element params
+  // array, not just the limit.
+
+  test("passes a default cursor of 0 and limit of 20 when neither is specified", async () => {
     await request(app).get("/api/leaderboard").expect(200);
 
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [0, 20]);
   });
 
   test("respects a custom limit within bounds", async () => {
     await request(app).get("/api/leaderboard?limit=5").expect(200);
 
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [5]);
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [0, 5]);
   });
 
   test("caps the limit at 100 when a larger value is requested", async () => {
     await request(app).get("/api/leaderboard?limit=500").expect(200);
 
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [100]);
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [0, 100]);
   });
 
   test("falls back to default limit of 20 when limit is non-numeric", async () => {
     await request(app).get("/api/leaderboard?limit=abc").expect(200);
 
-    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [20]);
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [0, 20]);
+  });
+
+  test("respects a custom cursor value", async () => {
+    await request(app).get("/api/leaderboard?cursor=40").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [40, 20]);
+  });
+
+  test("falls back to default cursor of 0 when cursor is non-numeric", async () => {
+    await request(app).get("/api/leaderboard?cursor=abc").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(expect.any(String), [0, 20]);
   });
 });
 
@@ -406,7 +436,11 @@ describe("GET /api/leaderboard/history", () => {
 
 describe("GET /api/leaderboard — rate limiting (issue #695)", () => {
   test("createRateLimiter is called with (30, 1) — 30 req/min per IP", () => {
-    expect(createRateLimiter).toHaveBeenCalledWith(30, 1);
+    // See the module-load-time comment near the top of this file: this
+    // checks the snapshot taken immediately after require(), since later
+    // beforeEach hooks call jest.clearAllMocks() and would otherwise erase
+    // the one-time call record.
+    expect(rateLimiterInitCall).toEqual([30, 1]);
   });
 
   test("GET / returns 429 with Retry-After when the limiter blocks the request", async () => {
