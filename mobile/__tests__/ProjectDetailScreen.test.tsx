@@ -34,6 +34,11 @@ jest.mock('../utils/notifications', () => ({
   getPushToken: jest.fn(),
   followProject: jest.fn(),
   unfollowProject: jest.fn(),
+  markNotificationsSeen: jest.fn().mockResolvedValue(''),
+}));
+
+jest.mock('expo-notifications', () => ({
+  setBadgeCountAsync: jest.fn().mockResolvedValue(true),
 }));
 
 jest.mock('../utils/recurringDonations', () => ({
