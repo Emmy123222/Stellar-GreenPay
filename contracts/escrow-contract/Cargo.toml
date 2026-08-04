@@ -14,12 +14,4 @@ soroban-sdk = "27.0.3"
 [dev-dependencies]
 soroban-sdk = { version = "27.0.3", features = ["testutils"] }
 
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
+# [profile.release] is configured once at the workspace root (contracts/Cargo.toml)

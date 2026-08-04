@@ -20,6 +20,16 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
     <div className="relative group">
       <Link href={`/projects/${project.id}`}>
         <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
+          {project.imageUrl ? (
+            <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
+              <img
+                src={project.imageUrl}
+                alt={project.name}
+                className="h-40 w-full object-cover"
+              />
+            </div>
+          ) : null}
+
           {/* Category icon + badges */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -103,12 +113,9 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                   ?
                 </button>
                 <span className="tooltip-text" role="tooltip">
-                  Estimated based on {project.co2PerXLM || project.co2PerXlm || 0} g CO₂ offset per XLM donated to this project
+                  Estimated based on {(project as any).co2PerXLM || (project as any).co2PerXlm || project.co2_per_xlm || 0} g CO₂ offset per XLM donated to this project
                 </span>
               </span>
-            </div>
-            <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">
-              Donate →
             </span>
           </div>
 	          <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">

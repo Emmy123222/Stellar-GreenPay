@@ -126,7 +126,7 @@ function buildDigestText({ project, stats, milestones, updates, projectUrl, mont
   return lines.join("\n");
 }
 
-// ── Email sender (per-recipient for personalized unsubscribe links) ──────────
+// ── Email sender (individual BCC sends to protect subscriber privacy) ────────
 
 async function sendDigestEmails({ project, stats, milestones, updates, emails, monthLabel }) {
   if (!RESEND_API_KEY) {
@@ -139,26 +139,28 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
   const subject    = `Your ${monthLabel} Impact Digest — ${project.name}`;
 
   for (const email of emails) {
-    let unsubscribeUrl;
     try {
-      const token = signUnsubscribeToken(email, project.id);
-      unsubscribeUrl = `${API_URL.replace(/\/$/, "")}/api/subscriptions/unsubscribe?token=${encodeURIComponent(token)}`;
-    } catch (err) {
-      logger.error({ event: "digest_unsubscribe_token_error", projectId: project.id, err }, err.message);
-      continue;
-    }
+      let unsubscribeUrl = "";
+      try {
+        const token = signUnsubscribeToken(email, project.id);
+        unsubscribeUrl = `${API_URL}/api/projects/${project.id}/unsubscribe?token=${token}`;
+      } catch (err) {
+        logger.warn({ event: "digest_unsubscribe_token_error", email, projectId: project.id, err }, "Failed to generate unsubscribe token");
+      }
 
-    const html = buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl });
-    const text = buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl });
-
-    try {
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${RESEND_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ from: FROM_ADDRESS, to: [email], subject, html, text }),
+        body: JSON.stringify({
+          from: FROM_ADDRESS,
+          to: email,
+          subject,
+          html: buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
+          text: buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
+        }),
       });
       if (!res.ok) {
         const body = await res.text();

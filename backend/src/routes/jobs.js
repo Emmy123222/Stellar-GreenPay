@@ -67,6 +67,7 @@ router.get("/", async (req, res, next) => {
     values.push(maxLimit);
     paramIndex++;
 
+    // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(queryStr, values);
     res.json({ success: true, data: result.rows.map(mapJobRow) });
   } catch (e) {

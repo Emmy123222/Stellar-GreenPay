@@ -178,41 +178,6 @@ export async function unfollowProject(
   return data.data;
 }
 
-export interface FollowResponse {
-  isFollowing: boolean;
-  followCount: number;
-}
-
-/**
- * Follow a project. Returns the updated isFollowing flag and follower count.
- * Idempotent — safe to call even if already following.
- */
-export async function followProject(
-  projectId: string,
-  walletAddress: string,
-): Promise<FollowResponse> {
-  const { data } = await api.post<{ success: boolean; data: FollowResponse }>(
-    `/api/projects/${projectId}/follow`,
-    { walletAddress },
-  );
-  return data.data;
-}
-
-/**
- * Unfollow a project. Returns the updated isFollowing flag and follower count.
- * Idempotent — safe to call even if not currently following.
- */
-export async function unfollowProject(
-  projectId: string,
-  walletAddress: string,
-): Promise<FollowResponse> {
-  const { data } = await api.delete<{ success: boolean; data: FollowResponse }>(
-    `/api/projects/${projectId}/follow`,
-    { data: { walletAddress } },
-  );
-  return data.data;
-}
-
 export interface AISummaryResponse {
   aiSummary: string;
   aiSummaryGeneratedAt: string;
@@ -401,7 +366,7 @@ export async function upsertProfile(
  */
 export async function fetchLeaderboard(
   limit = 20,
-  period: "all" | "month" | "year" = "all",
+  period: "all" | "week" | "month" | "year" = "all",
 ) {
   const { data } = await api.get<{
     success: boolean;
@@ -682,8 +647,15 @@ export interface ImpactCategoryBreakdownItem {
   co2OffsetKg: number;
 }
 
+export interface ImpactCountryBreakdownItem {
+  country: string;
+  totalDonationsXLM: string;
+  donorCount: number;
+}
+
 export interface ImpactGlobalStats extends ImpactProjectStats {
   breakdownByCategory: ImpactCategoryBreakdownItem[];
+  countryBreakdown: ImpactCountryBreakdownItem[];
 }
 
 export interface ImpactDonorStats {
@@ -840,6 +812,21 @@ export async function submitVerificationRequest(
   return data.data;
 }
 
+export async function fetchVerificationRequests(
+  status?: string,
+  adminToken?: string,
+): Promise<VerificationRequestResponse[]> {
+  const params: Record<string, string> = {};
+  if (status) params.status = status;
+  const headers: Record<string, string> = {};
+  if (adminToken) headers.Authorization = `Bearer ${adminToken}`;
+  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
+    "/api/verification-requests",
+    { params, headers },
+  );
+  return data.data;
+}
+
 export async function fetchMyVerificationRequests(
   walletAddress: string,
 ): Promise<VerificationRequestResponse[]> {
@@ -934,24 +921,26 @@ export async function uploadSupportingDocument(file: File): Promise<UploadedDocu
   return data.data;
 }
 
-export async function fetchVerificationRequests(
-  params?: { status?: string; limit?: number; page?: number }
-): Promise<VerificationRequestResponse[]> {
-  const { data } = await api.get<{ success: boolean; data: VerificationRequestResponse[] }>(
-    "/api/verification-requests",
-    { params },
+export async function updateProjectImage(projectId: string, imageUrl: string, adminAddress: string) {
+  const { data } = await api.patch<{ success: boolean; data: ClimateProject }>(
+    `/api/projects/${projectId}`,
+    { imageUrl, adminAddress },
   );
   return data.data;
 }
 
-export async function updateVerificationRequestStatus(
-  id: string,
-  status: "pending" | "in_review" | "approved" | "rejected",
-  reviewerNotes?: string,
-): Promise<VerificationRequestResponse> {
-  const { data } = await api.patch<{ success: boolean; data: VerificationRequestResponse }>(
-    `/api/verification-requests/${id}/status`,
-    { status, reviewerNotes },
+export async function fetchTagSuggestions(query: string): Promise<string[]> {
+  const { data } = await api.get<{ success: boolean; data: string[] }>(
+    "/api/tags/suggestions",
+    { params: { q: query } },
   );
   return data.data;
+}
+
+export async function notifyAdmin(payload: AdminNotificationPayload): Promise<{ success: boolean }> {
+  const { data } = await api.post<{ success: boolean }>(
+    "/api/admin/notify",
+    payload,
+  );
+  return data;
 }
