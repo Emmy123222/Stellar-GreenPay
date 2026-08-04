@@ -5,7 +5,7 @@
 import { useState, useEffect } from "react";
 import Head from "next/head";
 import Link from "next/link";
-import { getPublicKey } from "@stellar/freighter-api";
+import { getAddress as getPublicKey } from "@stellar/freighter-api";
 import { shortenAddress } from "@/utils/format";
 import { fetchProjects, recordDonation } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
@@ -43,8 +43,8 @@ export default function BridgePage() {
 
   const loadStellarAddress = async () => {
     try {
-      const pk = await getPublicKey();
-      setStellarAddress(pk);
+      const pk: any = await getPublicKey();
+      setStellarAddress(typeof pk === 'string' ? pk : pk?.address || null);
     } catch (err) {
       console.log("Wallet not connected");
     }
