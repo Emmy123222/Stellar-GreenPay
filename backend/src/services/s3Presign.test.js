@@ -49,7 +49,7 @@ function clearS3Env() {
 const SAVED = {};
 beforeAll(() => {
   ["AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "S3_BUCKET",
-   "UPLOAD_MAX_BYTES", "PRESIGN_EXPIRY_SECONDS"].forEach((k) => {
+    "UPLOAD_MAX_BYTES", "PRESIGN_EXPIRY_SECONDS"].forEach((k) => {
     SAVED[k] = process.env[k];
   });
 });
