@@ -139,7 +139,35 @@ router.post("/", submitLimiter, async (req, res, next) => {
     }
 
     const email = typeof body.contactEmail === "string" ? body.contactEmail.trim().toLowerCase() : "";
-    if (!EMAIL_RE.test(email)) errors.push("contactEmail must be a valid email");
+    if (!EMAIL_RE.test(email)) {
+      errors.push("contactEmail must be a valid email");
+    } else if (website) {
+      // Prevent org email spoofing: the contact email domain must match the
+      // organisation's website hostname. This stops an attacker from claiming
+      // to represent e.g. "greenworldfund.org" while providing a personal
+      // Gmail address. We compare only the registered domain+TLD so that
+      // subdomain email addresses (e.g. team@mail.greenworldfund.org) are
+      // accepted for submissions about https://greenworldfund.org.
+      const emailDomain = email.split("@")[1];
+      let websiteHost;
+      try {
+        websiteHost = new URL(website).hostname.toLowerCase();
+      } catch {
+        websiteHost = null;
+      }
+      if (websiteHost && emailDomain) {
+        // Strip "www." prefix for comparison
+        const normalise = (h) => h.replace(/^www\./, "");
+        const normEmail = normalise(emailDomain);
+        const normSite  = normalise(websiteHost);
+        // Accept exact match or subdomain of the website host
+        if (normEmail !== normSite && !normEmail.endsWith("." + normSite)) {
+          errors.push(
+            `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
+          );
+        }
+      }
+    }
 
     const walletAddress = typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
     if (!STELLAR_ADDRESS_RE.test(walletAddress)) {

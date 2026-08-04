@@ -1580,21 +1580,26 @@ router.get("/:id/badge-holders", async (req, res, next) => {
   }
 });
 
+const WEBHOOK_SECRET_MIN_LENGTH = 32;
+const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
+
 /**
  * PATCH /api/projects/:id/webhook
- * Update the webhook URL and secret for a project. Auto-generates a secret
- * when one is not provided. Returns the updated webhook config.
+ * Set or clear the webhook URL and secret for milestone notifications.
+ * Requires the project's wallet_address as the Bearer token subject so that
+ * only the project owner (not any admin) can configure this.
+ *
+ * Body:
+ *   webhookUrl    {string|null}  — https:// URL to deliver milestone events to.
+ *   webhookSecret {string|null}  — HMAC-SHA256 signing secret (≥ 32 chars).
+ *
+ * Pass null / omit both to clear the existing webhook configuration.
  */
-router.patch("/:id/webhook", async (req, res, next) => {
+router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
   try {
-    const { webhookUrl, webhookSecret } = req.body || {};
-
-    if (webhookUrl !== null && webhookUrl !== undefined && webhookUrl !== "") {
-      try {
-        new URL(webhookUrl);
-      } catch {
-        return res.status(400).json({ error: "Invalid webhook URL" });
-      }
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(req.params.id)) {
+      return res.status(404).json({ error: "Project not found" });
     }
 
     const projectResult = await pool.query(
@@ -1605,79 +1610,56 @@ router.patch("/:id/webhook", async (req, res, next) => {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    const url = webhookUrl || null;
-    let secret = webhookSecret || null;
-    if (url && !secret) {
-      secret = crypto.randomBytes(32).toString("hex");
+    const { webhookUrl, webhookSecret } = req.body || {};
+
+    // Allow clearing the webhook by passing null / empty values for both fields.
+    const clearing = (webhookUrl == null || webhookUrl === "") &&
+                     (webhookSecret == null || webhookSecret === "");
+
+    if (!clearing) {
+      if (typeof webhookUrl !== "string" || !WEBHOOK_URL_RE.test(webhookUrl)) {
+        return res.status(400).json({
+          error: "webhookUrl must be a valid https:// URL",
+        });
+      }
+      if (typeof webhookSecret !== "string" ||
+          webhookSecret.length < WEBHOOK_SECRET_MIN_LENGTH) {
+        return res.status(400).json({
+          error: `webhookSecret must be at least ${WEBHOOK_SECRET_MIN_LENGTH} characters`,
+        });
+      }
     }
 
-    const updated = await updateWebhook(req.params.id, url, secret);
-    res.json({ success: true, data: updated });
-  } catch (e) {
-    next(e);
-  }
-});
-
-/**
- * POST /api/projects/:id/webhook/test
- * Sends a test event to the project's configured webhook URL.
- * Returns the HTTP status code from the remote endpoint.
- */
-router.post("/:id/webhook/test", async (req, res, next) => {
-  try {
-    const projectResult = await pool.query(
-      "SELECT id, webhook_url, webhook_secret FROM projects WHERE id = $1",
-      [req.params.id],
+    const result = await pool.query(
+      `UPDATE projects
+          SET webhook_url    = $1,
+              webhook_secret = $2,
+              updated_at     = NOW()
+        WHERE id = $3
+        RETURNING id, webhook_url`,
+      [
+        clearing ? null : webhookUrl.trim(),
+        clearing ? null : webhookSecret,
+        req.params.id,
+      ],
     );
-    const project = projectResult.rows[0];
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
-    }
-    if (!project.webhook_url || !project.webhook_secret) {
-      return res.status(400).json({ error: "No webhook configured for this project" });
-    }
 
-    const payload = {
-      event: "webhook.test",
-      projectId: req.params.id,
-      message: "This is a test webhook delivery from GreenPay.",
-      timestamp: new Date().toISOString(),
-    };
-
-    const body = JSON.stringify(payload);
-    const urlObj = new URL(project.webhook_url);
-    const lib = urlObj.protocol === "https:" ? require("https") : require("http");
-
-    const statusCode = await new Promise((resolve, reject) => {
-      const options = {
-        hostname: urlObj.hostname,
-        port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
-        path: urlObj.pathname + urlObj.search,
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
-          "User-Agent": "GreenPay-Webhook/1.0",
-        },
-        timeout: 10000,
-      };
-
-      const req = lib.request(options, (response) => {
-        response.on("data", () => {});
-        response.on("end", () => resolve(response.statusCode));
-      });
-
-      req.on("error", (err) => reject(err));
-      req.on("timeout", () => {
-        req.destroy();
-        reject(new Error("Request timed out"));
-      });
-
-      req.write(body);
-      req.end();
+    logAdminAction({
+      actor: (req.admin && req.admin.sub) || "admin",
+      action: clearing ? "project.webhook.cleared" : "project.webhook.updated",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { webhookUrl: clearing ? null : webhookUrl.trim() },
+      ipAddress: req.ip,
     });
 
-    res.json({ success: true, statusCode });
+    res.json({
+      success: true,
+      data: {
+        id: result.rows[0].id,
+        webhookUrl: result.rows[0].webhook_url || null,
+      },
+    });
   } catch (e) {
     next(e);
   }

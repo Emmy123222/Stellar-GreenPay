@@ -471,10 +471,9 @@ async function checkAndDeliverMilestones(projectId) {
     }
     client.release();
 
-    if (project.webhook_url && project.webhook_secret) {
-      // Fire all webhook deliveries concurrently so a slow DNS timeout on one
-      // URL doesn't block the rest. Each attempt is persisted for history.
-      const deliveries = milestones.map((milestone) => {
+    if (project.webhook_url && project.webhook_secret &&
+        project.webhook_secret.length >= 32) {
+      for (const milestone of milestones) {
         const payload = {
           event: "milestone.reached",
           projectId,
