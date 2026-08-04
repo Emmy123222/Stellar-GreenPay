@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   public_key TEXT PRIMARY KEY,
   display_name TEXT,
   bio TEXT,
+  avatar_url TEXT,
   total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   projects_supported INTEGER NOT NULL DEFAULT 0,
   badges JSONB NOT NULL DEFAULT '[]'::JSONB,

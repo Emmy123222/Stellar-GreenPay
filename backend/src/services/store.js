@@ -220,6 +220,7 @@ function mapProfileRow(row) {
     publicKey: row.public_key,
     displayName: row.display_name,
     bio: row.bio,
+    avatarUrl: row.avatar_url || null,
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],

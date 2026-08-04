@@ -16,11 +16,25 @@ function validateKey(k) {
 
 const profilePostLimiter = createRateLimiter(20, 1);
 
+const avatarUrlField = z
+  .union([z.string().url().max(2048), z.literal(""), z.null()])
+  .optional();
+
 const profileSchema = z.object({
   publicKey: z.string().min(1, "publicKey is required"),
   displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
   bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
+  avatarUrl: avatarUrlField,
 });
+
+const profilePatchSchema = z.object({
+  displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
+  bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
+  avatarUrl: avatarUrlField,
+}).refine(
+  (body) => body.displayName !== undefined || body.bio !== undefined || body.avatarUrl !== undefined,
+  { message: "At least one of displayName, bio, or avatarUrl is required" },
+);
 
 router.get("/:publicKey", async (req, res, next) => {
   try {
@@ -57,23 +71,72 @@ router.get("/:publicKey", async (req, res, next) => {
 
 router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, res, next) => {
   try {
-    const { publicKey, displayName, bio } = req.body;
+    const { publicKey, displayName, bio, avatarUrl } = req.body;
     validateKey(publicKey);
     const trimmedDisplayName = displayName?.trim().slice(0, 30) || null;
     const trimmedBio = bio?.trim().slice(0, 300) || null;
+    // null/empty keeps existing avatar on conflict via COALESCE; a URL sets it.
+    const normalizedAvatarUrl = avatarUrl ? String(avatarUrl).trim() : null;
 
     const result = await pool.query(
       `INSERT INTO profiles (
-        public_key, display_name, bio, total_donated_xlm, projects_supported, badges, created_at, updated_at
+        public_key, display_name, bio, avatar_url, total_donated_xlm, projects_supported, badges, created_at, updated_at
       )
-      VALUES ($1, $2, $3, 0, 0, '[]'::jsonb, NOW(), NOW())
+      VALUES ($1, $2, $3, $4, 0, 0, '[]'::jsonb, NOW(), NOW())
       ON CONFLICT (public_key) DO UPDATE SET
         display_name = COALESCE($2, profiles.display_name),
         bio = COALESCE($3, profiles.bio),
+        avatar_url = COALESCE($4, profiles.avatar_url),
         updated_at = NOW()
       RETURNING *`,
-      [publicKey, trimmedDisplayName, trimmedBio],
+      [publicKey, trimmedDisplayName, trimmedBio, normalizedAvatarUrl],
     );
+
+    res.json({ success: true, data: mapProfileRow(result.rows[0]) });
+  } catch (e) { next(e); }
+});
+
+/**
+ * PATCH /api/profiles/:publicKey
+ * Partially update displayName, bio, and/or avatarUrl for an existing profile.
+ * Passing avatarUrl as "" or null clears the avatar.
+ */
+router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema), async (req, res, next) => {
+  try {
+    validateKey(req.params.publicKey);
+
+    const sets = [];
+    const values = [];
+
+    if (req.body.displayName !== undefined) {
+      values.push(req.body.displayName?.trim().slice(0, 30) || null);
+      sets.push(`display_name = $${values.length}`);
+    }
+    if (req.body.bio !== undefined) {
+      values.push(req.body.bio?.trim().slice(0, 300) || null);
+      sets.push(`bio = $${values.length}`);
+    }
+    if (req.body.avatarUrl !== undefined) {
+      const avatar = req.body.avatarUrl === "" || req.body.avatarUrl === null
+        ? null
+        : String(req.body.avatarUrl).trim();
+      values.push(avatar);
+      sets.push(`avatar_url = $${values.length}`);
+    }
+
+    sets.push("updated_at = NOW()");
+    values.push(req.params.publicKey);
+
+    const result = await pool.query(
+      `UPDATE profiles SET ${sets.join(", ")} WHERE public_key = $${values.length} RETURNING *`,
+      values,
+    );
+
+    if (!result.rows[0]) {
+      const e = new Error("Profile not found");
+      e.status = 404;
+      throw e;
+    }
 
     res.json({ success: true, data: mapProfileRow(result.rows[0]) });
   } catch (e) { next(e); }
