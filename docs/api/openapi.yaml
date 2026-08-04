@@ -400,6 +400,17 @@ components:
         updatedAt:
           type: string
           format: date-time
+    JobStats:
+      type: object
+      properties:
+        totalJobsInEscrow:
+          type: integer
+        totalJobsCompleted:
+          type: integer
+        totalEscrowXLM:
+          type: string
+        totalReleasedXLM:
+          type: string
     StatsGlobal:
       type: object
       properties:
@@ -1610,6 +1621,18 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Job'
+  /api/jobs/stats:
+    get:
+      tags: [Jobs]
+      summary: Get escrow marketplace aggregate metrics
+      description: Returns total jobs in escrow, completed jobs, and aggregate XLM amounts. Cached for 60 seconds.
+      responses:
+        '200':
+          description: Aggregate job statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStats'
   /api/jobs/{id}/release:
     patch:
       tags: [Jobs]
