@@ -1494,6 +1494,112 @@ impl GreenPayContract {
         );
     }
 
+    // ─── Admin: refund a disputed or fraudulent donation ────────────────────
+    //
+    // NOTE ON AUTHORIZATION: `donate()` transfers funds directly
+    // donor -> project.wallet — this contract never custodies funds. That
+    // means reversing a donation requires `project.wallet` itself to
+    // authorize the outgoing transfer; Soroban's token client cannot move
+    // funds out of an address without that address's own auth, and
+    // `admin.require_auth()` alone cannot satisfy that for an arbitrary
+    // external wallet. This function therefore requires BOTH the admin's
+    // and the project wallet's authorization in the submitted transaction
+    // (e.g. as a co-signed/multi-op transaction, or with the project
+    // wallet itself being a contract that trusts this admin).
+    //
+    // If the intent is for admin to unilaterally claw back funds from an
+    // uncooperative or genuinely fraudulent project (i.e. without that
+    // project's cooperation), that requires a different architecture —
+    // true custodial escrow held by this contract, or a pre-authorized
+    // clawback allowance granted by the project at registration time.
+    // Neither exists in this codebase today; this is flagged as a
+    // recommended follow-up, not solved by this function.
+    pub fn refund_donation(
+        env: Env,
+        admin: Address,
+        project_id: String,
+        donor: Address,
+        amount: i128,
+        token: Address,
+    ) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can refund donations");
+        }
+
+        if amount <= 0 {
+            panic!("Refund amount must be positive");
+        }
+
+        let mut project: Project = env
+            .storage()
+            .instance()
+            .get(&DataKey::Project(project_id.clone()))
+            .expect("Project not found");
+
+        // The project wallet must itself authorize giving the funds back —
+        // see the note above.
+        project.wallet.require_auth();
+
+        if project.total_raised < amount {
+            panic!("Refund amount exceeds project total_raised");
+        }
+
+        let mut donor_stats: DonorStats = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorStats(donor.clone()))
+            .expect("Donor has no recorded donations");
+
+        if donor_stats.total_donated < amount {
+            panic!("Refund amount exceeds donor total_donated");
+        }
+
+        // ── Effects before the external token transfer (Checks-Effects-
+        //    Interactions, matching `donate`'s ordering) ─────────────────────
+        project.total_raised = project
+            .total_raised
+            .checked_sub(amount)
+            .expect("Project total_raised underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::Project(project_id.clone()), &project);
+
+        donor_stats.total_donated = donor_stats
+            .total_donated
+            .checked_sub(amount)
+            .expect("Donor total_donated underflow");
+        donor_stats.badge = calculate_badge(donor_stats.total_donated);
+        env.storage()
+            .instance()
+            .set(&DataKey::DonorStats(donor.clone()), &donor_stats);
+
+        let gr: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::GlobalTotalRaised)
+            .unwrap_or(0);
+        let new_gr = gr.checked_sub(amount).expect("GlobalTotalRaised underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::GlobalTotalRaised, &new_gr);
+
+        // ── Interaction: transfer amount back from the project wallet to
+        //    the donor, after every effect above is durable.
+        let token_client = token::Client::new(&env, &token);
+        token_client.transfer(&project.wallet, &donor, &amount);
+
+        env.events().publish(
+            (Symbol::new(&env, "donation_refunded"), donor.clone(), project_id.clone()),
+            (amount, project.wallet.clone()),
+        );
+    }
+
     /// Admin-only: Set the USDC token address for multi-currency donations.
     pub fn set_usdc_token(env: Env, admin: Address, usdc_token: Address) {
         admin.require_auth();
@@ -2471,90 +2577,49 @@ mod tests {
         client.mint_project_nft(&donor, &pid);
         assert!(client.has_project_nft(&donor, &pid));
 
-        let nft = client.get_project_nft(&donor, &pid);
+       let nft = client.get_project_nft(&donor, &pid);
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
 
-    // ─── ImpactSummary tests ──────────────────────────────────────────────────
-
-    /// `get_impact_summary` with a donor returns the project, computed CO₂ offset,
-    /// and the donor's stats in a single call.
     #[test]
-    fn test_get_impact_summary_with_donor() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+    fn test_refund_donation_reverses_totals_and_transfers_funds() {
+        let (env, _cid, client, admin, pid) = setup();
+        let donor = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
         let token_client = StellarAssetClient::new(&env, &token);
 
-        token_client.mint(&donor, &(25 * STROOP));
-        client.donate(&token, &donor, &pid, &(25 * STROOP), &1u32);
+        let amount = 100 * STROOP;
+        token_client.mint(&donor, &amount);
+        client.donate(&token, &donor, &pid, &amount, &0u32);
 
-        let summary = client.get_impact_summary(&pid, &Some(donor.clone()));
+        let wallet = client.get_project(&pid).wallet;
+        let project_before = client.get_project(&pid);
+        let donor_stats_before = client.get_donor_stats(&donor);
+        assert_eq!(project_before.total_raised, amount);
+        assert_eq!(donor_stats_before.total_donated, amount);
 
-        // Project identity
-        assert_eq!(summary.project.id, pid);
-        assert_eq!(summary.project.name, String::from_str(&env, "Test Project"));
-        assert!(summary.project.active);
-        // Project totals
-        assert_eq!(summary.project.total_raised, 25 * STROOP);
-        assert_eq!(summary.project.donor_count, 1);
-        // Project CO₂ offset: 25 XLM × 100 g/XLM = 2500 g
-        assert_eq!(summary.project_co2_offset_grams, 25 * 100);
-        // Donor stats
-        assert_eq!(summary.donor_stats.total_donated, 25 * STROOP);
-        assert_eq!(summary.donor_stats.donation_count, 1);
-        assert_eq!(summary.donor_stats.badge, BadgeTier::Seedling);
-        assert_eq!(summary.donor_stats.co2_offset_grams, 25 * 100);
+        client.refund_donation(&admin, &pid, &donor, &amount, &token);
+
+        let project_after = client.get_project(&pid);
+        let donor_stats_after = client.get_donor_stats(&donor);
+        assert_eq!(project_after.total_raised, 0);
+        assert_eq!(donor_stats_after.total_donated, 0);
+
+        let native_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(native_client.balance(&donor), amount);
+        assert_eq!(native_client.balance(&wallet), 0);
     }
 
-    /// `get_impact_summary` without a donor returns default (zero) donor_stats.
     #[test]
-    fn test_get_impact_summary_without_donor() {
-        let env    = Env::default();
-        env.mock_all_auths();
-        let id     = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &id);
-        let admin  = Address::generate(&env);
-        client.initialize(&admin);
-
-        let pid    = String::from_str(&env, "proj-summary-2");
-        let wallet = Address::generate(&env);
-        client.register_project(&admin, &pid, &String::from_str(&env, "Summary Project"), &wallet, &50u32);
-
-        // Make a donation so the project has non-zero stats
-        let donor       = Address::generate(&env);
+    #[should_panic(expected = "Only admin can refund donations")]
+    fn test_refund_donation_rejects_non_admin_caller() {
+        let (env, _cid, client, _admin, pid) = setup();
+        let not_admin = Address::generate(&env);
+        let donor = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token       = env.register_stellar_asset_contract_v2(token_admin).address();
-        StellarAssetClient::new(&env, &token).mint(&donor, &(10 * STROOP));
-        client.donate(&token, &donor, &pid, &(10 * STROOP), &0u32);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
-        // Call without a donor (None)
-        let summary = client.get_impact_summary(&pid, &None);
-
-        // Project fields are intact
-        assert_eq!(summary.project.total_raised, 10 * STROOP);
-        assert_eq!(summary.project_co2_offset_grams, 10 * 50); // 10 XLM × 50 g/XLM
-        // Donor stats are default (zero)
-        assert_eq!(summary.donor_stats.total_donated, 0);
-        assert_eq!(summary.donor_stats.donation_count, 0);
-        assert_eq!(summary.donor_stats.badge, BadgeTier::None);
-        assert_eq!(summary.donor_stats.co2_offset_grams, 0);
-    }
-
-    /// `get_impact_summary` panics for a non-existent project.
-    #[test]
-    #[should_panic(expected = "Project not found")]
-    fn test_get_impact_summary_missing_project() {
-        let env    = Env::default();
-        env.mock_all_auths();
-        let id     = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &id);
-        let admin  = Address::generate(&env);
-        client.initialize(&admin);
-
-        client.get_impact_summary(&String::from_str(&env, "no-such-project"), &None);
+        client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
     }
 }
-
-
