@@ -28,16 +28,17 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }
 
     if (onlyVerified) {
+      // Distinct aliases avoid clashing with the outer `pr` JOIN used for impact/CO2.
       const verifiedSubQuery = `
         NOT EXISTS (
           SELECT 1 FROM donations d2
-          JOIN projects pr ON d2.project_id = pr.id
-          WHERE d2.donor_address = p.public_key AND pr.verified = false
+          JOIN projects pr_unverified ON d2.project_id = pr_unverified.id
+          WHERE d2.donor_address = p.public_key AND pr_unverified.verified = false
         )
         AND EXISTS (
           SELECT 1 FROM donations d3
-          JOIN projects pr2 ON d3.project_id = pr2.id
-          WHERE d3.donor_address = p.public_key AND pr2.verified = true
+          JOIN projects pr_verified ON d3.project_id = pr_verified.id
+          WHERE d3.donor_address = p.public_key AND pr_verified.verified = true
         )
       `;
       conditions.push(`(${verifiedSubQuery})`);
