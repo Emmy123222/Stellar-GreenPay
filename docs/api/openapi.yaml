@@ -812,6 +812,13 @@ paths:
           in: query
           schema:
             type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created_at, raised_xlm, donor_count]
+            default: created_at
+          description: Sort projects by field in descending order.
       responses:
         '200':
           description: Paginated project list.

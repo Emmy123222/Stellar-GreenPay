@@ -98,11 +98,7 @@ describe("GET /api/stats/global", () => {
       totalDonors: 1234,
     });
 
-    expect(redis.set).toHaveBeenCalledWith(
-      "stats:global",
-      res.body,
-      60
-    );
+    expect(redis.set).toHaveBeenCalledWith("stats:global", res.body, 60);
   });
 
   test("serves cached stats without querying Postgres", async () => {

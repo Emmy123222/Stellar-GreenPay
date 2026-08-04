@@ -80,6 +80,9 @@ async function recordDonation(req, res, next) {
 
     client = await pool.connect();
 
+    const projectResult = await client.query("SELECT id, co2_per_xlm FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
     const projectResult = await client.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
     const project = projectResult.rows[0] || {};
@@ -93,7 +96,10 @@ async function recordDonation(req, res, next) {
       "SELECT * FROM donations WHERE transaction_hash = $1",
       [transactionHash],
     );
-    if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
+    if (existingResult.rows[0]) {
+      const existingRow = { ...existingResult.rows[0], co2_per_xlm: projectCo2PerXlm };
+      return res.json({ success: true, data: mapDonationRow(existingRow) });
+    }
 
     // Verify the transaction is confirmed on-chain before recording it.
     // Prevents a caller from inflating raised_xlm with a fake or unconfirmed tx hash.
@@ -274,7 +280,12 @@ async function recordDonation(req, res, next) {
     };
     broadcastDonationEvent(donationPayload);
 
-    res.status(201).json({ success: true, data: donationPayload });
+    const mappedRow = { ...donationResult.rows[0], co2_per_xlm: projectCo2PerXlm };
+    const mappedDonation = mapDonationRow(mappedRow);
+    donationEvents.emit("new_donation", mappedDonation);
+    donationEvents.emit("new_donation", ssePayload);
+
+    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
     console.error(e);
@@ -343,12 +354,13 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const result = await pool.query(
-      `SELECT *
-       FROM donations
-       WHERE project_id = $1
-         AND message IS NOT NULL
-         AND length(trim(message)) > 0
-       ORDER BY amount DESC, created_at DESC
+      `SELECT d.*, p.co2_per_xlm
+       FROM donations d
+       JOIN projects p ON d.project_id = p.id
+       WHERE d.project_id = $1
+         AND d.message IS NOT NULL
+         AND length(trim(d.message)) > 0
+       ORDER BY d.amount DESC, d.created_at DESC
        LIMIT $2`,
       [req.params.projectId, limit],
     );
@@ -377,14 +389,18 @@ router.get("/project/:projectId", async (req, res, next) => {
       : [req.params.projectId, limit + 1];
 
     const query = hasCursor
-      ? `SELECT * FROM donations
-         WHERE project_id = $1
-           AND created_at < $2::timestamptz
-         ORDER BY created_at DESC
+      ? `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.project_id = $1
+           AND d.created_at < $2::timestamptz
+         ORDER BY d.created_at DESC
          LIMIT $3`
-      : `SELECT * FROM donations
-         WHERE project_id = $1
-         ORDER BY created_at DESC
+      : `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.project_id = $1
+         ORDER BY d.created_at DESC
          LIMIT $2`;
 
     const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
@@ -412,9 +428,11 @@ router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
     const result = await pool.query(
-      `SELECT * FROM donations
-       WHERE donor_address = $1
-       ORDER BY created_at DESC`,
+      `SELECT d.*, p.co2_per_xlm
+       FROM donations d
+       JOIN projects p ON d.project_id = p.id
+       WHERE d.donor_address = $1
+       ORDER BY d.created_at DESC`,
       [req.params.publicKey],
     );
     res.json({ success: true, data: result.rows.map(mapDonationRow) });
@@ -436,11 +454,8 @@ router.get("/:id", async (req, res, next) => {
       SELECT 
         d.*,
         p.name AS project_name,
-        pr.display_name AS donor_display_name,
-        CASE
-          WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
-          ELSE 0
-        END AS co2_offset_kg
+        p.co2_per_xlm,
+        pr.display_name AS donor_display_name
       FROM donations d
       JOIN projects p ON d.project_id = p.id
       LEFT JOIN profiles pr ON d.donor_address = pr.public_key
@@ -458,7 +473,6 @@ router.get("/:id", async (req, res, next) => {
     const donationData = mapDonationRow(row);
     donationData.projectName = row.project_name;
     donationData.donorDisplayName = row.donor_display_name || null;
-    donationData.co2OffsetKg = Math.round(Number.parseFloat(row.co2_offset_kg || "0"));
 
     res.json({ success: true, data: donationData });
   } catch (e) {
