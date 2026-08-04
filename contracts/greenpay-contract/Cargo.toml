@@ -18,12 +18,4 @@ proptest = "1.4"
 [features]
 testutils = ["soroban-sdk/testutils"]
 
-[profile.release]
-opt-level = "z"
-overflow-checks = true
-debug = 0
-strip = "symbols"
-debug-assertions = false
-panic = "abort"
-codegen-units = 1
-lto = true
+# [profile.release] is configured once at the workspace root (contracts/Cargo.toml)

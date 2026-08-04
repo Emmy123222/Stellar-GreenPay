@@ -89,6 +89,28 @@ This document lists all events emitted by the Stellar GreenPay Soroban smart con
 
 ---
 
+## 9. `meta_upd`
+
+**Description**: Emitted when the admin sets or updates the off-chain metadata pointer (IPFS CID) for a project via `set_project_metadata`. The CID is persisted in contract storage under `DataKey::ProjectMetadata(project_id)` and can be read with `get_project_metadata`.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("meta_upd"), admin), (project_id, ipfs_cid))
+```
+
+| Event Name | Topics                | Data                                        | When Emitted                          |
+|------------|-----------------------|---------------------------------------------|---------------------------------------|
+| `meta_upd` | `["meta_upd", admin]` | `(project_id: String, ipfs_cid: String)`    | After project metadata CID is updated |
+
+**Parameter details**:
+
+- `admin` (`Address`, topic): the contract admin who authorized the update (must pass `require_auth` and match the stored admin).
+- `project_id` (`String`, data): the on-chain identifier of the project whose metadata changed.
+- `ipfs_cid` (`String`, data): the IPFS content identifier resolving to the project's metadata JSON (name, description, images, documents, etc.).
+
+---
+
 ## Usage Notes
 
 - All events follow Soroban’s standard event format: `topics: Vec<Val>`, `data: Val`.
@@ -96,4 +118,4 @@ This document lists all events emitted by the Stellar GreenPay Soroban smart con
 - Events can be queried via Horizon or Soroban RPC tools.
 - Frontend / backend should listen to these for real-time updates, notifications, and leaderboard.
 
-**Last Updated**: June 30, 2026
+**Last Updated**: July 30, 2026

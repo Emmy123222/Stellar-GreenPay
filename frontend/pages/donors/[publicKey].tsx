@@ -9,6 +9,8 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { useEffect, useState, useCallback } from "react";
 import { fetchProfile, fetchDonorHistory } from "@/lib/api";
+import { connectWallet, signTransactionWithWallet, getConnectedPublicKey } from "@/lib/wallet";
+import { CONTRACT_ID, buildMintImpactNftTransaction, submitSorobanTransaction, explorerUrl } from "@/lib/stellar";
 import type { DonorProfile, Donation, BadgeTier } from "@/utils/types";
 import { formatXLM } from "@/utils/format";
 

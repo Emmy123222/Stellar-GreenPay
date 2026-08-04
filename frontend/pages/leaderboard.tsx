@@ -6,7 +6,7 @@ import { useRouter } from "next/router";
 import LeaderboardTable from "@/components/LeaderboardTable";
 import Link from "next/link";
 
-type Period = "all" | "month" | "year";
+type Period = "all" | "week" | "month" | "year";
 
 export default function LeaderboardPage() {
   const router = useRouter();
@@ -51,6 +51,7 @@ export default function LeaderboardPage() {
       {/* Period tabs */}
       <div className="mb-8 flex gap-2 justify-center">
         {[
+          { key: "week", label: "This Week" },
           { key: "month", label: "This Month" },
           { key: "year", label: "This Year" },
           { key: "all", label: "All Time" },

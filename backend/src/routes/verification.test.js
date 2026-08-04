@@ -332,7 +332,7 @@ describe("PATCH /api/verification-requests/:id/status (admin)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ status: "pending" });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Request is already in "pending" state');
+    expect(res.body.error).toBe("Request is already in \"pending\" state");
   });
 });
 

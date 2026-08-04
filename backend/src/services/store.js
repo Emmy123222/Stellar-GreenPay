@@ -155,6 +155,7 @@ function mapProjectRow(row) {
     description: row.description,
     category: row.category,
     location: row.location,
+    imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
@@ -204,6 +205,10 @@ function mapDonationRow(row) {
 
   if (row.amount_xlm !== null && row.amount_xlm !== undefined) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
+  }
+
+  if (row.donor_country) {
+    data.donorCountry = row.donor_country;
   }
 
   return data;
