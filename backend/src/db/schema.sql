@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
   raised_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   donor_count INTEGER NOT NULL DEFAULT 0,
   co2_offset_kg INTEGER NOT NULL DEFAULT 0,
+  co2_per_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   verified BOOLEAN NOT NULL DEFAULT FALSE,
   on_chain_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -36,6 +37,8 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS image_url TEXT;
+
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
@@ -52,8 +55,10 @@ CREATE TABLE IF NOT EXISTS donations (
   currency TEXT NOT NULL DEFAULT 'XLM',
   message TEXT,
   transaction_hash TEXT NOT NULL UNIQUE,
+  donor_country TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_donations_donor_project ON donations(donor_address, project_id);
 
 -- profiles: aggregated donor stats and public profile for a Stellar wallet.
 -- total_donated_xlm and projects_supported are computed counters kept in
@@ -62,6 +67,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   public_key TEXT PRIMARY KEY,
   display_name TEXT,
   bio TEXT,
+  avatar_url TEXT,
   total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   projects_supported INTEGER NOT NULL DEFAULT 0,
   badges JSONB NOT NULL DEFAULT '[]'::JSONB,
@@ -71,11 +77,13 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- project_updates: news / blog posts published by project owners. Listed
 -- on the project detail page in reverse chronological order.
+-- image_url is an optional link to a photo or chart uploaded via /api/uploads.
 CREATE TABLE IF NOT EXISTS project_updates (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
+  image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -157,6 +165,34 @@ CREATE TABLE IF NOT EXISTS donation_matches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- recurring_donations: monthly pledge schedule. Each row represents a
+-- donor's commitment to donate amount_xlm per month for duration_months.
+-- The pg-boss daily job (recurringDonationQueue.js) processes due pledges,
+-- builds Soroban transactions, and sends push/email reminders.
+-- Status lifecycle: active → completed | cancelled
+CREATE TABLE IF NOT EXISTS recurring_donations (
+  id               UUID PRIMARY KEY,
+  donor_address    TEXT NOT NULL,
+  project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  amount_xlm       NUMERIC(20, 7) NOT NULL CHECK (amount_xlm > 0),
+  currency         TEXT NOT NULL DEFAULT 'XLM',
+  next_due_date    DATE NOT NULL,
+  duration_months  INTEGER NOT NULL CHECK (duration_months >= 1),
+  remaining_months INTEGER NOT NULL CHECK (remaining_months >= 0),
+  status           TEXT NOT NULL DEFAULT 'active',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT recurring_donations_status_check
+    CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
+  CONSTRAINT recurring_donations_remaining_lte_duration
+    CHECK (remaining_months <= duration_months)
+);
+CREATE INDEX IF NOT EXISTS recurring_donations_due_idx
+  ON recurring_donations (next_due_date, status)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS recurring_donations_donor_idx
+  ON recurring_donations (donor_address);
+CREATE INDEX IF NOT EXISTS recurring_donations_project_idx
+  ON recurring_donations (project_id);
 
 -- device_tokens: push notification device registrations. token is the FCM /
 -- APNs device token; platform is 'ios' or 'android'. wallet_address links
@@ -170,17 +206,42 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- project_follows: many-to-many join between projects and device_tokens.
--- A device "follows" a project to receive push notifications.
--- UNIQUE(project_id, device_token_id) prevents duplicate follows.
+-- recurring_donations: recurring donation schedules set by donors.
+-- next_due_date is calculated from the schedule when the donation is created
+-- or renewed; the recurring-donation queue polls this column daily.
+CREATE TABLE IF NOT EXISTS recurring_donations (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  donor_address TEXT NOT NULL,
+  amount_xlm NUMERIC(20, 7) NOT NULL,
+  frequency TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly', 'biweekly', 'monthly')),
+  next_due_date TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_recurring_donations_next_due
+  ON recurring_donations (next_due_date)
+  WHERE status = 'active';
+
+-- project_follows: project follow relationships for push devices and/or wallets.
+-- - Mobile push: device_token_id set (UNIQUE with project_id); wallet_address optional.
+-- - Web Follow button: device_token_id NULL, wallet_address required; uniqueness
+--   enforced by partial unique index (see migration 003_wallet_project_follows).
 CREATE TABLE IF NOT EXISTS project_follows (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  device_token_id UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
+  device_token_id UUID REFERENCES device_tokens(id) ON DELETE CASCADE,
   wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE(project_id, device_token_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS project_follows_project_wallet_uidx
+  ON project_follows (project_id, wallet_address)
+  WHERE device_token_id IS NULL AND wallet_address IS NOT NULL;
+CREATE INDEX IF NOT EXISTS project_follows_wallet_lookup_idx
+  ON project_follows (project_id, wallet_address)
+  WHERE wallet_address IS NOT NULL;
 
 -- Verification requests submitted via the /apply form on the frontend.
 -- Each row represents an organisation asking the GreenPay admin team to
@@ -215,3 +276,42 @@ CREATE INDEX IF NOT EXISTS verification_requests_status_idx
   ON verification_requests (status, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
   ON verification_requests (wallet_address);
+
+-- webhook_deliveries: history of outbound webhook delivery attempts.
+-- Populated when milestone.reached (and similar) events are sent to a
+-- project's webhook_url. Used by GET /api/webhooks/:projectId/history.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  event TEXT,
+  payload_hash TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_attempt_at TIMESTAMPTZ,
+  next_attempt_at TIMESTAMPTZ,
+  response_status INTEGER,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+  ON webhook_deliveries (status);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_id
+  ON webhook_deliveries (project_id);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_created
+  ON webhook_deliveries (project_id, created_at DESC);
+
+-- global_stats_mv: pre-aggregated landing-page totals refreshed by pg-boss.
+CREATE MATERIALIZED VIEW IF NOT EXISTS global_stats_mv AS
+SELECT
+  1 AS id,
+  COALESCE(SUM(raised_xlm), 0) AS total_xlm_raised,
+  COALESCE(SUM(co2_offset_kg), 0)::int AS total_co2_offset_kg,
+  COUNT(*)::int AS total_projects,
+  COALESCE(SUM(donor_count), 0)::int AS total_donors,
+  (SELECT COUNT(*)::int FROM donations) AS total_donations
+FROM projects;
+CREATE UNIQUE INDEX IF NOT EXISTS global_stats_mv_id_uidx ON global_stats_mv (id);

@@ -1,5 +1,9 @@
 "use strict";
 
+jest.mock("uuid", () => ({
+  v4: () => "11111111-1111-1111-1111-111111111111",
+}));
+
 jest.mock("../db/pool", () => ({
   query: jest.fn(),
   connect: jest.fn(),
@@ -12,6 +16,7 @@ jest.mock("../middleware/rateLimiter", () => ({
 jest.mock("../services/email", () => ({
   sendUpdateNotifications: jest.fn().mockResolvedValue(undefined),
   sendAdminVerificationNotification: jest.fn().mockResolvedValue(undefined),
+  sendVerificationStatusNotification: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock("../services/storage", () => ({
@@ -293,5 +298,235 @@ describe("PATCH /api/verification-requests/:id/status (admin)", () => {
       .set("Authorization", `Bearer ${token}`)
       .send({ status: "shipped" });
     expect(res.status).toBe(400);
+  });
+
+  test("transitions in_review \u2192 approved", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] })
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "approved" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe("approved");
+  });
+
+  test("rejects approved \u2192 rejected with 400 (no valid transitions out of approved)", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "rejected" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Cannot transition/);
+  });
+
+  test("rejects a same-status transition (pending \u2192 pending) with 400", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "pending" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .patch(`/api/verification-requests/${MOCK_DB_ROW.id}/status`)
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "pending" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Request is already in \"pending\" state");
+  });
+});
+
+describe("DELETE /api/verification-requests/:id (admin)", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 401 without admin auth", async () => {
+    const res = await request(app).delete(`/api/verification-requests/${MOCK_DB_ROW.id}`);
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 404 when the row does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete("/api/verification-requests/missing-id")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/not found/i);
+  });
+
+  test("hard-deletes a pending submission", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "pending" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({ id: MOCK_DB_ROW.id, deleted: true });
+    expect(pool.query).toHaveBeenNthCalledWith(
+      2,
+      "DELETE FROM verification_requests WHERE id = $1",
+      [MOCK_DB_ROW.id],
+    );
+  });
+
+  test("hard-deletes a rejected submission", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "rejected" }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.deleted).toBe(true);
+  });
+
+  test("rejects deletion of an approved submission", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "approved" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/approved/);
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects deletion of an in_review submission", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ ...MOCK_DB_ROW, status: "in_review" }] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .delete(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/in_review/);
+  });
+});
+
+describe("GET /api/verification-requests/stats (admin)", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 401 when no auth header is provided", async () => {
+    const res = await request(app).get("/api/verification-requests/stats");
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 401 when an invalid (tampered) bearer token is supplied", async () => {
+    // adminRequired validates the JWT signature; a tampered token is rejected
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", "Bearer totally.invalid.jwt");
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns all-zero counts when the table is empty", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({
+      pending:  0,
+      inReview: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  });
+
+  test("returns correct counts for a mixed-status dataset", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { status: "pending",   count: 5 },
+        { status: "in_review", count: 2 },
+        { status: "approved",  count: 18 },
+        { status: "rejected",  count: 7 },
+      ],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      pending:  5,
+      inReview: 2,
+      approved: 18,
+      rejected: 7,
+    });
+  });
+
+  test("defaults missing statuses to zero when only some statuses exist", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ status: "pending", count: 3 }],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      pending:  3,
+      inReview: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  });
+
+  test("response keys are always in the canonical order (pending, inReview, approved, rejected)", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { status: "rejected",  count: 1 },
+        { status: "approved",  count: 2 },
+        { status: "pending",   count: 3 },
+        { status: "in_review", count: 4 },
+      ],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body.data)).toEqual(["pending", "inReview", "approved", "rejected"]);
+  });
+
+  test("issues a single GROUP BY query to the database", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    const [sql] = pool.query.mock.calls[0];
+    expect(typeof sql).toBe("string");
+    expect(sql).toMatch(/GROUP BY status/i);
+    expect(sql).not.toMatch(/SELECT \*/);
+  });
+
+  test("returns 500 when the database throws an unexpected error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("DB connection lost"));
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/DB connection lost/);
   });
 });
