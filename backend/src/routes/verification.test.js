@@ -411,3 +411,122 @@ describe("DELETE /api/verification-requests/:id (admin)", () => {
     expect(res.body.error).toMatch(/in_review/);
   });
 });
+
+describe("GET /api/verification-requests/stats (admin)", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 401 when no auth header is provided", async () => {
+    const res = await request(app).get("/api/verification-requests/stats");
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 401 when an invalid (tampered) bearer token is supplied", async () => {
+    // adminRequired validates the JWT signature; a tampered token is rejected
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", "Bearer totally.invalid.jwt");
+    expect(res.status).toBe(401);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns all-zero counts when the table is empty", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({
+      pending:  0,
+      inReview: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  });
+
+  test("returns correct counts for a mixed-status dataset", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { status: "pending",   count: 5 },
+        { status: "in_review", count: 2 },
+        { status: "approved",  count: 18 },
+        { status: "rejected",  count: 7 },
+      ],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      pending:  5,
+      inReview: 2,
+      approved: 18,
+      rejected: 7,
+    });
+  });
+
+  test("defaults missing statuses to zero when only some statuses exist", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ status: "pending", count: 3 }],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      pending:  3,
+      inReview: 0,
+      approved: 0,
+      rejected: 0,
+    });
+  });
+
+  test("response keys are always in the canonical order (pending, inReview, approved, rejected)", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        { status: "rejected",  count: 1 },
+        { status: "approved",  count: 2 },
+        { status: "pending",   count: 3 },
+        { status: "in_review", count: 4 },
+      ],
+    });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body.data)).toEqual(["pending", "inReview", "approved", "rejected"]);
+  });
+
+  test("issues a single GROUP BY query to the database", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    const [sql] = pool.query.mock.calls[0];
+    expect(typeof sql).toBe("string");
+    expect(sql).toMatch(/GROUP BY status/i);
+    expect(sql).not.toMatch(/SELECT \*/);
+  });
+
+  test("returns 500 when the database throws an unexpected error", async () => {
+    pool.query.mockRejectedValueOnce(new Error("DB connection lost"));
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get("/api/verification-requests/stats")
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toMatch(/DB connection lost/);
+  });
+});

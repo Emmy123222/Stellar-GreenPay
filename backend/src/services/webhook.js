@@ -294,7 +294,8 @@ async function deliverPayload(url, secret, payload) {
     headers["X-Webhook-Signature"] = `${signature}, ${previousSignature}`;
   }
 
-  const options = {
+  const urlObj = new URL(url);
+  const reqOptions = {
     hostname: urlObj.hostname,
     port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
     path: urlObj.pathname + urlObj.search,
