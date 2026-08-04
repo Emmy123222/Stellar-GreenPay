@@ -46,6 +46,7 @@ const VALID_CATEGORIES = [
   "Sustainable Agriculture",
   "Other",
 ];
+const VALID_SORT_FIELDS = ["created_at", "raised_xlm", "donor_count"];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
 /**
@@ -226,7 +227,9 @@ router.get("/", async (req, res, next) => {
       search,
       limit = 20,
       cursor,
+      sort = "created_at",
     } = req.query;
+    const sortField = VALID_SORT_FIELDS.includes(sort) ? sort : "created_at";
     const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
 
     const cacheKey =
@@ -236,6 +239,7 @@ router.get("/", async (req, res, next) => {
         status,
         verified,
         search,
+        sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
       });
@@ -270,21 +274,27 @@ router.get("/", async (req, res, next) => {
       } catch {
         return res.status(400).json({ error: "Invalid cursor" });
       }
-      const { created_at, id } = cursorData;
-      if (!created_at || !id) {
+      const { id } = cursorData;
+      if (!(sortField in cursorData) || !id) {
         return res.status(400).json({ error: "Invalid cursor" });
       }
-      values.push(created_at, id);
-      const caIdx = values.length - 1;
+      const sortValue = cursorData[sortField];
+      values.push(sortValue, id);
+      const sortValIdx = values.length - 1;
       const idIdx = values.length;
       where.push(
-        `(created_at < $${caIdx} OR (created_at = $${caIdx} AND id < $${idIdx}))`,
+        `(${sortField} < $${sortValIdx} OR (${sortField} = $${sortValIdx} AND id < $${idIdx}))`,
       );
     }
 
     values.push(pageSize + 1);
     const limitIdx = values.length;
 
+    let query = "SELECT * FROM projects ";
+    if (where.length) {
+      query += "WHERE " + where.join(" AND ") + " ";
+    }
+    query += `ORDER BY ${sortField} DESC, id DESC LIMIT $${limitIdx}`;
     // Build the SQL query: WHERE values are whitelisted enum strings;
     // all user values use parameterized $N placeholders below.
     const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")} ` : "";
@@ -303,7 +313,7 @@ router.get("/", async (req, res, next) => {
     if (hasMore) {
       const last = rows[pageSize - 1];
       nextCursor = Buffer.from(
-        JSON.stringify({ created_at: last.created_at, id: last.id }),
+        JSON.stringify({ [sortField]: last[sortField], id: last.id }),
       ).toString("base64");
     }
 
