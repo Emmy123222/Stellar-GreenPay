@@ -374,6 +374,17 @@ router.get("/", adminRequired, async (req, res, next) => {
     const values = statusFilter ? [status, pageSize, offset] : [pageSize, offset];
 
     const result = await pool.query(query, values);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.list",
+      targetType: "verification_request",
+      targetId: null,
+      metadata: { filters: { status, limit, page } },
+      ipAddress: req.ip,
+    });
+
     res.json({
       success: true,
       data: result.rows.map(mapRequestRow),
