@@ -141,7 +141,35 @@ router.post("/", submitLimiter, async (req, res, next) => {
     }
 
     const email = typeof body.contactEmail === "string" ? body.contactEmail.trim().toLowerCase() : "";
-    if (!EMAIL_RE.test(email)) errors.push("contactEmail must be a valid email");
+    if (!EMAIL_RE.test(email)) {
+      errors.push("contactEmail must be a valid email");
+    } else if (website) {
+      // Prevent org email spoofing: the contact email domain must match the
+      // organisation's website hostname. This stops an attacker from claiming
+      // to represent e.g. "greenworldfund.org" while providing a personal
+      // Gmail address. We compare only the registered domain+TLD so that
+      // subdomain email addresses (e.g. team@mail.greenworldfund.org) are
+      // accepted for submissions about https://greenworldfund.org.
+      const emailDomain = email.split("@")[1];
+      let websiteHost;
+      try {
+        websiteHost = new URL(website).hostname.toLowerCase();
+      } catch {
+        websiteHost = null;
+      }
+      if (websiteHost && emailDomain) {
+        // Strip "www." prefix for comparison
+        const normalise = (h) => h.replace(/^www\./, "");
+        const normEmail = normalise(emailDomain);
+        const normSite  = normalise(websiteHost);
+        // Accept exact match or subdomain of the website host
+        if (normEmail !== normSite && !normEmail.endsWith("." + normSite)) {
+          errors.push(
+            `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
+          );
+        }
+      }
+    }
 
     const walletAddress = typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
     if (!STELLAR_ADDRESS_RE.test(walletAddress)) {
@@ -289,43 +317,35 @@ router.get("/me", async (req, res, next) => {
 });
 
 /**
- * GET /api/verification-requests/:id/documents
- * Returns only the supporting document metadata for a request. Accessible to
- * admins via Bearer token, or to the submitter via a matching ?wallet= param.
- *
- * The admin detail page calls this lazily (on scroll / expand) so the main
- * GET /:id response stays lightweight even for 20-document submissions.
+ * GET /api/verification-requests/stats
+ * Admin only. Returns aggregated counts of verification requests grouped by
+ * status. Uses a single GROUP BY query so it is efficient even with large
+ * datasets. All four known statuses are always present in the response,
+ * defaulting to 0 when no rows exist for that status.
  */
-router.get("/:id/documents", async (req, res, next) => {
+router.get("/stats", adminRequired, async (req, res, next) => {
   try {
     const result = await pool.query(
-      "SELECT supporting_documents, wallet_address FROM verification_requests WHERE id = $1",
-      [req.params.id],
+      `SELECT status, COUNT(*)::int AS count
+       FROM verification_requests
+       GROUP BY status`
     );
-    const row = result.rows[0];
-    if (!row) return res.status(404).json({ error: "Verification request not found" });
 
-    const documents = Array.isArray(row.supporting_documents) ? row.supporting_documents : [];
+    const STATUS_DEFAULTS = { pending: 0, in_review: 0, approved: 0, rejected: 0 };
+    const raw = result.rows.reduce((acc, row) => {
+      acc[row.status] = row.count;
+      return acc;
+    }, { ...STATUS_DEFAULTS });
 
-    // Allow admin-readable without wallet guard.
-    const auth = req.headers.authorization || "";
-    if (auth.startsWith("Bearer ")) {
-      try {
-        const { verifyToken } = require("../middleware/auth");
-        const decoded = verifyToken(auth.slice(7));
-        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
-          return res.json({ success: true, data: { documents } });
-        }
-      } catch (_err) {
-        // fall through to wallet check
-      }
-    }
-
-    const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
-    if (!wallet || wallet !== row.wallet_address) {
-      return res.status(403).json({ error: "Provide a matching ?wallet= query param to view these documents" });
-    }
-    res.json({ success: true, data: { documents } });
+    res.json({
+      success: true,
+      data: {
+        pending:  raw.pending,
+        inReview: raw.in_review,
+        approved: raw.approved,
+        rejected: raw.rejected,
+      },
+    });
   } catch (e) {
     next(e);
   }
@@ -390,6 +410,17 @@ router.get("/", adminRequired, async (req, res, next) => {
     const values = statusFilter ? [status, pageSize, offset] : [pageSize, offset];
 
     const result = await pool.query(query, values);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.list",
+      targetType: "verification_request",
+      targetId: null,
+      metadata: { filters: { status, limit, page } },
+      ipAddress: req.ip,
+    });
+
     res.json({
       success: true,
       data: result.rows.map(mapRequestRow),
