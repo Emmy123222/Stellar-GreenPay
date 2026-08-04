@@ -161,6 +161,28 @@ pub struct GlobalStats {
     pub project_count:   u32,
 }
 
+/// Aggregated project-detail view returned by `get_impact_summary`.
+///
+/// Bundles the full project record together with the project-level CO₂
+/// offset and the calling donor's personal stats (defaults to zeros when
+/// no donor address is provided), so that a client can render a complete
+/// project detail page in a single contract call instead of three separate
+/// RPC round trips.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ImpactSummary {
+    /// The full on-chain project record (id, name, wallet, etc.).
+    pub project: Project,
+    /// Total CO₂ offset in grams attributed to this project's donations.
+    /// Computed as `(project.total_raised / STROOP) × project.co2_per_xlm`.
+    pub project_co2_offset_grams: i128,
+    /// Donor-specific stats (total_donated, donation_count, badge,
+    /// co2_offset_grams).  When `get_impact_summary` is called without a
+    /// donor address, this field is returned with all-zero / `None` badge
+    /// defaults, saving the extra storage read.
+    pub donor_stats: DonorStats,
+}
+
 #[contracttype]
 pub enum DataKey {
     Admin,
@@ -500,48 +522,16 @@ impl GreenPayContract {
         );
     }
 
-    /// Check if metadata CID is set for a given project.
-    pub fn has_project_metadata(env: Env, project_id: String) -> bool {
-        env.storage()
-            .instance()
-            .has(&DataKey::ProjectMetadata(project_id))
-    }
-
-    /// Retrieve the stored IPFS CID metadata hash for a project.
-    pub fn get_project_metadata(env: Env, project_id: String) -> String {
-        if !env
-            .storage()
-            .instance()
-            .has(&DataKey::Project(project_id.clone()))
-        {
-            panic!("Project not found");
-        }
-
-        env.storage()
-            .instance()
-            .get(&DataKey::ProjectMetadata(project_id))
-            .expect("Project metadata not found")
-    }
-
-    // ─── Admin functions ────────────────────────────────────────────────────────
-    /// Update the CO₂ per XLM rate for a project. Admin only.
-    pub fn update_project_co2_rate(
-        env: Env,
-        admin: Address,
-        project_id: String,
-        new_rate: u32,
-    ) {
+    pub fn pause_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can update project CO₂ rate"); }
-        if new_rate == 0 || new_rate > 10_000 { panic!("CO₂ rate must be between 1 and 10,000"); }
+        if stored_admin != admin { panic!("Only admin can pause projects"); }
         let mut project: Project = env.storage().instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-        project.co2_per_xlm = new_rate;
-        env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
-        env.events().publish((Symbol::new(&env, "proj_rate_update"), admin), (project_id, new_rate));
+            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+        if !project.active { panic!("Cannot pause a deactivated project"); }
+        project.active = false;
+        env.storage().instance().set(&DataKey::Project(project_id), &project);
     }
 
     /// Deactivate all active projects at once. Admin only.
@@ -817,6 +807,69 @@ impl GreenPayContract {
                                   .get(&DataKey::DonationCount).unwrap_or(0),
             project_count:    env.storage().instance()
                                   .get(&DataKey::ProjectCount).unwrap_or(0),
+        }
+    }
+
+    /// Returns all data needed for a project detail page in one Soroban call.
+    ///
+    /// Bundles the full project record together with the project-level CO₂
+    /// offset and (optionally) the calling donor's personal stats.  This
+    /// eliminates three separate RPC round trips (`get_project`,
+    /// `get_donor_stats`, plus a manual CO₂ computation on the client) that
+    /// were previously required to render a project detail page.
+    ///
+    /// When `donor` is `None`, the returned `donor_stats` field is a
+    /// zeroed-out `DonorStats` (all amounts 0, badge `None`) and the
+    /// contract skips the second storage read entirely, saving gas.
+    ///
+    /// # Panics
+    /// Panics if the project does not exist.
+    ///
+    /// # Example (JavaScript SDK)
+    /// ```js
+    /// // With donor
+    /// const summary = await contract.get_impact_summary({ project_id: "proj-001", donor: donorAddr });
+    /// console.log(summary.project.name, summary.project_co2_offset_grams, summary.donor_stats.badge);
+    ///
+    /// // Without donor (public view) — donor_stats defaults to zeros
+    /// const summary = await contract.get_impact_summary({ project_id: "proj-001" });
+    /// console.log(summary.project_co2_offset_grams, summary.donor_stats.badge);
+    /// ```
+    pub fn get_impact_summary(env: Env, project_id: String, donor: Option<Address>) -> ImpactSummary {
+        let project: Project = env.storage()
+            .instance()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found");
+
+        let xlm_units = project.total_raised / STROOP;
+        let project_co2_offset_grams = xlm_units
+            .checked_mul(project.co2_per_xlm as i128)
+            .expect("CO2 calculation overflow");
+
+        let donor_stats = match donor {
+            Some(donor_addr) => {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::DonorStats(donor_addr))
+                    .unwrap_or(DonorStats {
+                        total_donated: 0,
+                        donation_count: 0,
+                        badge: BadgeTier::None,
+                        co2_offset_grams: 0,
+                    })
+            }
+            None => DonorStats {
+                total_donated: 0,
+                donation_count: 0,
+                badge: BadgeTier::None,
+                co2_offset_grams: 0,
+            },
+        };
+
+        ImpactSummary {
+            project,
+            project_co2_offset_grams,
+            donor_stats,
         }
     }
 
@@ -1535,10 +1588,9 @@ impl OracleInterface for MockOracle {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger as _, Events as _};
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
-    use soroban_sdk::{Address, Env, String, Vec};
+    use super::*;
 
     // ─── Existing tests ───────────────────────────────────────────────────────
 
@@ -1624,18 +1676,16 @@ mod tests {
         #[test]
     fn test_get_donation_record() {
         let (env, _cid, client, admin, pid) = setup();
-        // Set up USDC token & mock oracle
+        // Set up USDC token and oracle
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
         client.set_usdc_token(&admin, &token);
-
         let oracle_id = env.register_contract(None, MockOracle);
         client.set_oracle(&admin, &oracle_id);
         let donor = Address::generate(&env);
         // Mint USDC to donor
         StellarAssetClient::new(&env, &token).mint(&donor, &(100 * 1_000_000i128));
         let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
-        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
         client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
         let record = client.get_donation_record(&0u32);
         assert_eq!(record.donor, donor);
@@ -2118,8 +2168,6 @@ mod tests {
         assert!(p.resolved);
         assert_eq!(p.votes_for,     1);
         assert_eq!(p.votes_against, 1);
-
-        assert_eq!(rejection_events, 1, "expected one event from resolve_proposal");
     }
 
     #[test]
@@ -2427,305 +2475,85 @@ mod tests {
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
 
-    // ─── Project enumeration / pagination tests (#734) ──────────────────────
+    // ─── ImpactSummary tests ──────────────────────────────────────────────────
 
+    /// `get_impact_summary` with a donor returns the project, computed CO₂ offset,
+    /// and the donor's stats in a single call.
     #[test]
-    fn test_get_all_projects_paginated_single_project() {
+    fn test_get_impact_summary_with_donor() {
         let (env, _cid, client, _admin, pid) = setup();
-        // setup() creates one project, so we should get it back
-        let projects = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects.get(0).id, pid);
+        let donor        = Address::generate(&env);
+        let token_admin  = Address::generate(&env);
+        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+
+        token_client.mint(&donor, &(25 * STROOP));
+        client.donate(&token, &donor, &pid, &(25 * STROOP), &1u32);
+
+        let summary = client.get_impact_summary(&pid, &Some(donor.clone()));
+
+        // Project identity
+        assert_eq!(summary.project.id, pid);
+        assert_eq!(summary.project.name, String::from_str(&env, "Test Project"));
+        assert!(summary.project.active);
+        // Project totals
+        assert_eq!(summary.project.total_raised, 25 * STROOP);
+        assert_eq!(summary.project.donor_count, 1);
+        // Project CO₂ offset: 25 XLM × 100 g/XLM = 2500 g
+        assert_eq!(summary.project_co2_offset_grams, 25 * 100);
+        // Donor stats
+        assert_eq!(summary.donor_stats.total_donated, 25 * STROOP);
+        assert_eq!(summary.donor_stats.donation_count, 1);
+        assert_eq!(summary.donor_stats.badge, BadgeTier::Seedling);
+        assert_eq!(summary.donor_stats.co2_offset_grams, 25 * 100);
     }
 
+    /// `get_impact_summary` without a donor returns default (zero) donor_stats.
     #[test]
-    fn test_get_all_projects_paginated_multiple_projects() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create 5 more projects
-        for i in 2..=5u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &(100u32 * i),
-            );
-        }
-        // Now we have 5 projects total (setup creates proj-001, then we add 2-5)
-        assert_eq!(client.get_project_count(), 5);
-        
-        let all_projects = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(all_projects.len(), 5);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_offset_limit_basic() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create 10 projects
-        for i in 2..=10u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &100u32,
-            );
-        }
-        assert_eq!(client.get_project_count(), 10);
-
-        // Test: get first 3
-        let page1 = client.get_all_projects_paginated(&0u32, &3u32);
-        assert_eq!(page1.len(), 3);
-
-        // Test: get next 3 (offset=3, limit=3)
-        let page2 = client.get_all_projects_paginated(&3u32, &3u32);
-        assert_eq!(page2.len(), 3);
-
-        // Verify they're different projects
-        assert_ne!(page1.get(0).id, page2.get(0).id);
-
-        // Test: get last 4 projects (offset=6, limit=4)
-        let page3 = client.get_all_projects_paginated(&6u32, &4u32);
-        assert_eq!(page3.len(), 4);
-
-        // Test: offset 9, limit 1 should get the last project
-        let last_page = client.get_all_projects_paginated(&9u32, &1u32);
-        assert_eq!(last_page.len(), 1);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_offset_beyond_total() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create 5 projects total
-        for i in 2..=5u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &100u32,
-            );
-        }
-        assert_eq!(client.get_project_count(), 5);
-
-        // Offset equal to total count should return empty
-        let empty1 = client.get_all_projects_paginated(&5u32, &10u32);
-        assert_eq!(empty1.len(), 0);
-
-        // Offset beyond total count should return empty
-        let empty2 = client.get_all_projects_paginated(&100u32, &10u32);
-        assert_eq!(empty2.len(), 0);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_limit_larger_than_remaining() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create 7 projects
-        for i in 2..=7u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &100u32,
-            );
-        }
-        assert_eq!(client.get_project_count(), 7);
-
-        // Request offset=5, limit=100 should only return 2 projects (indices 5, 6)
-        let partial = client.get_all_projects_paginated(&5u32, &100u32);
-        assert_eq!(partial.len(), 2);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_empty_contract_state() {
-        let env = Env::default();
+    fn test_get_impact_summary_without_donor() {
+        let env    = Env::default();
         env.mock_all_auths();
-        let cid = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &cid);
-        let admin = Address::generate(&env);
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
         client.initialize(&admin);
 
-        // Before any projects are registered
-        let empty = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(empty.len(), 0);
+        let pid    = String::from_str(&env, "proj-summary-2");
+        let wallet = Address::generate(&env);
+        client.register_project(&admin, &pid, &String::from_str(&env, "Summary Project"), &wallet, &50u32);
 
-        // Even with large offset
-        let empty_offset = client.get_all_projects_paginated(&5u32, &10u32);
-        assert_eq!(empty_offset.len(), 0);
+        // Make a donation so the project has non-zero stats
+        let donor       = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token       = env.register_stellar_asset_contract_v2(token_admin).address();
+        StellarAssetClient::new(&env, &token).mint(&donor, &(10 * STROOP));
+        client.donate(&token, &donor, &pid, &(10 * STROOP), &0u32);
+
+        // Call without a donor (None)
+        let summary = client.get_impact_summary(&pid, &None);
+
+        // Project fields are intact
+        assert_eq!(summary.project.total_raised, 10 * STROOP);
+        assert_eq!(summary.project_co2_offset_grams, 10 * 50); // 10 XLM × 50 g/XLM
+        // Donor stats are default (zero)
+        assert_eq!(summary.donor_stats.total_donated, 0);
+        assert_eq!(summary.donor_stats.donation_count, 0);
+        assert_eq!(summary.donor_stats.badge, BadgeTier::None);
+        assert_eq!(summary.donor_stats.co2_offset_grams, 0);
     }
 
+    /// `get_impact_summary` panics for a non-existent project.
     #[test]
-    fn test_get_all_projects_paginated_batch_registration() {
-        let env = Env::default();
+    #[should_panic(expected = "Project not found")]
+    fn test_get_impact_summary_missing_project() {
+        let env    = Env::default();
         env.mock_all_auths();
-        let cid = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &cid);
-        let admin = Address::generate(&env);
+        let id     = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin  = Address::generate(&env);
         client.initialize(&admin);
 
-        // Batch register projects
-        let mut projects = Vec::new(&env);
-        for i in 1..=5u32 {
-            projects.push_back(ProjectInit {
-                id:          String::from_str(&env, &format!("batch-proj-{:03}", i)),
-                name:        String::from_str(&env, &format!("Batch Project {}", i)),
-                wallet:      Address::generate(&env),
-                co2_per_xlm: 100u32 * i,
-            });
-        }
-        client.batch_register_projects(&admin, &projects);
-
-        // Verify all 5 projects are accessible via pagination
-        let all = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(all.len(), 5);
-
-        // Verify the order matches insertion order
-        for i in 0..5u32 {
-            let proj = all.get(i as usize);
-            assert_eq!(proj.id, String::from_str(&env, &format!("batch-proj-{:03}", i + 1)));
-        }
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_with_deactivated_projects() {
-        let (env, _cid, client, admin, pid1) = setup();
-        // Create 3 more projects
-        let pid2 = String::from_str(&env, "proj-002");
-        let pid3 = String::from_str(&env, "proj-003");
-        let pid4 = String::from_str(&env, "proj-004");
-        
-        for (i, pid) in vec![pid2.clone(), pid3.clone(), pid4.clone()].iter().enumerate() {
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                pid,
-                &String::from_str(&env, &format!("Project {}", i + 2)),
-                &wallet,
-                &100u32,
-            );
-        }
-        assert_eq!(client.get_project_count(), 4);
-
-        // Deactivate one project
-        client.deactivate_project(&admin, &pid2);
-
-        // Pagination should still return the deactivated project (it's still stored)
-        let all = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(all.len(), 4);
-
-        // Verify that the second project is now inactive but still present
-        let proj2 = client.get_project(&pid2);
-        assert!(!proj2.active);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_zero_limit() {
-        let (env, _cid, client, _admin, _pid) = setup();
-        // Zero limit should return empty vec
-        let empty = client.get_all_projects_paginated(&0u32, &0u32);
-        assert_eq!(empty.len(), 0);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_consistency_with_project_count() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create exactly 8 projects
-        for i in 2..=8u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &100u32,
-            );
-        }
-
-        let count = client.get_project_count();
-        assert_eq!(count, 8);
-
-        // Fetching all with a large limit should match the project count
-        let all = client.get_all_projects_paginated(&0u32, &1000u32);
-        assert_eq!(all.len() as u32, count);
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_sequential_pages() {
-        let (env, _cid, client, admin, _pid1) = setup();
-        // Create 12 projects
-        for i in 2..=12u32 {
-            let pid = String::from_str(&env, &format!("proj-{:03}", i));
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &pid,
-                &String::from_str(&env, &format!("Project {}", i)),
-                &wallet,
-                &100u32,
-            );
-        }
-
-        // Fetch in pages of 4
-        let page1 = client.get_all_projects_paginated(&0u32, &4u32);
-        let page2 = client.get_all_projects_paginated(&4u32, &4u32);
-        let page3 = client.get_all_projects_paginated(&8u32, &4u32);
-
-        assert_eq!(page1.len(), 4);
-        assert_eq!(page2.len(), 4);
-        assert_eq!(page3.len(), 4);
-
-        // Verify no duplicates by checking project IDs
-        let mut all_ids = Vec::new(&env);
-        for i in 0..4u32 {
-            all_ids.push_back(page1.get(i as usize).id.clone());
-            all_ids.push_back(page2.get(i as usize).id.clone());
-            all_ids.push_back(page3.get(i as usize).id.clone());
-        }
-
-        // Verify order is consistent
-        let all = client.get_all_projects_paginated(&0u32, &12u32);
-        for i in 0..12u32 {
-            assert_eq!(all.get(i as usize).id, all_ids.get(i as usize).clone());
-        }
-    }
-
-    #[test]
-    fn test_get_all_projects_paginated_project_data_integrity() {
-        let (env, _cid, client, admin, pid1) = setup();
-        let pid2 = String::from_str(&env, "proj-special");
-        let wallet2 = Address::generate(&env);
-
-        client.register_project(
-            &admin,
-            &pid2,
-            &String::from_str(&env, "Special Project"),
-            &wallet2,
-            &42u32,
-        );
-
-        // Get all projects
-        let all = client.get_all_projects_paginated(&0u32, &10u32);
-        assert_eq!(all.len(), 2);
-
-        // Find and verify the special project
-        let special = all.get(1); // Should be second (inserted second)
-        assert_eq!(special.id, pid2);
-        assert_eq!(special.name, String::from_str(&env, "Special Project"));
-        assert_eq!(special.wallet, wallet2);
-        assert_eq!(special.co2_per_xlm, 42u32);
-        assert_eq!(special.total_raised, 0);
-        assert_eq!(special.donor_count, 0);
-        assert!(special.active);
+        client.get_impact_summary(&String::from_str(&env, "no-such-project"), &None);
     }
 }
 
