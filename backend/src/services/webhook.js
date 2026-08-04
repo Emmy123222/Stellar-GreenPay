@@ -350,23 +350,29 @@ async function deliverPayload(url, secret, payload) {
   await validateUrl(url);
 
   const body = JSON.stringify(payload);
-  const signature = crypto
-    .createHmac("sha256", secret)
-    .update(body)
-    .digest("hex");
+  const signature = generateSignature(secret, body);
+
+  const headers = {
+    "Content-Type": "application/json",
+    "Content-Length": Buffer.byteLength(body),
+    "X-Webhook-Signature": signature,
+    "User-Agent": "GreenPay-Webhook/1.0",
+  };
+
+  const { previousSecret, previousSecretExpiresAt, now = Date.now() } = options;
+  if (previousSecret && typeof previousSecret === "string" && isGracePeriodActive(previousSecretExpiresAt, now)) {
+    const previousSignature = generateSignature(previousSecret, body);
+    headers["X-Webhook-Signature-Previous"] = previousSignature;
+    headers["X-Webhook-Signature"] = `${signature}, ${previousSignature}`;
+  }
 
   const urlObj = new URL(url);
-  const options = {
+  const reqOptions = {
     hostname: urlObj.hostname,
     port: urlObj.port || (urlObj.protocol === "https:" ? 443 : 80),
     path: urlObj.pathname + urlObj.search,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Content-Length": Buffer.byteLength(body),
-      "X-Webhook-Signature": signature,
-      "User-Agent": "GreenPay-Webhook/1.0",
-    },
+    headers,
     timeout: 10000,
   };
 
@@ -412,58 +418,69 @@ async function deliverPayload(url, secret, payload) {
 }
 
 /**
- * Persist a delivery row, attempt the HTTP POST, then update status/history fields.
+ * Rotate webhook secret for a project.
  *
- * @param {{ projectId: string, url: string, secret: string, payload: object }} opts
- * @returns {Promise<void>}
+ * @param {string} projectId - Project UUID.
+ * @param {object} [options]
+ * @param {number} [options.gracePeriodMs=86400000] - Duration of grace period in ms.
+ * @param {Date|number} [options.now] - Current time override.
+ * @returns {Promise<object>} Secret rotation result.
  */
-async function recordAndDeliver({ projectId, url, secret, payload }) {
-  const id = crypto.randomUUID();
-  const body = JSON.stringify(payload);
-  const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
-  const event = typeof payload?.event === "string" ? payload.event : null;
+async function rotateWebhookSecret(projectId, options = {}) {
+  const gracePeriodMs = options.gracePeriodMs || GRACE_PERIOD_MS;
+  const nowMs = options.now ? new Date(options.now).getTime() : Date.now();
+  const rotatedAtDate = new Date(nowMs);
+  const expiresAtDate = new Date(nowMs + gracePeriodMs);
 
-  await pool.query(
-    `INSERT INTO webhook_deliveries (
-       id, project_id, url, payload, event, payload_hash, status, attempt_count
-     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', 0)`,
-    [id, projectId, url, body, event, payloadHash],
+  const projectResult = await pool.query(
+    "SELECT id, webhook_secret, previous_webhook_secret FROM projects WHERE id = $1",
+    [projectId]
   );
 
-  try {
-    const { statusCode } = await deliverPayload(url, secret, payload);
-    const delivered = statusCode >= 200 && statusCode < 300;
-    await pool.query(
-      `UPDATE webhook_deliveries
-       SET status = $2,
-           attempt_count = 1,
-           last_attempt_at = NOW(),
-           response_status = $3,
-           delivered_at = CASE WHEN $4 THEN NOW() ELSE NULL END,
-           last_error = CASE WHEN $4 THEN NULL ELSE $5 END,
-           next_attempt_at = NULL
-       WHERE id = $1`,
-      [
-        id,
-        delivered ? "delivered" : "failed",
-        statusCode,
-        delivered,
-        delivered ? null : `Webhook responded with HTTP ${statusCode}`,
-      ],
-    );
-  } catch (err) {
-    await pool.query(
-      `UPDATE webhook_deliveries
-       SET status = 'failed',
-           attempt_count = 1,
-           last_attempt_at = NOW(),
-           last_error = $2,
-           next_attempt_at = NULL
-       WHERE id = $1`,
-      [id, err.message],
-    );
+  const project = projectResult.rows[0];
+  if (!project) {
+    const err = new Error("Project not found");
+    err.status = 404;
     throw err;
   }
+
+  const oldSecret = project.webhook_secret || null;
+  const newSecret = "whsec_" + crypto.randomBytes(24).toString("hex");
+
+  const updateResult = await pool.query(
+    `UPDATE projects
+     SET webhook_secret = $1,
+         previous_webhook_secret = $2,
+         webhook_secret_rotated_at = $3,
+         previous_webhook_secret_expires_at = $4,
+         updated_at = NOW()
+     WHERE id = $5
+     RETURNING id, webhook_secret, previous_webhook_secret, webhook_secret_rotated_at, previous_webhook_secret_expires_at`,
+    [
+      newSecret,
+      oldSecret,
+      rotatedAtDate.toISOString(),
+      oldSecret ? expiresAtDate.toISOString() : null,
+      projectId,
+    ]
+  );
+
+  const updated = updateResult.rows[0];
+  const gracePeriodActive = isGracePeriodActive(updated.previous_webhook_secret_expires_at, nowMs);
+
+  return {
+    success: true,
+    projectId,
+    webhookSecret: updated.webhook_secret,
+    rotatedAt: new Date(updated.webhook_secret_rotated_at).toISOString(),
+    previousSecretExpiresAt: updated.previous_webhook_secret_expires_at
+      ? new Date(updated.previous_webhook_secret_expires_at).toISOString()
+      : null,
+    expiresAt: updated.previous_webhook_secret_expires_at
+      ? new Date(updated.previous_webhook_secret_expires_at).toISOString()
+      : null,
+    gracePeriodActive,
+  };
 }
 
 /**
@@ -475,7 +492,10 @@ async function recordAndDeliver({ projectId, url, secret, payload }) {
 async function checkAndDeliverMilestones(projectId) {
   try {
     const projectResult = await pool.query(
-      "SELECT id, goal_xlm, raised_xlm, webhook_url, webhook_secret FROM projects WHERE id = $1",
+      `SELECT id, goal_xlm, raised_xlm, webhook_url, webhook_secret,
+              previous_webhook_secret, previous_webhook_secret_expires_at
+       FROM projects
+       WHERE id = $1`,
       [projectId],
     );
 

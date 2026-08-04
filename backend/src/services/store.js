@@ -176,6 +176,13 @@ function mapProjectRow(row) {
     aiSummaryModel:       row.ai_summary_model || null,
     aiSummarySourceHash:  row.ai_summary_source_hash || null,
     webhookUrl: row.webhook_url || null,
+    webhookSecretRotatedAt: row.webhook_secret_rotated_at ? toIso(row.webhook_secret_rotated_at) : null,
+    previousWebhookSecretExpiresAt: row.previous_webhook_secret_expires_at ? toIso(row.previous_webhook_secret_expires_at) : null,
+    gracePeriodActive: Boolean(
+      row.previous_webhook_secret &&
+      row.previous_webhook_secret_expires_at &&
+      new Date(row.previous_webhook_secret_expires_at).getTime() > Date.now()
+    ),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
