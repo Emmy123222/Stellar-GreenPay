@@ -25,10 +25,10 @@ module.exports = {
       )
     `);
 
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary TEXT`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model TEXT`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash TEXT`);
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary TEXT");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model TEXT");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash TEXT");
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS donations (
@@ -177,17 +177,17 @@ module.exports = {
 
   async down(client) {
     // Drop in reverse dependency order
-    await client.query(`DROP TABLE IF EXISTS project_follows`);
-    await client.query(`DROP TABLE IF EXISTS device_tokens`);
-    await client.query(`DROP TABLE IF EXISTS donation_matches`);
-    await client.query(`DROP TABLE IF EXISTS project_ratings`);
-    await client.query(`DROP TABLE IF EXISTS project_milestones`);
-    await client.query(`DROP TABLE IF EXISTS project_campaigns`);
-    await client.query(`DROP TABLE IF EXISTS project_subscriptions`);
-    await client.query(`DROP TABLE IF EXISTS project_updates`);
-    await client.query(`DROP TABLE IF EXISTS jobs`);
-    await client.query(`DROP TABLE IF EXISTS profiles`);
-    await client.query(`DROP TABLE IF EXISTS donations`);
-    await client.query(`DROP TABLE IF EXISTS projects`);
+    await client.query("DROP TABLE IF EXISTS project_follows");
+    await client.query("DROP TABLE IF EXISTS device_tokens");
+    await client.query("DROP TABLE IF EXISTS donation_matches");
+    await client.query("DROP TABLE IF EXISTS project_ratings");
+    await client.query("DROP TABLE IF EXISTS project_milestones");
+    await client.query("DROP TABLE IF EXISTS project_campaigns");
+    await client.query("DROP TABLE IF EXISTS project_subscriptions");
+    await client.query("DROP TABLE IF EXISTS project_updates");
+    await client.query("DROP TABLE IF EXISTS jobs");
+    await client.query("DROP TABLE IF EXISTS profiles");
+    await client.query("DROP TABLE IF EXISTS donations");
+    await client.query("DROP TABLE IF EXISTS projects");
   },
 };

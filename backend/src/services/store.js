@@ -155,6 +155,7 @@ function mapProjectRow(row) {
     description: row.description,
     category: row.category,
     location: row.location,
+    imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
@@ -199,6 +200,10 @@ function mapDonationRow(row) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
   }
 
+  if (row.donor_country) {
+    data.donorCountry = row.donor_country;
+  }
+
   return data;
 }
 
@@ -215,6 +220,7 @@ function mapProfileRow(row) {
     publicKey: row.public_key,
     displayName: row.display_name,
     bio: row.bio,
+    avatarUrl: row.avatar_url || null,
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],

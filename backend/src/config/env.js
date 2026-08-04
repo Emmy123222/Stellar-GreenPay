@@ -36,6 +36,8 @@ const envSchema = z.object({
   PRESIGN_EXPIRY_SECONDS: z.string().optional().default("300"),
   IPFS_API_URL: z.string().optional().default(""),
   IPFS_GATEWAY_URL: z.string().optional().default(""),
+  // Optional Pinata JWT used to pin CIDs after IPFS upload (prevents GC).
+  PINATA_JWT: z.string().optional().default(""),
 });
 
 function validateEnv() {
