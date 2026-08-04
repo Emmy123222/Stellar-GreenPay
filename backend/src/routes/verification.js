@@ -62,10 +62,12 @@ const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^https?:\/\/[^\s]{2,}$/i;
 
-function mapRequestRow(row) {
+function mapRequestRow(row, { includeDocuments = true } = {}) {
   if (!row) return null;
+  const documents = Array.isArray(row.supporting_documents) ? row.supporting_documents : [];
   return {
     id: row.id,
+    documentCount: documents.length,
     organizationName: row.organization_name,
     organizationWebsite: row.organization_website || null,
     organizationCountry: row.organization_country || null,
@@ -83,7 +85,7 @@ function mapRequestRow(row) {
       : row.expected_annual_tonnes_co2
         ? String(row.expected_annual_tonnes_co2)
         : null,
-    supportingDocuments: row.supporting_documents || [],
+    supportingDocuments: includeDocuments ? documents : [],
     storageBackend: row.storage_backend,
     notes: row.notes || null,
     status: row.status,
@@ -287,16 +289,23 @@ router.get("/me", async (req, res, next) => {
 });
 
 /**
- * GET /api/verification-requests/:id
- * Public, but only returns the row if wallet query param matches
- * the row's wallet_address. Admins can pass ?wallet to bypass this check
- * using the Bearer token.
+ * GET /api/verification-requests/:id/documents
+ * Returns only the supporting document metadata for a request. Accessible to
+ * admins via Bearer token, or to the submitter via a matching ?wallet= param.
+ *
+ * The admin detail page calls this lazily (on scroll / expand) so the main
+ * GET /:id response stays lightweight even for 20-document submissions.
  */
-router.get("/:id", async (req, res, next) => {
+router.get("/:id/documents", async (req, res, next) => {
   try {
-    const result = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [req.params.id]);
+    const result = await pool.query(
+      "SELECT supporting_documents, wallet_address FROM verification_requests WHERE id = $1",
+      [req.params.id],
+    );
     const row = result.rows[0];
     if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    const documents = Array.isArray(row.supporting_documents) ? row.supporting_documents : [];
 
     // Allow admin-readable without wallet guard.
     const auth = req.headers.authorization || "";
@@ -305,7 +314,49 @@ router.get("/:id", async (req, res, next) => {
         const { verifyToken } = require("../middleware/auth");
         const decoded = verifyToken(auth.slice(7));
         if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
-          return res.json({ success: true, data: mapRequestRow(row) });
+          return res.json({ success: true, data: { documents } });
+        }
+      } catch (_err) {
+        // fall through to wallet check
+      }
+    }
+
+    const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
+    if (!wallet || wallet !== row.wallet_address) {
+      return res.status(403).json({ error: "Provide a matching ?wallet= query param to view these documents" });
+    }
+    res.json({ success: true, data: { documents } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/verification-requests/:id
+ * Public, but only returns the row if wallet query param matches
+ * the row's wallet_address. Admins can pass ?wallet to bypass this check
+ * using the Bearer token.
+ *
+ * The supporting document array is omitted by default to keep the payload
+ * light; pass ?includeDocuments=true to embed it, or use
+ * GET /:id/documents to fetch it lazily.
+ */
+router.get("/:id", async (req, res, next) => {
+  try {
+    const result = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [req.params.id]);
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    const mapped = mapRequestRow(row, { includeDocuments: req.query.includeDocuments === "true" });
+
+    // Allow admin-readable without wallet guard.
+    const auth = req.headers.authorization || "";
+    if (auth.startsWith("Bearer ")) {
+      try {
+        const { verifyToken } = require("../middleware/auth");
+        const decoded = verifyToken(auth.slice(7));
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
+          return res.json({ success: true, data: mapped });
         }
       } catch (_err) {
         // fall through to wallet check
@@ -316,7 +367,7 @@ router.get("/:id", async (req, res, next) => {
     if (!wallet || wallet !== row.wallet_address) {
       return res.status(403).json({ error: "Provide a matching ?wallet= query param to view this request" });
     }
-    res.json({ success: true, data: mapRequestRow(row) });
+    res.json({ success: true, data: mapped });
   } catch (e) {
     next(e);
   }
