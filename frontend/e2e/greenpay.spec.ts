@@ -39,6 +39,7 @@ const MOCK_LEADERBOARD = [
     publicKey: MOCK_PUBLIC_KEY,
     displayName: "EcoChampion",
     totalDonatedXLM: "2500",
+    totalCO2OffsetKg: "1200",
     projectsSupported: 5,
     topBadge: "earth",
   },

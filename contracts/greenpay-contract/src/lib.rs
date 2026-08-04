@@ -61,6 +61,7 @@ pub struct Project {
     pub name: String,
     pub wallet: Address,
     pub co2_per_xlm: u32,
+    pub min_donation_amount: i128,
     pub total_raised: i128,
     pub donor_count: u32,
     pub active: bool,
@@ -75,6 +76,7 @@ pub struct ProjectInit {
     pub name:        String,
     pub wallet:      Address,
     pub co2_per_xlm: u32,
+    pub min_donation_amount: i128,
 }
 
 #[contracttype]
@@ -129,6 +131,17 @@ pub struct VoteProposal {
     pub resolved: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct VerificationStatus {
+    pub has_proposal: bool,
+    pub votes_for: u32,
+    pub votes_against: u32,
+    pub deadline_ledger: u32,
+    pub resolved: bool,
+    pub approved: bool,
+}
+
 /// Aggregated platform-wide counters returned by `get_global_stats`.
 ///
 /// Bundles the four values that the landing page hero section needs in a
@@ -180,6 +193,7 @@ pub enum DataKey {
     ImpactNFT(Address, BadgeTier),
     DonationCount,
     DonationRecord(u32),
+    DonorDonations(Address),
     GlobalTotalRaised,
     GlobalCO2OffsetGrams,
     // Tracks whether `donor` has ever donated to `project` — used so
@@ -194,11 +208,16 @@ pub enum DataKey {
     DonorProjectTotal(String, Address),
     // Per-project milestone NFT: one per (project_id, donor) pair
     ProjectMilestoneNFT(String, Address),
+    // Metadata IPFS storage
+    ProjectMetadata(String),
     // Contract upgrade and multi-currency support
     ContractWasmHash,
     USDCTokenAddress,
     // Price oracle for USDC → XLM conversion
     OracleAddress,
+    // Contract-wide emergency pause status
+    Paused,
+    PendingAdmin,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -258,6 +277,43 @@ impl GreenPayContract {
             .set(&DataKey::GlobalCO2OffsetGrams, &0i128);
     }
 
+    // ─── Emergency Pause (Circuit Breaker) ───────────────────────────────────
+
+    pub fn pause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can pause contract");
+        }
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish((symbol_short!("paused"), admin), ());
+    }
+
+    pub fn unpause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can unpause contract");
+        }
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish((symbol_short!("unpaused"), admin), ());
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     // ─── Project management ───────────────────────────────────────────────────
 
     pub fn register_project(
@@ -267,6 +323,7 @@ impl GreenPayContract {
         name: String,
         wallet: Address,
         co2_per_xlm: u32,
+        min_donation_amount: i128,
     ) {
         admin.require_auth();
         let stored_admin: Address = env
@@ -292,6 +349,7 @@ impl GreenPayContract {
             name,
             wallet,
             co2_per_xlm,
+            min_donation_amount,
             total_raised: 0,
             donor_count: 0,
             active: true,
@@ -316,6 +374,18 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::ProjectCount, &next_count);
+        
+        // Append project ID to the ProjectIds vector for enumeration
+        let mut project_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
+        project_ids.push_back(project_id.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectIds, &project_ids);
+        
         env.events()
             .publish((symbol_short!("proj_reg"), admin), project_id);
     }
@@ -325,6 +395,13 @@ impl GreenPayContract {
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
         if stored_admin != admin { panic!("Only admin can register projects"); }
+
+        // Load the project IDs vector once outside the loop for efficiency
+        let mut project_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
 
         for init in projects.iter() {
             let project_id = init.id.clone();
@@ -336,6 +413,7 @@ impl GreenPayContract {
                 name: init.name.clone(),
                 wallet: init.wallet.clone(),
                 co2_per_xlm: init.co2_per_xlm,
+                min_donation_amount: init.min_donation_amount,
                 total_raised: 0,
                 donor_count: 0,
                 active: true,
@@ -352,8 +430,17 @@ impl GreenPayContract {
             let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
             env.storage().instance().set(&DataKey::ProjectCount, &next_count);
+            
+            // Append project ID to the ProjectIds vector for enumeration
+            project_ids.push_back(project_id.clone());
+            
             env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
         }
+        
+        // Store the updated ProjectIds vector
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectIds, &project_ids);
     }
 
     pub fn deactivate_project(env: Env, admin: Address, project_id: String) {
@@ -377,8 +464,35 @@ impl GreenPayContract {
             .set(&DataKey::Project(project_id), &project);
     }
 
-    pub fn update_project_co2_rate(env: Env, admin: Address, project_id: String, co2_per_xlm: u32) {
+    pub fn pause_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can pause projects"); }
+        let mut project: Project = env.storage().instance()
+            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+        if !project.active { panic!("Cannot pause a deactivated project"); }
+        project.active = false;
+        env.storage().instance().set(&DataKey::Project(project_id), &project);
+    }
+
+    // ─── Project Metadata ───────────────────────────────────────────────────
+
+    /// Update or store the IPFS CID of a project's metadata JSON.
+    /// Accessible by contract global admin or the project's wallet owner.
+    pub fn set_project_metadata(
+        env: Env,
+        admin: Address,
+        project_id: String,
+        ipfs_cid: String,
+    ) {
+        admin.require_auth();
+
+        let project: Project = env
+            .storage()
+            .instance()
+            .get(&DataKey::Project(project_id.clone()))
+            .expect("Project not found");
 
         let stored_admin: Address = env
             .storage()
@@ -386,25 +500,25 @@ impl GreenPayContract {
             .get(&DataKey::Admin)
             .expect("Not initialized");
 
-        if stored_admin != admin {
-            panic!("Only admin can update project rate");
+        if stored_admin != admin && project.wallet != admin {
+            panic!("Only admin or project wallet can set metadata");
         }
 
-        let mut project: Project = env
-            .storage()
-            .instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
+        if ipfs_cid.is_empty() {
+            panic!("IPFS CID cannot be empty");
+        }
 
-        project.co2_per_xlm = co2_per_xlm;
+        if ipfs_cid.len() > 128 {
+            panic!("IPFS CID exceeds maximum length");
+        }
 
         env.storage()
             .instance()
-            .set(&DataKey::Project(project_id.clone()), &project);
+            .set(&DataKey::ProjectMetadata(project_id.clone()), &ipfs_cid);
 
         env.events().publish(
-            (symbol_short!("co2_rate"), admin),
-            (project_id, co2_per_xlm),
+            (Symbol::new(&env, "meta_updated"), project_id),
+            (admin, ipfs_cid),
         );
     }
 
@@ -448,6 +562,9 @@ impl GreenPayContract {
         msg_hash: u32,
     ) {
         donor.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
         if amount <= 0 {
             panic!("Donation amount must be positive");
         }
@@ -459,6 +576,9 @@ impl GreenPayContract {
             .expect("Project not found");
         if !project.active {
             panic!("Project is not accepting donations");
+        }
+        if amount < project.min_donation_amount {
+            panic!("Donation below minimum");
         }
 
         // Pre-compute CO2 increment with checked multiplication so an attacker
@@ -559,6 +679,15 @@ impl GreenPayContract {
             currency: symbol_short!("XLM"),
         };
         env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
+
+        // Track this donation index in the donor's history list.
+        let mut donor_donations: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor.clone()))
+            .unwrap_or(Vec::new(&env));
+        donor_donations.push_back(dc);
+        env.storage().instance().set(&DataKey::DonorDonations(donor.clone()), &donor_donations);
 
         let gr: i128 = env
             .storage()
@@ -749,11 +878,119 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
+    /// Retrieve a paginated list of all projects on-chain.
+    ///
+    /// # Arguments
+    /// * `offset` - Starting index in the project list (0-indexed)
+    /// * `limit` - Maximum number of projects to return
+    ///
+    /// # Returns
+    /// A `Vec<Project>` containing up to `limit` projects starting from `offset`.
+    /// If `offset` is greater than or equal to the total number of projects,
+    /// returns an empty vector without panicking.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Get first 10 projects
+    /// let projects = contract.get_all_projects_paginated(0, 10);
+    /// // Get next 10 projects
+    /// let projects = contract.get_all_projects_paginated(10, 10);
+    /// ```
+    pub fn get_all_projects_paginated(env: Env, offset: u32, limit: u32) -> Vec<Project> {
+        // Retrieve the list of project IDs, or empty vec if not yet initialized
+        let project_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
+        
+        let total_count = project_ids.len();
+        
+        // If offset is out of bounds, return empty vec
+        if offset >= total_count {
+            return Vec::new(&env);
+        }
+        
+        // Calculate the end bound: min(offset + limit, total_count)
+        let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
+            total_count
+        } else {
+            offset as usize + limit as usize
+        };
+        
+        // Collect projects from the slice
+        let mut result = Vec::new(&env);
+        let mut idx = offset as usize;
+        while idx < end {
+            if let Some(project_id) = project_ids.get(idx) {
+                if let Some(project) = env
+                    .storage()
+                    .instance()
+                    .get::<_, Project>(&DataKey::Project(project_id))
+                {
+                    result.push_back(project);
+                }
+            }
+            idx += 1;
+        }
+        
+        result
+    }
+
     pub fn get_admin(env: Env) -> Address {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized")
+    }
+
+    /// Propose a new admin. The current admin keeps control until the
+    /// proposed address explicitly accepts the role.
+    pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can propose a new admin");
+        }
+        if new_admin == stored_admin {
+            panic!("New admin must differ from current admin");
+        }
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        env.events()
+            .publish((symbol_short!("adm_prop"), admin), new_admin);
+    }
+
+    /// Accept a pending admin proposal and finalize the admin rotation.
+    pub fn accept_admin(env: Env, new_admin: Address) {
+        new_admin.require_auth();
+        let pending_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .expect("No pending admin proposal");
+        if pending_admin != new_admin {
+            panic!("Only pending admin can accept admin role");
+        }
+
+        let previous_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events()
+            .publish((symbol_short!("adm_acpt"), previous_admin), new_admin);
+    }
+
+    /// Read the current pending admin proposal, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
     // ─── Placeholders ─────────────────────────────────────────────────────────
@@ -795,6 +1032,16 @@ impl GreenPayContract {
         env.storage().instance().set(&key, &nft);
         env.events()
             .publish((symbol_short!("nft_mint"), donor), tier);
+    }
+
+    /// Returns the impact NFT minted for `owner` at `tier`, if it exists.
+    ///
+    /// The returned value is the complete immutable mint snapshot, including
+    /// the owner, tier, cumulative donation total, and mint ledger sequence.
+    pub fn get_impact_nft(env: Env, owner: Address, tier: BadgeTier) -> Option<ImpactNFT> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ImpactNFT(owner, tier))
     }
 
     pub fn has_nft(env: Env, donor: Address, tier: BadgeTier) -> bool {
@@ -922,6 +1169,9 @@ impl GreenPayContract {
     /// Badge holders (≥ Seedling) cast a vote. One vote per address per proposal.
     pub fn vote_verify_project(env: Env, voter: Address, project_id: String, approve: bool) {
         voter.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
 
         let stats: DonorStats = env
             .storage()
@@ -1032,6 +1282,30 @@ impl GreenPayContract {
             .expect("Proposal not found")
     }
 
+    pub fn get_verification_status(env: Env, project_id: String) -> VerificationStatus {
+        if env.storage().instance().has(&DataKey::Proposal(project_id.clone())) {
+            let proposal: VoteProposal = env.storage().instance().get(&DataKey::Proposal(project_id)).unwrap();
+            let approved = proposal.resolved && proposal.votes_for > proposal.votes_against;
+            VerificationStatus {
+                has_proposal: true,
+                votes_for: proposal.votes_for,
+                votes_against: proposal.votes_against,
+                deadline_ledger: proposal.deadline_ledger,
+                resolved: proposal.resolved,
+                approved,
+            }
+        } else {
+            VerificationStatus {
+                has_proposal: false,
+                votes_for: 0,
+                votes_against: 0,
+                deadline_ledger: 0,
+                resolved: false,
+                approved: false,
+            }
+        }
+    }
+
     /// Returns the list of voter addresses for a proposal.
     /// Can be used by governance UIs to display who voted and how.
     pub fn get_voter_list(env: Env, project_id: String) -> Vec<Address> {
@@ -1050,6 +1324,9 @@ impl GreenPayContract {
         msg_hash: u32,
     ) {
         donor.require_auth();
+        if Self::is_paused(env.clone()) {
+            panic!("Contract is paused");
+        }
         if usdc_amount <= 0 {
             panic!("Donation amount must be positive");
         }
@@ -1076,6 +1353,9 @@ impl GreenPayContract {
             .expect("Project not found");
         if !project.active {
             panic!("Project is not accepting donations");
+        }
+        if usdc_amount < project.min_donation_amount {
+            panic!("Donation below minimum");
         }
 
         // Pre-compute CO2 increment using XLM-equivalent
@@ -1164,6 +1444,15 @@ impl GreenPayContract {
             currency: symbol_short!("USDC"),
         };
         env.storage().instance().set(&DataKey::DonationRecord(dc), &donation_record);
+
+        // Track this donation index in the donor's history list.
+        let mut donor_donations: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor.clone()))
+            .unwrap_or(Vec::new(&env));
+        donor_donations.push_back(dc);
+        env.storage().instance().set(&DataKey::DonorDonations(donor.clone()), &donor_donations);
 
         let gr: i128 = env
             .storage()
@@ -1318,6 +1607,72 @@ mod tests {
         assert_eq!(client.get_global_total(), 0);
     }
 
+    #[test]
+    fn test_admin_rotation_requires_proposal_and_acceptance() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+        client.accept_admin(&new_admin);
+
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only pending admin can accept admin role")]
+    fn test_accept_admin_requires_pending_admin_match() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let pending_admin = Address::generate(&env);
+        let wrong_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &pending_admin);
+        client.accept_admin(&wrong_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "No pending admin proposal")]
+    fn test_accept_admin_without_proposal_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.accept_admin(&new_admin);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can propose a new admin")]
+    fn test_only_current_admin_can_propose_new_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&attacker, &new_admin);
+    }
+
         #[test]
     fn test_get_donation_record() {
         let (env, _cid, client, admin, pid) = setup();
@@ -1337,6 +1692,42 @@ mod tests {
         assert_eq!(record.project, pid);
         assert_eq!(record.amount, usdc_amount);
         assert_eq!(record.currency, symbol_short!("USDC"));
+    }
+
+    #[test]
+    fn test_get_donor_history() {
+        let (env, cid, client, admin, pid) = setup();
+        env.mock_all_auths();
+        let donor = Address::generate(&env);
+        let wallet = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(wallet.clone()).address();
+        let token_client = StellarAssetClient::new(&env, &token);
+        token_client.mint(&donor, &i128::MAX);
+
+        // No donations yet — empty result.
+        let history = client.get_donor_history(&donor, &0, &10);
+        assert_eq!(history.len(), 0);
+
+        // Donate XLM three times.
+        for i in 1..=3 {
+            client.donate(&token, &donor, &pid, &(i * 100 * STROOP), &0);
+        }
+
+        let history = client.get_donor_history(&donor, &0, &10);
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.get(0).unwrap().amount, 100 * STROOP);
+        assert_eq!(history.get(1).unwrap().amount, 200 * STROOP);
+        assert_eq!(history.get(2).unwrap().amount, 300 * STROOP);
+
+        // Pagination: offset=1, limit=2 → gets second and third donation.
+        let page = client.get_donor_history(&donor, &1, &2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page.get(0).unwrap().amount, 200 * STROOP);
+        assert_eq!(page.get(1).unwrap().amount, 300 * STROOP);
+
+        // Pagination: offset=5 → empty.
+        let empty = client.get_donor_history(&donor, &5, &10);
+        assert_eq!(empty.len(), 0);
     }
 
     #[test]
@@ -1372,7 +1763,7 @@ mod tests {
         client.register_project(
             &admin, &pid,
             &String::from_str(&env, "Stats Project"),
-            &wallet, &200u32,
+            &wallet, &200u32, &1i128,
         );
 
         // Mint tokens and donate
@@ -1451,18 +1842,21 @@ mod tests {
             name:        String::from_str(&env, "Forest Restore"),
             wallet:      wallet1.clone(),
             co2_per_xlm: 100,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          String::from_str(&env, "proj-002"),
             name:        String::from_str(&env, "Ocean Cleanup"),
             wallet:      wallet2.clone(),
             co2_per_xlm: 200,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          String::from_str(&env, "proj-003"),
             name:        String::from_str(&env, "Solar Schools"),
             wallet:      wallet3.clone(),
             co2_per_xlm: 150,
+            min_donation_amount: 1,
         });
 
         client.batch_register_projects(&admin, &projects);
@@ -1497,12 +1891,14 @@ mod tests {
             name:        String::from_str(&env, "First"),
             wallet:      wallet.clone(),
             co2_per_xlm: 100,
+            min_donation_amount: 1,
         });
         projects.push_back(ProjectInit {
             id:          pid,
             name:        String::from_str(&env, "Duplicate"),
             wallet:      wallet,
             co2_per_xlm: 50,
+            min_donation_amount: 1,
         });
 
         client.batch_register_projects(&admin, &projects);
@@ -1532,6 +1928,7 @@ mod tests {
             &String::from_str(&env, "Test Project"),
             &wallet,
             &100u32,
+            &1i128,
         );
         (env, cid, client, admin, pid)
     }
@@ -1763,6 +2160,10 @@ mod tests {
         env.ledger().set_sequence_number(VOTING_WINDOW_LEDGERS + 2);
         client.resolve_proposal(&pid);
 
+        // Capture events BEFORE any other contract calls — env.events().all()
+        // returns events from the most recent call only.
+        let rejection_events = env.events().all().events().len();
+
         let p = client.get_proposal(&pid);
         assert!(p.resolved);
         assert_eq!(p.votes_for,     1);
@@ -1880,6 +2281,7 @@ mod tests {
             &String::from_str(&env, "Bad Project"),
             &wallet,
             &(MAX_CO2_PER_XLM + 1),
+            &1i128,
         );
     }
 
@@ -1894,12 +2296,14 @@ mod tests {
             &String::from_str(&env, "Second Project"),
             &wallet,
             &100u32,
+            &1i128,
         );
 
         assert!(client.get_project(&pid1).active);
         assert!(client.get_project(&pid2).active);
 
-        client.deactivate_all_projects(&admin);
+        client.deactivate_project(&admin, &pid1);
+        client.deactivate_project(&admin, &pid2);
 
         assert!(!client.get_project(&pid1).active);
         assert!(!client.get_project(&pid2).active);
@@ -2034,7 +2438,7 @@ mod tests {
         client.register_project(
             &admin, &pid2,
             &String::from_str(&env, "Project 2"),
-            &wallet2, &50u32,
+            &wallet2, &50u32, &1i128,
         );
 
         let donor        = Address::generate(&env);
@@ -2152,4 +2556,5 @@ mod tests {
         client.get_impact_summary(&String::from_str(&env, "no-such-project"), &None);
     }
 }
+
 

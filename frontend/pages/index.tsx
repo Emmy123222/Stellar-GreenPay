@@ -2,7 +2,7 @@
  * pages/index.tsx — GreenPay landing page
  */
 import Link from "next/link";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import WalletConnect from "@/components/WalletConnect";
 import { useCountUp } from "@/hooks/useCountUp";
 import {
@@ -11,8 +11,8 @@ import {
   fetchProjects,
   fetchCategoryStats,
 } from "@/lib/api";
-import { streamGlobalProjectDonations } from "@/lib/stellar";
-import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
+import { formatCO2, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
+import { formatDistanceToNowStrict } from "date-fns";
 import type { GlobalStats, CategoryStats } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
 
@@ -25,6 +25,7 @@ interface LiveDonationTickerItem {
   id: string;
   projectId: string;
   projectName: string;
+  donorAddress: string;
   amountXLM: string;
   createdAt: string;
 }
@@ -118,11 +119,10 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
   const [liveDonations, setLiveDonations] = useState<LiveDonationTickerItem[]>(
     [],
   );
-  const [tickerIndex, setTickerIndex] = useState(0);
 
   useEffect(() => {
-    let closeStream: (() => void) | null = null;
     let isMounted = true;
+    let eventSource: EventSource | null = null;
 
     fetchGlobalStats()
       .then(setGlobalStats)
@@ -137,49 +137,62 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
     fetchProjects({ limit: 100 })
       .then((projects) => {
         if (!isMounted || projects.length === 0) return;
-        closeStream = streamGlobalProjectDonations(
-          projects.map((project) => ({
-            id: project.id,
-            name: project.name,
-            walletAddress: project.walletAddress,
-          })),
-          (donation) => {
-            setLiveDonations((prev) =>
-              [
-                {
+
+        const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
+        eventSource = new EventSource("/api/donations/stream");
+
+        eventSource.addEventListener("initial", (event) => {
+          if (!isMounted) return;
+          const payload = JSON.parse((event as MessageEvent).data);
+          const initialDonations = Array.isArray(payload?.donations)
+            ? payload.donations
+                .map((donation: any) => ({
                   id: donation.id,
                   projectId: donation.projectId,
-                  projectName: donation.projectName,
-                  amountXLM: donation.amountXLM,
+                  projectName: donation.projectName || projectNameById.get(donation.projectId) || "A project",
+                  donorAddress: donation.donorAddress || donation.from || "",
+                  amountXLM: donation.amountXLM || donation.amount || "0",
                   createdAt: donation.createdAt,
-                },
-                ...prev.filter((item) => item.id !== donation.id),
-              ].slice(0, 10),
-            );
-          },
-        );
+                }))
+                .slice(0, 10)
+            : [];
+          setLiveDonations(initialDonations);
+        });
+
+        eventSource.addEventListener("donation", (event) => {
+          if (!isMounted) return;
+          const payload = JSON.parse((event as MessageEvent).data);
+          const donation = payload?.donation;
+          if (!donation) return;
+          setLiveDonations((prev) => {
+            const nextDonation = {
+              id: donation.id,
+              projectId: donation.projectId,
+              projectName: donation.projectName || projectNameById.get(donation.projectId) || "A project",
+              donorAddress: donation.donorAddress || donation.from || "",
+              amountXLM: donation.amountXLM || donation.amount || "0",
+              createdAt: donation.createdAt,
+            };
+            return [nextDonation, ...prev.filter((item) => item.id !== donation.id)].slice(0, 10);
+          });
+        });
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+        };
       })
       .catch(() => null);
 
     return () => {
       isMounted = false;
-      if (closeStream) closeStream();
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
-
-  useEffect(() => {
-    if (liveDonations.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setTickerIndex((current) => (current + 1) % liveDonations.length);
-    }, 3500);
-    return () => window.clearInterval(timer);
-  }, [liveDonations.length]);
-
-  useEffect(() => {
-    if (tickerIndex >= liveDonations.length) {
-      setTickerIndex(0);
-    }
-  }, [liveDonations.length, tickerIndex]);
 
   return (
     <div className="relative overflow-hidden">
@@ -384,38 +397,77 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
         </div>
       )}
 
-      <LiveDonationTicker donations={liveDonations} activeIndex={tickerIndex} />
+      <LiveDonationTicker donations={liveDonations} />
     </div>
   );
 }
 
-function LiveDonationTicker({
-  donations,
-  activeIndex,
-}: {
-  donations: LiveDonationTickerItem[];
-  activeIndex: number;
-}) {
+function LiveDonationTicker({ donations }: { donations: LiveDonationTickerItem[] }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (donations.length === 0) return;
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % donations.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [donations.length]);
+
+  useEffect(() => {
+    if (activeIndex >= donations.length) {
+      setActiveIndex(0);
+    }
+  }, [activeIndex, donations.length]);
+
   if (donations.length === 0) return null;
+
   const item = donations[activeIndex];
+  const donorLabel = shortenAddress(item.donorAddress || "Unknown donor", 4);
+  const projectLabel = item.projectName || "a project";
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2">
+    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2 overflow-hidden">
       <div className="max-w-6xl mx-auto flex items-center gap-3 text-sm text-white font-body">
-        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold">
+        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold shrink-0">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           Live donations
         </span>
-        <p key={item.id} className="animate-slide-up">
-          just donated <strong>{formatXLM(item.amountXLM)}</strong> to{" "}
-          <Link
-            href={`/projects/${item.projectId}`}
-            className="text-emerald-300 hover:text-emerald-200"
-          >
-            {item.projectName}
-          </Link>
-        </p>
+        <div key={item.id} className="flex-1 overflow-hidden">
+          <div className="flex items-center gap-2 whitespace-nowrap animate-slide-up">
+            <span className="text-emerald-300">⚡ Just now</span>
+            <span className="text-forest-100">—</span>
+            <span className="font-mono text-forest-100">{donorLabel}</span>
+            <span className="text-white">
+              donated <strong>{formatXLM(item.amountXLM)}</strong> to {projectLabel}
+            </span>
+            <span className="text-forest-300">🌱</span>
+          </div>
+        </div>
       </div>
+      <style jsx>{`
+        .animate-slide-up {
+          animation: slide-up 3s ease-in-out forwards;
+        }
+
+        @keyframes slide-up {
+          0% {
+            transform: translateY(16px);
+            opacity: 0;
+          }
+          10% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          90% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(-16px);
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
