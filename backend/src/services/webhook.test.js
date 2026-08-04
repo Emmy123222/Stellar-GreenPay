@@ -505,6 +505,9 @@ describe("Webhook signature validation (testcontainers)", () => {
 
     // No webhook should have been delivered
     expect(received.length).toBe(0);
+  }, 15000);
+});
+
 process.env.NODE_ENV = "test";
 const dns = require("dns");
 const net = require("net");
