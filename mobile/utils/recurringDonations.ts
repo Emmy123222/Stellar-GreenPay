@@ -8,6 +8,25 @@ import axios from 'axios';
 
 export const RECURRING_DONATIONS_KEY = 'greenpay_recurring_donations';
 
+function randomId(): string {
+  const bytes = new Uint8Array(16);
+  const crypto = globalThis.crypto;
+  if (crypto?.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    // Fallback for environments without Web Crypto; not used on modern runtimes.
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  // 16 bytes -> 26-char base36 id without padding, collision-resistant.
+  let value = '';
+  for (const byte of bytes) {
+    value += byte.toString(36).padStart(2, '0');
+  }
+  return value;
+}
+
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
 export class RecurringDonationValidationError extends Error {
@@ -71,7 +90,7 @@ export async function createRecurringDonation(input: {
 
   const now = new Date().toISOString();
   const donation: RecurringDonation = {
-    id: `rec_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
+    id: `rec_${randomId()}_${Date.now()}`,
     projectId: input.projectId,
     projectName: input.projectName,
     amountXLM: input.amountXLM,
@@ -117,7 +136,7 @@ export async function recordPayment(
   projectName: string
 ): Promise<PaymentRecord> {
   const record: PaymentRecord = {
-    id: `pay_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
+    id: `pay_${randomId()}_${Date.now()}`,
     donationId,
     amountXLM,
     projectName,

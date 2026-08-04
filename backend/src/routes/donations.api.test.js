@@ -275,7 +275,7 @@ describe("GET /api/donations/:id", () => {
           ...MOCK_DONATION_ROW,
           project_name: "Amazon Reforestation",
           donor_display_name: "John Doe",
-          co2_offset_kg: "500",
+          co2_per_xlm: 2000,
         },
       ],
     });

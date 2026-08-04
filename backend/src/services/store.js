@@ -161,6 +161,11 @@ function mapProjectRow(row) {
     raisedXLM: row.raised_xlm?.toString() || "0",
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
+    co2PerXLM: row.co2_per_xlm?.toString
+      ? row.co2_per_xlm.toString()
+      : row.co2_per_xlm != null
+        ? String(row.co2_per_xlm)
+        : "0",
     status: row.status,
     rejectionReason: row.rejection_reason || null,
     verified: row.verified,
@@ -205,6 +210,15 @@ function mapDonationRow(row) {
 
   if (row.amount_xlm !== null && row.amount_xlm !== undefined) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
+
+    // Per-donation CO₂ offset: grams per XLM * XLM amount / 1000 = kg
+    if (row.co2_per_xlm !== null && row.co2_per_xlm !== undefined) {
+      const co2PerXlm = Number.parseFloat(row.co2_per_xlm);
+      const amountXlm = Number.parseFloat(row.amount_xlm);
+      if (!Number.isNaN(co2PerXlm) && !Number.isNaN(amountXlm)) {
+        data.co2OffsetKg = Math.round((amountXlm * co2PerXlm) / 1000);
+      }
+    }
   }
 
   if (row.donor_country) {
@@ -227,6 +241,7 @@ function mapProfileRow(row) {
     publicKey: row.public_key,
     displayName: row.display_name,
     bio: row.bio,
+    avatarUrl: row.avatar_url || null,
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],

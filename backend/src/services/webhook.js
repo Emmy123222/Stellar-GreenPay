@@ -545,7 +545,7 @@ async function checkAndDeliverMilestones(projectId) {
 
     if (project.webhook_url && project.webhook_secret) {
       // Fire all webhook deliveries concurrently so a slow DNS timeout on one
-      // URL doesn't block the rest.
+      // URL doesn't block the rest. Each attempt is persisted for history.
       const deliveries = milestones.map((milestone) => {
         const payload = {
           event: "milestone.reached",
@@ -556,15 +556,19 @@ async function checkAndDeliverMilestones(projectId) {
           timestamp: new Date().toISOString(),
         };
 
-        return deliverPayload(project.webhook_url, project.webhook_secret, payload)
-          .catch((err) => {
-            logger.error({
-              event: "webhook_url_rejected",
-              projectId,
-              url: project.webhook_url,
-              reason: err.message,
-            }, "Skipping webhook delivery — URL rejected");
-          });
+        return recordAndDeliver({
+          projectId,
+          url: project.webhook_url,
+          secret: project.webhook_secret,
+          payload,
+        }).catch((err) => {
+          logger.error({
+            event: "webhook_url_rejected",
+            projectId,
+            url: project.webhook_url,
+            reason: err.message,
+          }, "Skipping webhook delivery — URL rejected");
+        });
       });
 
       await Promise.allSettled(deliveries);
@@ -578,8 +582,18 @@ async function checkAndDeliverMilestones(projectId) {
   }
 }
 
+/**
+ * No-op queue start — delivery history is recorded inline.
+ * Kept so server.js can await start() without a separate pg-boss worker.
+ * @returns {Promise<void>}
+ */
+async function start() {
+  return;
+}
+
 module.exports = {
   checkAndDeliverMilestones,
+  start,
   // Exported for unit testing
   validateUrl,
   checkPrivateIPv4,
@@ -588,6 +602,7 @@ module.exports = {
   ip4ToInt,
   stripBrackets,
   PRIVATE_IPV4_RANGES,
+  recordAndDeliver,
 };
 
 // Export internal functions for testing

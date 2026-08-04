@@ -140,13 +140,27 @@ async function sendDigestEmails({ project, stats, milestones, updates, emails, m
 
   for (const email of emails) {
     try {
+      let unsubscribeUrl = "";
+      try {
+        const token = signUnsubscribeToken(email, project.id);
+        unsubscribeUrl = `${API_URL}/api/projects/${project.id}/unsubscribe?token=${token}`;
+      } catch (err) {
+        logger.warn({ event: "digest_unsubscribe_token_error", email, projectId: project.id, err }, "Failed to generate unsubscribe token");
+      }
+
       const res = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${RESEND_API_KEY}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ from: FROM_ADDRESS, to: email, subject, html: buildDigestHtml({ project, stats, milestones, updates, email }), text: buildDigestText({ project, stats, milestones, updates, email }) }),
+        body: JSON.stringify({
+          from: FROM_ADDRESS,
+          to: email,
+          subject,
+          html: buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
+          text: buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
+        }),
       });
       if (!res.ok) {
         const body = await res.text();
