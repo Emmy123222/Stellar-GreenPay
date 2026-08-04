@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
-import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
+import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch, uploadSupportingDocument, updateProjectImage, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
@@ -52,6 +52,8 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [approvalState, setApprovalState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [imageUploadState, setImageUploadState] = useState<"idle" | "uploading" | "saving" | "success" | "error">("idle");
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   const [onChainState, setOnChainState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [onChainMessage, setOnChainMessage] = useState<string | null>(null);
@@ -323,6 +325,25 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     }
   };
 
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !project || !publicKey) return;
+    setImageUploadState("uploading");
+    setImageUploadError(null);
+
+    try {
+      const uploaded = await uploadSupportingDocument(file);
+      setImageUploadState("saving");
+      const updated = await updateProjectImage(project.id, uploaded.url, publicKey);
+      setProject(updated);
+      setImageUploadState("success");
+      setTimeout(() => setImageUploadState("idle"), 2500);
+    } catch (e: unknown) {
+      setImageUploadError(e instanceof Error ? e.message : "Failed to upload image");
+      setImageUploadState("error");
+    }
+  };
+
   const handleRegisterOnChain = async () => {
     if (!project || !publicKey) return;
     setOnChainState("loading");
@@ -436,6 +457,22 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
           </div>
         ))}
+      </div>
+
+      <div className="card mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h2 className="font-display text-xl font-bold text-forest-900">Project Banner</h2>
+          <label className="inline-flex cursor-pointer items-center rounded-xl border border-forest-200 bg-forest-50 px-4 py-2 text-sm font-semibold text-forest-700 transition hover:bg-forest-100">
+            <input type="file" accept="image/*" className="sr-only" onChange={handleImageUpload} />
+            {imageUploadState === "uploading" ? "Uploading…" : imageUploadState === "saving" ? "Saving…" : imageUploadState === "success" ? "Saved" : "Upload banner image"}
+          </label>
+        </div>
+        {imageUploadError ? <p className="mb-3 text-sm text-red-600">{imageUploadError}</p> : null}
+        {project.imageUrl ? (
+          <img src={project.imageUrl} alt={`${project.name} banner`} className="h-48 w-full rounded-2xl object-cover" />
+        ) : (
+          <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-forest-200 bg-forest-50 text-sm text-[#5a7a5a]">No banner image yet. Upload one to personalize the project page.</div>
+        )}
       </div>
 
       <div className="card mb-8">

@@ -225,6 +225,7 @@ describe("store utility functions", () => {
         public_key: "GUSER",
         display_name: "Asraf",
         bio: "Donor",
+        avatar_url: "https://cdn.example.com/a.png",
         total_donated_xlm: 100,
         projects_supported: 2,
         badges: [{ tier: "tree" }],
@@ -234,12 +235,28 @@ describe("store utility functions", () => {
     ).toMatchObject({
       publicKey: "GUSER",
       displayName: "Asraf",
+      avatarUrl: "https://cdn.example.com/a.png",
       totalDonatedXLM: "100",
       projectsSupported: 2,
       badges: [{ tier: "tree" }],
       createdAt: null,
       updatedAt: null,
     });
+  });
+
+  test("mapProfileRow defaults missing avatar_url to null", () => {
+    expect(
+      mapProfileRow({
+        public_key: "GUSER",
+        display_name: "Asraf",
+        bio: null,
+        total_donated_xlm: 0,
+        projects_supported: 0,
+        badges: [],
+        created_at: null,
+        updated_at: null,
+      }).avatarUrl
+    ).toBeNull();
   });
 
   test("row mappers convert snake_case fields to camelCase", () => {

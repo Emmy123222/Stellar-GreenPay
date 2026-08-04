@@ -172,3 +172,93 @@ describe("GET /api/webhooks/:projectId", () => {
     expect(res.body.error).toBe("Only the project owner can view webhook configuration");
   });
 });
+
+describe("GET /api/webhooks/:projectId/history", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns paginated delivery history for project owner", async () => {
+    pool.query
+      .mockResolvedValueOnce({
+        rows: [{
+          id: PROJECT_ID,
+          wallet_address: OWNER_ADDRESS,
+          webhook_url: "https://example.com/hook",
+          webhook_secret: "secret",
+        }],
+      })
+      .mockResolvedValueOnce({
+        rows: [{
+          id: "del-1",
+          project_id: PROJECT_ID,
+          event: "milestone.reached",
+          payload_hash: "abc123",
+          status: "delivered",
+          attempt_count: 1,
+          last_attempt_at: "2026-07-01T12:00:00.000Z",
+          next_attempt_at: null,
+          response_status: 200,
+          last_error: null,
+          delivered_at: "2026-07-01T12:00:00.000Z",
+          created_at: "2026-07-01T12:00:00.000Z",
+        }],
+      })
+      .mockResolvedValueOnce({ rows: [{ total: 1 }] });
+
+    const res = await request(app)
+      .get(`/api/webhooks/${PROJECT_ID}/history?page=1&pageSize=20`)
+      .set("X-Wallet-Address", OWNER_ADDRESS)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      success: true,
+      data: [{
+        id: "del-1",
+        projectId: PROJECT_ID,
+        event: "milestone.reached",
+        payloadHash: "abc123",
+        status: "delivered",
+        attempts: 1,
+        lastAttemptAt: "2026-07-01T12:00:00.000Z",
+        nextAttemptAt: null,
+        responseStatus: 200,
+        lastError: null,
+        deliveredAt: "2026-07-01T12:00:00.000Z",
+        createdAt: "2026-07-01T12:00:00.000Z",
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+  });
+
+  test("rejects non-owners from viewing history", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: PROJECT_ID,
+        wallet_address: OWNER_ADDRESS,
+        webhook_url: "https://example.com/hook",
+        webhook_secret: "secret",
+      }],
+    });
+
+    const res = await request(app)
+      .get(`/api/webhooks/${PROJECT_ID}/history`)
+      .set("X-Wallet-Address", OTHER_ADDRESS)
+      .expect(403);
+
+    expect(res.body.error).toBe("Only the project owner can view webhook configuration");
+  });
+
+  test("rejects requests without X-Wallet-Address", async () => {
+    const res = await request(app)
+      .get(`/api/webhooks/${PROJECT_ID}/history`)
+      .expect(401);
+
+    expect(res.body.error).toBe("X-Wallet-Address header is required");
+  });
+});

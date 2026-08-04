@@ -23,13 +23,26 @@ import {
   Animated,
   Share,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
+
+import * as Notifications from 'expo-notifications';
+import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
+import { useTheme } from '../theme';
+import {
+  getPushToken,
+  followProject,
+  unfollowProject,
+  markNotificationsSeen,
+} from '../../utils/notifications';
+
 import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
 import { useTheme } from '../theme';
 import { markNotificationsSeen } from '../../utils/notifications';
 import * as Notifications from 'expo-notifications';
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -73,8 +86,13 @@ function Toast({
   onHide: () => void;
 }) {
   const opacity = useRef(new Animated.Value(0)).current;
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
 
   useEffect(() => {
+
+    let fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
+
     // Unmount-race hygiene for the toast's animation chain.
     //
     // Three things can race against an unmount:
@@ -96,6 +114,7 @@ function Toast({
     let mounted = true;
     let anim: Animated.CompositeAnimation | undefined;
 
+
     // Fade in
     anim = Animated.timing(opacity, {
       toValue: 1,
@@ -106,15 +125,28 @@ function Toast({
       // Bail if the component unmounted before fade-in finished.
       if (!mounted) return;
       // Hold for 2 s, then fade out
+
+      fadeOutTimer = setTimeout(() => {
+
       holdTimer = setTimeout(() => {
         if (!mounted) return;
+
         Animated.timing(opacity, {
           toValue: 0,
           duration: 300,
           useNativeDriver: true,
-        }).start(onHide);
+        }).start(onHideRef.current);
       }, 2000);
     });
+
+
+    // Clear the fade-out timer on unmount so a dismissed toast never fires a
+    // stale timer (which could otherwise animate after the component is gone).
+    return () => {
+      if (fadeOutTimer) clearTimeout(fadeOutTimer);
+      opacity.stopAnimation();
+    };
+  }, [opacity]);
 
     return () => {
       mounted = false;
@@ -125,6 +157,7 @@ function Toast({
       anim?.stop();
     };
   }, []);
+
 
   const bg = variant === 'success' ? '#227239' : '#b91c1c';
 
@@ -179,7 +212,45 @@ export default function ProjectDetailScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
+  const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const viewShotRef = useRef<View>(null);
+
+  // Share the project as an image via the native share sheet.
+  const handleShare = async () => {
+    try {
+      if (!project) return;
+      const uri = await captureRef(viewShotRef, { format: 'png', quality: 1 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Share ${project.name}`,
+        });
+      }
+    } catch {
+      // Sharing is optional — never block the screen on it.
+    }
+  };
+
+  const checkRecurringDonation = useCallback(async (projectId: string) => {
+    try {
+      const donations = await loadRecurringDonations();
+      const active = donations.find(
+        (d) => d.projectId === projectId && d.status === 'active'
+      );
+      setActiveDonation(active || null);
+    } catch {
+      setActiveDonation(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id) {
+        checkRecurringDonation(id as string);
+      }
+    }, [id, checkRecurringDonation])
+  );
 
   useEffect(() => {
     if (id) {
@@ -368,7 +439,11 @@ export default function ProjectDetailScreen() {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
 
   return (
-    <View style={[styles.wrapper, { backgroundColor: colors.background }]}>
+    <View
+      ref={viewShotRef}
+      collapsable={false}
+      style={[styles.wrapper, { backgroundColor: colors.background }]}
+    >
       <ScrollView style={styles.container}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.primary }]}>
@@ -385,17 +460,65 @@ export default function ProjectDetailScreen() {
               </Text>
             </View>
             <TouchableOpacity
+
+              style={styles.shareButton}
+              onPress={handleShare}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${project.name}`}
+              accessibilityHint="Opens the share sheet"
+
               testID="share-button"
               style={styles.shareButton}
               onPress={handleShare}
               accessibilityRole="button"
               accessibilityLabel={`Share ${project.name}`}
               accessibilityHint="Opens the system share sheet so you can send this project to others"
+
             >
               <Text style={styles.shareIcon}>↗</Text>
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* Active Recurring Donation Banner */}
+        {activeDonation && (
+          <View
+            testID="recurring-donation-banner"
+            style={[
+              styles.recurringBanner,
+              {
+                backgroundColor: colors.surface,
+                borderColor: '#227239',
+                shadowColor: colors.cardShadow,
+              },
+            ]}
+            accessibilityRole="region"
+            accessibilityLabel={`Active recurring donation banner for ${project.name}`}
+          >
+            <View style={styles.recurringBannerContent}>
+              <Text
+                style={[styles.recurringBannerText, { color: colors.primaryText }]}
+                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || 'monthly'} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
+              >
+                You have an active {(activeDonation as any).frequency || 'monthly'} donation of{' '}
+                <Text style={styles.recurringBannerBold}>{activeDonation.amountXLM} XLM</Text> — next payment:{' '}
+                <Text style={styles.recurringBannerBold}>
+                  {formatNextPaymentDate(activeDonation.nextDueDate)}
+                </Text>
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="manage-recurring-button"
+              style={styles.manageButton}
+              onPress={() => router.push('/recurring')}
+              accessibilityRole="button"
+              accessibilityLabel="Manage recurring donations"
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Stats */}
         <View

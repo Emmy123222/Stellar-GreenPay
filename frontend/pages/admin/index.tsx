@@ -68,8 +68,8 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
     }
   };
 
-  const pendingProjects = projects.filter(p => p.status === 'pending');
-  const otherProjects = projects.filter(p => p.status !== 'pending');
+  const pendingProjects = projects.filter(p => (p.status as string) === 'pending');
+  const otherProjects = projects.filter(p => (p.status as string) !== 'pending');
 
   if (!publicKey) {
     return (
