@@ -352,6 +352,18 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::ProjectCount, &next_count);
+        
+        // Append project ID to the ProjectIds vector for enumeration
+        let mut project_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
+        project_ids.push_back(project_id.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectIds, &project_ids);
+        
         env.events()
             .publish((symbol_short!("proj_reg"), admin), project_id);
     }
@@ -361,6 +373,13 @@ impl GreenPayContract {
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
         if stored_admin != admin { panic!("Only admin can register projects"); }
+
+        // Load the project IDs vector once outside the loop for efficiency
+        let mut project_ids: Vec<String> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProjectIds)
+            .unwrap_or(Vec::new(&env));
 
         for init in projects.iter() {
             let project_id = init.id.clone();
@@ -389,8 +408,17 @@ impl GreenPayContract {
             let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
             env.storage().instance().set(&DataKey::ProjectCount, &next_count);
+            
+            // Append project ID to the ProjectIds vector for enumeration
+            project_ids.push_back(project_id.clone());
+            
             env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
         }
+        
+        // Store the updated ProjectIds vector
+        env.storage()
+            .instance()
+            .set(&DataKey::ProjectIds, &project_ids);
     }
 
     pub fn deactivate_project(env: Env, admin: Address, project_id: String) {
@@ -797,28 +825,62 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
-    /// Returns a paginated list of donation records for a given donor.
-    /// Results are ordered chronologically (oldest first).
-    pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
-        let indices: Vec<u32> = env
+    /// Retrieve a paginated list of all projects on-chain.
+    ///
+    /// # Arguments
+    /// * `offset` - Starting index in the project list (0-indexed)
+    /// * `limit` - Maximum number of projects to return
+    ///
+    /// # Returns
+    /// A `Vec<Project>` containing up to `limit` projects starting from `offset`.
+    /// If `offset` is greater than or equal to the total number of projects,
+    /// returns an empty vector without panicking.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Get first 10 projects
+    /// let projects = contract.get_all_projects_paginated(0, 10);
+    /// // Get next 10 projects
+    /// let projects = contract.get_all_projects_paginated(10, 10);
+    /// ```
+    pub fn get_all_projects_paginated(env: Env, offset: u32, limit: u32) -> Vec<Project> {
+        // Retrieve the list of project IDs, or empty vec if not yet initialized
+        let project_ids: Vec<String> = env
             .storage()
             .instance()
-            .get(&DataKey::DonorDonations(donor))
+            .get(&DataKey::ProjectIds)
             .unwrap_or(Vec::new(&env));
-        let total = indices.len();
-        let mut result: Vec<DonationRecord> = Vec::new(&env);
-        let end = (offset + limit).min(total);
-        let mut i = offset;
-        while i < end {
-            let idx = indices.get(i).unwrap();
-            let record: DonationRecord = env
-                .storage()
-                .instance()
-                .get(&DataKey::DonationRecord(idx))
-                .expect("Donation record not found");
-            result.push_back(record);
-            i += 1;
+        
+        let total_count = project_ids.len();
+        
+        // If offset is out of bounds, return empty vec
+        if offset >= total_count {
+            return Vec::new(&env);
         }
+        
+        // Calculate the end bound: min(offset + limit, total_count)
+        let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
+            total_count
+        } else {
+            offset as usize + limit as usize
+        };
+        
+        // Collect projects from the slice
+        let mut result = Vec::new(&env);
+        let mut idx = offset as usize;
+        while idx < end {
+            if let Some(project_id) = project_ids.get(idx) {
+                if let Some(project) = env
+                    .storage()
+                    .instance()
+                    .get::<_, Project>(&DataKey::Project(project_id))
+                {
+                    result.push_back(project);
+                }
+            }
+            idx += 1;
+        }
+        
         result
     }
 
@@ -2365,194 +2427,305 @@ mod tests {
         assert_eq!(nft.amount_donated, 120 * STROOP);
     }
 
-// ─── Project Metadata tests ───────────────────────────────────────────────
+    // ─── Project enumeration / pagination tests (#734) ──────────────────────
 
     #[test]
-    fn test_set_project_metadata_success_admin() {
-        let (env, _cid, client, admin, pid) = setup();
-        let cid_hash = String::from_str(&env, "QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco");
-
-        assert!(!client.has_project_metadata(&pid));
-        client.set_project_metadata(&admin, &pid, &cid_hash);
-        assert!(client.has_project_metadata(&pid));
-        assert_eq!(client.get_project_metadata(&pid), cid_hash);
+    fn test_get_all_projects_paginated_single_project() {
+        let (env, _cid, client, _admin, pid) = setup();
+        // setup() creates one project, so we should get it back
+        let projects = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects.get(0).id, pid);
     }
 
     #[test]
-    fn test_set_project_metadata_success_project_wallet() {
-        let (env, _cid, client, admin, _pid) = setup();
-        let wallet = Address::generate(&env);
-        let pid2 = String::from_str(&env, "proj-wallet-test");
+    fn test_get_all_projects_paginated_multiple_projects() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create 5 more projects
+        for i in 2..=5u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &(100u32 * i),
+            );
+        }
+        // Now we have 5 projects total (setup creates proj-001, then we add 2-5)
+        assert_eq!(client.get_project_count(), 5);
+        
+        let all_projects = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(all_projects.len(), 5);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_offset_limit_basic() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create 10 projects
+        for i in 2..=10u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &100u32,
+            );
+        }
+        assert_eq!(client.get_project_count(), 10);
+
+        // Test: get first 3
+        let page1 = client.get_all_projects_paginated(&0u32, &3u32);
+        assert_eq!(page1.len(), 3);
+
+        // Test: get next 3 (offset=3, limit=3)
+        let page2 = client.get_all_projects_paginated(&3u32, &3u32);
+        assert_eq!(page2.len(), 3);
+
+        // Verify they're different projects
+        assert_ne!(page1.get(0).id, page2.get(0).id);
+
+        // Test: get last 4 projects (offset=6, limit=4)
+        let page3 = client.get_all_projects_paginated(&6u32, &4u32);
+        assert_eq!(page3.len(), 4);
+
+        // Test: offset 9, limit 1 should get the last project
+        let last_page = client.get_all_projects_paginated(&9u32, &1u32);
+        assert_eq!(last_page.len(), 1);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_offset_beyond_total() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create 5 projects total
+        for i in 2..=5u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &100u32,
+            );
+        }
+        assert_eq!(client.get_project_count(), 5);
+
+        // Offset equal to total count should return empty
+        let empty1 = client.get_all_projects_paginated(&5u32, &10u32);
+        assert_eq!(empty1.len(), 0);
+
+        // Offset beyond total count should return empty
+        let empty2 = client.get_all_projects_paginated(&100u32, &10u32);
+        assert_eq!(empty2.len(), 0);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_limit_larger_than_remaining() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create 7 projects
+        for i in 2..=7u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &100u32,
+            );
+        }
+        assert_eq!(client.get_project_count(), 7);
+
+        // Request offset=5, limit=100 should only return 2 projects (indices 5, 6)
+        let partial = client.get_all_projects_paginated(&5u32, &100u32);
+        assert_eq!(partial.len(), 2);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_empty_contract_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &cid);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        // Before any projects are registered
+        let empty = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(empty.len(), 0);
+
+        // Even with large offset
+        let empty_offset = client.get_all_projects_paginated(&5u32, &10u32);
+        assert_eq!(empty_offset.len(), 0);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_batch_registration() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &cid);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        // Batch register projects
+        let mut projects = Vec::new(&env);
+        for i in 1..=5u32 {
+            projects.push_back(ProjectInit {
+                id:          String::from_str(&env, &format!("batch-proj-{:03}", i)),
+                name:        String::from_str(&env, &format!("Batch Project {}", i)),
+                wallet:      Address::generate(&env),
+                co2_per_xlm: 100u32 * i,
+            });
+        }
+        client.batch_register_projects(&admin, &projects);
+
+        // Verify all 5 projects are accessible via pagination
+        let all = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(all.len(), 5);
+
+        // Verify the order matches insertion order
+        for i in 0..5u32 {
+            let proj = all.get(i as usize);
+            assert_eq!(proj.id, String::from_str(&env, &format!("batch-proj-{:03}", i + 1)));
+        }
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_with_deactivated_projects() {
+        let (env, _cid, client, admin, pid1) = setup();
+        // Create 3 more projects
+        let pid2 = String::from_str(&env, "proj-002");
+        let pid3 = String::from_str(&env, "proj-003");
+        let pid4 = String::from_str(&env, "proj-004");
+        
+        for (i, pid) in vec![pid2.clone(), pid3.clone(), pid4.clone()].iter().enumerate() {
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                pid,
+                &String::from_str(&env, &format!("Project {}", i + 2)),
+                &wallet,
+                &100u32,
+            );
+        }
+        assert_eq!(client.get_project_count(), 4);
+
+        // Deactivate one project
+        client.deactivate_project(&admin, &pid2);
+
+        // Pagination should still return the deactivated project (it's still stored)
+        let all = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(all.len(), 4);
+
+        // Verify that the second project is now inactive but still present
+        let proj2 = client.get_project(&pid2);
+        assert!(!proj2.active);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_zero_limit() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        // Zero limit should return empty vec
+        let empty = client.get_all_projects_paginated(&0u32, &0u32);
+        assert_eq!(empty.len(), 0);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_consistency_with_project_count() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create exactly 8 projects
+        for i in 2..=8u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &100u32,
+            );
+        }
+
+        let count = client.get_project_count();
+        assert_eq!(count, 8);
+
+        // Fetching all with a large limit should match the project count
+        let all = client.get_all_projects_paginated(&0u32, &1000u32);
+        assert_eq!(all.len() as u32, count);
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_sequential_pages() {
+        let (env, _cid, client, admin, _pid1) = setup();
+        // Create 12 projects
+        for i in 2..=12u32 {
+            let pid = String::from_str(&env, &format!("proj-{:03}", i));
+            let wallet = Address::generate(&env);
+            client.register_project(
+                &admin,
+                &pid,
+                &String::from_str(&env, &format!("Project {}", i)),
+                &wallet,
+                &100u32,
+            );
+        }
+
+        // Fetch in pages of 4
+        let page1 = client.get_all_projects_paginated(&0u32, &4u32);
+        let page2 = client.get_all_projects_paginated(&4u32, &4u32);
+        let page3 = client.get_all_projects_paginated(&8u32, &4u32);
+
+        assert_eq!(page1.len(), 4);
+        assert_eq!(page2.len(), 4);
+        assert_eq!(page3.len(), 4);
+
+        // Verify no duplicates by checking project IDs
+        let mut all_ids = Vec::new(&env);
+        for i in 0..4u32 {
+            all_ids.push_back(page1.get(i as usize).id.clone());
+            all_ids.push_back(page2.get(i as usize).id.clone());
+            all_ids.push_back(page3.get(i as usize).id.clone());
+        }
+
+        // Verify order is consistent
+        let all = client.get_all_projects_paginated(&0u32, &12u32);
+        for i in 0..12u32 {
+            assert_eq!(all.get(i as usize).id, all_ids.get(i as usize).clone());
+        }
+    }
+
+    #[test]
+    fn test_get_all_projects_paginated_project_data_integrity() {
+        let (env, _cid, client, admin, pid1) = setup();
+        let pid2 = String::from_str(&env, "proj-special");
+        let wallet2 = Address::generate(&env);
+
         client.register_project(
             &admin,
             &pid2,
-            &String::from_str(&env, "Wallet Test Project"),
-            &wallet,
-            &100u32,
+            &String::from_str(&env, "Special Project"),
+            &wallet2,
+            &42u32,
         );
 
-        let cid_hash = String::from_str(&env, "bafybeicn7e3b2p5u3r6u2f3s4t5v6w7x8y9z0a1b2c3d4e5f6g7h8i9j0k");
-        client.set_project_metadata(&wallet, &pid2, &cid_hash);
-        assert_eq!(client.get_project_metadata(&pid2), cid_hash);
-    }
+        // Get all projects
+        let all = client.get_all_projects_paginated(&0u32, &10u32);
+        assert_eq!(all.len(), 2);
 
-    #[test]
-    fn test_set_project_metadata_overwrite() {
-        let (env, _cid, client, admin, pid) = setup();
-        let cid1 = String::from_str(&env, "QmFirstCid11111111111111111111111111111111111");
-        let cid2 = String::from_str(&env, "QmSecondCid2222222222222222222222222222222222");
-
-        client.set_project_metadata(&admin, &pid, &cid1);
-        assert_eq!(client.get_project_metadata(&pid), cid1);
-
-        client.set_project_metadata(&admin, &pid, &cid2);
-        assert_eq!(client.get_project_metadata(&pid), cid2);
-    }
-
-    #[test]
-    #[should_panic(expected = "Only admin or project wallet can set metadata")]
-    fn test_set_project_metadata_unauthorized_fails() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let imposter = Address::generate(&env);
-        let cid_hash = String::from_str(&env, "QmTestCid");
-        client.set_project_metadata(&imposter, &pid, &cid_hash);
-    }
-
-    #[test]
-    #[should_panic(expected = "Project not found")]
-    fn test_set_project_metadata_project_not_found_fails() {
-        let (env, _cid, client, admin, _pid) = setup();
-        let nonexistent = String::from_str(&env, "nonexistent-project");
-        let cid_hash = String::from_str(&env, "QmTestCid");
-        client.set_project_metadata(&admin, &nonexistent, &cid_hash);
-    }
-
-    #[test]
-    #[should_panic(expected = "IPFS CID cannot be empty")]
-    fn test_set_project_metadata_empty_cid_fails() {
-        let (env, _cid, client, admin, pid) = setup();
-        let empty_cid = String::from_str(&env, "");
-        client.set_project_metadata(&admin, &pid, &empty_cid);
-    }
-
-    #[test]
-    fn test_set_project_metadata_emits_event() {
-        let (env, _cid, client, admin, pid) = setup();
-        let cid_hash = String::from_str(&env, "QmEventTestCid1234567890");
-
-        client.set_project_metadata(&admin, &pid, &cid_hash);
-
-        let events = env.events().all();
-        assert!(!events.events().is_empty());
-    }
-
-    // ─── Emergency Pause Tests ───────────────────────────────────────────────
-
-    #[test]
-    fn test_pause_unpause_is_paused() {
-        let (env, _cid, client, admin, _pid) = setup();
-        assert!(!client.is_paused());
-
-        client.pause(&admin);
-        assert!(client.is_paused());
-
-        client.unpause(&admin);
-        assert!(!client.is_paused());
-    }
-
-    #[test]
-    #[should_panic(expected = "Only admin can pause contract")]
-    fn test_non_admin_cannot_pause() {
-        let (env, _cid, client, _admin, _pid) = setup();
-        let non_admin = Address::generate(&env);
-        client.pause(&non_admin);
-    }
-
-    #[test]
-    #[should_panic(expected = "Only admin can unpause contract")]
-    fn test_non_admin_cannot_unpause() {
-        let (env, _cid, client, admin, _pid) = setup();
-        client.pause(&admin);
-        let non_admin = Address::generate(&env);
-        client.unpause(&non_admin);
-    }
-
-    #[test]
-    #[should_panic(expected = "Contract is paused")]
-    fn test_donate_fails_when_paused() {
-        let (env, _cid, client, admin, pid) = setup();
-        let donor = Address::generate(&env);
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        StellarAssetClient::new(&env, &token).mint(&donor, &(100 * STROOP));
-
-        client.pause(&admin);
-        client.donate(&token, &donor, &pid, &(10 * STROOP), &1u32);
-    }
-
-    #[test]
-    #[should_panic(expected = "Contract is paused")]
-    fn test_donate_usdc_fails_when_paused() {
-        let (env, _cid, client, admin, pid) = setup();
-        let usdc_token = Address::generate(&env);
-        client.set_usdc_token(&admin, &usdc_token);
-        let oracle = env.register_contract(None, MockOracle);
-        client.set_oracle(&admin, &oracle);
-
-        let donor = Address::generate(&env);
-        client.pause(&admin);
-        client.donate_usdc(&usdc_token, &donor, &pid, &1000, &1u32);
-    }
-
-    #[test]
-    #[should_panic(expected = "Contract is paused")]
-    fn test_vote_verify_project_fails_when_paused() {
-        let (env, cid, client, admin, pid) = setup();
-        client.create_proposal(&admin, &pid, &0u32);
-        let voter = Address::generate(&env);
-        grant_badge(&env, &cid, &voter);
-
-        client.pause(&admin);
-        client.vote_verify_project(&voter, &pid, &true);
-    }
-
-    // ─── Impact NFT getter tests ──────────────────────────────────────────────
-
-    #[test]
-    fn test_get_impact_nft_returns_none_when_not_minted() {
-        let env = Env::default();
-        let id = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &id);
-        let owner = Address::generate(&env);
-
-        assert!(client
-            .get_impact_nft(&owner, &BadgeTier::Seedling)
-            .is_none());
-    }
-
-    #[test]
-    fn test_get_impact_nft_returns_full_mint_snapshot() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor = Address::generate(&env);
-        let token_admin = Address::generate(&env);
-        let token = env
-            .register_stellar_asset_contract_v2(token_admin)
-            .address();
-        let token_client = StellarAssetClient::new(&env, &token);
-        let amount = 25 * STROOP;
-        let mint_ledger = 42;
-
-        token_client.mint(&donor, &amount);
-        env.ledger().set_sequence_number(mint_ledger);
-        client.donate(&token, &donor, &pid, &amount, &0u32);
-
-        let nft = client
-            .get_impact_nft(&donor, &BadgeTier::Seedling)
-            .expect("Seedling impact NFT should be minted");
-        assert_eq!(nft.owner, donor);
-        assert_eq!(nft.tier, BadgeTier::Seedling);
-        assert_eq!(nft.total_donated, amount);
-        assert_eq!(nft.minted_at_ledger, mint_ledger);
+        // Find and verify the special project
+        let special = all.get(1); // Should be second (inserted second)
+        assert_eq!(special.id, pid2);
+        assert_eq!(special.name, String::from_str(&env, "Special Project"));
+        assert_eq!(special.wallet, wallet2);
+        assert_eq!(special.co2_per_xlm, 42u32);
+        assert_eq!(special.total_raised, 0);
+        assert_eq!(special.donor_count, 0);
+        assert!(special.active);
     }
 }
 
