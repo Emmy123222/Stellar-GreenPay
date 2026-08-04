@@ -780,6 +780,7 @@ export interface VerificationRequestPayload {
 
 export interface VerificationRequestResponse {
   id: string;
+  documentCount: number;
   organizationName: string;
   organizationWebsite: string | null;
   organizationCountry: string | null;
@@ -868,6 +869,26 @@ export async function fetchVerificationRequestAdmin(
     { headers: { Authorization: `Bearer ${adminToken}` } },
   );
   return data.data;
+}
+
+/**
+ * Fetch the supporting document metadata for a verification request on demand
+ * (admin). The admin detail page calls this lazily on scroll / expand so the
+ * initial request payload stays lightweight.
+ *
+ * @param id - Verification request id.
+ * @param adminToken - Bearer JWT issued by /api/admin/login.
+ * @returns The supporting document list for the request.
+ */
+export async function fetchVerificationRequestDocuments(
+  id: string,
+  adminToken: string,
+): Promise<VerificationDocument[]> {
+  const { data } = await api.get<{ success: boolean; data: { documents: VerificationDocument[] } }>(
+    `/api/verification-requests/${id}/documents`,
+    { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data.documents;
 }
 
 /**

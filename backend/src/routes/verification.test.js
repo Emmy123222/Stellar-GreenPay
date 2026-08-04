@@ -230,6 +230,71 @@ describe("GET /api/verification-requests/:id", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  test("omits document payloads by default for a lightweight response", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get(`/api/verification-requests/${MOCK_DB_ROW.id}`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.supportingDocuments).toEqual([]);
+    expect(res.body.data.documentCount).toBe(1);
+  });
+
+  test("embeds documents when ?includeDocuments=true is passed", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get(`/api/verification-requests/${MOCK_DB_ROW.id}?includeDocuments=true`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.supportingDocuments).toHaveLength(1);
+    expect(res.body.data.supportingDocuments[0].name).toBe("methodology.pdf");
+  });
+});
+
+describe("GET /api/verification-requests/:id/documents", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns the documents to an admin bearer token", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app)
+      .get(`/api/verification-requests/${MOCK_DB_ROW.id}/documents`)
+      .set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.documents).toHaveLength(1);
+    expect(res.body.data.documents[0].url).toBe("https://example.com/methodology.pdf");
+  });
+
+  test("returns documents to the matching submitter wallet", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
+    const res = await request(app).get(
+      `/api/verification-requests/${MOCK_DB_ROW.id}/documents?wallet=${VALID_PAYLOAD.walletAddress}`,
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.documents).toHaveLength(1);
+  });
+
+  test("forbids a non-matching wallet", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
+    const res = await request(app).get(
+      `/api/verification-requests/${MOCK_DB_ROW.id}/documents?wallet=GDIFFERENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA`,
+    );
+    expect(res.status).toBe(403);
+  });
+
+  test("returns 404 when the row does not exist", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+    const res = await request(app).get("/api/verification-requests/missing/documents");
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("GET /api/verification-requests (admin)", () => {
