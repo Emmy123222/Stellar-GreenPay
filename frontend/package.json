@@ -43,7 +43,7 @@
     "@types/node": "^20.11.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "autoprefixer": "^10.0.1",
+    "autoprefixer": "^10.5.4",
     "eslint": "^9.0.0",
     "eslint-config-next": "^16.0.0",
     "jest": "^30.4.2",
