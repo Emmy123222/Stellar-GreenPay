@@ -38,7 +38,7 @@ router.get("/project/:id", async (req, res, next) => {
     if (hit) return res.json(hit);
 
     const projectResult = await pool.query(
-      `SELECT id, category, raised_xlm, co2_offset_kg
+      `SELECT id, category, raised_xlm, co2_offset_kg, updated_at, created_at
        FROM projects
        WHERE id = $1`,
       [req.params.id],
@@ -76,7 +76,9 @@ router.get("/project/:id", async (req, res, next) => {
         treesEquivalent: treesEquivalentFromKg(co2OffsetKg),
         uniqueCountries,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
@@ -128,6 +130,12 @@ router.get("/global", async (req, res, next) => {
        ORDER BY "totalDonationsXLM" DESC, p.category ASC`,
     );
 
+    const timestampsResult = await pool.query(
+      `SELECT
+        (SELECT MAX(updated_at) FROM projects) AS "maxProjectUpdated",
+        (SELECT MAX(created_at) FROM donations WHERE currency = 'XLM' OR currency IS NULL) AS "maxDonationCreated"`,
+    );
+
     const totalsRow = totalsResult.rows[0] || {};
     const totalDonationsXLM = Number.parseFloat(totalsRow.totalDonationsXLM || "0");
     const donorCount = totalsRow.donorCount || 0;
@@ -171,7 +179,9 @@ router.get("/global", async (req, res, next) => {
         breakdownByCategory,
         countryBreakdown,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
@@ -219,6 +229,17 @@ router.get("/donor/:publicKey", async (req, res, next) => {
       [req.params.publicKey],
     );
 
+    const timestampsResult = await pool.query(
+      `SELECT
+        MAX(d.created_at) AS "maxDonationCreated",
+        MAX(p.updated_at) AS "maxProjectUpdated"
+       FROM donations d
+       JOIN projects p ON p.id = d.project_id
+       WHERE d.donor_address = $1
+         AND (d.currency = 'XLM' OR d.currency IS NULL)`,
+      [req.params.publicKey],
+    );
+
     const row = totalsResult.rows[0] || {};
     const totalDonatedXLM = Number.parseFloat(row.totalDonatedXLM || "0");
     const projectsSupported = row.projectsSupported || 0;
@@ -233,7 +254,9 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         projectsSupported,
         topCategory,
       },
-    });
+    };
+
+    return sendCachedResponse(req, res, payload, lastModified);
   } catch (e) {
     next(e);
   }
