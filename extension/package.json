@@ -6,13 +6,13 @@
     "dev": "webpack --watch --config webpack.config.js"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1"
+    "@stellar/stellar-sdk": "^16.2.0"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.0",
+    "@types/chrome": "^0.2.2",
     "ts-loader": "^9.5.1",
-    "typescript": "^6.0.3",
-    "webpack": "^5.90.1",
-    "webpack-cli": "^7.1.0"
+    "typescript": "^7.0.2",
+    "webpack": "^5.109.2",
+    "webpack-cli": "^7.2.2"
   }
 }

@@ -155,6 +155,7 @@ function mapProjectRow(row) {
     description: row.description,
     category: row.category,
     location: row.location,
+    imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
@@ -199,6 +200,10 @@ function mapDonationRow(row) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
   }
 
+  if (row.donor_country) {
+    data.donorCountry = row.donor_country;
+  }
+
   return data;
 }
 
@@ -215,6 +220,7 @@ function mapProfileRow(row) {
     publicKey: row.public_key,
     displayName: row.display_name,
     bio: row.bio,
+    avatarUrl: row.avatar_url || null,
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],
@@ -237,6 +243,7 @@ function mapProjectUpdateRow(row) {
     projectId: row.project_id,
     title: row.title,
     body: row.body,
+    imageUrl: row.image_url || null,
     createdAt: toIso(row.created_at),
   };
 }
@@ -311,6 +318,33 @@ function mapProjectRatingRow(row) {
  */
 // exported as `mapProjectRatingRow`
 
+/**
+ * Update the webhook URL and secret for a project.
+ *
+ * @param {string} projectId - Project UUID.
+ * @param {string|null} webhookUrl - The webhook URL to set (or null to clear).
+ * @param {string|null} webhookSecret - The HMAC secret for signing payloads.
+ * @returns {Promise<{webhookUrl: string|null, webhookSecret: string|null}>} Updated webhook config.
+ */
+async function updateWebhook(projectId, webhookUrl, webhookSecret) {
+  const pool = require("../db/pool");
+  const result = await pool.query(
+    `UPDATE projects
+     SET webhook_url = $1,
+         webhook_secret = $2,
+         updated_at = NOW()
+     WHERE id = $3
+     RETURNING webhook_url, webhook_secret`,
+    [webhookUrl || null, webhookSecret || null, projectId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    webhookUrl: row.webhook_url || null,
+    webhookSecret: row.webhook_secret || null,
+  };
+}
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
@@ -324,4 +358,5 @@ module.exports = {
   mapJobRow,
   mapProjectMilestoneRow,
   mapProjectRatingRow,
+  updateWebhook,
 };
