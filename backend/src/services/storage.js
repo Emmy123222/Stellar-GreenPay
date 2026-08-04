@@ -15,7 +15,9 @@
  *                Requires an IPFS_API_URL (Infura, Pinata cluster, or local
  *                IPFS daemon). Returns the content identifier (CID); the
  *                gateway URL is derived from IPFS_GATEWAY_URL or
- *                https://ipfs.io/ipfs/<cid>.
+ *                https://ipfs.io/ipfs/<cid>. When PINATA_JWT is set, the CID
+ *                is also pinned via Pinata's pinByHash API so the content is
+ *                not garbage-collected from the IPFS network.
  *
  * The active backend is selected by STORAGE_BACKEND env var. If
  * STORAGE_BACKEND is "s3" or "ipfs" but the required credentials or
@@ -186,6 +188,9 @@ async function uploadIpfs(buffer, originalName, contentType) {
   if (!last || !last.Hash) {
     throw new Error("IPFS upload succeeded but response did not include a CID");
   }
+
+  await pinCidWithPinata(last.Hash, originalName);
+
   const gateway = (process.env.IPFS_GATEWAY_URL || "https://ipfs.io/ipfs").replace(/\/$/, "");
   return {
     key: last.Hash,
@@ -194,6 +199,56 @@ async function uploadIpfs(buffer, originalName, contentType) {
     contentType: contentType || "application/octet-stream",
     backend: "ipfs",
   };
+}
+
+/**
+ * Pin an already-uploaded CID via Pinata so it is not garbage-collected.
+ * No-ops when PINATA_JWT is unset. Failures are logged but do not fail the
+ * upload — the file is already on IPFS; pinning is a durability best-effort.
+ *
+ * @param {string} cid - IPFS content identifier (CID) from /api/v0/add.
+ * @param {string} [originalName] - Optional filename for Pinata metadata.
+ * @returns {Promise<void>}
+ */
+async function pinCidWithPinata(cid, originalName) {
+  const jwt = process.env.PINATA_JWT;
+  if (!jwt) {
+    logger.warn(
+      { event: "storage_pinata_jwt_missing", cid },
+      "IPFS upload succeeded without PINATA_JWT — content may be garbage-collected"
+    );
+    return;
+  }
+
+  try {
+    const res = await fetch("https://api.pinata.cloud/pinning/pinByHash", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${jwt}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        hashToPin: cid,
+        pinataMetadata: originalName ? { name: String(originalName).slice(0, 255) } : undefined,
+      }),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      logger.error(
+        { event: "storage_pinata_pin_failed", cid, status: res.status, body: body.slice(0, 500) },
+        "Pinata pinByHash failed — CID may not be permanently pinned"
+      );
+      return;
+    }
+
+    logger.info({ event: "storage_pinata_pinned", cid }, "Pinned CID via Pinata");
+  } catch (err) {
+    logger.error(
+      { event: "storage_pinata_pin_error", cid, err: err.message },
+      "Pinata pinByHash request failed — CID may not be permanently pinned"
+    );
+  }
 }
 
 /**
@@ -218,4 +273,4 @@ function backendName() {
   return STORAGE_BACKEND;
 }
 
-module.exports = { uploadFile, backendName, UPLOAD_DIR, buildKey };
+module.exports = { uploadFile, backendName, UPLOAD_DIR, buildKey, pinCidWithPinata };
