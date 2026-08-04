@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: greenpay-db-migrate
+  namespace: {{ .Values.namespace }}
+  annotations:
+    "helm.sh/hook": post-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: greenpay-db-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: db-migrate
+          image: {{ .Values.backend.image }}
+          command: ["node", "src/db/migrate.js"]
+          envFrom:
+            - configMapRef:
+                name: greenpay-config
+            - secretRef:
+                name: greenpay-secrets
