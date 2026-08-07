@@ -9,6 +9,7 @@
  *   - empty-state rendering when no projects are passed
  *   - the ProjectMap dynamic import is rendered (or its loading fallback)
  */
+import React from "react";
 import { render, screen } from "@testing-library/react";
 import type { ClimateProject } from "@/utils/types";
 
@@ -18,7 +19,7 @@ import type { ClimateProject } from "@/utils/types";
 jest.mock("next/dynamic", () => {
   return function mockDynamic(
     importFn: () => Promise<{ default: React.ComponentType<{ projects: ClimateProject[] }> }>,
-    options?: { loading?: () => JSX.Element }
+    options?: { loading?: () => React.ReactNode }
   ) {
     // Return a component that renders the loading placeholder so the test
     // can verify the page skeleton without needing a real Leaflet canvas.
