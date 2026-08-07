@@ -155,11 +155,17 @@ function mapProjectRow(row) {
     description: row.description,
     category: row.category,
     location: row.location,
+    imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
+    co2PerXLM: row.co2_per_xlm?.toString
+      ? row.co2_per_xlm.toString()
+      : row.co2_per_xlm != null
+        ? String(row.co2_per_xlm)
+        : "0",
     status: row.status,
     rejectionReason: row.rejection_reason || null,
     verified: row.verified,
@@ -171,6 +177,13 @@ function mapProjectRow(row) {
     aiSummarySourceHash:  row.ai_summary_source_hash || null,
     co2PerXLM: row.co2_per_xlm ? Number.parseFloat(row.co2_per_xlm) : null,
     webhookUrl: row.webhook_url || null,
+    webhookSecretRotatedAt: row.webhook_secret_rotated_at ? toIso(row.webhook_secret_rotated_at) : null,
+    previousWebhookSecretExpiresAt: row.previous_webhook_secret_expires_at ? toIso(row.previous_webhook_secret_expires_at) : null,
+    gracePeriodActive: Boolean(
+      row.previous_webhook_secret &&
+      row.previous_webhook_secret_expires_at &&
+      new Date(row.previous_webhook_secret_expires_at).getTime() > Date.now()
+    ),
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
@@ -198,6 +211,19 @@ function mapDonationRow(row) {
 
   if (row.amount_xlm !== null && row.amount_xlm !== undefined) {
     data.amountXLM = Number.parseFloat(row.amount_xlm).toFixed(7);
+
+    // Per-donation CO₂ offset: grams per XLM * XLM amount / 1000 = kg
+    if (row.co2_per_xlm !== null && row.co2_per_xlm !== undefined) {
+      const co2PerXlm = Number.parseFloat(row.co2_per_xlm);
+      const amountXlm = Number.parseFloat(row.amount_xlm);
+      if (!Number.isNaN(co2PerXlm) && !Number.isNaN(amountXlm)) {
+        data.co2OffsetKg = Math.round((amountXlm * co2PerXlm) / 1000);
+      }
+    }
+  }
+
+  if (row.donor_country) {
+    data.donorCountry = row.donor_country;
   }
 
   return data;
@@ -216,6 +242,7 @@ function mapProfileRow(row) {
     publicKey: row.public_key,
     displayName: row.display_name,
     bio: row.bio,
+    avatarUrl: row.avatar_url || null,
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],
@@ -238,6 +265,7 @@ function mapProjectUpdateRow(row) {
     projectId: row.project_id,
     title: row.title,
     body: row.body,
+    imageUrl: row.image_url || null,
     createdAt: toIso(row.created_at),
   };
 }
@@ -312,6 +340,33 @@ function mapProjectRatingRow(row) {
  */
 // exported as `mapProjectRatingRow`
 
+/**
+ * Update the webhook URL and secret for a project.
+ *
+ * @param {string} projectId - Project UUID.
+ * @param {string|null} webhookUrl - The webhook URL to set (or null to clear).
+ * @param {string|null} webhookSecret - The HMAC secret for signing payloads.
+ * @returns {Promise<{webhookUrl: string|null, webhookSecret: string|null}>} Updated webhook config.
+ */
+async function updateWebhook(projectId, webhookUrl, webhookSecret) {
+  const pool = require("../db/pool");
+  const result = await pool.query(
+    `UPDATE projects
+     SET webhook_url = $1,
+         webhook_secret = $2,
+         updated_at = NOW()
+     WHERE id = $3
+     RETURNING webhook_url, webhook_secret`,
+    [webhookUrl || null, webhookSecret || null, projectId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    webhookUrl: row.webhook_url || null,
+    webhookSecret: row.webhook_secret || null,
+  };
+}
+
 module.exports = {
   seedProjects,
   seedProjectUpdates,
@@ -325,4 +380,5 @@ module.exports = {
   mapJobRow,
   mapProjectMilestoneRow,
   mapProjectRatingRow,
+  updateWebhook,
 };

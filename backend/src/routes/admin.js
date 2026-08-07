@@ -6,10 +6,7 @@ const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { logAdminAction } = require("../services/audit");
-const { VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
 
 const loginLimiter = createRateLimiter(10, 15);
 
@@ -153,163 +150,103 @@ router.get("/audit-log", adminRequired, async (req, res, next) => {
 });
 
 /**
- * POST /api/admin/projects/import
- * Bulk import projects from a CSV file.
- * Accepts a multipart/form-data upload with a single "file" field.
- * Expected CSV columns: name,description,category,location,walletAddress,goalXLM,co2PerXLM
+ * Render a monthly digest email body for admin review without sending it.
  *
- * @returns { { imported: number, failed: number, errors: Array<{ row: number, error: string }> } }
+ * @route POST /api/admin/digest/preview
+ * @param {import('express').Request} req - Express request with projectId and month.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the HTML digest body as text/html.
  */
-router.post("/projects/import", adminRequired, upload.single("file"), async (req, res, next) => {
+router.post("/digest/preview", adminRequired, async (req, res, next) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: "CSV file is required as multipart field 'file'" });
+    const { projectId, month } = req.body || {};
+
+    if (!projectId || typeof projectId !== "string") {
+      return res.status(400).json({ error: "projectId is required" });
     }
 
-    const csvText = req.file.buffer.toString("utf-8").trim();
-    if (!csvText) {
-      return res.status(400).json({ error: "CSV file is empty" });
+    if (!month || typeof month !== "string") {
+      return res.status(400).json({ error: "month is required in YYYY-MM format" });
     }
 
-    const rows = parseCSV(csvText);
-    if (rows.length < 2) {
-      return res.status(400).json({ error: "CSV must include a header row and at least one data row" });
+    const monthMatch = /^\d{4}-(0[1-9]|1[0-2])$/.exec(month);
+    if (!monthMatch) {
+      return res.status(400).json({ error: "month must be in YYYY-MM format" });
     }
 
-    const header = rows[0].map((h) => h.trim());
-    const expectedColumns = ["name", "description", "category", "location", "walletAddress", "goalXLM", "co2PerXLM"];
+    const [year, monthIndex] = month.split("-").map(Number);
+    const monthStart = new Date(Date.UTC(year, monthIndex - 1, 1));
+    const monthEnd = new Date(Date.UTC(year, monthIndex, 1));
+    const monthLabel = monthStart.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
 
-    // Validate header row
-    const missingCols = expectedColumns.filter((col) => !header.includes(col));
-    if (missingCols.length > 0) {
-      return res.status(400).json({
-        error: `Missing required CSV columns: ${missingCols.join(", ")}. Expected: ${expectedColumns.join(", ")}`,
-      });
+    const projectResult = await pool.query(
+      "SELECT id, name, co2_offset_kg FROM projects WHERE id = $1",
+      [projectId],
+    );
+
+    if (!projectResult.rows.length) {
+      return res.status(404).json({ error: "Project not found" });
     }
 
-    const idx = {};
-    for (const col of expectedColumns) {
-      idx[col] = header.indexOf(col);
-    }
+    const project = projectResult.rows[0];
 
-    const imported = [];
-    const errors = [];
+    const statsResult = await pool.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN currency = 'XLM' THEN amount_xlm ELSE 0 END), 0) AS raised_xlm
+       FROM donations
+       WHERE project_id = $1
+         AND created_at >= $2
+         AND created_at < $3`,
+      [project.id, monthStart.toISOString(), monthEnd.toISOString()],
+    );
 
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNum = i + 1; // 1-based in CSV (row 1 = header)
-      const rowErrors = [];
+    const raisedXLM = parseFloat(statsResult.rows[0].raised_xlm || "0").toFixed(2);
 
-      const name = (row[idx.name] || "").trim();
-      const description = (row[idx.description] || "").trim();
-      const category = (row[idx.category] || "").trim();
-      const location = (row[idx.location] || "").trim();
-      const walletAddress = (row[idx.walletAddress] || "").trim();
-      const goalXLM = (row[idx.goalXLM] || "").trim();
-      const co2PerXLM = (row[idx.co2PerXLM] || "").trim();
+    const lifetimeTotResult = await pool.query(
+      "SELECT COALESCE(SUM(amount_xlm), 0) AS total FROM donations WHERE project_id = $1 AND currency = 'XLM'",
+      [project.id],
+    );
+    const lifetimeXLM = parseFloat(lifetimeTotResult.rows[0].total || "0");
+    const co2Total = parseInt(project.co2_offset_kg, 10) || 0;
+    const co2OffsetKg = lifetimeXLM > 0
+      ? Math.round((parseFloat(raisedXLM) / lifetimeXLM) * co2Total)
+      : 0;
 
-      // Validate
-      if (!name || name.length < 3 || name.length > 120) {
-        rowErrors.push(`name must be 3-120 characters (got "${name.slice(0, 30)}")`);
-      }
-      if (!description || description.length < 10 || description.length > 5000) {
-        rowErrors.push("description must be 10-5000 characters");
-      }
-      if (!category || !VALID_CATEGORIES.includes(category)) {
-        rowErrors.push(`category must be one of: ${VALID_CATEGORIES.join(", ")} (got "${category}")`);
-      }
-      if (!location || location.length < 2 || location.length > 200) {
-        rowErrors.push("location must be 2-200 characters");
-      }
-      if (!walletAddress) {
-        rowErrors.push("walletAddress is required");
-      } else if (!STELLAR_PUBLIC_KEY_RE.test(walletAddress)) {
-        rowErrors.push(`walletAddress must be a valid Stellar public key (starts with G, 56 chars): "${walletAddress.slice(0, 12)}..."`);
-      }
-      const goal = Number.parseFloat(goalXLM);
-      if (!goalXLM || !Number.isFinite(goal) || goal < 0) {
-        rowErrors.push(`goalXLM must be a non-negative number (got "${goalXLM}")`);
-      }
-      const co2 = Number.parseFloat(co2PerXLM);
-      if (!co2PerXLM || !Number.isFinite(co2) || co2 < 0) {
-        rowErrors.push(`co2PerXLM must be a non-negative number (got "${co2PerXLM}")`);
-      }
+    const milestonesResult = await pool.query(
+      `SELECT title, percentage FROM project_milestones
+       WHERE project_id = $1
+         AND reached_at >= $2
+         AND reached_at < $3
+       ORDER BY percentage ASC`,
+      [project.id, monthStart.toISOString(), monthEnd.toISOString()],
+    );
 
-      if (rowErrors.length > 0) {
-        errors.push({ row: rowNum, error: rowErrors.join("; ") });
-        continue;
-      }
+    const updatesResult = await pool.query(
+      `SELECT title, body FROM project_updates
+       WHERE project_id = $1
+         AND created_at >= $2
+         AND created_at < $3
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [project.id, monthStart.toISOString(), monthEnd.toISOString()],
+    );
 
-      // Insert
-      try {
-        const id = uuid();
-        await pool.query(
-          `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, co2_per_xlm)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [id, name, description, category, location, walletAddress, goal.toFixed(7), co2.toFixed(7)],
-        );
-        imported.push(id);
-      } catch (dbErr) {
-        errors.push({ row: rowNum, error: `Database error: ${dbErr.message}` });
-      }
-    }
-
-    logAdminAction({
-      actor: req.admin?.sub || "unknown",
-      action: "admin.projects.import",
-      targetType: "project",
-      targetId: "csv-import",
-      metadata: { imported: imported.length, failed: errors.length, totalRows: rows.length - 1 },
-      ipAddress: req.ip,
+    const projectUrl = `${process.env.APP_URL || "http://localhost:3000"}/projects/${project.id}`;
+    const html = buildDigestHtml({
+      project,
+      stats: { raisedXLM, co2OffsetKg },
+      milestones: milestonesResult.rows,
+      updates: updatesResult.rows,
+      projectUrl,
+      monthLabel,
     });
 
-    res.json({
-      success: true,
-      data: {
-        imported: imported.length,
-        failed: errors.length,
-        errors,
-      },
-    });
+    res.type("text/html");
+    return res.send(html);
   } catch (e) {
-    next(e);
+    return next(e);
   }
 });
-
-/**
- * Simple CSV parser that handles quoted fields and commas.
- *
- * @param {string} text - Raw CSV content.
- * @returns {string[][]} Array of rows, each row an array of column values.
- */
-function parseCSV(text) {
-  const rows = [];
-  const lines = text.split(/\r?\n/);
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    const fields = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === "," && !inQuotes) {
-        fields.push(current.trim());
-        current = "";
-      } else {
-        current += ch;
-      }
-    }
-    fields.push(current.trim());
-    rows.push(fields);
-  }
-  return rows;
-}
 
 module.exports = router;

@@ -4,56 +4,69 @@
 "use strict";
 
 require("dotenv").config();
-const Sentry = require("@sentry/node");
-const Tracing = require("@sentry/tracing");
-
-Sentry.init({
-  dsn: process.env.SENTRY_DSN || "",
-  tracesSampleRate: 0.1,
-  environment: process.env.NODE_ENV,
-});
+const express = require("express");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf = require("csurf");
+const http = require("http");
+const { Server } = require("socket.io");
+const { initSentry, errorHandler: sentryErrorMiddleware } = require("./services/sentry");
 const { runMigrations } = require("./db/migrate");
 const { startTurretsServer } = require("./services/turrets");
+const { start: startSummaryQueue } = require("./services/summaryQueue");
+const { start: startProfileQueue } = require("./services/profileQueue");
+const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
+const { startIndexer } = require("./services/indexerService");
 const express = require("express");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
 const csurf = require("csurf");
 const rateLimit = require("express-rate-limit");
-const { requestLogger } = require("./middleware/requestLogger");
-const http = require("http");
-const { Server } = require("socket.io");
-const { start: startSummaryQueue } = require("./services/summaryQueue");
-const { start: startProfileQueue } = require("./services/profileQueue");
-const { startIndexer } = require("./services/indexerService");
+const logger = require("./logger");
+const requestLogger = require("pino-http")({ logger });
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
+const requestLogger = require("./middleware/requestLogger");
+const { createRateLimiter } = require("./middleware/rateLimiter");
+const logger = require("./logger");
+const projectsRouter = require("./routes/projects");
+const uploadsRouter = require("./routes/uploads");
 
-const app    = express();
-const PORT   = process.env.PORT || 4000;
+const app = express();
+const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 
-// Sentry request/tracing handlers (must be added before other middleware)
-app.use(Sentry.Handlers.requestHandler());
-app.use(Sentry.Handlers.tracingHandler());
+// Sentry initialization (must be added before other middleware)
+initSentry(app);
 
 // ── Swagger UI (development) ─────────────────────────────────────────────────
 if (process.env.NODE_ENV !== "production") {
-  const swaggerUi = require("swagger-ui-express");
-  const yaml = require("js-yaml");
-  const fs = require("fs");
-  const path = require("path");
-  const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
-  const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
-  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+  try {
+    const swaggerUi = require("swagger-ui-express");
+    const yaml = require("js-yaml");
+    const fs = require("fs");
+    const path = require("path");
+    const swaggerPath = path.join(__dirname, "../../docs/api/openapi.yaml");
+    const swaggerDoc = yaml.load(fs.readFileSync(swaggerPath, "utf8"));
+    app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerDoc));
+  } catch (err) {
+    // Missing js-yaml/openapi must not crash require("../server") during tests
+    console.warn("[swagger] docs unavailable:", err.message);
+  }
 }
 
 app.use(helmet());
-app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
-  next();
-});
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  })
+);
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
+
 const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
@@ -70,6 +83,11 @@ app.use((req, res, next) => {
   return csrfProtection(req, res, next);
 });
 
+app.use("/api/projects", projectsRouter);
+app.use("/api/uploads", uploadsRouter);
+app.use("/api/v1/projects", projectsRouter);
+app.use("/api/v1/uploads", uploadsRouter);
+
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
 
@@ -78,10 +96,10 @@ const io = new Server(server, {
     origin: origins,
     methods: ["GET", "POST"],
     credentials: false,
-  }
+  },
 });
 app.set("io", io);
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 150, standardHeaders: true, legacyHeaders: false }));
+app.use(createRateLimiter(150, 15));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
@@ -90,42 +108,13 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-// ── API Routes ──────────────────────────────────────────────────────
-const routes = [
-  ["/api/projects", require("./routes/projects")],
-  ["/api/donations", require("./routes/donations")],
-  ["/api/profiles", require("./routes/profiles")],
-  ["/api/jobs", require("./routes/jobs")],
-  ["/api/updates", require("./routes/updates")],
-  ["/api/subscriptions", require("./routes/subscriptions")],
-  ["/api/leaderboard", require("./routes/leaderboard")],
-  ["/api/admin", require("./routes/admin")],
-  ["/api/stats", require("./routes/stats")],
-  ["/api/impact", require("./routes/impact")],
-  ["/api/notifications", require("./routes/notifications")],
-  ["/api/ratings", require("./routes/ratings")],
-  ["/api/verification-requests", require("./routes/verification")],
-  ["/api/uploads", require("./routes/uploads")],
-  ["/api/health", require("./routes/health")],
-  ["/api/readiness", require("./routes/readiness")],
-];
-
-for (const [path, router] of routes) {
-  app.use(path, router);
-  app.use(path.replace("/api/", "/api/v1/"), router);
-}
-
+app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
-// Sentry error handler — capture and send exceptions to Sentry
-app.use(Sentry.Handlers.errorHandler());
+// Sentry error handler — capture exceptions before the final error middleware
+app.use(sentryErrorMiddleware());
 
 app.use((err, req, res, next) => {
   void next;
-  try {
-    Sentry.captureException(err);
-  } catch (e) {
-    // ignore
-  }
   console.error("[Error]", err.message);
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
@@ -138,11 +127,18 @@ async function startServer() {
 
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
+  await startStatsRefreshQueue();
+
+  const { start: startWebhookQueue } = require("./services/webhook");
+  await startWebhookQueue();
+
+  const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
+  await startRecurringDonationQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   server.listen(PORT, () => {
-    console.log();
+    logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);
   });
 
   if (process.env.ENABLE_TURRETS === "true") {

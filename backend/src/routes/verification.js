@@ -19,6 +19,8 @@
  *   - PATCH /api/verification-requests/:id/status   Approve / reject.
  *       Body: { status: "in_review" | "approved" | "rejected",
  *               reviewerNotes?: string, reviewerBy?: string }
+ *   - DELETE /api/verification-requests/:id   Hard-delete spam/test rows
+ *       (admin-only). Allowed only when status is pending or rejected.
  *
  * Admin endpoints expect a Bearer JWT issued by /api/admin/login, the same
  * mechanism already used by projects.admin/register (see middleware/auth.js).
@@ -32,7 +34,7 @@ const pool = require("../db/pool");
 const { adminRequired } = require("../middleware/auth");
 const { logAdminAction } = require("../services/audit");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { sendAdminVerificationNotification } = require("../services/email");
+const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
 
 const submitLimiter = createRateLimiter(10, 15); // 10 submissions / 15 min / IP
@@ -137,7 +139,35 @@ router.post("/", submitLimiter, async (req, res, next) => {
     }
 
     const email = typeof body.contactEmail === "string" ? body.contactEmail.trim().toLowerCase() : "";
-    if (!EMAIL_RE.test(email)) errors.push("contactEmail must be a valid email");
+    if (!EMAIL_RE.test(email)) {
+      errors.push("contactEmail must be a valid email");
+    } else if (website) {
+      // Prevent org email spoofing: the contact email domain must match the
+      // organisation's website hostname. This stops an attacker from claiming
+      // to represent e.g. "greenworldfund.org" while providing a personal
+      // Gmail address. We compare only the registered domain+TLD so that
+      // subdomain email addresses (e.g. team@mail.greenworldfund.org) are
+      // accepted for submissions about https://greenworldfund.org.
+      const emailDomain = email.split("@")[1];
+      let websiteHost;
+      try {
+        websiteHost = new URL(website).hostname.toLowerCase();
+      } catch {
+        websiteHost = null;
+      }
+      if (websiteHost && emailDomain) {
+        // Strip "www." prefix for comparison
+        const normalise = (h) => h.replace(/^www\./, "");
+        const normEmail = normalise(emailDomain);
+        const normSite  = normalise(websiteHost);
+        // Accept exact match or subdomain of the website host
+        if (normEmail !== normSite && !normEmail.endsWith("." + normSite)) {
+          errors.push(
+            `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
+          );
+        }
+      }
+    }
 
     const walletAddress = typeof body.walletAddress === "string" ? body.walletAddress.trim() : "";
     if (!STELLAR_ADDRESS_RE.test(walletAddress)) {
@@ -285,6 +315,41 @@ router.get("/me", async (req, res, next) => {
 });
 
 /**
+ * GET /api/verification-requests/stats
+ * Admin only. Returns aggregated counts of verification requests grouped by
+ * status. Uses a single GROUP BY query so it is efficient even with large
+ * datasets. All four known statuses are always present in the response,
+ * defaulting to 0 when no rows exist for that status.
+ */
+router.get("/stats", adminRequired, async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      `SELECT status, COUNT(*)::int AS count
+       FROM verification_requests
+       GROUP BY status`
+    );
+
+    const STATUS_DEFAULTS = { pending: 0, in_review: 0, approved: 0, rejected: 0 };
+    const raw = result.rows.reduce((acc, row) => {
+      acc[row.status] = row.count;
+      return acc;
+    }, { ...STATUS_DEFAULTS });
+
+    res.json({
+      success: true,
+      data: {
+        pending:  raw.pending,
+        inReview: raw.in_review,
+        approved: raw.approved,
+        rejected: raw.rejected,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/verification-requests/:id
  * Public, but only returns the row if wallet query param matches
  * the row's wallet_address. Admins can pass ?wallet to bypass this check
@@ -302,7 +367,7 @@ router.get("/:id", async (req, res, next) => {
       try {
         const { verifyToken } = require("../middleware/auth");
         const decoded = verifyToken(auth.slice(7));
-        if (decoded && decoded.role === "admin") {
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
           return res.json({ success: true, data: mapRequestRow(row) });
         }
       } catch (_err) {
@@ -327,23 +392,27 @@ router.get("/:id", async (req, res, next) => {
 router.get("/", adminRequired, async (req, res, next) => {
   try {
     const { status, limit = "50", page = "1" } = req.query;
-    const where = [];
-    const values = [];
-
-    if (status && Object.keys(VALID_TRANSITIONS).includes(status)) {
-      values.push(status);
-      where.push(`status = $${values.length}`);
-    }
-
     const pageSize = Math.min(Number.parseInt(limit, 10) || 50, 200);
     const offset = (Math.max(Number.parseInt(page, 10) || 1, 1) - 1) * pageSize;
-    values.push(pageSize, offset);
 
-    let query = "SELECT * FROM verification_requests";
-    if (where.length) query += " WHERE " + where.join(" AND ");
-    query += ` ORDER BY submitted_at DESC LIMIT $${values.length - 1} OFFSET $${values.length}`;
+    const statusFilter = status && Object.keys(VALID_TRANSITIONS).includes(status);
+    const query = statusFilter
+      ? "SELECT * FROM verification_requests WHERE status = $1 ORDER BY submitted_at DESC LIMIT $2 OFFSET $3"
+      : "SELECT * FROM verification_requests ORDER BY submitted_at DESC LIMIT $1 OFFSET $2";
+    const values = statusFilter ? [status, pageSize, offset] : [pageSize, offset];
 
     const result = await pool.query(query, values);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.list",
+      targetType: "verification_request",
+      targetId: null,
+      metadata: { filters: { status, limit, page } },
+      ipAddress: req.ip,
+    });
+
     res.json({
       success: true,
       data: result.rows.map(mapRequestRow),
@@ -407,7 +476,64 @@ router.patch("/:id/status", adminRequired, async (req, res, next) => {
       ipAddress: req.ip,
     });
 
-    res.json({ success: true, data: mapRequestRow(updated.rows[0]) });
+    const updatedRow = mapRequestRow(updated.rows[0]);
+
+    // Fire-and-forget status-change email to the submitter; failures here must
+    // NOT block the PATCH success response.
+    if (["approved", "rejected", "in_review"].includes(status)) {
+      sendVerificationStatusNotification(updatedRow, status).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error("[verification] status-change notification failed:", err.message);
+      });
+    }
+
+    res.json({ success: true, data: updatedRow });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * DELETE /api/verification-requests/:id
+ * Admin only. Hard-deletes spam or test submissions.
+ * Only pending or rejected rows may be deleted (not approved / in_review).
+ */
+router.delete("/:id", adminRequired, async (req, res, next) => {
+  try {
+    const existing = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [
+      req.params.id,
+    ]);
+    const row = existing.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    if (row.status !== "pending" && row.status !== "rejected") {
+      return res.status(400).json({
+        error: `Cannot delete verification request with status "${row.status}"; only pending or rejected rows may be deleted`,
+      });
+    }
+
+    await pool.query("DELETE FROM verification_requests WHERE id = $1", [req.params.id]);
+
+    const actor = (req.admin && req.admin.sub) || "admin";
+    logAdminAction({
+      actor,
+      action: "verification.delete",
+      targetType: "verification_request",
+      targetId: req.params.id,
+      metadata: {
+        status: row.status,
+        organizationName: row.organization_name,
+        projectName: row.project_name,
+        walletAddress: row.wallet_address,
+        contactEmail: row.contact_email,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      data: { id: req.params.id, deleted: true },
+    });
   } catch (e) {
     next(e);
   }
