@@ -23,6 +23,14 @@ jest.mock("../services/summaryQueue", () => ({
   enqueueAISummary: jest.fn(),
 }));
 
+jest.mock("dns", () => ({
+  promises: {
+    resolve4: jest.fn(),
+    resolve6: jest.fn(),
+  },
+}));
+
+const dns = require("dns");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { server } = require("../services/stellar");
@@ -220,22 +228,66 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns a single project", async () => {
-    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 7 }],
+    }); // SELECT project + follow count join
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.name).toBe("Test Project");
-    expect(res.body.data.subscriberCount).toBe(5);
+    expect(res.body.data.followCount).toBe(7);
+    expect(res.body.data.isFollowing).toBe(false);
+  });
+
+  test("returns followCount zero when project has no followers", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 0 }],
+    });
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).get("/api/projects/proj-1").expect(200);
+
+    expect(res.body.data.followCount).toBe(0);
   });
 
   test("returns 404 for non-existent project", async () => {
     pool.query.mockResolvedValue({ rows: [] });
 
     await request(app).get("/api/projects/nonexistent").expect(404);
+  });
+});
+
+describe("PATCH /api/projects/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  test("updates the project image when the owner requests it", async () => {
+    const updatedImageUrl = "https://example.com/banner.png";
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1", wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" }] })
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_PROJECT_ROW, image_url: updatedImageUrl }] });
+
+    const res = await request(app)
+      .patch("/api/projects/proj-1")
+      .send({ imageUrl: updatedImageUrl, adminAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.imageUrl).toBe(updatedImageUrl);
+    expect(pool.query).toHaveBeenCalled();
   });
 });
 
@@ -725,6 +777,105 @@ describe("GET /api/projects/:id/impact-certificate", () => {
   });
 });
 
+describe("POST /api/projects/:id/webhook", () => {
+  let app;
+  const OWNER_ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("rejects webhook_url pointing at localhost", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "http://localhost:8080/internal", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    // No UPDATE was issued once SSRF validation rejected the URL.
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+    expect(dns.promises.resolve4).not.toHaveBeenCalled();
+  });
+
+  test("rejects webhook_url pointing at the cloud metadata IP", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "http://169.254.169.254/metadata", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("accepts a legitimate external webhook_url", async () => {
+    dns.promises.resolve4.mockResolvedValue(["104.21.0.1"]);
+    dns.promises.resolve6.mockRejectedValue(new Error("ENODATA"));
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.webhookUrl).toBe("https://webhook.site/xyz");
+    expect(res.body.data.webhookSecret).toEqual(expect.any(String));
+
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall[1][0]).toBe("https://webhook.site/xyz");
+  });
+
+  test("returns 400 when webhookUrl is missing", async () => {
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 404 when the project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/projects/missing/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 403 when adminAddress does not match the project owner", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: "GDIFFERENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+
+    expect(res.status).toBe(403);
+  });
+});
+
 describe("POST /api/projects/admin/confirm", () => {
   let app;
   const transactionHash = "a".repeat(64);
@@ -765,3 +916,71 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.data.onChainVerified).toBe(true);
   });
 });
+
+describe("GET /api/projects/:id/summary-status", () => {
+  let app;
+  const projectId = "proj-1";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+  });
+
+  test("returns queued status when ai_summary is null", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: null,
+          ai_summary_generated_at: null,
+          ai_summary_model: null,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "queued",
+      aiSummary: null,
+      aiSummaryGeneratedAt: null,
+      aiSummaryModel: null,
+    });
+  });
+
+  test("returns ready status with summary details when ai_summary is present", async () => {
+    const generatedAt = new Date().toISOString();
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: "This is an AI summary.",
+          ai_summary_generated_at: generatedAt,
+          ai_summary_model: "claude-haiku-4-5",
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "ready",
+      aiSummary: "This is an AI summary.",
+      aiSummaryGeneratedAt: new Date(generatedAt).toISOString(),
+      aiSummaryModel: "claude-haiku-4-5",
+    });
+  });
+});
+
