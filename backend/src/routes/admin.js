@@ -1,6 +1,8 @@
 "use strict";
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");

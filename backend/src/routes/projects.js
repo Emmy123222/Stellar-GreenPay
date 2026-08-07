@@ -398,6 +398,15 @@ router.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "wallet_address is required" });
     }
 
+    // Validate co2_per_xlm if provided
+    const co2PerXLM = req.body.co2_per_xlm;
+    if (co2PerXLM !== undefined && co2PerXLM !== null) {
+      const co2 = Number.parseFloat(co2PerXLM);
+      if (!Number.isFinite(co2) || co2 < 0) {
+        return res.status(400).json({ error: "co2_per_xlm must be a non-negative number" });
+      }
+    }
+
     const id = uuid();
     const result = await pool.query(
       `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
@@ -411,6 +420,7 @@ router.post("/", async (req, res, next) => {
         location.trim(),
         wallet_address,
         goal_xlm,
+        req.body.co2_per_xlm || null,
         tags,
       ],
     );

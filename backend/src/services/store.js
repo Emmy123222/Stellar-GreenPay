@@ -175,6 +175,7 @@ function mapProjectRow(row) {
     aiSummaryGeneratedAt: row.ai_summary_generated_at ? toIso(row.ai_summary_generated_at) : null,
     aiSummaryModel:       row.ai_summary_model || null,
     aiSummarySourceHash:  row.ai_summary_source_hash || null,
+    co2PerXLM: row.co2_per_xlm ? Number.parseFloat(row.co2_per_xlm) : null,
     webhookUrl: row.webhook_url || null,
     webhookSecretRotatedAt: row.webhook_secret_rotated_at ? toIso(row.webhook_secret_rotated_at) : null,
     previousWebhookSecretExpiresAt: row.previous_webhook_secret_expires_at ? toIso(row.previous_webhook_secret_expires_at) : null,
