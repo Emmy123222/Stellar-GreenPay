@@ -13,13 +13,15 @@
  *   If no token is present the user is redirected to /admin/login.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import {
   fetchVerificationRequestAdmin,
+  fetchVerificationRequestDocuments,
   updateVerificationRequestStatus,
+  type VerificationDocument,
   type VerificationRequestResponse,
 } from "@/lib/api";
 import { timeAgo } from "@/utils/format";
@@ -79,6 +81,14 @@ export default function AdminVerificationDetail({
   const [reviewerNotes, setReviewerNotes] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
 
+  // Lazy-loaded supporting documents (fetched on scroll / expand).
+  const [documents, setDocuments] = useState<VerificationDocument[] | null>(null);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [documentsExpanded, setDocumentsExpanded] = useState(false);
+  const documentsSectionRef = useRef<HTMLDivElement | null>(null);
+  const documentsLoadedRef = useRef(false);
+
   // ── Read token from sessionStorage on mount ──────────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -105,6 +115,48 @@ export default function AdminVerificationDetail({
       })
       .finally(() => setLoading(false));
   }, [adminToken, id]);
+
+  // ── Lazy-load supporting documents once expanded ────────────────────────────
+  const loadDocuments = useCallback(async () => {
+    if (!request || documentsLoadedRef.current) return;
+    documentsLoadedRef.current = true;
+    setDocumentsLoading(true);
+    setDocumentsError(null);
+    try {
+      const docs = await fetchVerificationRequestDocuments(request.id, adminToken as string);
+      setDocuments(docs);
+    } catch (e: unknown) {
+      // Allow a retry on transient failures.
+      documentsLoadedRef.current = false;
+      setDocumentsError((e as Error).message || "Failed to load documents");
+    } finally {
+      setDocumentsLoading(false);
+    }
+  }, [request, adminToken]);
+
+  useEffect(() => {
+    if (documentsExpanded && request && request.documentCount > 0) {
+      loadDocuments();
+    }
+  }, [documentsExpanded, request, loadDocuments]);
+
+  // Load automatically when the documents section is scrolled near the viewport.
+  useEffect(() => {
+    if (documentsExpanded || !request || request.documentCount === 0) return;
+    const el = documentsSectionRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          observer.disconnect();
+          setDocumentsExpanded(true);
+        }
+      },
+      { rootMargin: "250px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [documentsExpanded, request]);
 
   // ── Status transition handler ────────────────────────────────────────────────
   const handleStatusChange = async (
@@ -292,81 +344,119 @@ export default function AdminVerificationDetail({
         </dl>
       </section>
 
-      {/* ── Supporting documents ─────────────────────────────────────────────── */}
-      <section className="card mb-6">
+      {/* ── Supporting documents (lazy-loaded on scroll / expand) ──────────── */}
+      <section className="card mb-6" ref={documentsSectionRef}>
         <h2 className="font-display text-base font-semibold text-forest-900 mb-3">
           Supporting Documents
-          {request.supportingDocuments.length > 0 && (
+          {(request.documentCount ?? request.supportingDocuments.length) > 0 && (
             <span className="ml-2 text-xs font-normal text-[#8aaa8a]">
-              ({request.supportingDocuments.length})
+              ({(request.documentCount ?? request.supportingDocuments.length)})
             </span>
           )}
         </h2>
 
-        {request.supportingDocuments.length === 0 ? (
-          <p className="text-sm text-[#8aaa8a] font-body italic">No documents uploaded.</p>
-        ) : (
-          <ul className="space-y-2">
-            {request.supportingDocuments.map((doc, index) => (
-              <li key={index}>
-                <a
-                  href={doc.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 rounded-lg border border-forest-100 hover:border-forest-300 hover:bg-forest-50/50 transition-colors group"
-                >
-                  {/* File icon */}
-                  <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-5 w-5"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </span>
+        {(() => {
+          const docCount = request.documentCount ?? request.supportingDocuments.length;
 
-                  {/* Name + size */}
-                  <span className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-forest-900 group-hover:text-forest-700 truncate block">
-                      {doc.name}
+          if (docCount === 0) {
+            return (
+              <p className="text-sm text-[#8aaa8a] font-body italic">No documents uploaded.</p>
+            );
+          }
+
+          if (documents === null) {
+            return (
+              <div className="animate-fade-in">
+                <p className="text-sm text-[#8aaa8a] font-body mb-3">
+                  {docCount} supporting document{docCount === 1 ? "" : "s"} attached to this
+                  submission.
+                </p>
+                {documentsError ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-sm text-red-600 font-body">{documentsError}</p>
+                    <button
+                      onClick={loadDocuments}
+                      className="btn-secondary text-sm px-4 py-2"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setDocumentsExpanded(true)}
+                    disabled={documentsLoading}
+                    className="btn-secondary text-sm px-4 py-2 disabled:opacity-60"
+                  >
+                    {documentsLoading ? "Loading documents…" : `Expand documents (${docCount})`}
+                  </button>
+                )}
+              </div>
+            );
+          }
+
+          return (
+            <ul className="space-y-2">
+              {documents.map((doc, index) => (
+                <li key={index}>
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-3 p-3 rounded-lg border border-forest-100 hover:border-forest-300 hover:bg-forest-50/50 transition-colors group"
+                  >
+                    {/* File icon */}
+                    <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
                     </span>
-                    {doc.size !== undefined && (
-                      <span className="text-xs text-[#8aaa8a]">
-                        {doc.size < 1024 * 1024
-                          ? `${(doc.size / 1024).toFixed(1)} KB`
-                          : `${(doc.size / (1024 * 1024)).toFixed(1)} MB`}
-                      </span>
-                    )}
-                  </span>
 
-                  {/* Download arrow */}
-                  <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="h-4 w-4"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
+                    {/* Name + size */}
+                    <span className="flex-1 min-w-0">
+                      <span className="text-sm font-medium text-forest-900 group-hover:text-forest-700 truncate block">
+                        {doc.name}
+                      </span>
+                      {doc.size !== undefined && (
+                        <span className="text-xs text-[#8aaa8a]">
+                          {doc.size < 1024 * 1024
+                            ? `${(doc.size / 1024).toFixed(1)} KB`
+                            : `${(doc.size / (1024 * 1024)).toFixed(1)} MB`}
+                        </span>
+                      )}
+                    </span>
+
+                    {/* Download arrow */}
+                    <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-4 w-4"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        aria-hidden="true"
+                      >
+                        <path
+                          fillRule="evenodd"
+                          d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
+                          clipRule="evenodd"
+                        />
+                      </svg>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </section>
 
       {/* ── Review history ───────────────────────────────────────────────────── */}
