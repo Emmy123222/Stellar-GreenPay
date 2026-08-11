@@ -47,7 +47,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@testcontainers/postgresql": "^12.0.4",
+    "@testcontainers/postgresql": "^12.1.0",
     "eslint": "^8.57.0",
     "eslint-plugin-security": "^1.7.1",
     "eslint-plugin-sql-injection": "^1.0.1",
