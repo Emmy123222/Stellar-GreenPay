@@ -254,6 +254,23 @@ export interface MonthlySubscription {
   history: MonthlyDonationHistoryItem[];
 }
 
+/**
+ * A merged pull request displayed on the /contributors timeline.
+ */
+export interface ContributorPR {
+  id: number;
+  number: number;
+  title: string;
+  htmlUrl: string;
+  mergedAt: string;
+  feature: string;
+  author: {
+    login: string;
+    avatarUrl: string;
+    htmlUrl: string;
+  };
+}
+
 export interface VerificationRequest {
   id: string;
   organizationName: string;
