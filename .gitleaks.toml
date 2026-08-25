@@ -3,36 +3,17 @@ title = "Stellar GreenPay secret scanning"
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "Generated distributable archives are not source files to scan."
+[allowlist]
+description = "Global allowlist for ignored files and test values."
 paths = [
   '''^extension/greenpay-extension\.zip$''',
-]
-
-[[allowlists]]
-description = "Environment templates contain placeholder-only values for contributors."
-condition = "AND"
-paths = [
   '''(^|/)\.env(\.[a-z]+)*\.example$''',
+  '''(^|/)(__tests__|__mocks__|e2e|test_snapshots)(/|$)''',
+  '''\.(test|spec)\.(js|ts|tsx)$''',
+  '''(^|/)(package-lock\.json|yarn\.lock)$'''
 ]
 regexes = [
   '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',
   '''^$''',
-]
-
-[[allowlists]]
-description = "Automated tests and mocks use deterministic dummy identifiers."
-condition = "AND"
-paths = [
-  '''(^|/)(__tests__|__mocks__|e2e|test_snapshots)(/|$)''',
-  '''\.(test|spec)\.(js|ts|tsx)$''',
-]
-regexes = [
-  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
-]
-
-[[allowlists]]
-description = "Ignore auto-generated lock files which can contain high-entropy hashes."
-paths = [
-  '''(^|/)(package-lock\.json|yarn\.lock)$''',
+  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)'''
 ]
