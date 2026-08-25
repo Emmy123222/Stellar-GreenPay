@@ -472,8 +472,10 @@ router.get("/:id/verify", async (req, res) => {
       },
     });
   } catch (err) {
-    res.json({
-      success: true,
+    console.error(`[verify] Error checking on-chain status for project ${req.params.id}:`, err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to verify on-chain status",
       data: {
         projectId: req.params.id,
         onChainVerified: false,
