@@ -1211,8 +1211,21 @@ router.get("/:id/summary-status", async (req, res, next) => {
       });
     }
 
+    const jobResult = await pool.query(
+      "SELECT state FROM pgboss.job WHERE name = 'ai-summary' AND data->>'projectId' = $1 ORDER BY created_on DESC LIMIT 1",
+      [req.params.id]
+    );
+
+    let status = "queued";
+    if (jobResult.rows.length > 0) {
+      const state = jobResult.rows[0].state;
+      if (state === "failed" || state === "cancelled") {
+        status = "failed";
+      }
+    }
+
     res.json({
-      status: "queued",
+      status,
       aiSummary: null,
       aiSummaryGeneratedAt: null,
       aiSummaryModel: null,
