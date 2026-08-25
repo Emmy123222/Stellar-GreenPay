@@ -408,6 +408,9 @@ impl GreenPayContract {
             if env.storage().instance().has(&DataKey::Project(project_id.clone())) {
                 panic!("Project already registered");
             }
+            if init.co2_per_xlm > MAX_CO2_PER_XLM {
+                panic!("CO2 per XLM exceeds maximum");
+            }
             let project = Project {
                 id: project_id.clone(),
                 name: init.name.clone(),
@@ -2389,6 +2392,21 @@ mod tests {
             &(MAX_CO2_PER_XLM + 1),
             &1i128,
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "CO2 per XLM exceeds maximum")]
+    fn test_batch_register_projects_rejects_excessive_co2_per_xlm() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let project = ProjectInit {
+            id: String::from_str(&env, "proj-002"),
+            name: String::from_str(&env, "Bad Project"),
+            wallet: Address::generate(&env),
+            co2_per_xlm: MAX_CO2_PER_XLM + 1,
+            min_donation_amount: 1,
+        };
+        let projects = Vec::from_array(&env, [project]);
+        client.batch_register_projects(&admin, &projects);
     }
 
     #[test]
