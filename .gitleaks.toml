@@ -30,3 +30,9 @@ paths = [
 regexes = [
   '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
 ]
+
+[[allowlists]]
+description = "Ignore auto-generated lock files which can contain high-entropy hashes."
+paths = [
+  '''(^|/)(package-lock\.json|yarn\.lock)$''',
+]
