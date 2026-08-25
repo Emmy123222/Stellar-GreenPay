@@ -11,7 +11,7 @@
     "db:rollback:n": "node src/db/migrate.js --rollback",
     "lint": "eslint src/**/*.js",
     "docs": "typedoc --options typedoc.json",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand --forceExit",
     "load-test": "k6 run ../scripts/load-test.js"
   },
   "dependencies": {
@@ -42,6 +42,7 @@
     "pino": "^10.3.1",
     "pino-http": "^11.0.0",
     "qrcode": "^1.5.4",
+    "rate-limit-redis": "^5.0.0",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "6.3.0",
     "swagger-ui-express": "5.0.1",

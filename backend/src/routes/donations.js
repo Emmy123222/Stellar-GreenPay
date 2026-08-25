@@ -17,7 +17,7 @@ const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
-const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
 
 function resolveDonorCountry(ip) {
   if (!ip || typeof ip !== "string") return null;

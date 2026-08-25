@@ -37,7 +37,7 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
 
-const submitLimiter = createRateLimiter(10, 15); // 10 submissions / 15 min / IP
+const submitLimiter = createRateLimiter(10, 15, "verification"); // 10 submissions / 15 min / IP
 
 const VALID_CATEGORIES = [
   "Reforestation",

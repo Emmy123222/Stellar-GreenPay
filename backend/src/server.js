@@ -98,7 +98,7 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
-app.use(createRateLimiter(150, 15));
+app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
