@@ -39,6 +39,8 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS image_url TEXT;
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
