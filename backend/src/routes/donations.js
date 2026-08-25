@@ -80,10 +80,10 @@ async function recordDonation(req, res, next) {
 
     client = await pool.connect();
 
-    const projectResult = await client.query("SELECT id, name, co2_per_xlm FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await client.query("SELECT id, co2_per_xlm, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
     const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
-    const project = projectResult.rows[0];
+    const project = projectResult.rows[0] || {};
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);

@@ -302,7 +302,8 @@ router.get("/", async (req, res, next) => {
     }
     query += `ORDER BY ${sortField} DESC, id DESC LIMIT $${limitIdx}`;
 
-    // All user-controlled values (status, category, search, cursor fields) are
+    // Build the SQL query: WHERE values are whitelisted enum strings;
+    // all user-controlled values (status, category, search, cursor fields) are
     // passed as parameterised $N placeholders in `values`. Dynamic WHERE clauses
     // are built only from whitelisted enum strings, so no injection surface exists.
     // eslint-disable-next-line sql-injection/no-sql-injection

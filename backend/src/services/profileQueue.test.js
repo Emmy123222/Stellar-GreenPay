@@ -57,17 +57,17 @@ describe("profileQueue badge computation", () => {
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
     } catch (err) {
       console.warn("Testcontainers startup failed – integration tests will be skipped:", err.message);
-      try { if (testPool) await testPool.end(); } catch { /* ignore */ }
-      try { if (container) await container.stop(); } catch { /* ignore */ }
+      try { if (testPool) await testPool.end(); } catch { /* best-effort cleanup */ }
+      try { if (container) await container.stop(); } catch { /* best-effort cleanup */ }
       container = null;
       testPool = null;
     }
   });
 
   afterAll(async () => {
-    try { if (pool) await pool.end(); } catch { /* ignore */ }
-    try { if (testPool) await testPool.end(); } catch { /* ignore */ }
-    try { if (container) await container.stop({ timeout: 5000 }); } catch { /* ignore */ }
+    try { if (pool) await pool.end(); } catch { /* best-effort cleanup */ }
+    try { if (testPool) await testPool.end(); } catch { /* best-effort cleanup */ }
+    try { if (container) await container.stop({ timeout: 5000 }); } catch { /* best-effort cleanup */ }
   });
 
   async function cleanDb() {
