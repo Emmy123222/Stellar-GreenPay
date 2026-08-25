@@ -6,6 +6,7 @@ useDefault = true
 [allowlist]
 description = "Global allowlist for ignored files and test values."
 paths = [
+  '''^\.gitleaks\.toml$''',
   '''^extension/greenpay-extension\.zip$''',
   '''(^|/)\.env(\.[a-z]+)*\.example$''',
   '''(^|/)(__tests__|__mocks__|e2e|test_snapshots)(/|$)''',
