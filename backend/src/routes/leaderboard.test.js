@@ -126,6 +126,93 @@ describe("GET /api/leaderboard — ranking assignment", () => {
   });
 });
 
+describe("GET /api/leaderboard — pagination", () => {
+  beforeEach(resetQueries);
+
+  test("defaults to limit=50 and cursor=0 when no params provided", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const app = createApp();
+    await request(app).get("/api/leaderboard").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      [50, 0],
+    );
+  });
+
+  test("caps limit at 200", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const app = createApp();
+    await request(app).get("/api/leaderboard?limit=999").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      [200, 0],
+    );
+  });
+
+  test("uses cursor as OFFSET in the query", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const app = createApp();
+    await request(app).get("/api/leaderboard?cursor=100&limit=25").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      [25, 100],
+    );
+  });
+
+  test("clamps negative cursor to 0", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const app = createApp();
+    await request(app).get("/api/leaderboard?cursor=-5").expect(200);
+
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      [50, 0],
+    );
+  });
+
+  test("returns has_more=false and next_cursor=null when fewer rows than limit", async () => {
+    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+
+    const app = createApp();
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.has_more).toBe(false);
+    expect(res.body.next_cursor).toBeNull();
+  });
+
+  test("returns has_more=true and correct next_cursor when rows equal limit", async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => ({
+      ...SORTED_DONORS[0],
+      public_key: `G${String.fromCharCode(65 + i).repeat(55)}`,
+      total_donated_xlm: String(1000 - i),
+    }));
+    pool.query.mockResolvedValue({ rows });
+
+    const app = createApp();
+    const res = await request(app).get("/api/leaderboard?limit=10").expect(200);
+
+    expect(res.body.has_more).toBe(true);
+    expect(res.body.next_cursor).toBe(10);
+  });
+
+  test("ranks continue across pages via cursor offset", async () => {
+    const rows = [SORTED_DONORS[1]];
+    pool.query.mockResolvedValue({ rows });
+
+    const app = createApp();
+    const res = await request(app).get("/api/leaderboard?cursor=1").expect(200);
+
+    expect(res.body.data[0].rank).toBe(2);
+  });
+});
+
 describe("leaderboard route SQL structure", () => {
   beforeEach(resetQueries);
 
@@ -277,7 +364,7 @@ describe("leaderboard route SQL structure", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?limit=10");
 
-    expect(queries[0].sql).toMatch(/LIMIT\s+\$1/i);
+    expect(queries[0].sql).toMatch(/LIMIT\s+\$1\s+OFFSET\s+\$2/i);
     expect(pool.query).toHaveBeenCalledWith(
       expect.any(String),
       expect.arrayContaining([10]),
@@ -301,6 +388,7 @@ describe("leaderboard route SQL structure", () => {
       sql.indexOf("GROUP BY"),
       sql.indexOf("ORDER BY"),
       sql.indexOf("LIMIT"),
+      sql.indexOf("OFFSET"),
     ];
     for (let i = 1; i < structure.length; i++) {
       expect(structure[i]).toBeGreaterThan(structure[i - 1]);
@@ -320,6 +408,7 @@ describe("leaderboard route SQL structure", () => {
       sql.indexOf("GROUP BY"),
       sql.indexOf("ORDER BY"),
       sql.indexOf("LIMIT"),
+      sql.indexOf("OFFSET"),
     ];
     for (let i = 1; i < structure.length; i++) {
       expect(structure[i]).toBeGreaterThan(structure[i - 1]);
@@ -629,7 +718,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
 
-    const sql = queries[0].sql;
+    const sql = pool.query.mock.calls[0][0];
     expect(sql).toMatch(/NOT EXISTS/i);
     expect(sql).toMatch(/verified\s*=\s*false/i);
     expect(sql).toMatch(/EXISTS/i);
@@ -647,7 +736,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard").expect(200);
 
-    const sql = queries[0].sql;
+    const sql = pool.query.mock.calls[0][0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
     expect(sql).not.toMatch(/verified\s*=\s*false/i);
   });
@@ -685,7 +774,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=false").expect(200);
 
-    const sql = queries[0].sql;
+    const sql = pool.query.mock.calls[0][0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
   });
 });

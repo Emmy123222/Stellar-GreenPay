@@ -4,10 +4,6 @@
 "use strict";
 
 require("dotenv").config();
-const express = require("express");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
 const http = require("http");
 const { Server } = require("socket.io");
 const { initSentry, errorHandler: sentryErrorMiddleware } = require("./services/sentry");
@@ -23,11 +19,9 @@ const cookieParser = require("cookie-parser");
 const csurf = require("csurf");
 const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
-const requestLogger = require("pino-http")({ logger });
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
 const { createRateLimiter } = require("./middleware/rateLimiter");
-const logger = require("./logger");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
 

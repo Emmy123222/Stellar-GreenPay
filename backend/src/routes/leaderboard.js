@@ -12,14 +12,14 @@ const leaderboardLimiter = createRateLimiter(30, 1);
 
 router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
-    const cursor = parseInt(req.query.cursor, 10) || 0;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const cursor = Math.max(parseInt(req.query.cursor, 10) || 0, 0);
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
     const onlyVerified = req.query.onlyVerified === "true";
 
     const conditions = [];
-    const params = [limit];
+    const params = [limit, cursor];
 
     if (period === "month") {
       conditions.push("d.created_at >= NOW() - INTERVAL '30 days'");
@@ -81,13 +81,13 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       ${whereClause}
       GROUP BY p.public_key, p.display_name, p.badges
       ORDER BY ${sortBy} DESC
-      LIMIT $1
+      LIMIT $1 OFFSET $2
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, params);
     const entries = result.rows.map((p, i) => ({
-      rank: i + 1,
+      rank: cursor + i + 1,
       publicKey: p.public_key,
       displayName: p.display_name || null,
       totalDonatedXLM: p.total_donated_xlm?.toString() || "0",
@@ -98,7 +98,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }));
 
     const hasMore = entries.length === limit;
-    const nextCursor = hasMore ? entries[entries.length - 1].rank : null;
+    const nextCursor = hasMore ? cursor + limit : null;
 
     res.json({
       success: true,

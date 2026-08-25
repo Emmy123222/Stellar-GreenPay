@@ -352,6 +352,46 @@ router.get("/stats", adminRequired, async (req, res, next) => {
 });
 
 /**
+ * GET /api/verification-requests/:id/documents
+ * Returns supporting documents to an admin or the request's submitting wallet.
+ */
+router.get("/:id/documents", async (req, res, next) => {
+  try {
+    const result = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [req.params.id]);
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    const auth = req.headers.authorization || "";
+    if (auth.startsWith("Bearer ")) {
+      try {
+        const { verifyToken } = require("../middleware/auth");
+        const decoded = verifyToken(auth.slice(7));
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
+          return res.json({
+            success: true,
+            data: { documents: Array.isArray(row.supporting_documents) ? row.supporting_documents : [] },
+          });
+        }
+      } catch (_err) {
+        // Fall through to the wallet check.
+      }
+    }
+
+    const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
+    if (!wallet || wallet !== row.wallet_address) {
+      return res.status(403).json({ error: "Provide a matching ?wallet= query param to view documents" });
+    }
+
+    res.json({
+      success: true,
+      data: { documents: Array.isArray(row.supporting_documents) ? row.supporting_documents : [] },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/verification-requests/:id
  * Public, but only returns the row if wallet query param matches
  * the row's wallet_address. Admins can pass ?wallet to bypass this check
