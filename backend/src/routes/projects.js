@@ -290,11 +290,6 @@ router.get("/", async (req, res, next) => {
     values.push(pageSize + 1);
     const limitIdx = values.length;
 
-    let query = "SELECT * FROM projects ";
-    if (where.length) {
-      query += "WHERE " + where.join(" AND ") + " ";
-    }
-    query += `ORDER BY ${sortField} DESC, id DESC LIMIT $${limitIdx}`;
     // Build the SQL query: WHERE values are whitelisted enum strings;
     // all user values use parameterized $N placeholders below.
     const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")} ` : "";
@@ -1532,6 +1527,91 @@ router.post("/:id/webhook", async (req, res, next) => {
         webhookUrl,
         webhookSecret,
       },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/donors
+ * Returns donors who contributed to the project, ordered by their profile total.
+ */
+router.get("/:id/donors", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(projectId)) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const { limit = 20, cursor } = req.query;
+    const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+    const values = [projectId];
+    const where = ["d.project_id = $1"];
+
+    if (cursor) {
+      let cursorData;
+      try {
+        cursorData = JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+
+      const { total_donated_xlm: totalDonatedXlm, donor_address: donorAddress } = cursorData;
+      if (totalDonatedXlm === undefined || !donorAddress) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+
+      values.push(totalDonatedXlm, donorAddress);
+      const totalIdx = values.length - 1;
+      const addressIdx = values.length;
+      where.push(
+        `(p.total_donated_xlm < $${totalIdx} OR (p.total_donated_xlm = $${totalIdx} AND p.public_key < $${addressIdx}))`,
+      );
+    }
+
+    values.push(pageSize + 1);
+    const limitIdx = values.length;
+    const result = await pool.query(
+      `SELECT d.donor_address,
+              p.total_donated_xlm,
+              INITCAP(p.badges->0->>'tier') AS badge
+       FROM donations d
+       JOIN profiles p ON p.public_key = d.donor_address
+       WHERE ${where.join(" AND ")}
+       GROUP BY d.donor_address, p.public_key, p.total_donated_xlm, p.badges
+       ORDER BY p.total_donated_xlm DESC, p.public_key DESC
+       LIMIT $${limitIdx}`,
+      values,
+    );
+
+    const rows = result.rows;
+    const hasMore = rows.length > pageSize;
+    const pageRows = rows.slice(0, pageSize);
+    const nextCursor = hasMore
+      ? Buffer.from(
+          JSON.stringify({
+            total_donated_xlm: pageRows[pageRows.length - 1].total_donated_xlm,
+            donor_address: pageRows[pageRows.length - 1].donor_address,
+          }),
+        ).toString("base64")
+      : null;
+
+    res.json({
+      success: true,
+      data: pageRows.map((row) => ({
+        donorAddress: row.donor_address,
+        totalXLM: Number.parseFloat(row.total_donated_xlm || "0").toFixed(7),
+        badge: row.badge || null,
+      })),
+      next_cursor: nextCursor,
+      has_more: hasMore,
     });
   } catch (e) {
     next(e);

@@ -623,6 +623,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/projects/{id}/donors:
+    get:
+      tags: [Projects]
+      summary: List project donors
+      operationId: listProjectDonors
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Base64 cursor returned by the previous response
+      responses:
+        '200':
+          description: Cursor-paginated donor list ordered by total donated XLM
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Success'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          required: [donorAddress, totalXLM, badge]
+                          properties:
+                            donorAddress:
+                              type: string
+                            totalXLM:
+                              type: string
+                              example: '12.5000000'
+                            badge:
+                              type: string
+                              nullable: true
+                              example: Seedling
+                      next_cursor:
+                        type: string
+                        nullable: true
+                      has_more:
+                        type: boolean
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/projects/{id}/verify:
     get:
       tags: [Projects]
