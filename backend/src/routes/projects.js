@@ -27,11 +27,17 @@ const WEBHOOK_URL_MAX_LENGTH = 2048;
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
+const PROJECT_DETAIL_CACHE_TTL = 30; // seconds
+const PROJECT_DETAIL_CACHE_PREFIX = "projects:detail:";
 const PROJECT_MILESTONES_CACHE_TTL = 300; // seconds (5 minutes)
 const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
 
 function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
+}
+
+function getProjectDetailCacheKey(projectId) {
+  return PROJECT_DETAIL_CACHE_PREFIX + projectId;
 }
 
 const VALID_STATUSES = ["active", "completed", "paused"];
@@ -868,6 +874,7 @@ router.patch("/:id", async (req, res, next) => {
     );
 
     if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(getProjectDetailCacheKey(req.params.id));
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
@@ -877,6 +884,21 @@ router.patch("/:id", async (req, res, next) => {
 
 router.get("/:id", async (req, res, next) => {
   try {
+    const { walletAddress } = req.query;
+    const hasWalletQuery =
+      typeof walletAddress === "string" && walletAddress.trim().length > 0;
+    const normalizedWallet = hasWalletQuery ? walletAddress.trim() : null;
+
+    // Non-personalized requests can use the Redis detail cache.
+    if (!hasWalletQuery) {
+      const cacheKey = getProjectDetailCacheKey(req.params.id);
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        res.set("Cache-Control", `public, max-age=${PROJECT_DETAIL_CACHE_TTL}`);
+        return res.json(cached);
+      }
+    }
+
     const projectResult = await pool.query(
       `SELECT p.*, COUNT(pf.id)::int AS follow_count
        FROM projects p
@@ -887,11 +909,6 @@ router.get("/:id", async (req, res, next) => {
     );
     if (!projectResult.rows[0])
       return res.status(404).json({ error: "Project not found" });
-
-    const { walletAddress } = req.query;
-    const hasWalletQuery =
-      typeof walletAddress === "string" && walletAddress.trim().length > 0;
-    const normalizedWallet = hasWalletQuery ? walletAddress.trim() : null;
 
     const updatedAt = projectResult.rows[0].updated_at;
     const etag = `"${crypto.createHash("md5").update(String(updatedAt)).digest("hex")}"`;
@@ -974,7 +991,7 @@ router.get("/:id", async (req, res, next) => {
       return `${negative ? "-" : ""}${whole.toString()}.${fracStr}`;
     };
 
-    res.json({
+    const responseBody = {
       success: true,
       data: {
         ...mapProjectRow(projectResult.rows[0]),
@@ -995,7 +1012,14 @@ router.get("/:id", async (req, res, next) => {
         followCount,
         isFollowing,
       },
-    });
+    };
+
+    if (!hasWalletQuery) {
+      const cacheKey = getProjectDetailCacheKey(req.params.id);
+      await redis.set(cacheKey, responseBody, PROJECT_DETAIL_CACHE_TTL);
+    }
+
+    res.json(responseBody);
   } catch (e) {
     next(e);
   }
@@ -1467,6 +1491,8 @@ router.patch("/:id/status", async (req, res, next) => {
 
     if (typeof redis.deletePattern === "function") await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
     if (typeof redis.deletePattern === "function") await redis.deletePattern("stats:*");
+    if (typeof redis.deletePattern === "function") await redis.deletePattern(getProjectDetailCacheKey(req.params.id));
+    featuredCache = null;
 
     res.json({ success: true, data: mapProjectRow(result.rows[0]) });
   } catch (e) {
