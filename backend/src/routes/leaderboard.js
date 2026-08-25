@@ -8,7 +8,7 @@ const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
 // 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
-const leaderboardLimiter = createRateLimiter(30, 1);
+const leaderboardLimiter = createRateLimiter(30, 1, "leaderboard");
 
 // Cursor-based pagination constants (matching /api/projects conventions).
 const LEADERBOARD_DEFAULT_LIMIT = 50;
