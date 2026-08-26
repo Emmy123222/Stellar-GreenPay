@@ -8,8 +8,6 @@
 "use strict";
 
 const crypto = require("crypto");
-const dns = require("dns");
-const net = require("net");
 const https = require("https");
 const http = require("http");
 const pool = require("../db/pool");
@@ -20,246 +18,70 @@ const QUEUE = "webhook-delivery";
 const MAX_ATTEMPTS = 5;
 /** Delay (seconds) before the next attempt after failures 1–4. */
 const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200]; // 1m, 5m, 30m, 2h
+const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 
 let boss = null;
 
-// ---------------------------------------------------------------------------
-// Private & reserved IPv4 CIDR ranges (SSRF blacklist)
-// ---------------------------------------------------------------------------
-const PRIVATE_IPV4_RANGES = Object.freeze([
-  Object.freeze({ start: ip4ToInt("0.0.0.0"),       end: ip4ToInt("0.255.255.255"),     label: "0.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("10.0.0.0"),      end: ip4ToInt("10.255.255.255"),    label: "10.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("100.64.0.0"),    end: ip4ToInt("100.127.255.255"),   label: "100.64.0.0/10" }),
-  Object.freeze({ start: ip4ToInt("127.0.0.0"),     end: ip4ToInt("127.255.255.255"),   label: "127.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("169.254.0.0"),   end: ip4ToInt("169.254.255.255"),   label: "169.254.0.0/16" }),
-  Object.freeze({ start: ip4ToInt("172.16.0.0"),    end: ip4ToInt("172.31.255.255"),    label: "172.16.0.0/12" }),
-  Object.freeze({ start: ip4ToInt("192.0.2.0"),     end: ip4ToInt("192.0.2.255"),       label: "192.0.2.0/24" }),
-  Object.freeze({ start: ip4ToInt("192.168.0.0"),   end: ip4ToInt("192.168.255.255"),   label: "192.168.0.0/16" }),
-  Object.freeze({ start: ip4ToInt("198.18.0.0"),    end: ip4ToInt("198.19.255.255"),    label: "198.18.0.0/15" }),
-  Object.freeze({ start: ip4ToInt("198.51.100.0"),  end: ip4ToInt("198.51.100.255"),    label: "198.51.100.0/24" }),
-  Object.freeze({ start: ip4ToInt("203.0.113.0"),   end: ip4ToInt("203.0.113.255"),     label: "203.0.113.0/24" }),
-]);
-
-/** Convert a dotted-quad IPv4 string to a 32-bit integer. */
-function ip4ToInt(ip) {
-  const parts = ip.split(".").map(Number);
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+function generateSignature(secret, body) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(body)
+    .digest("hex");
 }
 
-/** Default timeout (ms) for DNS lookups in webhook validation. */
-const DNS_TIMEOUT = 5000;
-
-// ---------------------------------------------------------------------------
-// IPv4 helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Check whether an IP address falls within loopback, private, or link-local ranges.
- *
- * Blocked ranges:
- * - 127.0.0.0/8 (loopback)
- * - 10.0.0.0/8 (private)
- * - 172.16.0.0/12 (private)
- * - 192.168.0.0/16 (private)
- * - 169.254.0.0/16 (link-local / cloud metadata)
- * - 0.0.0.0/8 (unspecified / broadcast)
- * - IPv6 loopback (::1, ::), link-local (fe80::/10), unique local (fc00::/7)
- *
- * @param {string} ip - IP address string.
- * @returns {boolean} True if private or restricted IP.
- */
-function isPrivateIP(ip) {
-  if (!ip || typeof ip !== "string") return true;
-
-  let normalizedIp = ip.trim();
-
-  // Handle IPv4-mapped IPv6 address (e.g. ::ffff:127.0.0.1)
-  if (normalizedIp.toLowerCase().startsWith("::ffff:")) {
-    normalizedIp = normalizedIp.substring(7);
-  }
-
-  if (net.isIPv4(normalizedIp)) {
-    const parts = normalizedIp.split(".").map(Number);
-    if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
-      return true;
-    }
-    const [a, b] = parts;
-    // 127.0.0.0/8 (loopback)
-    if (a === 127) return true;
-    // 10.0.0.0/8 (private)
-    if (a === 10) return true;
-    // 172.16.0.0/12 (private: 172.16.0.0 - 172.31.255.255)
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    // 192.168.0.0/16 (private)
-    if (a === 192 && b === 168) return true;
-    // 169.254.0.0/16 (link-local / cloud metadata)
-    if (a === 169 && b === 254) return true;
-    // 0.0.0.0/8 (current network / loopback route)
-    if (a === 0) return true;
-
-    return false;
-  }
-
-  if (net.isIPv6(normalizedIp)) {
-    const lower = normalizedIp.toLowerCase();
-    // IPv6 Loopback (::1 or ::)
-    if (lower === "::1" || lower === "::" || lower === "0:0:0:0:0:0:0:1" || lower === "0:0:0:0:0:0:0:0") {
-      return true;
-    }
-    // Unique local addresses (fc00::/7)
-    if (lower.startsWith("fc") || lower.startsWith("fd")) {
-      return true;
-    }
-    // Link-local addresses (fe80::/10)
-    if (
-      lower.startsWith("fe8") ||
-      lower.startsWith("fe9") ||
-      lower.startsWith("fea") ||
-      lower.startsWith("feb")
-    ) {
-      return true;
-    }
-    return false;
-  }
-
-  return true;
+function isGracePeriodActive(expiresAt, nowMs) {
+  if (!expiresAt) return false;
+  const expiry = new Date(expiresAt).getTime();
+  return !isNaN(expiry) && nowMs < expiry;
 }
 
-/**
- * POST a signed JSON payload to a webhook URL.
- * Resolves the hostname via DNS first to ensure the IP does not belong to private/restricted ranges.
- *
- * @param {string} address - IPv4 dotted-quad string.
- * @returns {{ blocked: boolean, range?: string }}
- */
-function checkPrivateIPv4(address) {
-  if (!net.isIPv4(address)) return { blocked: false };
-  const num = ip4ToInt(address);
-  for (const range of PRIVATE_IPV4_RANGES) {
-    if (num >= range.start && num <= range.end) {
-      return { blocked: true, range: range.label };
-    }
-  }
-  return { blocked: false };
-}
-
-// ---------------------------------------------------------------------------
-// IPv6 helpers
-// ---------------------------------------------------------------------------
-
-/** Regex to detect IPv4-mapped/compat IPv6 addresses in dotted-quad form (e.g. ::ffff:192.168.1.1). */
-const IPV4_MAPPED_DOT_RE = /^::(?:ffff|0)(?::0)?:(\d+\.\d+\.\d+\.\d+)$/i;
-
-/** Strip surrounding square brackets from a hostname if present. */
-function stripBrackets(host) {
-  return host.replace(/^\[|\]$/g, "");
-}
-
-/**
- * Normalize an IPv6 address to its canonical lowercase expanded form
- * (zero-padded 8 groups of 4 hex digits, ":" separated).
- *
- * @param {string} address
- * @returns {string | null} Normalised address or null if not valid IPv6.
- */
-async function deliverPayload(url, secret, payload) {
-  let urlObj;
+function timingSafeEqualHex(a, b) {
   try {
-    urlObj = new URL(url);
-  } catch (err) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: err.message,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: Invalid URL");
-    return;
-  }
-
-  if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `Unsupported protocol: ${urlObj.protocol}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: Unsupported protocol");
-    return;
-  }
-
-  let addresses;
-  try {
-    addresses = await dns.promises.lookup(urlObj.hostname, { all: true });
-  } catch (err) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `DNS resolution failed for ${urlObj.hostname}: ${err.message}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: DNS resolution error");
-    return;
-  }
-
-  if (!addresses || addresses.length === 0) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `No IP addresses resolved for ${urlObj.hostname}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: No IP addresses resolved");
-    return;
-  }
-
-  for (const entry of addresses) {
-    if (isPrivateIP(entry.address)) {
-      logger.error({
-        event: "webhook_delivery_error",
-        url,
-        ip: entry.address,
-        err: `Blocked SSRF target IP: ${entry.address}`,
-        payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-      }, "Webhook delivery failed: Blocked private or restricted IP address");
-      return;
-    }
-  }
-
-  try {
-    urlObj = new URL(url);
+    const bufA = Buffer.from(a, "hex");
+    const bufB = Buffer.from(b, "hex");
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
   } catch {
-    throw new Error(`Invalid webhook URL: "${url}"`);
+    return false;
+  }
+}
+
+function verifyWebhookSignature(payload, signatureInput, currentSecret, options = {}) {
+  if (!signatureInput || !currentSecret || typeof currentSecret !== "string") return false;
+
+  const { previousSecret, previousSecretExpiresAt, now = Date.now() } = options;
+
+  let candidateSignatures = [];
+  if (typeof signatureInput === "string") {
+    candidateSignatures = signatureInput.split(",").map((s) => s.trim()).filter(Boolean);
+  } else if (Array.isArray(signatureInput)) {
+    candidateSignatures = signatureInput.filter((s) => typeof s === "string" && s.trim());
+  } else if (typeof signatureInput === "object") {
+    const mainSig = signatureInput["x-webhook-signature"] || signatureInput["X-Webhook-Signature"];
+    const prevSig = signatureInput["x-webhook-signature-previous"] || signatureInput["X-Webhook-Signature-Previous"];
+    if (mainSig) candidateSignatures.push(...mainSig.split(",").map((s) => s.trim()));
+    if (prevSig) candidateSignatures.push(...prevSig.split(",").map((s) => s.trim()));
   }
 
-  if (!["http:", "https:"].includes(urlObj.protocol)) {
-    throw new Error(`Webhook URL uses unsupported protocol "${urlObj.protocol}"`);
-  }
+  if (candidateSignatures.length === 0) return false;
 
-  // Strip brackets from the hostname because Node.js URL parser may
-  // leave them on for IPv6 literals.
-  const host = stripBrackets(urlObj.hostname).toLowerCase();
-
-  // Block IP-literal hostnames that we already know are private BEFORE DNS lookup.
-  if (BLOCKED_HOSTNAMES.has(host)) {
-    throw new Error(`Webhook URL uses blocked hostname "${host}"`);
-  }
-
-  // Block any IPv4 hostname that falls in a private range directly.
-  if (net.isIPv4(host)) {
-    const v4 = checkPrivateIPv4(host);
-    if (v4.blocked) {
-      throw new Error(`Webhook URL is a private IPv4 address (${v4.range})`);
+  const expectedCurrentSig = generateSignature(currentSecret, payload);
+  for (const sig of candidateSignatures) {
+    if (timingSafeEqualHex(sig, expectedCurrentSig)) {
+      return true;
     }
   }
 
-  // Block any IPv6 hostname that falls in a private range directly (pre-DNS).
-  // Also catches IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.1).
-  if (net.isIPv6(host)) {
-    const v6 = checkPrivateIPv6(host);
-    if (v6.blocked) {
-      throw new Error(`Webhook URL is a private IPv6 address (${v6.range})`);
+  if (previousSecret && typeof previousSecret === "string" && isGracePeriodActive(previousSecretExpiresAt, now)) {
+    const expectedPrevSig = generateSignature(previousSecret, payload);
+    for (const sig of candidateSignatures) {
+      if (timingSafeEqualHex(sig, expectedPrevSig)) {
+        return true;
+      }
     }
   }
 
-  // Resolve hostname and validate resolved IPs.
-  await resolveAndValidateHost(host, dnsTimeout);
+  return false;
 }
 
 /**
@@ -270,11 +92,12 @@ async function deliverPayload(url, secret, payload) {
  * @param {string} url
  * @param {string} secret
  * @param {object} payload
+ * @param {object} [options]
  * @returns {Promise<number>}
  */
-async function deliverPayload(url, secret, payload) {
+async function deliverPayload(url, secret, payload, options = {}) {
   // Validate the URL before making any outbound request.
-  await validateUrl(url);
+  await assertPublicHttpUrl(url);
 
   const body = JSON.stringify(payload);
   const signature = generateSignature(secret, body);
@@ -306,7 +129,7 @@ async function deliverPayload(url, secret, payload) {
   const lib = urlObj.protocol === "https:" ? https : http;
 
   return new Promise((resolve, reject) => {
-    const req = lib.request(options, (res) => {
+    const req = lib.request(reqOptions, (res) => {
       res.on("data", () => {});
       res.on("end", () => {
         logger.info({
@@ -342,6 +165,61 @@ async function deliverPayload(url, secret, payload) {
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Persist a delivery row, attempt the HTTP POST, then update status/history fields.
+ *
+ * @param {{ projectId: string, url: string, secret: string, payload: object, options?: object }} opts
+ * @returns {Promise<void>}
+ */
+async function recordAndDeliver({ projectId, url, secret, payload, options = {} }) {
+  const id = crypto.randomUUID();
+  const body = JSON.stringify(payload);
+  const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+  const event = typeof payload?.event === "string" ? payload.event : null;
+
+  await pool.query(
+    `INSERT INTO webhook_deliveries (
+       id, project_id, url, payload, event, payload_hash, status, attempt_count
+     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', 0)`,
+    [id, projectId, url, body, event, payloadHash],
+  );
+
+  try {
+    const { statusCode } = await deliverPayload(url, secret, payload, options);
+    const delivered = statusCode >= 200 && statusCode < 300;
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = $2,
+           attempt_count = 1,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           delivered_at = CASE WHEN $4 THEN NOW() ELSE NULL END,
+           last_error = CASE WHEN $4 THEN NULL ELSE $5 END,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [
+        id,
+        delivered ? "delivered" : "failed",
+        statusCode,
+        delivered,
+        delivered ? null : `Webhook responded with HTTP ${statusCode}`,
+      ],
+    );
+  } catch (err) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'failed',
+           attempt_count = 1,
+           last_attempt_at = NOW(),
+           last_error = $2,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, err.message],
+    );
+    throw err;
+  }
 }
 
 /**
@@ -487,6 +365,10 @@ async function checkAndDeliverMilestones(projectId) {
           url: project.webhook_url,
           secret: project.webhook_secret,
           payload,
+          options: {
+            previousSecret: project.previous_webhook_secret,
+            previousSecretExpiresAt: project.previous_webhook_secret_expires_at,
+          }
         }).catch((err) => {
           logger.error({
             event: "webhook_url_rejected",
@@ -520,10 +402,16 @@ async function start() {
 module.exports = {
   checkAndDeliverMilestones,
   deliverPayload,
-  isPrivateIP,
+  start,
+  recordAndDeliver,
+  generateSignature,
+  isGracePeriodActive,
+  verifyWebhookSignature,
+  rotateWebhookSecret,
+  timingSafeEqualHex,
+  GRACE_PERIOD_MS,
+  QUEUE,
+  MAX_ATTEMPTS,
+  RETRY_DELAYS_SECONDS,
+  boss,
 };
-
-// Export internal functions for testing
-if (process.env.NODE_ENV === "test") {
-  module.exports.deliverPayload = deliverPayload;
-}
