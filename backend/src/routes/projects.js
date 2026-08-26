@@ -13,6 +13,7 @@ const { mapProjectRow, mapProjectMilestoneRow, updateWebhook, computeBadges } = 
 const {
   getOnChainProject,
   getProjectDonationEvents,
+  getRegisteredProjectIdFromTransaction,
   CONTRACT_ID,
   server,
   NETWORK_PASSPHRASE,
@@ -846,13 +847,39 @@ router.post("/admin/register", adminRequired, async (req, res) => {
 /**
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
+ *
+ * Security: the transaction is read from Horizon and parsed on the server
+ * (never trusted from the request body) so a caller cannot mark an arbitrary
+ * project as verified by replaying a registration transaction hash that
+ * belongs to a different project.
  */
 router.post("/admin/confirm", adminRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
+    if (!transactionHash || typeof transactionHash !== "string") {
+      return res
+        .status(400)
+        .json({ success: false, error: "transactionHash is required" });
+    }
+    if (!projectId || typeof projectId !== "string") {
+      return res
+        .status(400)
+        .json({ success: false, error: "projectId is required" });
+    }
+
     const tx = await server.getTransaction(transactionHash);
     if (!tx.successful) throw new Error("Transaction failed");
+
+    // Confirm the transaction actually registered this project on-chain
+    // before updating the local store.
+    const registeredProjectId = getRegisteredProjectIdFromTransaction(tx);
+    if (registeredProjectId !== projectId) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction does not register the requested project",
+      });
+    }
 
     const result = await pool.query(
       `UPDATE projects
