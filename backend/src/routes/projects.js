@@ -1596,11 +1596,11 @@ router.get("/:id/donors", async (req, res, next) => {
     const pageRows = rows.slice(0, pageSize);
     const nextCursor = hasMore
       ? Buffer.from(
-          JSON.stringify({
-            total_donated_xlm: pageRows[pageRows.length - 1].total_donated_xlm,
-            donor_address: pageRows[pageRows.length - 1].donor_address,
-          }),
-        ).toString("base64")
+        JSON.stringify({
+          total_donated_xlm: pageRows[pageRows.length - 1].total_donated_xlm,
+          donor_address: pageRows[pageRows.length - 1].donor_address,
+        }),
+      ).toString("base64")
       : null;
 
     res.json({
