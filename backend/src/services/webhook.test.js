@@ -22,11 +22,7 @@ jest.mock("dns", () => ({
 }));
 process.env.NODE_ENV = "test";
 
-    // Clean state
-    await testPool.query("TRUNCATE projects, project_milestones, donations RESTART IDENTITY CASCADE");
 
-    // Re-require after pool reset
-    const { checkAndDeliverMilestones } = require("./webhook");
 
 describe("SSRF Protection - isPrivateIP", () => {
   test("identifies loopback addresses (127.0.0.0/8)", () => {

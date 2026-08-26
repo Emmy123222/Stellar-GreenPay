@@ -281,7 +281,6 @@ async function recordDonation(req, res, next) {
     const mappedRow = { ...donationResult.rows[0], co2_per_xlm: projectCo2PerXlm };
     const mappedDonation = mapDonationRow(mappedRow);
     donationEvents.emit("new_donation", mappedDonation);
-    donationEvents.emit("new_donation", ssePayload);
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
