@@ -19,6 +19,7 @@ jest.mock("dns", () => ({
   promises: {
     lookup: jest.fn(),
   },
+}));
 process.env.NODE_ENV = "test";
 
     // Clean state

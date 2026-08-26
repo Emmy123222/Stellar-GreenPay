@@ -12,7 +12,6 @@ const dns = require("dns");
 const net = require("net");
 const https = require("https");
 const http = require("http");
-const net = require("net");
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { assertPublicHttpUrl } = require("../utils/ssrf");
