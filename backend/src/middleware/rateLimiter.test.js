@@ -41,6 +41,23 @@ describe("Rate limiting middleware — donation endpoint", () => {
     }
   });
 
+  it("sets X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset on allowed requests", async () => {
+    const res = await request(app).get("/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe("10");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("9");
+    expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
+  });
+
+  it("sets X-RateLimit-Remaining to 0 on the last allowed request", async () => {
+    for (let i = 0; i < 9; i++) {
+      await request(app).get("/ping");
+    }
+    const res = await request(app).get("/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+  });
+
   it("blocks the 11th request with HTTP 429", async () => {
     for (let i = 0; i < 10; i++) {
       await request(app).get("/ping");
