@@ -16,18 +16,12 @@ const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
+const { start: startAuditLogCleanupQueue } = require("./services/auditLogCleanupQueue");
 const { startIndexer } = require("./services/indexerService");
-const express = require("express");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
-const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
-const requestLogger = require("pino-http")({ logger });
-const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
+const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
-const logger = require("./logger");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
 
@@ -128,6 +122,7 @@ async function startServer() {
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
   await startStatsRefreshQueue();
+  await startAuditLogCleanupQueue();
 
   const { start: startWebhookQueue } = require("./services/webhook");
   await startWebhookQueue();
