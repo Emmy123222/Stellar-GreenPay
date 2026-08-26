@@ -472,7 +472,7 @@ async function checkAndDeliverMilestones(projectId) {
 
     if (project.webhook_url && project.webhook_secret &&
         project.webhook_secret.length >= 32) {
-      for (const milestone of milestones) {
+      const deliveries = milestones.map((milestone) => {
         const payload = {
           event: "milestone.reached",
           projectId,
