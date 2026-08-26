@@ -525,18 +525,6 @@ impl GreenPayContract {
         );
     }
 
-    pub fn pause_project(env: Env, admin: Address, project_id: String) {
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can pause projects"); }
-        let mut project: Project = env.storage().instance()
-            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
-        if !project.active { panic!("Cannot pause a deactivated project"); }
-        project.active = false;
-        env.storage().instance().set(&DataKey::Project(project_id), &project);
-    }
-
     /// Deactivate all active projects at once. Admin only.
     /// Iterates the project ID list stored during `register_project`.
     pub fn deactivate_all_projects(env: Env, admin: Address) {
@@ -881,6 +869,37 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
+    pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
+        let donation_ids: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor))
+            .unwrap_or(Vec::new(&env));
+        let total_count = donation_ids.len();
+
+        if offset >= total_count || limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let end = core::cmp::min(offset.saturating_add(limit), total_count);
+        let mut result = Vec::new(&env);
+        let mut index = offset;
+        while index < end {
+            if let Some(donation_id) = donation_ids.get(index) {
+                if let Some(record) = env
+                    .storage()
+                    .instance()
+                    .get::<_, DonationRecord>(&DataKey::DonationRecord(donation_id))
+                {
+                    result.push_back(record);
+                }
+            }
+            index += 1;
+        }
+
+        result
+    }
+
     /// Retrieve a paginated list of all projects on-chain.
     ///
     /// # Arguments
@@ -918,12 +937,12 @@ impl GreenPayContract {
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
-            offset as usize + limit as usize
+            offset + limit
         };
         
         // Collect projects from the slice
         let mut result = Vec::new(&env);
-        let mut idx = offset as usize;
+        let mut idx = offset;
         while idx < end {
             if let Some(project_id) = project_ids.get(idx) {
                 if let Some(project) = env
@@ -1697,7 +1716,7 @@ impl OracleInterface for MockOracle {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
     use super::*;
 
