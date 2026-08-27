@@ -17,19 +17,13 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
-const express = require("express");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
-const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
-const requestLogger = require("pino-http")({ logger });
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
 const { createRateLimiter } = require("./middleware/rateLimiter");
-const logger = require("./logger");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const healthRouter = require("./routes/health");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -100,6 +94,7 @@ const io = new Server(server, {
 });
 app.set("io", io);
 app.use(createRateLimiter(150, 15));
+app.use("/health", healthRouter);
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
