@@ -408,6 +408,9 @@ impl GreenPayContract {
             if env.storage().instance().has(&DataKey::Project(project_id.clone())) {
                 panic!("Project already registered");
             }
+            if init.co2_per_xlm > MAX_CO2_PER_XLM {
+                panic!("CO2 per XLM exceeds maximum");
+            }
             let project = Project {
                 id: project_id.clone(),
                 name: init.name.clone(),
@@ -864,6 +867,37 @@ impl GreenPayContract {
     /// Retrieve a donation record by its index.
     pub fn get_donation_record(env: Env, index: u32) -> DonationRecord {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
+    }
+
+    pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
+        let donation_ids: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor))
+            .unwrap_or(Vec::new(&env));
+        let total_count = donation_ids.len();
+
+        if offset >= total_count || limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let end = core::cmp::min(offset.saturating_add(limit), total_count);
+        let mut result = Vec::new(&env);
+        let mut index = offset;
+        while index < end {
+            if let Some(donation_id) = donation_ids.get(index) {
+                if let Some(record) = env
+                    .storage()
+                    .instance()
+                    .get::<_, DonationRecord>(&DataKey::DonationRecord(donation_id))
+                {
+                    result.push_back(record);
+                }
+            }
+            index += 1;
+        }
+
+        result
     }
 
     /// Retrieve a paginated list of all projects on-chain.
@@ -1682,7 +1716,7 @@ impl OracleInterface for MockOracle {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
     use super::*;
 
@@ -2377,6 +2411,21 @@ mod tests {
             &(MAX_CO2_PER_XLM + 1),
             &1i128,
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "CO2 per XLM exceeds maximum")]
+    fn test_batch_register_projects_rejects_excessive_co2_per_xlm() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let project = ProjectInit {
+            id: String::from_str(&env, "proj-002"),
+            name: String::from_str(&env, "Bad Project"),
+            wallet: Address::generate(&env),
+            co2_per_xlm: MAX_CO2_PER_XLM + 1,
+            min_donation_amount: 1,
+        };
+        let projects = Vec::from_array(&env, [project]);
+        client.batch_register_projects(&admin, &projects);
     }
 
     #[test]
