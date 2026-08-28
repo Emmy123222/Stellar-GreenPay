@@ -80,15 +80,19 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (!compareQuery || projects.length === 0) return;
-    const ids = compareQuery
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => projects.some((project) => project.id === id))
-      .slice(0, 3);
-    if (ids.length >= 2) {
-      setSelectedProjectIds(ids);
-      setShowComparison(true);
-    }
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(() => {
+      const ids = compareQuery
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => projects.some((project) => project.id === id))
+        .slice(0, 3);
+      if (ids.length >= 2) {
+        setSelectedProjectIds(ids);
+        setShowComparison(true);
+      }
+    });
   }, [compareQuery, projects]);
 
   const setFilter = (key: string, val: string) => {

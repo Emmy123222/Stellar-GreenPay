@@ -17,15 +17,20 @@ interface DonationFeedProps {
 
 export default function DonationFeed({ projectId, walletAddress, refreshKey = 0, onNewDonation }: DonationFeedProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
-  const [loading,   setLoading]   = useState(true);
+  // Rather than flipping a `loading` flag synchronously inside the effect
+  // (which triggers a cascading render), `loading` is derived by comparing
+  // the request that's currently in flight to the last one that resolved.
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const latestIdRef = useRef<string | null>(null);
 
+  const requestKey = `${projectId}:${refreshKey}`;
+  const loading = loadedRequestKey !== requestKey;
+
   // Load initial donation data from the backend API
   useEffect(() => {
-    setLoading(true);
     fetchProjectDonations(projectId, 10)
       .then(({ donations: data, nextCursor: cursor }) => {
         setDonations(data);
@@ -35,8 +40,8 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
         }
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [projectId, refreshKey]);
+      .finally(() => setLoadedRequestKey(requestKey));
+  }, [projectId, refreshKey, requestKey]);
 
   // Handle incoming SSE payment
   const handleNewPayment = useCallback((payment: {
