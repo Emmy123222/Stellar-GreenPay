@@ -61,9 +61,11 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      - name: Run pg-boss migrations
+      - name: Run database & pg-boss migrations
         working-directory: backend
-        run: node src/db/pgboss-migrate.js
+        run: |
+          npm run db:migrate
+          node src/db/pgboss-migrate.js
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
 

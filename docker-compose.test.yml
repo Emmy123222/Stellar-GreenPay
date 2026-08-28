@@ -31,7 +31,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: node src/db/pgboss-migrate.js
+    command: sh -c "npm run db:migrate && node src/db/pgboss-migrate.js"
 
   backend:
     build:
