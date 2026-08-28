@@ -94,12 +94,11 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws" }]),   // SELECT project
         queryResult([]),                          // dedup check
         queryResult(),                            // BEGIN
+        queryResult([{ total: "0" }]),            // prevTotalResult
         queryResult([donationRow]),               // INSERT donation
         queryResult([]),                          // SELECT donation_matches (empty)
         queryResult(),                            // UPDATE projects
-        queryResult([]),                          // SELECT * FROM profiles (new donor)
-        queryResult([{ count: "1" }]),            // SELECT COUNT(DISTINCT project_id)
-        queryResult(),                            // INSERT INTO profiles
+        queryResult(),                            // COMMIT
       );
 
       const socket = ioc(baseUrl, {
@@ -221,11 +220,10 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws-2" }]),
         queryResult([]),
         queryResult(),
+        queryResult([{ total: "0" }]),
         queryResult([donationRow]),
         queryResult([]),
         queryResult(),
-        queryResult([]),
-        queryResult([{ count: "1" }]),
         queryResult(),
       );
 
@@ -324,12 +322,10 @@ describe("POST /api/donations → broadcast hardening", () => {
       queryResult([{ id: donationRow.project_id }]), // SELECT project
       queryResult([]),                                // dedup check (none)
       queryResult(),                                  // BEGIN
+      queryResult([{ total: "0" }]),                  // prevTotalResult
       queryResult([donationRow]),                     // INSERT donation
       queryResult([]),                                // SELECT donation_matches (none)
       queryResult(),                                  // UPDATE projects
-      queryResult([]),                                // SELECT profile (new donor)
-      queryResult([{ count: "1" }]),                  // COUNT(DISTINCT project_id)
-      queryResult(),                                  // INSERT profile
       queryResult(),                                  // COMMIT
     );
   }
@@ -536,6 +532,7 @@ describe("POST /api/donations → broadcast hardening", () => {
         queryResult([{ id: "project-match" }]),           // SELECT project
         queryResult([]),                                   // dedup check
         queryResult(),                                     // BEGIN
+        queryResult([{ total: "0" }]),                     // prevTotalResult
         queryResult([                                      // INSERT primary donation
           {
             id: "match-primary",

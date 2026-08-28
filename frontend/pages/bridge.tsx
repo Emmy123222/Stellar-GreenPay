@@ -26,12 +26,6 @@ export default function BridgePage() {
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadStellarAddress();
-    loadBridgeHistory();
-    loadProjects();
-  }, []);
-
   const loadProjects = async () => {
     try {
       const data = await fetchProjects({ status: "active", limit: 50 });
@@ -57,6 +51,17 @@ export default function BridgePage() {
       setBridgeHistory(JSON.parse(history));
     }
   };
+
+  useEffect(() => {
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState — each loader
+    // manages its own state updates once its data is ready.
+    queueMicrotask(() => {
+      loadStellarAddress();
+      loadBridgeHistory();
+      loadProjects();
+    });
+  }, []);
 
   const connectMetaMask = async () => {
     if (typeof window === "undefined" || !(window as any).ethereum) {

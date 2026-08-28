@@ -48,14 +48,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-    },
-  })
-);
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());

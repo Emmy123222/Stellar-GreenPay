@@ -1,12 +1,12 @@
 "use strict";
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
-jest.mock("../services/cache", () => ({ get: jest.fn(), set: jest.fn() }));
+jest.mock("../services/redis", () => ({ get: jest.fn(), set: jest.fn() }));
 
 const request = require("supertest");
 const express = require("express");
 const pool = require("../db/pool");
-const cache = require("../services/cache");
+const redis = require("../services/redis");
 const impactRouter = require("./impact");
 
 function buildApp() {
@@ -28,7 +28,7 @@ describe("GET /api/impact/global", () => {
   });
 
   test("returns category breakdown with one entry per donated category and excludes empty categories", async () => {
-    cache.get.mockReturnValue(null);
+    redis.get.mockResolvedValue(null);
     pool.query
       .mockResolvedValueOnce({
         rows: [
@@ -60,7 +60,8 @@ describe("GET /api/impact/global", () => {
             co2OffsetKg: 22,
           },
         ],
-      });
+      })
+      .mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app).get("/api/impact/global").expect(200);
 
@@ -89,6 +90,6 @@ describe("GET /api/impact/global", () => {
 
     expect(res.body.data.totalDonationsXLM).toBe("350.0000000");
     expect(res.body.data.co2OffsetKg).toBe(127);
-    expect(cache.set).toHaveBeenCalledWith("/api/impact/global", res.body, 300000);
+    expect(redis.set).toHaveBeenCalledWith("/api/impact/global", res.body, 300);
   });
 });

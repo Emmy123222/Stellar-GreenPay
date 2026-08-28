@@ -51,18 +51,25 @@ function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: s
 
 export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "week" | "month" | "year" }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const xlmUsd = useXlmPrice();
 
+  // `loading` is derived by comparing the in-flight request to the last one
+  // that resolved, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
+  const requestKey = `${limit}:${period}`;
+  const loading = loadedRequestKey !== requestKey;
+
   useEffect(() => {
-    setLoading(true);
-    setError(null);
     fetchLeaderboard(limit, period)
-      .then(setEntries)
+      .then((data) => {
+        setEntries(data);
+        setError(null);
+      })
       .catch(() => setError("Could not load leaderboard."))
-      .finally(() => setLoading(false));
-  }, [limit, period]);
+      .finally(() => setLoadedRequestKey(requestKey));
+  }, [limit, period, requestKey]);
 
   if (loading) return (
     <div className="space-y-2">

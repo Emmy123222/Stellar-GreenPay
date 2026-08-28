@@ -869,6 +869,8 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
+    /// Returns a paginated list of donation records for a given donor.
+    /// Results are ordered chronologically (oldest first).
     pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
         let donation_ids: Vec<u32> = env
             .storage()
@@ -933,13 +935,16 @@ impl GreenPayContract {
             return Vec::new(&env);
         }
         
-        // Calculate the end bound: min(offset + limit, total_count)
+        // Calculate the end bound: min(offset + limit, total_count).
+        // The addition is done in u64 to avoid overflow when checking the
+        // bound; once we know offset + limit <= total_count (a u32), the
+        // u32 addition below is guaranteed not to overflow.
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
             offset + limit
         };
-        
+
         // Collect projects from the slice
         let mut result = Vec::new(&env);
         let mut idx = offset;

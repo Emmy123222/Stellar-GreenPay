@@ -75,7 +75,9 @@ export default function ProjectDetail({
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
   const [showMonthlySetup, setShowMonthlySetup] = useState(false);
   const [subEmail, setSubEmail] = useState("");
-  const [countdownNow, setCountdownNow] = useState(Date.now());
+  // Lazy initializer: Date.now() is only evaluated once, on mount, instead
+  // of on every render.
+  const [countdownNow, setCountdownNow] = useState(() => Date.now());
   const [campaignForm, setCampaignForm] = useState({
     title: "",
     goalXLM: "",
@@ -87,7 +89,11 @@ export default function ProjectDetail({
   >("idle");
   const [campaignError, setCampaignError] = useState<string | null>(null);
   const [discussion, setDiscussion] = useState<ProjectDiscussionMessage[]>([]);
-  const [discussionLoading, setDiscussionLoading] = useState(false);
+  // `discussionLoading` is derived by comparing the wallet address the
+  // discussion was loaded for to the project's current wallet address,
+  // rather than toggled synchronously inside the effect (which triggers a
+  // cascading render).
+  const [discussionLoadedFor, setDiscussionLoadedFor] = useState<string | null>(null);
   const [matches, setMatches] = useState<any[]>([]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [aiSummaryState, setAiSummaryState] = useState<"idle" | "loading" | "error">("idle");
@@ -95,6 +101,17 @@ export default function ProjectDetail({
   const [isFollowing, setIsFollowing] = useState(false);
   const [followCount, setFollowCount] = useState(0);
   const [followLoading, setFollowLoading] = useState(false);
+
+  // Stable per-particle randomness for the completion celebration animation.
+  // A useState lazy initializer (unlike useMemo, which React may recompute
+  // at any time) is only ever evaluated once, on mount.
+  const [celebrationParticles] = useState(() =>
+    Array.from({ length: 50 }).map(() => ({
+      left: `${Math.random() * 100}%`,
+      animationDelay: `${Math.random() * 3}s`,
+      animationDuration: `${3 + Math.random() * 2}s`,
+    }))
+  );
 
   const { toggleWishlist, isInWishlist } = useWishlist();
   const prefillAmount =
@@ -126,13 +143,14 @@ export default function ProjectDetail({
       .finally(() => setLoading(false));
   }, [id, publicKey, router]);
 
+  const discussionLoading = Boolean(project) && discussionLoadedFor !== project?.walletAddress;
+
   useEffect(() => {
     if (!project) return;
-    setDiscussionLoading(true);
     fetchProjectDiscussion(project.walletAddress, 50)
       .then(setDiscussion)
       .catch(() => setDiscussion([]))
-      .finally(() => setDiscussionLoading(false));
+      .finally(() => setDiscussionLoadedFor(project.walletAddress));
   }, [project?.walletAddress]);
 
   useEffect(() => {
@@ -791,17 +809,13 @@ export default function ProjectDetail({
       />
       {isComplete && (
         <div className="celebration-overlay">
-          {Array.from({ length: 50 }).map((_, i) => (
+          {celebrationParticles.map((particle, i) => (
             <div
               key={i}
               className={
                 i % 2 === 0 ? "celebration-leaf" : "celebration-confetti"
               }
-              style={{
-                left: `${Math.random() * 100}%`,
-                animationDelay: `${Math.random() * 3}s`,
-                animationDuration: `${3 + Math.random() * 2}s`,
-              }}
+              style={particle}
             />
           ))}
         </div>
