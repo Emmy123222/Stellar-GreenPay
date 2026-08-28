@@ -1,0 +1,976 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`DonorProfile Component matches snapshot for badge tier: EarthGuardian 1`] = `
+<div>
+  <div
+    class="min-h-screen bg-leaf"
+  >
+    <div
+      class="max-w-2xl mx-auto px-4 py-10 space-y-6"
+    >
+      <div
+        class="card shadow-green"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="w-14 h-14 rounded-full bg-[#e8f3e8] border-2 border-[rgba(34,114,57,0.20)] flex items-center justify-center text-2xl select-none"
+            >
+              🌿
+            </div>
+            <div>
+              <h1
+                class="font-display text-xl font-semibold text-[#1a2e1a] leading-tight"
+              >
+                Test Donor
+              </h1>
+              <span
+                class="address-tag mt-1 inline-block"
+              >
+                G12345…012345
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Copy profile URL to clipboard"
+            class="btn-secondary text-sm flex items-center gap-2"
+          >
+            <span>
+              🔗
+            </span>
+             Share my impact
+          </button>
+        </div>
+        <p
+          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+        >
+          Test bio
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 gap-3"
+      >
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Total Donated
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            1,000 XLM
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Projects Supported
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            5
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Member Since
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            Jan 1, 2023
+          </p>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-3"
+        >
+          Earned Badges
+        </h2>
+        <div
+          class="flex flex-wrap gap-2"
+        >
+          <div
+            class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200"
+            title="Earth Guardian — earned Jan 1, 2023"
+          >
+            <span
+              aria-label="Earth Guardian"
+              class="text-base leading-none"
+              role="img"
+            >
+              🌍
+            </span>
+            Earth Guardian
+          </div>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Claim your Impact NFT
+        </h2>
+        <p
+          class="text-sm text-[#5a7a5a] font-body mb-4"
+        >
+          Mint an on-chain
+           
+          <span
+            class="font-semibold text-blue-700"
+          >
+            🌍
+             
+            Earth Guardian
+          </span>
+           
+          Impact NFT for your contributions.
+        </p>
+        <button
+          class="btn-primary text-sm"
+        >
+          🔗 Connect Freighter to claim
+        </button>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Recent Donations
+        </h2>
+        <div>
+          <div
+            class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
+          >
+            <div
+              class="flex flex-col gap-0.5 min-w-0"
+            >
+              <span
+                class="address-tag truncate max-w-[160px] sm:max-w-xs"
+              >
+                Project 
+                proj-1
+              </span>
+            </div>
+            <div
+              class="flex flex-col items-end gap-0.5 shrink-0"
+            >
+              <span
+                class="font-semibold text-[#227239] font-body text-sm"
+              >
+                100 XLM
+              </span>
+              <span
+                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+              >
+                Jan 1, 2023
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="text-center pb-4"
+      >
+        <a
+          class="btn-ghost text-sm"
+          href="/projects"
+        >
+          ← Browse all projects
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DonorProfile Component matches snapshot for badge tier: Forest 1`] = `
+<div>
+  <div
+    class="min-h-screen bg-leaf"
+  >
+    <div
+      class="max-w-2xl mx-auto px-4 py-10 space-y-6"
+    >
+      <div
+        class="card shadow-green"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="w-14 h-14 rounded-full bg-[#e8f3e8] border-2 border-[rgba(34,114,57,0.20)] flex items-center justify-center text-2xl select-none"
+            >
+              🌿
+            </div>
+            <div>
+              <h1
+                class="font-display text-xl font-semibold text-[#1a2e1a] leading-tight"
+              >
+                Test Donor
+              </h1>
+              <span
+                class="address-tag mt-1 inline-block"
+              >
+                G12345…012345
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Copy profile URL to clipboard"
+            class="btn-secondary text-sm flex items-center gap-2"
+          >
+            <span>
+              🔗
+            </span>
+             Share my impact
+          </button>
+        </div>
+        <p
+          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+        >
+          Test bio
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 gap-3"
+      >
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Total Donated
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            1,000 XLM
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Projects Supported
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            5
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Member Since
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            Jan 1, 2023
+          </p>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-3"
+        >
+          Earned Badges
+        </h2>
+        <div
+          class="flex flex-wrap gap-2"
+        >
+          <div
+            class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border bg-teal-50 text-teal-700 border-teal-200"
+            title="Forest — earned Jan 1, 2023"
+          >
+            <span
+              aria-label="Forest"
+              class="text-base leading-none"
+              role="img"
+            >
+              🌲
+            </span>
+            Forest
+          </div>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Claim your Impact NFT
+        </h2>
+        <p
+          class="text-sm text-[#5a7a5a] font-body mb-4"
+        >
+          Mint an on-chain
+           
+          <span
+            class="font-semibold text-teal-700"
+          >
+            🌲
+             
+            Forest
+          </span>
+           
+          Impact NFT for your contributions.
+        </p>
+        <button
+          class="btn-primary text-sm"
+        >
+          🔗 Connect Freighter to claim
+        </button>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Recent Donations
+        </h2>
+        <div>
+          <div
+            class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
+          >
+            <div
+              class="flex flex-col gap-0.5 min-w-0"
+            >
+              <span
+                class="address-tag truncate max-w-[160px] sm:max-w-xs"
+              >
+                Project 
+                proj-1
+              </span>
+            </div>
+            <div
+              class="flex flex-col items-end gap-0.5 shrink-0"
+            >
+              <span
+                class="font-semibold text-[#227239] font-body text-sm"
+              >
+                100 XLM
+              </span>
+              <span
+                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+              >
+                Jan 1, 2023
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="text-center pb-4"
+      >
+        <a
+          class="btn-ghost text-sm"
+          href="/projects"
+        >
+          ← Browse all projects
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DonorProfile Component matches snapshot for badge tier: None 1`] = `
+<div>
+  <div
+    class="min-h-screen bg-leaf"
+  >
+    <div
+      class="max-w-2xl mx-auto px-4 py-10 space-y-6"
+    >
+      <div
+        class="card shadow-green"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="w-14 h-14 rounded-full bg-[#e8f3e8] border-2 border-[rgba(34,114,57,0.20)] flex items-center justify-center text-2xl select-none"
+            >
+              🌿
+            </div>
+            <div>
+              <h1
+                class="font-display text-xl font-semibold text-[#1a2e1a] leading-tight"
+              >
+                Test Donor
+              </h1>
+              <span
+                class="address-tag mt-1 inline-block"
+              >
+                G12345…012345
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Copy profile URL to clipboard"
+            class="btn-secondary text-sm flex items-center gap-2"
+          >
+            <span>
+              🔗
+            </span>
+             Share my impact
+          </button>
+        </div>
+        <p
+          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+        >
+          Test bio
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 gap-3"
+      >
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Total Donated
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            1,000 XLM
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Projects Supported
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            5
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Member Since
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            Jan 1, 2023
+          </p>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Recent Donations
+        </h2>
+        <div>
+          <div
+            class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
+          >
+            <div
+              class="flex flex-col gap-0.5 min-w-0"
+            >
+              <span
+                class="address-tag truncate max-w-[160px] sm:max-w-xs"
+              >
+                Project 
+                proj-1
+              </span>
+            </div>
+            <div
+              class="flex flex-col items-end gap-0.5 shrink-0"
+            >
+              <span
+                class="font-semibold text-[#227239] font-body text-sm"
+              >
+                100 XLM
+              </span>
+              <span
+                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+              >
+                Jan 1, 2023
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="text-center pb-4"
+      >
+        <a
+          class="btn-ghost text-sm"
+          href="/projects"
+        >
+          ← Browse all projects
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DonorProfile Component matches snapshot for badge tier: Seedling 1`] = `
+<div>
+  <div
+    class="min-h-screen bg-leaf"
+  >
+    <div
+      class="max-w-2xl mx-auto px-4 py-10 space-y-6"
+    >
+      <div
+        class="card shadow-green"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="w-14 h-14 rounded-full bg-[#e8f3e8] border-2 border-[rgba(34,114,57,0.20)] flex items-center justify-center text-2xl select-none"
+            >
+              🌿
+            </div>
+            <div>
+              <h1
+                class="font-display text-xl font-semibold text-[#1a2e1a] leading-tight"
+              >
+                Test Donor
+              </h1>
+              <span
+                class="address-tag mt-1 inline-block"
+              >
+                G12345…012345
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Copy profile URL to clipboard"
+            class="btn-secondary text-sm flex items-center gap-2"
+          >
+            <span>
+              🔗
+            </span>
+             Share my impact
+          </button>
+        </div>
+        <p
+          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+        >
+          Test bio
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 gap-3"
+      >
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Total Donated
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            1,000 XLM
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Projects Supported
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            5
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Member Since
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            Jan 1, 2023
+          </p>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-3"
+        >
+          Earned Badges
+        </h2>
+        <div
+          class="flex flex-wrap gap-2"
+        >
+          <div
+            class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
+            title="Seedling — earned Jan 1, 2023"
+          >
+            <span
+              aria-label="Seedling"
+              class="text-base leading-none"
+              role="img"
+            >
+              🌱
+            </span>
+            Seedling
+          </div>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Claim your Impact NFT
+        </h2>
+        <p
+          class="text-sm text-[#5a7a5a] font-body mb-4"
+        >
+          Mint an on-chain
+           
+          <span
+            class="font-semibold text-emerald-700"
+          >
+            🌱
+             
+            Seedling
+          </span>
+           
+          Impact NFT for your contributions.
+        </p>
+        <button
+          class="btn-primary text-sm"
+        >
+          🔗 Connect Freighter to claim
+        </button>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Recent Donations
+        </h2>
+        <div>
+          <div
+            class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
+          >
+            <div
+              class="flex flex-col gap-0.5 min-w-0"
+            >
+              <span
+                class="address-tag truncate max-w-[160px] sm:max-w-xs"
+              >
+                Project 
+                proj-1
+              </span>
+            </div>
+            <div
+              class="flex flex-col items-end gap-0.5 shrink-0"
+            >
+              <span
+                class="font-semibold text-[#227239] font-body text-sm"
+              >
+                100 XLM
+              </span>
+              <span
+                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+              >
+                Jan 1, 2023
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="text-center pb-4"
+      >
+        <a
+          class="btn-ghost text-sm"
+          href="/projects"
+        >
+          ← Browse all projects
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`DonorProfile Component matches snapshot for badge tier: Tree 1`] = `
+<div>
+  <div
+    class="min-h-screen bg-leaf"
+  >
+    <div
+      class="max-w-2xl mx-auto px-4 py-10 space-y-6"
+    >
+      <div
+        class="card shadow-green"
+      >
+        <div
+          class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+        >
+          <div
+            class="flex items-center gap-4"
+          >
+            <div
+              class="w-14 h-14 rounded-full bg-[#e8f3e8] border-2 border-[rgba(34,114,57,0.20)] flex items-center justify-center text-2xl select-none"
+            >
+              🌿
+            </div>
+            <div>
+              <h1
+                class="font-display text-xl font-semibold text-[#1a2e1a] leading-tight"
+              >
+                Test Donor
+              </h1>
+              <span
+                class="address-tag mt-1 inline-block"
+              >
+                G12345…012345
+              </span>
+            </div>
+          </div>
+          <button
+            aria-label="Copy profile URL to clipboard"
+            class="btn-secondary text-sm flex items-center gap-2"
+          >
+            <span>
+              🔗
+            </span>
+             Share my impact
+          </button>
+        </div>
+        <p
+          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+        >
+          Test bio
+        </p>
+      </div>
+      <div
+        class="grid grid-cols-2 sm:grid-cols-3 gap-3"
+      >
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Total Donated
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            1,000 XLM
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Projects Supported
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            5
+          </p>
+        </div>
+        <div
+          class="stat-card flex flex-col gap-1"
+        >
+          <p
+            class="label"
+          >
+            Member Since
+          </p>
+          <p
+            class="font-display text-2xl font-semibold text-[#227239]"
+          >
+            Jan 1, 2023
+          </p>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-3"
+        >
+          Earned Badges
+        </h2>
+        <div
+          class="flex flex-wrap gap-2"
+        >
+          <div
+            class="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border bg-green-50 text-green-700 border-green-200"
+            title="Tree — earned Jan 1, 2023"
+          >
+            <span
+              aria-label="Tree"
+              class="text-base leading-none"
+              role="img"
+            >
+              🌳
+            </span>
+            Tree
+          </div>
+        </div>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Claim your Impact NFT
+        </h2>
+        <p
+          class="text-sm text-[#5a7a5a] font-body mb-4"
+        >
+          Mint an on-chain
+           
+          <span
+            class="font-semibold text-green-700"
+          >
+            🌳
+             
+            Tree
+          </span>
+           
+          Impact NFT for your contributions.
+        </p>
+        <button
+          class="btn-primary text-sm"
+        >
+          🔗 Connect Freighter to claim
+        </button>
+      </div>
+      <div
+        class="card"
+      >
+        <h2
+          class="label mb-1"
+        >
+          Recent Donations
+        </h2>
+        <div>
+          <div
+            class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
+          >
+            <div
+              class="flex flex-col gap-0.5 min-w-0"
+            >
+              <span
+                class="address-tag truncate max-w-[160px] sm:max-w-xs"
+              >
+                Project 
+                proj-1
+              </span>
+            </div>
+            <div
+              class="flex flex-col items-end gap-0.5 shrink-0"
+            >
+              <span
+                class="font-semibold text-[#227239] font-body text-sm"
+              >
+                100 XLM
+              </span>
+              <span
+                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+              >
+                Jan 1, 2023
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        class="text-center pb-4"
+      >
+        <a
+          class="btn-ghost text-sm"
+          href="/projects"
+        >
+          ← Browse all projects
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+`;

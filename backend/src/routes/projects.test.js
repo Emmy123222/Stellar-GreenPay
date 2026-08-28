@@ -30,6 +30,12 @@ jest.mock("dns", () => ({
   },
 }));
 
+// Real QR code generation takes ~500ms-3s; mocked so the impact-certificate
+// tests don't risk the suite's 5000ms timeout under load.
+jest.mock("qrcode", () => ({
+  toDataURL: jest.fn().mockResolvedValue("data:image/png;base64,mock-qr-code"),
+}));
+
 const dns = require("dns");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
@@ -514,6 +520,7 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     app = buildApp();
     jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
+    require("qrcode").toDataURL.mockResolvedValue("data:image/png;base64,mock-qr-code");
   });
 
   test("returns 200 with all required certificate fields for a valid donor", async () => {
