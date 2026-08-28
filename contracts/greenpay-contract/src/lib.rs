@@ -408,6 +408,9 @@ impl GreenPayContract {
             if env.storage().instance().has(&DataKey::Project(project_id.clone())) {
                 panic!("Project already registered");
             }
+            if init.co2_per_xlm > MAX_CO2_PER_XLM {
+                panic!("CO2 per XLM exceeds maximum");
+            }
             let project = Project {
                 id: project_id.clone(),
                 name: init.name.clone(),
@@ -520,18 +523,6 @@ impl GreenPayContract {
             (Symbol::new(&env, "meta_updated"), project_id),
             (admin, ipfs_cid),
         );
-    }
-
-    pub fn pause_project(env: Env, admin: Address, project_id: String) {
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can pause projects"); }
-        let mut project: Project = env.storage().instance()
-            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
-        if !project.active { panic!("Cannot pause a deactivated project"); }
-        project.active = false;
-        env.storage().instance().set(&DataKey::Project(project_id), &project);
     }
 
     /// Deactivate all active projects at once. Admin only.
@@ -878,6 +869,37 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
+    pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
+        let donation_ids: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::DonorDonations(donor))
+            .unwrap_or(Vec::new(&env));
+        let total_count = donation_ids.len();
+
+        if offset >= total_count || limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let end = core::cmp::min(offset.saturating_add(limit), total_count);
+        let mut result = Vec::new(&env);
+        let mut index = offset;
+        while index < end {
+            if let Some(donation_id) = donation_ids.get(index) {
+                if let Some(record) = env
+                    .storage()
+                    .instance()
+                    .get::<_, DonationRecord>(&DataKey::DonationRecord(donation_id))
+                {
+                    result.push_back(record);
+                }
+            }
+            index += 1;
+        }
+
+        result
+    }
+
     /// Retrieve a paginated list of all projects on-chain.
     ///
     /// # Arguments
@@ -915,12 +937,12 @@ impl GreenPayContract {
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
-            offset as usize + limit as usize
+            offset + limit
         };
         
         // Collect projects from the slice
         let mut result = Vec::new(&env);
-        let mut idx = offset as usize;
+        let mut idx = offset;
         while idx < end {
             if let Some(project_id) = project_ids.get(idx) {
                 if let Some(project) = env
@@ -1694,7 +1716,7 @@ impl OracleInterface for MockOracle {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
     use super::*;
 
@@ -2389,6 +2411,21 @@ mod tests {
             &(MAX_CO2_PER_XLM + 1),
             &1i128,
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "CO2 per XLM exceeds maximum")]
+    fn test_batch_register_projects_rejects_excessive_co2_per_xlm() {
+        let (env, _cid, client, admin, _pid) = setup();
+        let project = ProjectInit {
+            id: String::from_str(&env, "proj-002"),
+            name: String::from_str(&env, "Bad Project"),
+            wallet: Address::generate(&env),
+            co2_per_xlm: MAX_CO2_PER_XLM + 1,
+            min_donation_amount: 1,
+        };
+        let projects = Vec::from_array(&env, [project]);
+        client.batch_register_projects(&admin, &projects);
     }
 
     #[test]

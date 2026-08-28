@@ -19,6 +19,9 @@ const LEAFLET_TILE_SOURCES = [
 // unpkg.com serves the Leaflet CSS loaded dynamically in ProjectMap.tsx.
 const UNPKG = 'https://unpkg.com'
 
+// GitHub avatars rendered on the /contributors timeline
+const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
+
 function buildCsp(nonce: string, isWidget: boolean): string {
   // API origin: 'self' covers same-origin deploys; localhost:4000 covers local dev.
   const connectSrc = [
@@ -38,7 +41,8 @@ function buildCsp(nonce: string, isWidget: boolean): string {
     "font-src 'self' https://fonts.gstatic.com",
     // OSM tile images are loaded as <img> elements by Leaflet TileLayer.
     // Leaflet marker icons use data: URIs (our inline SVG divIcon).
-    `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES}`,
+    // GitHub avatars are loaded on the /contributors timeline.
+    `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES} ${GITHUB_AVATARS}`,
     `connect-src ${connectSrc}`,
     "object-src 'none'",
     "base-uri 'self'",
