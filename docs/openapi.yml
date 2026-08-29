@@ -102,6 +102,8 @@ components:
           type: string
         raisedXLM:
           type: string
+        raisedUSDC:
+          type: string
         deadline:
           type: string
           format: date-time

@@ -93,6 +93,7 @@ export interface ProjectCampaign {
   description: string;
   goalXLM: string;
   raisedXLM: string;
+  raisedUSDC: string;
   deadline: string;
   progressPercent: number;
   completed: boolean;
