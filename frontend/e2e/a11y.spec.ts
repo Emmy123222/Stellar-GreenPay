@@ -55,20 +55,20 @@ async function mockApi(page: Page) {
     r.fulfill({ json: { _embedded: { records: [] }, balances: [{ asset_type: "native", balance: "500.0000000" }] } })
   );
 
-  await page.route("**/api/stats/global",   (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
-  await page.route("**/api/stats/categories", (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
-  await page.route("**/api/leaderboard**",  (r) => r.fulfill(ok([])));
-  await page.route("**/api/donations/**",   (r) => r.fulfill(ok([])));
-  await page.route("**/api/updates/**",     (r) => r.fulfill(ok([])));
-  await page.route("**/api/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/stats/global",   (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
+  await page.route("**/api/**/stats/categories", (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
+  await page.route("**/api/**/leaderboard**",  (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/donations/**",   (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/updates/**",     (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
 
-  await page.route("**/api/profiles/**",    (r) => r.fulfill(ok(MOCK_PROFILE)));
+  await page.route("**/api/**/profiles/**",    (r) => r.fulfill(ok(MOCK_PROFILE)));
 
-  await page.route("**/api/projects?**",              (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects",                 (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects/featured",        (r) => r.fulfill(ok(MOCK_PROJECT)));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}`,    (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route("**/api/**/projects?**",              (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects",                 (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects/featured",        (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}`,    (r) => r.fulfill(ok(MOCK_PROJECT)));
 }
 
 // ── Axe helper — assert zero critical/serious violations ─────────────────────

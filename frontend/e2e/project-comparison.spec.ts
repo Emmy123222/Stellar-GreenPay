@@ -76,9 +76,9 @@ async function mockApi(page: Page) {
   await page.route("**/horizon-testnet.stellar.org/**", (r) =>
     r.fulfill({ json: { _embedded: { records: [] } } }),
   );
-  await page.route("**/api/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/stats/global", (r) =>
+  await page.route("**/api/**/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/**/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/**/stats/global", (r) =>
     r.fulfill({ json: { success: true, data: { totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 } } }),
   );
 }

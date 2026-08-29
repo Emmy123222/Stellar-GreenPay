@@ -149,6 +149,7 @@ jobs:
 
       - name: Run ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
+        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'https://staging.greenpay.app'

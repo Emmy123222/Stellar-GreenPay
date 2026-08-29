@@ -41,12 +41,12 @@ const MOCK_PROJECT = {
 // ── Helper: mock all API routes the donate page may fetch ────────────────────
 
 async function mockDonatePageApi(page: Page, projectId = PROJECT_ID) {
-  await page.route(`**/api/projects/${projectId}`, (route) =>
-    route.fulfill({ json: { success: true, data: MOCK_PROJECT } })
-  );
-  // Blanket catch-all for any other /api/** calls
+  // Blanket catch-all for any other /api/** calls (first so specific route wins)
   await page.route("**/api/**", (route) =>
     route.fulfill({ json: { success: true, data: [] } })
+  );
+  await page.route(`**/api/**/projects/${projectId}`, (route) =>
+    route.fulfill({ json: { success: true, data: MOCK_PROJECT } })
   );
 }
 
@@ -102,7 +102,7 @@ test.describe("QR code donation link flow", () => {
     page,
   }) => {
     const badId = "00000000-0000-0000-0000-000000000000";
-    await page.route(`**/api/projects/${badId}`, (route) =>
+    await page.route(`**/api/**/projects/${badId}`, (route) =>
       route.fulfill({ status: 404, json: { success: false, error: "Not found" } })
     );
 
