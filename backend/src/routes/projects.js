@@ -24,6 +24,7 @@ const { adminRequired } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { isUrlSafeFromSsrf, assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
+const { VALID_STATUSES, VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants");
 const WEBHOOK_URL_MAX_LENGTH = 2048;
 const KG_CO2_PER_TREE = 22; // heuristic for treesEquivalent
 
@@ -42,20 +43,7 @@ function getProjectDetailCacheKey(projectId) {
   return PROJECT_DETAIL_CACHE_PREFIX + projectId;
 }
 
-const VALID_STATUSES = ["active", "completed", "paused"];
-const VALID_CATEGORIES = [
-  "Reforestation",
-  "Solar Energy",
-  "Ocean Conservation",
-  "Clean Water",
-  "Wildlife Protection",
-  "Carbon Capture",
-  "Wind Energy",
-  "Sustainable Agriculture",
-  "Other",
-];
 const VALID_SORT_FIELDS = ["created_at", "raised_xlm", "donor_count"];
-const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
 /**
  * GET /api/projects/featured
@@ -402,10 +390,19 @@ router.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "wallet_address is required" });
     }
 
+    // Validate co2_per_xlm if provided
+    const co2PerXLM = req.body.co2_per_xlm;
+    if (co2PerXLM !== undefined && co2PerXLM !== null) {
+      const co2 = Number.parseFloat(co2PerXLM);
+      if (!Number.isFinite(co2) || co2 < 0) {
+        return res.status(400).json({ error: "co2_per_xlm must be a non-negative number" });
+      }
+    }
+
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($8, ' '), '')))
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, co2_per_xlm, tags, search_vector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($9, ' '), '')))
        RETURNING *`,
       [
         id,
@@ -415,6 +412,7 @@ router.post("/", async (req, res, next) => {
         location.trim(),
         wallet_address,
         goal_xlm,
+        req.body.co2_per_xlm || null,
         tags,
       ],
     );

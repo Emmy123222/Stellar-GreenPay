@@ -22,8 +22,22 @@ const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
+const donationsRouter = require("./routes/donations");
+const leaderboardRouter = require("./routes/leaderboard");
+const profilesRouter = require("./routes/profiles");
+const statsRouter = require("./routes/stats");
+const updatesRouter = require("./routes/updates");
 const uploadsRouter = require("./routes/uploads");
 const healthRouter = require("./routes/health");
+const readinessRouter = require("./routes/readiness");
+const notificationsRouter = require("./routes/notifications");
+const adminRouter = require("./routes/admin");
+const verificationRouter = require("./routes/verification");
+const impactRouter = require("./routes/impact");
+const subscriptionsRouter = require("./routes/subscriptions");
+const ratingsRouter = require("./routes/ratings");
+const jobsRouter = require("./routes/jobs");
+const webhooksRouter = require("./routes/webhooks");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -78,12 +92,33 @@ app.use((req, res, next) => {
 });
 
 // Bare /health (no /api prefix) is what the frontend.yml CI wait loop and
-// container orchestrators probe; keep it alongside the versioned mount.
+// container orchestrators probe; keep it alongside the versioned mounts.
 app.use("/health", healthRouter);
-app.use("/api/projects", projectsRouter);
-app.use("/api/uploads", uploadsRouter);
-app.use("/api/v1/projects", projectsRouter);
-app.use("/api/v1/uploads", uploadsRouter);
+
+const routeMounts = [
+  ["/health", healthRouter],
+  ["/readiness", readinessRouter],
+  ["/projects", projectsRouter],
+  ["/donations", donationsRouter],
+  ["/leaderboard", leaderboardRouter],
+  ["/profiles", profilesRouter],
+  ["/stats", statsRouter],
+  ["/updates", updatesRouter],
+  ["/uploads", uploadsRouter],
+  ["/notifications", notificationsRouter],
+  ["/admin", adminRouter],
+  ["/verification", verificationRouter],
+  ["/impact", impactRouter],
+  ["/subscriptions", subscriptionsRouter],
+  ["/ratings", ratingsRouter],
+  ["/jobs", jobsRouter],
+  ["/webhooks", webhooksRouter],
+];
+
+for (const [path, router] of routeMounts) {
+  app.use(`/api${path}`, router);
+  app.use(`/api/v1${path}`, router);
+}
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -105,7 +140,6 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());

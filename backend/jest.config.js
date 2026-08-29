@@ -6,6 +6,8 @@ module.exports = {
   // peek-readable, @tokenizer/*) are pure ESM and are required by the uploads
   // route. babel-jest (default transform) compiles them to CJS via
   // babel.config.js; everything else in node_modules is left untouched.
+  // (expo-server-sdk is also pure ESM but is handled by a manual mock in
+  // __mocks__/expo-server-sdk.js rather than a transform.)
   transformIgnorePatterns: [
     "/node_modules/(?!file-type|strtok3|token-types|peek-readable|@tokenizer)",
   ],
