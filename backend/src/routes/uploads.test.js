@@ -199,40 +199,46 @@ describe("POST /api/uploads — disallowed MIME type", () => {
     app = buildApp();
   });
 
-  test("returns 400 when an executable (.exe) is uploaded", async () => {
+  // The route rejects unrecognized AND disallowed files with 415 Unsupported
+  // Media Type. Recognized-but-disallowed files (e.g. a detected PE executable)
+  // get the explicit "Unsupported file type: …" message; files with no
+  // detectable magic bytes get the "could not be detected" message. file-type
+  // v18 does not detect HTML/JS from these short buffers, so those land in the
+  // undetectable branch.
+  test("returns 415 when an executable (.exe) is uploaded", async () => {
     const res = await request(app)
       .post("/api/uploads")
       .attach("file", Buffer.from("MZ\x90\x00"), {
         filename: "virus.exe",
         contentType: "application/x-msdownload",
       })
-      .expect(400);
+      .expect(415);
 
     expect(res.body.error).toMatch(/unsupported file type/i);
   });
 
-  test("returns 400 when an HTML file is uploaded", async () => {
+  test("returns 415 when an HTML file is uploaded", async () => {
     const res = await request(app)
       .post("/api/uploads")
       .attach("file", Buffer.from("<html></html>"), {
         filename: "page.html",
         contentType: "text/html",
       })
-      .expect(400);
+      .expect(415);
 
-    expect(res.body.error).toMatch(/unsupported file type/i);
+    expect(res.body.error).toMatch(/could not be detected|unsupported file type/i);
   });
 
-  test("returns 400 when a JavaScript file is uploaded", async () => {
+  test("returns 415 when a JavaScript file is uploaded", async () => {
     const res = await request(app)
       .post("/api/uploads")
       .attach("file", Buffer.from("alert(1)"), {
         filename: "script.js",
         contentType: "application/javascript",
       })
-      .expect(400);
+      .expect(415);
 
-    expect(res.body.error).toMatch(/unsupported file type/i);
+    expect(res.body.error).toMatch(/could not be detected|unsupported file type/i);
   });
 
   test("does not write a disallowed file to disk", async () => {
@@ -244,7 +250,7 @@ describe("POST /api/uploads — disallowed MIME type", () => {
         filename: "bad.exe",
         contentType: "application/x-msdownload",
       })
-      .expect(400);
+      .expect(415);
 
     const after = fs.readdirSync(TEST_UPLOAD_DIR).length;
     expect(after).toBe(before);

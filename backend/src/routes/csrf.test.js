@@ -11,7 +11,12 @@ describe("CSRF protection", () => {
     expect(res.body).toEqual(expect.objectContaining({ success: true }));
     expect(typeof res.body.csrfToken).toBe("string");
     expect(res.body.csrfToken.length).toBeGreaterThan(0);
-    expect(res.headers["content-security-policy"]).toBe("default-src 'none'; frame-ancestors 'none'");
+    // helmet's CSP is strict and must deny third-party content: default-src
+    // 'none' (no network fetch/script from any origin) and frame-ancestors
+    // 'none' (no embedding). helmet also emits its baseline directives.
+    const csp = res.headers["content-security-policy"];
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("frame-ancestors 'none'");
   });
 
   it("rejects mutating requests without an X-CSRF-Token header", async () => {

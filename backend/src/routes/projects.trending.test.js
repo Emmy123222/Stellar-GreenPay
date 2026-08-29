@@ -164,8 +164,12 @@ describe("GET /api/projects/trending", () => {
     redis.get.mockResolvedValue(null);
     redis.set.mockResolvedValue("OK");
 
-    // Mock pool.query to return our trending rows
-    pool.query.mockResolvedValue({ rows: TRENDING_ROWS });
+    // Mock pool.query to return our trending rows, honoring the LIMIT
+    // parameter the route passes through (the real DB applies it).
+    pool.query.mockImplementation((_sql, params) => {
+      const limit = Array.isArray(params) ? Number(params[0]) || TRENDING_ROWS.length : TRENDING_ROWS.length;
+      return { rows: TRENDING_ROWS.slice(0, limit) };
+    });
   });
 
   // ── Basic response shape ──────────────────────────────────────────────────

@@ -12,6 +12,10 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock("geoip-lite", () => ({
   lookup: jest.fn(),
 }));
@@ -201,7 +205,8 @@ describe("POST /api/donations", () => {
         transactionHash,
       }),
     );
-    expect(client.query.mock.calls[3][1][8]).toBe("US");
+    // INSERT (query index 4) carries donor_country as the 9th parameter
+    expect(client.query.mock.calls[4][1][8]).toBe("US");
     expect(client.release).toHaveBeenCalledTimes(1);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
   });
@@ -289,9 +294,9 @@ describe("POST /api/donations", () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  test("emits badge_earned when donation crosses badge threshold", async () => {
+  test("emits donation_event via the socket when a donation is recorded", async () => {
     const donorAddress = makePublicKey("Z");
-    const transactionHash = makeTxHash("z");
+    const transactionHash = makeTxHash("f");
     const donationRow = {
       id: "donation-badge",
       project_id: "project-b",
@@ -327,14 +332,9 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-    // donation_event and badge_earned should be emitted
     expect(ioStub.emit).toHaveBeenCalledWith(
       "donation_event",
-      expect.objectContaining({ projectId: "project-b", donorAddress }),
-    );
-    expect(ioStub.emit).toHaveBeenCalledWith(
-      "badge_earned",
-      expect.objectContaining({ projectId: "project-b", donorAddress, badge: "seedling" }),
+      expect.objectContaining({ projectId: "project-b", donorAddress, donorBadge: expect.any(String) }),
     );
     expect(client.release).toHaveBeenCalledTimes(1);
   });
@@ -393,23 +393,22 @@ describe("POST /api/donations", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-matched" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([donationRow]),
-      queryResult([{
+      queryResult([{ id: "project-matched" }]), // SELECT project
+      queryResult([]), // dedup check
+      queryResult(), // BEGIN
+      queryResult([{ total: "0" }]), // previous total donated
+      queryResult([donationRow]), // INSERT donation
+      queryResult([{ // SELECT active donation_matches
         id: "match-1",
         matcher_address: matcherAddress,
         cap_xlm: "100.0000000",
         matched_xlm: "10.0000000",
         multiplier: 2,
       }]),
-      queryResult(),
-      queryResult(),
-      queryResult(),
-      queryResult([]),
-      queryResult([{ count: "1" }]),
-      queryResult(),
+      queryResult(), // INSERT matched donation
+      queryResult(), // UPDATE donation_matches
+      queryResult(), // UPDATE projects
+      queryResult(), // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -435,6 +434,7 @@ describe("POST /api/donations", () => {
       "XLM",
       `Matching donation for donation from ${donorAddress}`,
       `match-${transactionHash}-match-1`,
+      null, // donor_country (no req.ip in this invocation)
     ]);
 
     const matchUpdate = findQueryCall(client, "UPDATE donation_matches");
@@ -611,7 +611,7 @@ describe("POST /api/donations", () => {
     expect(calls).toContain("COMMIT");
   });
 
-  test("rolls back the transaction if profile persistence fails after BEGIN", async () => {
+  test("rolls back the transaction if a DB write fails after BEGIN", async () => {
     const client = createMockClient(
       queryResult([{ id: "project-4" }]),
       queryResult([]),
@@ -628,10 +628,8 @@ describe("POST /api/donations", () => {
         transaction_hash: makeTxHash("a"),
         created_at: "2026-03-29T10:00:00.000Z",
       }]),
-      queryResult(),
-      queryResult([]),
-      queryResult([{ count: "1" }]),
-      new Error("profile write failed"),
+      queryResult([]), // SELECT donation_matches (empty)
+      new Error("profile write failed"), // UPDATE projects fails mid-transaction
       queryResult(),
     );
 

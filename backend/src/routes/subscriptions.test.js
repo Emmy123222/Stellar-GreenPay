@@ -36,7 +36,13 @@ describe("unsubscribeToken service", () => {
 
   test("rejects tampered tokens", () => {
     const token = signUnsubscribeToken("user@example.com", "project-123");
-    const tampered = `${token}x`;
+    // Decode, change the payload, and re-encode so the HMAC no longer matches.
+    // (Appending characters to a base64url string is ignored by the decoder.)
+    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const tampered = Buffer.from(
+      decoded.replace("project-123", "project-124"),
+      "utf8",
+    ).toString("base64url");
     expect(verifyUnsubscribeToken(tampered)).toBeNull();
   });
 });

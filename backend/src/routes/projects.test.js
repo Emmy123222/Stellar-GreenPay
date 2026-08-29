@@ -126,7 +126,8 @@ describe("GET /api/projects", () => {
     await request(app).get("/api/projects?search=amazon").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("ILIKE");
+    expect(query).toContain("search_vector");
+    expect(query).toContain("websearch_to_tsquery");
   });
 
   test("rejects invalid cursor", async () => {
@@ -235,6 +236,9 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 7, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -252,6 +256,9 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 0, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -898,6 +905,7 @@ describe("POST /api/projects/admin/confirm", () => {
 
     const res = await request(app)
       .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", process.env.ADMIN_API_KEY)
       .send({ transactionHash, projectId })
       .expect(200);
 

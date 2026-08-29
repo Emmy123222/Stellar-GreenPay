@@ -12,6 +12,14 @@ jest.mock("pg-boss", () => {
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
 jest.mock("../logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
+// digestQueue captures RESEND_API_KEY / EMAIL_FROM / APP_URL / API_URL at
+// module load time, so these must be set before requiring it.
+process.env.RESEND_API_KEY = "re_test_key";
+process.env.EMAIL_FROM = "GreenPay <updates@greenpay.example>";
+process.env.APP_URL = "https://greenpay.example";
+process.env.API_URL = "https://api.greenpay.example";
+process.env.UNSUBSCRIBE_SECRET = "test-secret";
+
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { runDigest } = require("./digestQueue");
@@ -23,14 +31,7 @@ describe("runDigest", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env = {
-      ...OLD_ENV,
-      RESEND_API_KEY: "re_test_key",
-      EMAIL_FROM: "GreenPay <updates@greenpay.example>",
-      APP_URL: "https://greenpay.example",
-      API_URL: "https://api.greenpay.example",
-      UNSUBSCRIBE_SECRET: "test-secret",
-    };
+    process.env.UNSUBSCRIBE_SECRET = "test-secret";
     global.fetch.mockResolvedValue({
       ok: true,
       text: jest.fn().mockResolvedValue(""),
