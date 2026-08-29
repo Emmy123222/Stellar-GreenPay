@@ -169,6 +169,8 @@ components:
           type: string
         raisedXLM:
           type: string
+        raisedUSDC:
+          type: string
         donorCount:
           type: integer
         co2OffsetKg:
@@ -222,6 +224,8 @@ components:
         goalXLM:
           type: string
         raisedXLM:
+          type: string
+        raisedUSDC:
           type: string
         deadline:
           type: string

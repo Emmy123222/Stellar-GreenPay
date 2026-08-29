@@ -488,6 +488,132 @@ describe("mapCampaignRow", () => {
     expect(mapped.progressPercent).toBe(0);
     expect(mapped.completed).toBe(true);
   });
+
+  test("exposes raisedUSDC and uses converted raised_xlm for progress (issue #352)", () => {
+    const row = getBaseRow();
+    // SQL returns raised_xlm already converted (100 XLM + 150 USDC * 2 = 400)
+    row.raised_xlm = "400";
+    row.raised_usdc = "150";
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedXLM).toBe("400.0000000");
+    expect(mapped.raisedUSDC).toBe("150.0000000");
+    expect(mapped.progressPercent).toBe(40);
+    expect(mapped.completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0", () => {
+    const row = getBaseRow();
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedUSDC).toBe("0.0000000");
+  });
+});
+
+describe("getUsdcToXlmRate (issue #352)", () => {
+  const getRate = projectsRouter.getUsdcToXlmRate;
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  test("falls back to the documented default (3) when unset/invalid", () => {
+    delete process.env.USDC_TO_XLM_RATE;
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "not-a-number";
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "0";
+    expect(getRate()).toBe(3);
+  });
+
+  test("uses the configured env rate when valid", () => {
+    process.env.USDC_TO_XLM_RATE = "2.5";
+    expect(getRate()).toBe(2.5);
+  });
+});
+
+describe("GET /api/projects/:id/campaigns — USDC-aware progress (issue #352)", () => {
+  let app;
+  const rate = 2; // deterministic rate for these tests
+
+  beforeEach(() => {
+    process.env.USDC_TO_XLM_RATE = String(rate);
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  // Helper: the route issues `SELECT id FROM projects WHERE id=$1` then the
+  // campaign aggregation query. We mock both; the second result carries the
+  // values the SQL would have produced (XLM-equivalent total + raw USDC total).
+  async function getCampaigns(campaignRows) {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: "proj-1" }] });
+    pool.query.mockResolvedValueOnce({ rows: campaignRows });
+    return request(app).get("/api/projects/proj-1/campaigns").expect(200);
+  }
+
+  const baseCampaign = (overrides = {}) => ({
+    id: "camp-1",
+    project_id: "proj-1",
+    title: "Campaign",
+    description: null,
+    goal_xlm: "1000",
+    deadline: new Date("2099-01-01T00:00:00.000Z").toISOString(),
+    created_at: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+    ...overrides,
+  });
+
+  test("only XLM donations → raisedXLM = XLM total, raisedUSDC = 0", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "0" }),
+    ]);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("only USDC donations → raisedXLM converted at rate, raisedUSDC raw", async () => {
+    // 250 USDC * rate(2) = 500 XLM-equivalent
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "500", raised_usdc: "250" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("500.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("250.0000000");
+    expect(res.body.data[0].progressPercent).toBe(50);
+  });
+
+  test("mix of XLM and USDC → raisedXLM = XLM + USDC*rate, raisedUSDC raw USDC", async () => {
+    // 100 XLM + (150 USDC * 2) = 400 XLM-equivalent; raisedUSDC = 150
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "150" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("150.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+  });
+
+  test("zero donations → both totals 0, not completed", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "0", raised_usdc: "0" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("0.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(0);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0 (backwards compatible)", async () => {
+    const res = await getCampaigns([baseCampaign({ raised_xlm: "123" })]);
+    expect(res.body.data[0].raisedXLM).toBe("123.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+  });
 });
 
 // ── GET /api/projects/:id/impact-certificate ──────────────────────────────────
