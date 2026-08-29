@@ -218,6 +218,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                 </span>
               </div>
               <div
+                aria-label="Fundraising goal progress"
                 aria-valuemax="100"
                 aria-valuemin="0"
                 aria-valuenow="25"

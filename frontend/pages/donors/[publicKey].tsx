@@ -506,10 +506,6 @@ export default function DonorProfilePage() {
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  if (!publicKey || loading) return <ProfileSkeleton />;
-  if (notFound) return <ProfileNotFound publicKey={publicKey} />;
-  if (!profile) return null;
-
   return (
     <>
       <Head>
@@ -526,8 +522,13 @@ export default function DonorProfilePage() {
         <meta name="twitter:description" content={ogDescription} />
       </Head>
 
-      <div className="min-h-screen bg-leaf">
-        <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
+      {!publicKey || loading ? (
+        <ProfileSkeleton />
+      ) : notFound ? (
+        <ProfileNotFound publicKey={publicKey} />
+      ) : !profile ? null : (
+        <div className="min-h-screen bg-leaf">
+          <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
 
           {/* ── Header card ─────────────────────────────────────────────── */}
           <div className="card shadow-green">
@@ -610,8 +611,9 @@ export default function DonorProfilePage() {
             </Link>
           </div>
 
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

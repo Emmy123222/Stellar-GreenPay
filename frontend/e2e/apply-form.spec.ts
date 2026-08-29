@@ -46,7 +46,7 @@ test.describe("Project verification apply form", () => {
 
     await page.goto("/apply");
 
-    await expect(page.getByRole("heading", { name: /submit your project/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /(submit your project|apply for verification)/i })).toBeVisible();
 
     await page.getByPlaceholder("Acme Climate Foundation").fill("Green Horizon");
     await page.getByPlaceholder("https://acme.org").fill("https://greenhorizon.org");

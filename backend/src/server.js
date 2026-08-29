@@ -66,12 +66,22 @@ const csrfProtection = csurf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 });
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+  if (
+    req.path.startsWith("/api/notifications") ||
+    req.path.startsWith("/api/v1/notifications") ||
+    req.path === "/health" ||
+    req.path === "/api/health" ||
+    req.path === "/api/v1/health"
+  ) {
     return next();
   }
   return csrfProtection(req, res, next);
 });
 
+const healthRouter = require("./routes/health");
+app.use("/health", healthRouter);
+app.use("/api/health", healthRouter);
+app.use("/api/v1/health", healthRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);

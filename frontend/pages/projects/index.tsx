@@ -414,25 +414,26 @@ export default function ProjectsPage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {projects.map((p) => (
                 <div key={p.id} className="relative">
-                  <label
+                  <div
                     className={`absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-body shadow-sm ${
                       selectedProjectIds.includes(p.id)
                         ? "bg-forest-700 text-white border-forest-700"
                         : "bg-white text-forest-700 border-forest-200"
                     }`}
                     onClick={(e) => {
-                      e.preventDefault();
                       e.stopPropagation();
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedProjectIds.includes(p.id)}
-                      onChange={() => toggleSelection(p.id)}
-                      disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
-                    />
-                    Compare
-                  </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedProjectIds.includes(p.id)}
+                        onChange={() => toggleSelection(p.id)}
+                        disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
+                      />
+                      Compare
+                    </label>
+                  </div>
                   <ProjectCard project={p} />
                 </div>
               ))}
