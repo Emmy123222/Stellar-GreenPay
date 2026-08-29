@@ -126,14 +126,12 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
           <div className="flex-1 min-w-0 flex items-center gap-3">
             <Avatar publicKey={entry.publicKey} displayName={entry.displayName} />
             <div className="min-w-0">
-              <a
-                href={accountUrl(entry.publicKey)}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={`/donors/${entry.publicKey}`}
                 className="font-semibold text-forest-900 hover:text-forest-600 transition-colors text-sm font-body block truncate"
               >
                 {entry.displayName || shortenAddress(entry.publicKey)}
-              </a>
+              </Link>
               <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
                 {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
               </p>

@@ -83,7 +83,7 @@ async function mockApi(page: Page) {
   await page.route("**/api/**/projects",                           (r) => r.fulfill(ok([MOCK_PROJECT])));
   await page.route("**/api/**/projects/featured",                  (r) => r.fulfill(ok(MOCK_PROJECT)));
   await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`,     (r) => r.fulfill(ok([])));
-  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}`,        (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) => r.fulfill(ok(MOCK_PROJECT)));
 }
 
 /**
@@ -141,8 +141,8 @@ test.describe("Projects page", () => {
     await mockApi(page);
     // Override the projects list mock — registered AFTER mockApi so the
     // reverse-insertion-order tiebreaker picks this one.
-    await page.route("**/api/projects",    (r) => r.fulfill(ok([])));
-    await page.route("**/api/projects?**", (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects",    (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects?**", (r) => r.fulfill(ok([])));
     await page.goto("/projects");
     await expect(page.getByText(/no projects found/i)).toBeVisible();
   });

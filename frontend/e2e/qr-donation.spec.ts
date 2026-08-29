@@ -74,7 +74,8 @@ test.describe("QR code donation link flow", () => {
     await page.goto(`/donate/${PROJECT_ID}?amount=50`);
 
     // The donate page renders a chip like "Donate 50 XLM" when presetAmount is set
-    await expect(page.getByText(/50.*XLM/i)).toBeVisible();
+    await expect(page.locator(".donate-card__amount-chip")).toBeVisible();
+    await expect(page.locator(".donate-card__amount-chip")).toContainText("50 XLM");
   });
 
   test("landing on the QR link without ?amount shows no preset amount chip", async ({
