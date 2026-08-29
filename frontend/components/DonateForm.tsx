@@ -80,8 +80,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const isValid   = !isNaN(amountNum) && amountNum >= 1;
 
   // Calculate CO₂ impact for XLM donations
-  const co2Impact = currency === "XLM" && amount && !isNaN(amountNum) && project.co2_per_xlm
-    ? (amountNum * project.co2_per_xlm) / 1000 // Convert to kg
+  const co2Impact = currency === "XLM" && amount && !isNaN(amountNum) && project.co2PerXLM
+    ? (amountNum * project.co2PerXLM) / 1000 // Convert to kg
     : 0;
 
   // Calculate tree equivalent (rough estimate: 1 tree absorbs ~22kg CO₂ per year)

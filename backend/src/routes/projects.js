@@ -1754,6 +1754,62 @@ router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
 });
 
 /**
+ * GET /api/projects/:id/similar
+ * Returns up to 3 similar active projects in the same category,
+ * ranked by pg_trgm SIMILARITY of their name to the current project.
+ * Falls back to donor_count ordering if pg_trgm is not installed.
+ */
+router.get("/:id/similar", async (req, res, next) => {
+  let name;
+  let category;
+  try {
+    const projectResult = await pool.query(
+      "SELECT name, category FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    name = projectResult.rows[0].name;
+    category = projectResult.rows[0].category;
+
+    const result = await pool.query(
+      `SELECT * FROM projects
+       WHERE category = $1 AND id != $2 AND status = 'active'
+       ORDER BY SIMILARITY(name, $3) DESC
+       LIMIT 3`,
+      [category, req.params.id, name],
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map(mapProjectRow),
+    });
+  } catch (e) {
+    // If pg_trgm is not installed, fall back to donor_count ordering
+    if (e.code === "42883" || e.message?.includes("SIMILARITY")) {
+      try {
+        const fallback = await pool.query(
+          `SELECT * FROM projects
+           WHERE category = $1 AND id != $2 AND status = 'active'
+           ORDER BY donor_count DESC
+           LIMIT 3`,
+          [category || "Other", req.params.id],
+        );
+        return res.json({
+          success: true,
+          data: fallback.rows.map(mapProjectRow),
+        });
+      } catch (fallbackErr) {
+        next(fallbackErr);
+      }
+    }
+    next(e);
+  }
+});
+
+/**
  * GET /api/projects/:id/social-card
  * Returns a shareable impact summary card as JSON.
  * Requires ?donorAddress=G...&amount=X query params.

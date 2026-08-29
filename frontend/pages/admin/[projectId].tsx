@@ -353,7 +353,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         projectId: project.id,
         name: project.name,
         wallet: project.walletAddress,
-        co2PerXLM: project.co2_per_xlm || 0,
+        co2PerXLM: project.co2PerXLM || 0,
         adminAddress: publicKey,
       });
       // Sign the XDR with wallet
