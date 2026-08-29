@@ -45,7 +45,7 @@ const VALID_SECRET = "a".repeat(32);
 const VALID_URL    = "https://hooks.example.com/greenpay";
 
 function authHeader() {
-  return { Authorization: "Bearer test-admin-key" };
+  return { "X-Admin-Key": process.env.ADMIN_API_KEY };
 }
 
 describe("PATCH /api/projects/:id/webhook (#794)", () => {

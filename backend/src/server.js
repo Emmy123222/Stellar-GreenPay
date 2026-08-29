@@ -17,19 +17,13 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
-const express = require("express");
-const helmet = require("helmet");
-const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
-const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
-const requestLogger = require("pino-http")({ logger });
-const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
+const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
-const logger = require("./logger");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const healthRouter = require("./routes/health");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -83,6 +77,9 @@ app.use((req, res, next) => {
   return csrfProtection(req, res, next);
 });
 
+// Bare /health (no /api prefix) is what the frontend.yml CI wait loop and
+// container orchestrators probe; keep it alongside the versioned mount.
+app.use("/health", healthRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);

@@ -127,8 +127,9 @@ describe("GET /api/projects/:id isFollowing (issue #705)", () => {
     expect(res.body.data.followCount).toBe(1);
 
     const followCall = pool.query.mock.calls.find(
-      (c) => typeof c[0] === "string" && c[0].includes("project_follows"),
+      (c) => typeof c[0] === "string" && c[0].includes("is_following"),
     );
+    expect(followCall).toBeTruthy();
     expect(followCall[0]).toMatch(/EXISTS/);
     expect(followCall[1]).toEqual(["proj-1", FOLLOWER_WALLET]);
   });

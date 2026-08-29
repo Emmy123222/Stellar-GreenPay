@@ -1,5 +1,7 @@
 # Test stage — devDependencies for jest in docker-compose.test.yml
-FROM node:20-alpine AS test
+# node:20-alpine crashes when testcontainers loads its bundled undici
+# (webidl.util.markAsUncloneable is not a function); use a current LTS.
+FROM node:24-alpine AS test
 
 WORKDIR /app
 

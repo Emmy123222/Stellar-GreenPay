@@ -624,8 +624,6 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
   beforeEach(resetQueries);
 
   test("includes SQL that excludes donors with any unverified-project donation", async () => {
-    pool.query.mockResolvedValue({ rows: [DONOR_A] });
-
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
 
@@ -642,8 +640,6 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
   });
 
   test("does not apply verified-only SQL when onlyVerified is omitted", async () => {
-    pool.query.mockResolvedValue({ rows: [DONOR_A, DONOR_B] });
-
     const app = createApp();
     await request(app).get("/api/leaderboard").expect(200);
 
@@ -680,8 +676,6 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
   });
 
   test("ignores onlyVerified when the value is not the string true", async () => {
-    pool.query.mockResolvedValue({ rows: [] });
-
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=false").expect(200);
 

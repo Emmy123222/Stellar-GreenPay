@@ -94,12 +94,11 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws" }]),   // SELECT project
         queryResult([]),                          // dedup check
         queryResult(),                            // BEGIN
+        queryResult([{ total: "0" }]),           // previous total donated
         queryResult([donationRow]),               // INSERT donation
         queryResult([]),                          // SELECT donation_matches (empty)
         queryResult(),                            // UPDATE projects
-        queryResult([]),                          // SELECT * FROM profiles (new donor)
-        queryResult([{ count: "1" }]),            // SELECT COUNT(DISTINCT project_id)
-        queryResult(),                            // INSERT INTO profiles
+        queryResult(),                            // COMMIT
       );
 
       const socket = ioc(baseUrl, {
@@ -218,15 +217,14 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       };
 
       createMockClient(
-        queryResult([{ id: "project-ws-2" }]),
-        queryResult([]),
-        queryResult(),
-        queryResult([donationRow]),
-        queryResult([]),
-        queryResult(),
-        queryResult([]),
-        queryResult([{ count: "1" }]),
-        queryResult(),
+        queryResult([{ id: "project-ws-2" }]), // SELECT project
+        queryResult([]), // dedup check
+        queryResult(), // BEGIN
+        queryResult([{ total: "0" }]), // previous total donated
+        queryResult([donationRow]), // INSERT donation
+        queryResult([]), // SELECT donation_matches (empty)
+        queryResult(), // UPDATE projects
+        queryResult(), // COMMIT
       );
 
       const socket = ioc(baseUrl, {
@@ -322,15 +320,13 @@ describe("POST /api/donations → broadcast hardening", () => {
     // Mirrors the query order of recordDonation for a new donor, no active matches.
     createMockClient(
       queryResult([{ id: donationRow.project_id }]), // SELECT project
-      queryResult([]),                                // dedup check (none)
-      queryResult(),                                  // BEGIN
-      queryResult([donationRow]),                     // INSERT donation
-      queryResult([]),                                // SELECT donation_matches (none)
-      queryResult(),                                  // UPDATE projects
-      queryResult([]),                                // SELECT profile (new donor)
-      queryResult([{ count: "1" }]),                  // COUNT(DISTINCT project_id)
-      queryResult(),                                  // INSERT profile
-      queryResult(),                                  // COMMIT
+      queryResult([]), // dedup check (none)
+      queryResult(), // BEGIN
+      queryResult([{ total: "0" }]), // previous total donated
+      queryResult([donationRow]), // INSERT donation
+      queryResult([]), // SELECT donation_matches (none)
+      queryResult(), // UPDATE projects
+      queryResult(), // COMMIT
     );
   }
 
