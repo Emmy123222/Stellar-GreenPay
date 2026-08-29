@@ -44,9 +44,9 @@ test.describe("Project verification apply form", () => {
   test("submits project details, shows success, and notifies the admin", async ({ page }) => {
     const emailNotifications = await mockApplySubmission(page);
 
-    await page.goto("/apply");
+    await page.goto("/submit-project");
 
-    await expect(page.getByRole("heading", { name: /(submit your project|apply for verification)/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /submit your project/i })).toBeVisible();
 
     await page.getByPlaceholder("Acme Climate Foundation").fill("Green Horizon");
     await page.getByPlaceholder("https://acme.org").fill("https://greenhorizon.org");

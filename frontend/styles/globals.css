@@ -85,7 +85,7 @@
   .btn-secondary {
     @apply border border-[rgba(34,114,57,0.35)] dark:border-[rgba(96,208,123,0.35)]
            hover:border-[rgba(34,114,57,0.65)] dark:hover:border-[rgba(96,208,123,0.65)]
-           text-[#227239] dark:text-[#81c784] font-medium px-6 py-3 rounded-xl transition-all duration-200
+           text-[#165327] dark:text-[#81c784] font-medium px-6 py-3 rounded-xl transition-all duration-200
            bg-[rgba(34,114,57,0.04)] dark:bg-[rgba(96,208,123,0.06)]
            hover:bg-[rgba(34,114,57,0.08)] dark:hover:bg-[rgba(96,208,123,0.12)]
            focus:outline-none focus:ring-2 focus:ring-green-500 dark:focus:ring-[#60d07b] focus:ring-offset-2
@@ -183,7 +183,7 @@
 
   .btn-secondary {
     @apply border border-[rgba(34,114,57,0.35)] hover:border-[rgba(34,114,57,0.65)]
-           text-[#227239] font-medium px-6 py-3 rounded-xl transition-all duration-200
+           text-[#165327] font-medium px-6 py-3 rounded-xl transition-all duration-200
            bg-[rgba(34,114,57,0.04)] hover:bg-[rgba(34,114,57,0.08)]
            focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
   }
