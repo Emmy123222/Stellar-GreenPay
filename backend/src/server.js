@@ -23,6 +23,7 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const healthRouter = require("./routes/health");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -76,6 +77,9 @@ app.use((req, res, next) => {
   return csrfProtection(req, res, next);
 });
 
+// Bare /health (no /api prefix) is what the frontend.yml CI wait loop and
+// container orchestrators probe; keep it alongside the versioned mount.
+app.use("/health", healthRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
