@@ -15,7 +15,7 @@
     "load-test": "k6 run ../scripts/load-test.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
+    "@anthropic-ai/sdk": "^0.121.0",
     "@aws-sdk/client-s3": "^3.1120.0",
     "@aws-sdk/s3-request-presigner": "^3.1120.0",
     "@noble/hashes": "^1.7.1",
