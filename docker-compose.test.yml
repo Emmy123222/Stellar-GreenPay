@@ -21,18 +21,6 @@ services:
       timeout: 5s
       retries: 10
 
-  pgboss-migrate:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-      target: test
-    environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/greenpay_test
-    depends_on:
-      postgres:
-        condition: service_healthy
-    command: node src/db/pgboss-migrate.js
-
   backend:
     build:
       context: ./backend
@@ -50,6 +38,4 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      pgboss-migrate:
-        condition: service_completed_successfully
-    command: npm test
+    command: sh -c "node src/db/pgboss-migrate.js && npm test"

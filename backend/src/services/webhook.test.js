@@ -45,6 +45,11 @@ describe("deliverPayload - SSRF protection", () => {
   const secret = "a-secret-32-chars-min-length-value!!";
   const payload = { projectId: "p1", milestone: "M1" };
 
+  beforeEach(() => {
+    mockRequest(http);
+    mockRequest(https);
+  });
+
   test("rejects a hostname that resolves to a private IP", async () => {
     dns.promises.resolve4.mockResolvedValue(["127.0.0.1"]);
     dns.promises.resolve6.mockRejectedValue(new Error("ENODATA"));
