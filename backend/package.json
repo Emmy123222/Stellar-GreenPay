@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@aws-sdk/client-s3": "^3.1120.0",
+    "@aws-sdk/s3-request-presigner": "^3.1120.0",
     "@noble/hashes": "^1.7.1",
     "@sentry/node": "^7.51.0",
     "@sentry/tracing": "^7.51.0",
@@ -28,6 +30,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "file-type": "^18.7.0",
+    "file-type": "^16.5.4",
     "geoip-lite": "^1.4.0",
     "helmet": "^8.2.0",
     "iconv-lite": "^0.7.2",

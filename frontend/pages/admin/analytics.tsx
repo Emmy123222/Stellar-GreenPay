@@ -25,18 +25,40 @@ const COLORS = [
   "#9b2226"  // Dark Red
 ];
 
+// Defined at module scope (not inside the component) so it's not recreated
+// as a new component type on every render.
+function CustomTooltip({ active, payload }: any) {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white border border-forest-200 p-3 rounded shadow-md text-sm">
+        <p className="font-bold text-forest-900 mb-1">{data.category}</p>
+        <p className="text-forest-700">Donations: {data.total_donations}</p>
+        <p className="text-forest-700">Total XLM: {formatXLM(data.total_xlm)}</p>
+      </div>
+    );
+  }
+  return null;
+}
+
 export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsProps) {
   const [data, setData] = useState<CategoryStats[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // `loading` is derived by comparing the wallet the data was loaded for to
+  // the currently connected wallet, rather than toggled synchronously
+  // inside the effect (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const loading = loadedForKey !== publicKey;
 
   useEffect(() => {
     if (!publicKey) return;
-    setLoading(true);
     fetchCategoryStats()
-      .then(setData)
+      .then((stats) => {
+        setData(stats);
+        setError(null);
+      })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load analytics"))
-      .finally(() => setLoading(false));
+      .finally(() => setLoadedForKey(publicKey));
   }, [publicKey]);
 
   if (!publicKey) {
@@ -50,21 +72,6 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
       </div>
     );
   }
-
-  // Format tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="bg-white border border-forest-200 p-3 rounded shadow-md text-sm">
-          <p className="font-bold text-forest-900 mb-1">{data.category}</p>
-          <p className="text-forest-700">Donations: {data.total_donations}</p>
-          <p className="text-forest-700">Total XLM: {formatXLM(data.total_xlm)}</p>
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">

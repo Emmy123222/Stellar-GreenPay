@@ -413,15 +413,13 @@ function LiveDonationTicker({ donations }: { donations: LiveDonationTickerItem[]
     return () => window.clearInterval(timer);
   }, [donations.length]);
 
-  useEffect(() => {
-    if (activeIndex >= donations.length) {
-      setActiveIndex(0);
-    }
-  }, [activeIndex, donations.length]);
-
   if (donations.length === 0) return null;
 
-  const item = donations[activeIndex];
+  // Clamp directly during render instead of resetting `activeIndex` via an
+  // effect: if `donations` shrinks between ticks, this keeps the index in
+  // range without an extra render, and the interval above already advances
+  // modulo the (possibly new) length.
+  const item = donations[activeIndex % donations.length];
   const donorLabel = shortenAddress(item.donorAddress || "Unknown donor", 4);
   const projectLabel = item.projectName || "a project";
 

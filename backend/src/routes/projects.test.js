@@ -30,6 +30,12 @@ jest.mock("dns", () => ({
   },
 }));
 
+// Real QR code generation takes ~500ms-3s; mocked so the impact-certificate
+// tests don't risk the suite's 5000ms timeout under load.
+jest.mock("qrcode", () => ({
+  toDataURL: jest.fn().mockResolvedValue("data:image/png;base64,mock-qr-code"),
+}));
+
 const dns = require("dns");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
@@ -126,7 +132,7 @@ describe("GET /api/projects", () => {
     await request(app).get("/api/projects?search=amazon").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("ILIKE");
+    expect(query).toContain("websearch_to_tsquery");
   });
 
   test("rejects invalid cursor", async () => {
@@ -228,13 +234,14 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns a single project", async () => {
-    pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 7 }],
-    }); // SELECT project + follow count join
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 7, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -245,13 +252,14 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns followCount zero when project has no followers", async () => {
-    pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 0 }],
-    });
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 0, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -512,6 +520,7 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     app = buildApp();
     jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
+    require("qrcode").toDataURL.mockResolvedValue("data:image/png;base64,mock-qr-code");
   });
 
   test("returns 200 with all required certificate fields for a valid donor", async () => {
@@ -898,6 +907,9 @@ describe("POST /api/projects/admin/confirm", () => {
 
     const res = await request(app)
       .post("/api/projects/admin/confirm")
+      // adminRequired (see ../middleware/auth.js) accepts a raw admin key only via
+      // the X-Admin-Key header; Authorization: Bearer is reserved for JWTs.
+      .set("X-Admin-Key", "test-admin-key")
       .send({ transactionHash, projectId })
       .expect(200);
 

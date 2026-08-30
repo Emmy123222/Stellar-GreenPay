@@ -629,7 +629,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).toMatch(/NOT EXISTS/i);
     expect(sql).toMatch(/verified\s*=\s*false/i);
     expect(sql).toMatch(/EXISTS/i);
@@ -647,7 +647,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
     expect(sql).not.toMatch(/verified\s*=\s*false/i);
   });
@@ -685,7 +685,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=false").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
   });
 });
