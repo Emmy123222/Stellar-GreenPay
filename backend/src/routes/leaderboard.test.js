@@ -273,14 +273,37 @@ describe("leaderboard route SQL structure", () => {
   // LIMIT
   // -----------------------------------------------------------------------
 
-  test("respects limit parameter", async () => {
+  test("respects limit parameter by fetching pageSize + 1 rows", async () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?limit=10");
 
     expect(queries[0].sql).toMatch(/LIMIT\s+\$1/i);
+    // The route fetches pageSize + 1 to detect a next page.
     expect(pool.query).toHaveBeenCalledWith(
       expect.any(String),
-      expect.arrayContaining([10]),
+      expect.arrayContaining([11]),
+    );
+  });
+
+  test("uses default limit of 50 when limit is not specified", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard");
+
+    // Default pageSize = 50, so it fetches 51 rows to detect a next page.
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringMatching(/LIMIT\s+\$1/i),
+      expect.arrayContaining([51]),
+    );
+  });
+
+  test("caps limit at the maximum of 200", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?limit=10000");
+
+    // pageSize is clamped to 200, so it fetches 201 rows.
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining([201]),
     );
   });
 
