@@ -192,6 +192,8 @@ async function recordDonation(req, res, next) {
     await client.query("COMMIT");
     inTransaction = false;
 
+    await redis.deletePattern("projects:list:*");
+
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
@@ -398,15 +400,51 @@ router.get("/project/:projectId", async (req, res, next) => {
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
-    const result = await pool.query(
-      `SELECT d.*, p.co2_per_xlm
-       FROM donations d
-       JOIN projects p ON d.project_id = p.id
-       WHERE d.donor_address = $1
-       ORDER BY d.created_at DESC`,
-      [req.params.publicKey],
-    );
-    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+    const values = [req.params.publicKey];
+
+    let whereClause = "WHERE d.donor_address = $1";
+
+    if (hasCursor) {
+      try {
+        const cursorData = JSON.parse(
+          Buffer.from(req.query.cursor, "base64").toString("utf8"),
+        );
+        const cursorCreatedAt = cursorData.created_at;
+        const cursorId = cursorData.id;
+        if (!cursorCreatedAt || !cursorId) {
+          return res.status(400).json({ error: "Invalid cursor" });
+        }
+        values.push(cursorCreatedAt, cursorId);
+        whereClause +=
+          " AND (d.created_at < $2::timestamptz OR (d.created_at = $2::timestamptz AND d.id < $3))";
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+    }
+
+    values.push(limit + 1);
+    const query = `SELECT d.*, p.co2_per_xlm
+      FROM donations d
+      JOIN projects p ON d.project_id = p.id
+      ${whereClause}
+      ORDER BY d.created_at DESC, d.id DESC
+      LIMIT $${values.length}`;
+
+    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore
+      ? Buffer.from(
+          JSON.stringify({
+            created_at: result[result.length - 1].createdAt,
+            id: result[result.length - 1].id,
+          }),
+        ).toString("base64")
+      : null;
+
+    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor });
   } catch (e) { next(e); }
 });
 
