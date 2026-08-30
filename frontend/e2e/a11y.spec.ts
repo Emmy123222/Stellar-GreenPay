@@ -40,8 +40,8 @@ const MOCK_PROFILE = {
   displayName: "EcoChampion",
   totalDonatedXLM: "500",
   projectsSupported: 3,
-  badges: ["tree"],
-  badgeTier: "tree",
+  badges: [{ tier: "tree", earnedAt: new Date().toISOString() }],
+  createdAt: new Date().toISOString(),
 };
 
 const ok = (data: unknown) => ({ json: { success: true, data } });
@@ -92,6 +92,13 @@ async function assertNoCriticalViolations(page: Page) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test.describe("Accessibility (axe)", () => {
+  // Several pages wrap their content in a CSS fade-in animation on mount.
+  // Without this, axe can sample computed colors mid-fade and report
+  // spuriously low contrast ratios on nearly every element.
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+  });
+
   test("home page has no critical/serious violations", async ({ page }) => {
     await mockApi(page);
     await page.goto("/");
@@ -107,8 +114,10 @@ test.describe("Accessibility (axe)", () => {
   test("donor profile page has no critical/serious violations", async ({ page }) => {
     await mockApi(page);
     await page.goto(`/donors/${MOCK_PUBLIC_KEY}`);
-    // Wait for profile to load (skeleton disappears when profile renders)
-    await page.waitForFunction(() => document.title && document.title.trim().length > 0);
+    // Wait for the loaded profile to render (rather than racing on
+    // document.title, which next/head clears and re-inserts on every
+    // render — sampling it mid-flight can see a transient empty value).
+    await expect(page.getByRole("heading", { name: MOCK_PROFILE.displayName })).toBeVisible();
     await assertNoCriticalViolations(page);
   });
 });
