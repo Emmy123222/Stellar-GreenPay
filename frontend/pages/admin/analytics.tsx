@@ -25,6 +25,20 @@ const COLORS = [
   "#9b2226"  // Dark Red
 ];
 
+const CustomTooltip = ({ active, payload }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="bg-white border border-forest-200 p-3 rounded shadow-md text-sm">
+        <p className="font-bold text-forest-900 mb-1">{data.category}</p>
+        <p className="text-forest-700">Donations: {data.total_donations}</p>
+        <p className="text-forest-700">Total XLM: {formatXLM(data.total_xlm)}</p>
+      </div>
+    );
+  }
+  return null;
+};
+
 export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsProps) {
   const [data, setData] = useState<CategoryStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +46,16 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
 
   useEffect(() => {
     if (!publicKey) return;
-    setLoading(true);
-    fetchCategoryStats()
-      .then(setData)
-      .catch((e: unknown) => setError((e as Error).message || "Failed to load analytics"))
-      .finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      try {
+        setData(await fetchCategoryStats());
+      } catch (e: unknown) {
+        setError((e as Error).message || "Failed to load analytics");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [publicKey]);
 
   if (!publicKey) {
@@ -50,21 +69,6 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
       </div>
     );
   }
-
-  // Format tooltip
-  const CustomTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="bg-white border border-forest-200 p-3 rounded shadow-md text-sm">
-          <p className="font-bold text-forest-900 mb-1">{data.category}</p>
-          <p className="text-forest-700">Donations: {data.total_donations}</p>
-          <p className="text-forest-700">Total XLM: {formatXLM(data.total_xlm)}</p>
-        </div>
-      );
-    }
-    return null;
-  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">

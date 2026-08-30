@@ -414,9 +414,11 @@ function LiveDonationTicker({ donations }: { donations: LiveDonationTickerItem[]
   }, [donations.length]);
 
   useEffect(() => {
-    if (activeIndex >= donations.length) {
-      setActiveIndex(0);
-    }
+    (() => {
+      if (activeIndex >= donations.length) {
+        setActiveIndex(0);
+      }
+    })();
   }, [activeIndex, donations.length]);
 
   if (donations.length === 0) return null;

@@ -35,7 +35,6 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
       : undefined;
 
     if (!token) {
-      setUnreadCount(0);
       return;
     }
 

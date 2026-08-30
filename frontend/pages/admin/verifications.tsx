@@ -32,7 +32,9 @@ export default function AdminVerifications({ publicKey, onConnect }: AdminVerifi
 
   useEffect(() => {
     if (!publicKey) return;
-    loadRequests();
+    (async () => {
+      loadRequests();
+    })();
   }, [publicKey]);
 
   const handleApprove = async (id: string) => {

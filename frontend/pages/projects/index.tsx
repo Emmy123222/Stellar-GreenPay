@@ -79,16 +79,18 @@ export default function ProjectsPage() {
   }, [category, status, verified, search]);
 
   useEffect(() => {
-    if (!compareQuery || projects.length === 0) return;
-    const ids = compareQuery
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => projects.some((project) => project.id === id))
-      .slice(0, 3);
-    if (ids.length >= 2) {
-      setSelectedProjectIds(ids);
-      setShowComparison(true);
-    }
+    (() => {
+      if (!compareQuery || projects.length === 0) return;
+      const ids = compareQuery
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => projects.some((project) => project.id === id))
+        .slice(0, 3);
+      if (ids.length >= 2) {
+        setSelectedProjectIds(ids);
+        setShowComparison(true);
+      }
+    })();
   }, [compareQuery, projects]);
 
   const setFilter = (key: string, val: string) => {

@@ -97,23 +97,27 @@ export default function AdminVerificationDetail({
       router.replace("/admin/login");
       return;
     }
-    setAdminToken(token);
+    (async () => {
+      setAdminToken(token);
+    })();
   }, [router]);
 
   // ── Fetch verification request ───────────────────────────────────────────────
   useEffect(() => {
     if (!adminToken || !id || typeof id !== "string") return;
+    (async () => {
+      setLoading(true);
+      setError(null);
 
-    setLoading(true);
-    setError(null);
-
-    fetchVerificationRequestAdmin(id, adminToken)
-      .then(setRequest)
-      .catch((e: unknown) => {
+      try {
+        setRequest(await fetchVerificationRequestAdmin(id, adminToken));
+      } catch (e: unknown) {
         const msg = (e as Error).message || "Failed to load verification request";
         setError(msg);
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [adminToken, id]);
 
   // ── Lazy-load supporting documents once expanded ────────────────────────────
@@ -136,7 +140,9 @@ export default function AdminVerificationDetail({
 
   useEffect(() => {
     if (documentsExpanded && request && request.documentCount > 0) {
-      loadDocuments();
+      (async () => {
+        loadDocuments();
+      })();
     }
   }, [documentsExpanded, request, loadDocuments]);
 

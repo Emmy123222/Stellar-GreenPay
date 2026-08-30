@@ -22,24 +22,24 @@ export default function ComparePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!ids || typeof ids !== "string") return;
+    (async () => {
+      if (!ids || typeof ids !== "string") return;
 
-    const idList = ids.split(",").slice(0, 3).map((id) => id.trim()).filter(Boolean);
-    if (idList.length === 0) {
-      setError("No valid project IDs provided. Use ?ids=uuid1,uuid2,uuid3");
-      setLoading(false);
-      return;
-    }
-
-    Promise.all(idList.map((id) => fetchProject(id)))
-      .then((results) => {
-        setProjects(results);
+      const idList = ids.split(",").slice(0, 3).map((id) => id.trim()).filter(Boolean);
+      if (idList.length === 0) {
+        setError("No valid project IDs provided. Use ?ids=uuid1,uuid2,uuid3");
         setLoading(false);
-      })
-      .catch(() => {
+        return;
+      }
+
+      try {
+        setProjects(await Promise.all(idList.map((id) => fetchProject(id))));
+        setLoading(false);
+      } catch {
         setError("Failed to load one or more projects. Check the IDs and try again.");
         setLoading(false);
-      });
+      }
+    })();
   }, [ids]);
 
   if (loading) {

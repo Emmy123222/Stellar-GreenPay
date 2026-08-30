@@ -60,7 +60,9 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
 
   useEffect(() => {
     if (!router.isReady || !jobId) return;
-    load();
+    (async () => {
+      load();
+    })();
   }, [router.isReady, jobId, load]);
 
   const isClient =

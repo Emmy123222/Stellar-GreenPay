@@ -458,10 +458,10 @@ export default function DonorProfilePage() {
     if (!publicKey) return;
 
     let cancelled = false;
-    setLoading(true);
-    setNotFound(false);
 
     (async () => {
+      setLoading(true);
+      setNotFound(false);
       try {
         const [prof, hist] = await Promise.all([
           fetchProfile(publicKey),

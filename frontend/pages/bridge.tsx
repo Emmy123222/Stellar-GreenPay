@@ -17,7 +17,15 @@ export default function BridgePage() {
   const [destinationChain, setDestinationChain] = useState<"stellar">("stellar");
   const [ethBalance, setEthBalance] = useState<string | null>(null);
   const [stellarAddress, setStellarAddress] = useState<string | null>(null);
-  const [bridgeHistory, setBridgeHistory] = useState<any[]>([]);
+  const [bridgeHistory, setBridgeHistory] = useState<any[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const history = localStorage.getItem("bridge_history");
+      return history ? JSON.parse(history) : [];
+    } catch {
+      return [];
+    }
+  });
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(1);
   const [projects, setProjects] = useState<ClimateProject[]>([]);
@@ -25,12 +33,6 @@ export default function BridgePage() {
   const [bridgeAmount, setBridgeAmount] = useState<string>("");
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadStellarAddress();
-    loadBridgeHistory();
-    loadProjects();
-  }, []);
 
   const loadProjects = async () => {
     try {
@@ -50,13 +52,12 @@ export default function BridgePage() {
     }
   };
 
-  const loadBridgeHistory = () => {
-    // Load from localStorage
-    const history = localStorage.getItem("bridge_history");
-    if (history) {
-      setBridgeHistory(JSON.parse(history));
-    }
-  };
+  useEffect(() => {
+    void (async () => {
+      await loadStellarAddress();
+      await loadProjects();
+    })();
+  }, []);
 
   const connectMetaMask = async () => {
     if (typeof window === "undefined" || !(window as any).ethereum) {

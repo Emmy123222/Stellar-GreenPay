@@ -39,6 +39,12 @@ import type {
 } from "@/utils/types";
 import { useWishlist } from "@/hooks/useWishlist";
 
+const CELEBRATION_DECOR = Array.from({ length: 50 }).map(() => ({
+  left: `${Math.random() * 100}%`,
+  animationDelay: `${Math.random() * 3}s`,
+  animationDuration: `${3 + Math.random() * 2}s`,
+}));
+
 interface ProjectDetailProps {
   publicKey: string | null;
   onConnect: (pk: string) => void;
@@ -75,7 +81,7 @@ export default function ProjectDetail({
   const [subscriberCount, setSubscriberCount] = useState<number | null>(null);
   const [showMonthlySetup, setShowMonthlySetup] = useState(false);
   const [subEmail, setSubEmail] = useState("");
-  const [countdownNow, setCountdownNow] = useState(Date.now());
+  const [countdownNow, setCountdownNow] = useState(0);
   const [campaignForm, setCampaignForm] = useState({
     title: "",
     goalXLM: "",
@@ -127,12 +133,14 @@ export default function ProjectDetail({
   }, [id, publicKey, router]);
 
   useEffect(() => {
-    if (!project) return;
-    setDiscussionLoading(true);
-    fetchProjectDiscussion(project.walletAddress, 50)
-      .then(setDiscussion)
-      .catch(() => setDiscussion([]))
-      .finally(() => setDiscussionLoading(false));
+    (() => {
+      if (!project) return;
+      setDiscussionLoading(true);
+      fetchProjectDiscussion(project.walletAddress, 50)
+        .then(setDiscussion)
+        .catch(() => setDiscussion([]))
+        .finally(() => setDiscussionLoading(false));
+    })();
   }, [project?.walletAddress]);
 
   useEffect(() => {
@@ -798,9 +806,9 @@ export default function ProjectDetail({
                 i % 2 === 0 ? "celebration-leaf" : "celebration-confetti"
               }
               style={{
-                left: `${Math.random() * 100}%`,
-                animationDelay: `${Math.random() * 3}s`,
-                animationDuration: `${3 + Math.random() * 2}s`,
+                left: CELEBRATION_DECOR[i].left,
+                animationDelay: CELEBRATION_DECOR[i].animationDelay,
+                animationDuration: CELEBRATION_DECOR[i].animationDuration,
               }}
             />
           ))}

@@ -21,19 +21,22 @@ export default function FreelancerProfilePage() {
 
   useEffect(() => {
     if (!router.isReady || !publicKey) return;
-    setLoading(true);
-    setNotFound(false);
-    fetchFreelancerProfile(publicKey)
-      .then(setProfile)
-      .catch((err) => {
+    (async () => {
+      setLoading(true);
+      setNotFound(false);
+      try {
+        setProfile(await fetchFreelancerProfile(publicKey));
+      } catch (err: any) {
         const status = err?.response?.status;
         if (status === 404) {
           setNotFound(true);
         } else {
           setNotFound(true);
         }
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [router.isReady, publicKey]);
 
   const displayName = profile?.displayName || shortenAddress(publicKey ?? "");

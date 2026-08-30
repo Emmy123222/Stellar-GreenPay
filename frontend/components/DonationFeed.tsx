@@ -25,17 +25,21 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
 
   // Load initial donation data from the backend API
   useEffect(() => {
-    setLoading(true);
-    fetchProjectDonations(projectId, 10)
-      .then(({ donations: data, nextCursor: cursor }) => {
+    (async () => {
+      setLoading(true);
+      try {
+        const { donations: data, nextCursor: cursor } = await fetchProjectDonations(projectId, 10);
         setDonations(data);
         setNextCursor(cursor);
         if (data.length > 0) {
           latestIdRef.current = data[0].id;
         }
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [projectId, refreshKey]);
 
   // Handle incoming SSE payment

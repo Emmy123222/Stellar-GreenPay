@@ -28,7 +28,9 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
 
   useEffect(() => {
     if (!publicKey) return;
-    loadProjects();
+    (async () => {
+      loadProjects();
+    })();
   }, [publicKey]);
 
   const handleApprove = async (p: ClimateProject) => {

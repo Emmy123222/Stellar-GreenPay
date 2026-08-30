@@ -149,25 +149,29 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
-    setLoading(true);
-    setError(null);
+    (async () => {
+      setLoading(true);
+      setError(null);
 
-    Promise.all([
-      fetchProject(projectId),
-      fetchProjectDonations(projectId, 200).then((r) => r.donations),
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/projects/${projectId}/milestones`).then(r => r.json()),
-      fetchProjectMatches(projectId).catch(() => []),
-    ])
-      .then(([p, d, m, mt]) => {
+      try {
+        const [p, d, m, mt] = await Promise.all([
+          fetchProject(projectId),
+          fetchProjectDonations(projectId, 200).then((r) => r.donations),
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/projects/${projectId}/milestones`).then(r => r.json()),
+          fetchProjectMatches(projectId).catch(() => []),
+        ]);
         setProject(p);
         setDonations(d);
         setMilestones(m.data || []);
         setMatches(mt);
         setWebhookUrl(p.webhookUrl || "");
         setWebhookSecret(p.webhookSecret || "");
-      })
-      .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
-      .finally(() => setLoading(false));
+      } catch (e: unknown) {
+        setError((e as Error).message || "Failed to load project");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [projectId]);
 
   const isOwner = !!publicKey && !!project && publicKey === project.walletAddress;

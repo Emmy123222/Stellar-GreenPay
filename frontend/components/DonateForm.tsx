@@ -23,8 +23,8 @@ const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
 export default function DonateForm({ project, publicKey, initialAmount, initialMessage, onSuccess }: DonateFormProps) {
-  const [amount, setAmount]   = useState("");
-  const [message, setMessage] = useState("");
+  const [amount, setAmount]   = useState(initialAmount ?? "");
+  const [message, setMessage] = useState(initialMessage ?? "");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
   const [step, setStep]       = useState<Step>("idle");
   const [error, setError]     = useState<string | null>(null);
@@ -33,16 +33,6 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!initialAmount) return;
-    setAmount(initialAmount);
-  }, [initialAmount]);
-
-  useEffect(() => {
-    if (!initialMessage) return;
-    setMessage(initialMessage);
-  }, [initialMessage]);
 
   useEffect(() => {
     let mounted = true;

@@ -11,13 +11,13 @@ export function useAutocomplete<T>(
   const [activeIndex, setActiveIndex] = useState(-1);
 
   useEffect(() => {
-    if (query.length < 2) {
-      setResults([]);
-      setIsOpen(false);
-      return;
-    }
-
     const handler = setTimeout(async () => {
+      if (query.length < 2) {
+        setResults([]);
+        setIsOpen(false);
+        return;
+      }
+
       setLoading(true);
       try {
         const data = await fetcher(query);

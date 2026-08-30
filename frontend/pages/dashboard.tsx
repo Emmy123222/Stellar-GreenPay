@@ -66,8 +66,10 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   }, [publicKey, wishlist]);
 
   useEffect(() => {
-    if (!publicKey) return;
-    setDueSubscriptions(getDueMonthlySubscriptions());
+    (() => {
+      if (!publicKey) return;
+      setDueSubscriptions(getDueMonthlySubscriptions());
+    })();
   }, [publicKey]);
 
   const streak = calculateStreak(donations);

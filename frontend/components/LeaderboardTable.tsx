@@ -56,12 +56,17 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
   const xlmUsd = useXlmPrice();
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    fetchLeaderboard(limit, period)
-      .then(setEntries)
-      .catch(() => setError("Could not load leaderboard."))
-      .finally(() => setLoading(false));
+    (async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        setEntries(await fetchLeaderboard(limit, period));
+      } catch {
+        setError("Could not load leaderboard.");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [limit, period]);
 
   if (loading) return (

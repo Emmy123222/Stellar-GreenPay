@@ -93,14 +93,16 @@ export default function VerificationStatusPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const fromQuery = (params.get("wallet") || "").trim();
-    if (STELLAR_ADDRESS_RE.test(fromQuery)) {
-      setWallet(fromQuery);
-      setQueryWallet(fromQuery);
-      void load(fromQuery);
-    }
+    (() => {
+      if (typeof window === "undefined") return;
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = (params.get("wallet") || "").trim();
+      if (STELLAR_ADDRESS_RE.test(fromQuery)) {
+        setWallet(fromQuery);
+        setQueryWallet(fromQuery);
+        void load(fromQuery);
+      }
+    })();
   }, [load]);
 
   function onSubmit(e: React.FormEvent) {

@@ -1,18 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export function useWishlist() {
-  const [wishlist, setWishlist] = useState<string[]>([]);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('wishlist');
+  const [wishlist, setWishlist] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    const stored = window.localStorage.getItem('wishlist');
     if (stored) {
       try {
-        setWishlist(JSON.parse(stored));
+        return JSON.parse(stored);
       } catch (e) {
         console.error('Failed to parse wishlist from localStorage', e);
+        return [];
       }
     }
-  }, []);
+    return [];
+  });
 
   const toggleWishlist = (projectId: string) => {
     setWishlist(prev => {
