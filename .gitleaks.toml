@@ -16,5 +16,6 @@ paths = [
 regexes = [
   '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',
   '''^$''',
-  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)'''
+  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
+  '''(?:^|[^A-Z0-9])(CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC|GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890)(?:$|[^A-Z0-9])'''
 ]
