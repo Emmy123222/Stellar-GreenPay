@@ -273,6 +273,18 @@ components:
           type: string
           format: date-time
 
+    JobStats:
+      type: object
+      properties:
+        totalJobsInEscrow:
+          type: integer
+        totalJobsCompleted:
+          type: integer
+        totalEscrowXLM:
+          type: string
+        totalReleasedXLM:
+          type: string
+
     Rating:
       type: object
       properties:
@@ -1219,7 +1231,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [all, month, year]
+            enum: [all, week, month, year]
             default: all
       responses:
         '200':
@@ -1522,6 +1534,20 @@ paths:
                         items:
                           $ref: '#/components/schemas/Job'
 
+  /api/jobs/stats:
+    get:
+      tags: [Jobs]
+      summary: Get escrow marketplace aggregate metrics
+      operationId: getJobStats
+      description: Returns total jobs in escrow, completed jobs, and aggregate XLM amounts. Cached for 60 seconds.
+      responses:
+        '200':
+          description: Aggregate job statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStats'
+
   /api/jobs/{id}:
     get:
       tags: [Jobs]
@@ -1605,27 +1631,31 @@ paths:
   /api/stats/global:
     get:
       tags: [Stats]
-      summary: Global platform statistics
+      summary: Landing-page hero aggregate statistics
       operationId: getGlobalStats
       responses:
         '200':
-          description: Platform-wide totals
+          description: Aggregate platform totals for the landing page hero
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/Success'
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          totalDonations:
-                            type: integer
-                          totalXLMRaised:
-                            type: string
-                          totalCO2OffsetKg:
-                            type: integer
+                type: object
+                properties:
+                  totalXLMRaised:
+                    type: string
+                    example: "123456.0000000"
+                  totalCO2OffsetKg:
+                    type: integer
+                    example: 98765
+                  totalDonations:
+                    type: integer
+                    example: 4321
+                  totalProjects:
+                    type: integer
+                    example: 42
+                  totalDonors:
+                    type: integer
+                    example: 1234
 
   /api/stats/categories:
     get:

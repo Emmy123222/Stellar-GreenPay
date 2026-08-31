@@ -15,10 +15,29 @@ const envSchema = z.object({
   JWT_SECRET: z.string().optional().default(""),
   ADMIN_USERNAME: z.string().optional().default("admin"),
   ADMIN_PASSWORD: z.string().optional().default(""),
+  ADMIN_API_KEY: z.string().optional().default(""),
+  ADMIN_API_KEYS: z.string().optional().default(""),
   ANTHROPIC_API_KEY: z.string().optional().default(""),
   REDIS_URL: z.string().optional().default("redis://localhost:6379"),
   ENABLE_TURRETS: z.enum(["true", "false"]).optional().default("false"),
   TURRETS_PORT: z.string().optional().default("3001"),
+  // Verification request admin notification target (defaults to EMAIL_FROM).
+  ADMIN_NOTIFICATION_EMAIL: z.string().optional().default(""),
+  // Document storage backend for the /apply form (local|s3|ipfs)
+  STORAGE_BACKEND: z.enum(["local", "s3", "ipfs"]).optional().default("local"),
+  UPLOAD_MAX_BYTES: z.string().optional().default(String(10 * 1024 * 1024)),
+  // Optional S3 / IPFS knobs; only consulted when STORAGE_BACKEND matches.
+  AWS_REGION: z.string().optional().default(""),
+  AWS_ACCESS_KEY_ID: z.string().optional().default(""),
+  AWS_SECRET_ACCESS_KEY: z.string().optional().default(""),
+  S3_BUCKET: z.string().optional().default(""),
+  S3_PUBLIC_URL: z.string().optional().default(""),
+  // Presigned PUT URL TTL in seconds (default: 300)
+  PRESIGN_EXPIRY_SECONDS: z.string().optional().default("300"),
+  IPFS_API_URL: z.string().optional().default(""),
+  IPFS_GATEWAY_URL: z.string().optional().default(""),
+  // Optional Pinata JWT used to pin CIDs after IPFS upload (prevents GC).
+  PINATA_JWT: z.string().optional().default(""),
 });
 
 function validateEnv() {

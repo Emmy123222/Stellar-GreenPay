@@ -7,6 +7,8 @@ const { server: stellarServer } = require("./stellar");
 const pool = require("../db/pool");
 const { v4: uuid } = require("uuid");
 const { computeBadges } = require("./store");
+const { checkAndDeliverMilestones } = require("./webhook");
+const donationEvents = require("./donationEvents");
 const logger = require("../logger");
 
 let lastProcessedLedger = 0;
@@ -177,6 +179,28 @@ async function handleDonation(projectId, op) {
         timestamp: new Date().toISOString()
       });
     }
+
+    // 6. Emit SSE event with enriched payload
+    let projectName = "Unknown Project";
+    let donorBadge = "";
+    try {
+      const projectResult = await client.query("SELECT name FROM projects WHERE id = $1", [projectId]);
+      if (projectResult.rows[0]) projectName = projectResult.rows[0].name;
+    } catch {
+      // best-effort
+    }
+    if (badges.length > 0) {
+      const tier = badges[0].tier;
+      donorBadge = tier.charAt(0).toUpperCase() + tier.slice(1);
+    }
+    donationEvents.emit("new_donation", {
+      projectName,
+      amountXLM: String(amountXLM),
+      donorBadge,
+    });
+
+    // 7. Check milestones asynchronously
+    checkAndDeliverMilestones(projectId).catch(() => {});
   } catch (err) {
     if (inTransaction) await client.query("ROLLBACK");
     logger.error({ event: "indexer_donation_error", project: projectId, txHash, err }, err.message);

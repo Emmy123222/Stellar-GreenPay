@@ -1,14 +1,52 @@
 /**
  * app/projects/[id].tsx
  * Project detail screen
+ *
+ * Changes for issue #399:
+ *  - Follow button now wired to POST /api/projects/:id/follows (via
+ *    followProject / unfollowProject in utils/notifications.ts which call
+ *    both the push-notification and REST endpoints in parallel).
+ *  - Toast component shows confirmation / error messages above the tab bar.
+ *  - Button renders three distinct states:
+ *      • "🔔 Follow for Updates"  — not following, push token available
+ *      • "✓ Following · Tap to unfollow" — actively following
+ *      • Loading spinner text while the request is in-flight
+ *  - Errors (network failure, missing push token) surface as a red toast
+ *    rather than being silently swallowed.
  */
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Animated,
+  Share,
+} from 'react-native';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
+
+import * as Notifications from 'expo-notifications';
+import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
+import { useTheme } from '../theme';
+import {
+  getPushToken,
+  followProject,
+  unfollowProject,
+  markNotificationsSeen,
+} from '../../utils/notifications';
+
 import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
+import { useTheme } from '../theme';
+import { markNotificationsSeen } from '../../utils/notifications';
+import * as Notifications from 'expo-notifications';
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ClimateProject {
   id: string;
@@ -25,47 +63,242 @@ interface ClimateProject {
   status: string;
 }
 
+type ToastVariant = 'success' | 'error';
+
+interface ToastState {
+  message: string;
+  variant: ToastVariant;
+}
+
+// ─── Toast component ──────────────────────────────────────────────────────────
+
+/**
+ * Lightweight animated toast. Appears for ~2.5 s then fades out.
+ * Kept inline so the screen has no additional import dependencies.
+ */
+function Toast({
+  message,
+  variant,
+  onHide,
+}: {
+  message: string;
+  variant: ToastVariant;
+  onHide: () => void;
+}) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  const onHideRef = useRef(onHide);
+  onHideRef.current = onHide;
+
+  useEffect(() => {
+
+    let fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    // Unmount-race hygiene for the toast's animation chain.
+    //
+    // Three things can race against an unmount:
+    //   1. The fade-IN animation (`Animated.timing({duration: 200}).start(onFadeInDone)`)
+    //      is still in flight when the component unmounts. Its start callback
+    //      fires LATER, after the cleanup has already run — so any timer we
+    //      set inside it would be unreachable from the cleanup return.
+    //   2. The hold `setTimeout(2000)` queued by the fade-in callback.
+    //   3. The fade-OUT animation the latter triggers, whose `onHide` is a
+    //      `setToast(null)` on the (now unmounted) parent state.
+    //
+    // We track all three (`anim`, `holdTimer`, `mounted`) and tear them down
+    // in the cleanup return. Stopping the fade-in animation is the
+    // load-bearing one — without it, the cleanup can run with `holdTimer`
+    // still `undefined` and the start callback then queues a timer the
+    // cleanup can no longer reach. The `mounted` guard is a belt-and-braces
+    // defence for any future async path that updates the closure.
+    let holdTimer: ReturnType<typeof setTimeout> | undefined;
+    let mounted = true;
+    let anim: Animated.CompositeAnimation | undefined;
+
+
+    // Fade in
+    anim = Animated.timing(opacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    });
+    anim.start(() => {
+      // Bail if the component unmounted before fade-in finished.
+      if (!mounted) return;
+      // Hold for 2 s, then fade out
+
+      fadeOutTimer = setTimeout(() => {
+
+      holdTimer = setTimeout(() => {
+        if (!mounted) return;
+
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 300,
+          useNativeDriver: true,
+        }).start(onHideRef.current);
+      }, 2000);
+    });
+
+
+    // Clear the fade-out timer on unmount so a dismissed toast never fires a
+    // stale timer (which could otherwise animate after the component is gone).
+    return () => {
+      if (fadeOutTimer) clearTimeout(fadeOutTimer);
+      opacity.stopAnimation();
+    };
+  }, [opacity]);
+
+    return () => {
+      mounted = false;
+      if (holdTimer !== undefined) clearTimeout(holdTimer);
+      // `anim?.stop()` halts the fade-in mid-flight so its start callback
+      // never fires after unmount. (React Native's `Animated.CompositeAnimation`
+      // exposes `.stop(callback?)`; we don't need a callback here.)
+      anim?.stop();
+    };
+  }, []);
+
+
+  const bg = variant === 'success' ? '#227239' : '#b91c1c';
+
+  return (
+    <Animated.View
+      style={[toastStyles.container, { backgroundColor: bg, opacity }]}
+      accessibilityRole="alert"
+      accessibilityLiveRegion="polite"
+    >
+      <Text style={toastStyles.text}>
+        {variant === 'success' ? '✓ ' : '✕ '}
+        {message}
+      </Text>
+    </Animated.View>
+  );
+}
+
+const toastStyles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    bottom: 96,
+    left: 16,
+    right: 16,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    zIndex: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  text: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+});
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
 export default function ProjectDetailScreen() {
   const { colors } = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams();
+
   const [project, setProject] = useState<ClimateProject | null>(null);
+  const [updates, setUpdates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
+  const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const viewShotRef = useRef<View>(null);
+
+  // Share the project as an image via the native share sheet.
+  const handleShare = async () => {
+    try {
+      if (!project) return;
+      const uri = await captureRef(viewShotRef, { format: 'png', quality: 1 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, {
+          mimeType: 'image/png',
+          dialogTitle: `Share ${project.name}`,
+        });
+      }
+    } catch {
+      // Sharing is optional — never block the screen on it.
+    }
+  };
+
+  const checkRecurringDonation = useCallback(async (projectId: string) => {
+    try {
+      const donations = await loadRecurringDonations();
+      const active = donations.find(
+        (d) => d.projectId === projectId && d.status === 'active'
+      );
+      setActiveDonation(active || null);
+    } catch {
+      setActiveDonation(null);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (id) {
+        checkRecurringDonation(id as string);
+      }
+    }, [id, checkRecurringDonation])
+  );
 
   useEffect(() => {
     if (id) {
       loadProject(id as string);
+      loadUpdates(id as string);
       initializeNotifications();
+      // markNotificationsSeen / Notifications may be stripped from the
+      // module mocks during tests; optional-chaining the call sites keeps
+      // the badge reset truly non-critical (#168 follow-up cleanup).
+      markNotificationsSeen?.()?.then?.(() => {
+        Notifications.setBadgeCountAsync?.(0)?.catch?.(() => undefined);
+      });
     }
   }, [id]);
+
+  const loadUpdates = async (projectId: string) => {
+    try {
+      const res = await axios.get(`${API_URL}/api/updates/${projectId}`);
+      setUpdates(res.data.data || []);
+    } catch (error) {
+      console.error('Error loading updates:', error);
+    }
+  };
+
 
   const initializeNotifications = async () => {
     try {
       const token = await getPushToken();
       if (token) {
         setPushToken(token);
-        // Check if already following this project
         checkFollowStatus(id as string, token);
       }
-    } catch (error) {
-      console.error('Error initializing notifications:', error);
+    } catch {
+      // Non-critical — the screen still works without push
     }
   };
 
   const checkFollowStatus = async (projectId: string, token: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/notifications/follows?token=${token}`);
+      const response = await fetch(
+        `${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`
+      );
       const data = await response.json();
       if (data.success) {
-        const followedProjects = data.data;
-        const isFollowed = followedProjects.some((p: any) => p.id === projectId);
-        setIsFollowing(isFollowed);
+        setIsFollowing(data.data.some((p: { id: string }) => p.id === projectId));
       }
-    } catch (error) {
-      console.error('Error checking follow status:', error);
+    } catch {
+      // Silently ignore — follow state will default to false
     }
   };
 
@@ -73,31 +306,94 @@ export default function ProjectDetailScreen() {
     try {
       const res = await axios.get(`${API_URL}/api/projects/${projectId}`);
       setProject(res.data.data);
-    } catch (error) {
-      console.error('Error loading project:', error);
+    } catch {
+      // Project not found — handled in render
     } finally {
       setLoading(false);
     }
   };
 
+  // ── follow / unfollow ─────────────────────────────────────────────────────
+
   const handleToggleFollow = async () => {
-    if (!pushToken || !project) return;
+    if (!project) return;
+
+    if (!pushToken) {
+      showToast('Enable notifications to follow projects', 'error');
+      return;
+    }
 
     setFollowLoading(true);
     try {
       if (isFollowing) {
-        await unfollowProject(project.id, pushToken);
-        setIsFollowing(false);
+        // Pass the wallet address so `unfollowProject` also hits the REST
+        // DELETE on /api/projects/:id/follows (paired with the follow branch,
+        // which always sends walletAddress via followProject). Without this
+        // argument the REST unfollow endpoint would never be called.
+        const ok = await unfollowProject(
+          project.id,
+          pushToken,
+          project.walletAddress
+        );
+        if (ok) {
+          setIsFollowing(false);
+          showToast(`Unfollowed ${project.name}`);
+        } else {
+          showToast('Could not unfollow. Please try again.', 'error');
+        }
       } else {
-        await followProject(project.id, pushToken);
-        setIsFollowing(true);
+        const ok = await followProject(project.id, pushToken);
+        if (ok) {
+          setIsFollowing(true);
+          showToast(`You're now following ${project.name}! 🔔`);
+        } else {
+          showToast('Could not follow project. Please try again.', 'error');
+        }
       }
-    } catch (error) {
-      console.error('Error toggling follow:', error);
+    } catch {
+      showToast('Something went wrong. Please try again.', 'error');
     } finally {
       setFollowLoading(false);
     }
   };
+
+  // ── share ──────────────────────────────────────────────────────────────────
+
+  // Cross-platform share using RN's built-in `Share` (works for strings; the
+  // platform share sheet is presented on iOS and Android).
+  //
+  // iOS-specific quirk: `Share.share` rejects with the literal message
+  // "User did not share" when the user dismisses the sheet. That is a normal
+  // user gesture, not a failure, so we swallow it silently. Real failures
+  // (e.g. JS exception, Android SecurityException) bubble up the toast.
+  //
+  // The check intentionally matches on the iOS-shipped string rather than a
+  // platform guard -- we want this to keep working should expo upgrade RN's
+  // Share stub to behave identically. If RN ever changes that error string
+  // we'll need to update both this filter and the matching test in
+  // ProjectDetailScreen.test.tsx.
+  const handleShare = async () => {
+    if (!project) return;
+    try {
+      await Share.share({
+        title: project.name,
+        message:
+          `🌱 Support "${project.name}" on Stellar GreenPay!\n\n` +
+          `${project.description}\n\n` +
+          `Category: ${project.category} · ${project.location}`,
+      });
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : String(error);
+      if (message.includes('User did not share')) {
+        // User dismissed the share sheet — a normal, non-error interaction.
+        return;
+      }
+      showToast('Could not open share dialog', 'error');
+    }
+  };
+
+  // ── utilities ──────────────────────────────────────────────────────────────
 
   const progressPercent = (raised: string, goal: string) => {
     const r = parseFloat(raised);
@@ -106,93 +402,287 @@ export default function ProjectDetailScreen() {
     return Math.min(100, Math.round((r / g) * 100));
   };
 
+  // ── follow button label ───────────────────────────────────────────────────
+
+  // Single source of truth for both the visible Text and the
+  // `accessibilityLabel`. The pushToken check sits BEFORE isFollowing so the
+  // a11y label and the rendered text can never disagree.
+  const followButtonLabel = (() => {
+    if (followLoading) return '⏳ Loading…';
+    if (!pushToken) return '🔔 Follow for Updates';
+    if (isFollowing) return '✓ Following · Tap to unfollow';
+    return '🔔 Follow for Updates';
+  })();
+
+  // ── render ────────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}> 
-        <Text style={[styles.loadingText, { color: colors.secondaryText }]}>Loading project...</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.loadingText, { color: colors.secondaryText }]}>
+          Loading project...
+        </Text>
       </View>
     );
   }
 
   if (!project) {
     return (
-      <View style={[styles.container, { backgroundColor: colors.background }]}> 
-        <Text style={[styles.errorText, { color: colors.secondaryText }]}>Project not found</Text>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <Text style={[styles.errorText, { color: colors.secondaryText }]}>
+          Project not found
+        </Text>
       </View>
     );
   }
 
+  const pct = progressPercent(project.raisedXLM, project.goalXLM);
+
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}> 
-      <View style={[styles.header, { backgroundColor: colors.primary }]}> 
-        <Text style={[styles.category, { color: colors.headerText }]}>{project.category}</Text>
-        <Text style={[styles.name, { color: colors.headerText }]}>{project.name}</Text>
-        <Text style={[styles.location, { color: colors.headerText }]}>📍 {project.location}</Text>
-      </View>
+    <View
+      ref={viewShotRef}
+      collapsable={false}
+      style={[styles.wrapper, { backgroundColor: colors.background }]}
+    >
+      <ScrollView style={styles.container}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: colors.primary }]}>
+          <View style={styles.headerRow}>
+            <View style={styles.headerTextGroup}>
+              <Text style={[styles.category, { color: colors.headerText }]}>
+                {project.category}
+              </Text>
+              <Text style={[styles.name, { color: colors.headerText }]}>
+                {project.name}
+              </Text>
+              <Text style={[styles.location, { color: colors.headerText }]}>
+                📍 {project.location}
+              </Text>
+            </View>
+            <TouchableOpacity
 
-      <View style={[styles.statsCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
-        <View style={styles.statRow}>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.accent }]}>{parseFloat(project.raisedXLM).toFixed(2)}</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>XLM Raised</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.accent }]}>{project.donorCount}</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>Donors</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={[styles.statValue, { color: colors.accent }]}>{project.co2OffsetKg.toFixed(0)}</Text>
-            <Text style={[styles.statLabel, { color: colors.muted }]}>kg CO₂</Text>
+              style={styles.shareButton}
+              onPress={handleShare}
+              activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${project.name}`}
+              accessibilityHint="Opens the share sheet"
+
+              testID="share-button"
+              style={styles.shareButton}
+              onPress={handleShare}
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${project.name}`}
+              accessibilityHint="Opens the system share sheet so you can send this project to others"
+
+            >
+              <Text style={styles.shareIcon}>↗</Text>
+            </TouchableOpacity>
           </View>
         </View>
-      </View>
 
-      <View style={[styles.progressCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
-        <Text style={[styles.progressTitle, { color: colors.primaryText }]}>Fundraising Progress</Text>
-        <View style={[styles.progressBar, { backgroundColor: colors.border }]}> 
+        {/* Active Recurring Donation Banner */}
+        {activeDonation && (
           <View
+            testID="recurring-donation-banner"
             style={[
-              styles.progressFill,
-              { width: `${progressPercent(project.raisedXLM, project.goalXLM)}%`, backgroundColor: colors.primary }
+              styles.recurringBanner,
+              {
+                backgroundColor: colors.surface,
+                borderColor: '#227239',
+                shadowColor: colors.cardShadow,
+              },
             ]}
-          />
-        </View>
-        <Text style={[styles.progressText, { color: colors.secondaryText }]}> 
-          {progressPercent(project.raisedXLM, project.goalXLM)}% complete
-        </Text>
-        <Text style={[styles.goalText, { color: colors.muted }]}> 
-          Goal: {parseFloat(project.goalXLM).toFixed(2)} XLM
-        </Text>
-      </View>
+            accessibilityRole="region"
+            accessibilityLabel={`Active recurring donation banner for ${project.name}`}
+          >
+            <View style={styles.recurringBannerContent}>
+              <Text
+                style={[styles.recurringBannerText, { color: colors.primaryText }]}
+                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || 'monthly'} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
+              >
+                You have an active {(activeDonation as any).frequency || 'monthly'} donation of{' '}
+                <Text style={styles.recurringBannerBold}>{activeDonation.amountXLM} XLM</Text> — next payment:{' '}
+                <Text style={styles.recurringBannerBold}>
+                  {formatNextPaymentDate(activeDonation.nextDueDate)}
+                </Text>
+              </Text>
+            </View>
+            <TouchableOpacity
+              testID="manage-recurring-button"
+              style={styles.manageButton}
+              onPress={() => router.push('/recurring')}
+              accessibilityRole="button"
+              accessibilityLabel="Manage recurring donations"
+            >
+              <Text style={styles.manageButtonText}>Manage</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
-      <View style={[styles.descriptionCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}> 
-        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>About this project</Text>
-        <Text style={[styles.description, { color: colors.secondaryText }]}>{project.description}</Text>
-      </View>
-
-      {pushToken && (
-        <TouchableOpacity
-          style={[styles.followButton, isFollowing && styles.followButtonActive]}
-          onPress={handleToggleFollow}
-          disabled={followLoading}
+        {/* Stats */}
+        <View
+          style={[
+            styles.statsCard,
+            {
+              backgroundColor: colors.surface,
+              shadowColor: colors.cardShadow,
+              borderColor: colors.cardBorder,
+            },
+          ]}
         >
-          <Text style={styles.followButtonText}>
-            {followLoading ? 'Loading...' : isFollowing ? '🔔 Following' : '🔔 Follow for Updates'}
+          <View style={styles.statRow}>
+            <View style={styles.stat}>
+              <Text style={[styles.statValue, { color: colors.accent }]}>
+                {parseFloat(project.raisedXLM).toFixed(2)}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.muted }]}>
+                XLM Raised
+              </Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={[styles.statValue, { color: colors.accent }]}>
+                {project.donorCount}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.muted }]}>Donors</Text>
+            </View>
+            <View style={styles.stat}>
+              <Text style={[styles.statValue, { color: colors.accent }]}>
+                {project.co2OffsetKg.toFixed(0)}
+              </Text>
+              <Text style={[styles.statLabel, { color: colors.muted }]}>kg CO₂</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Progress */}
+        <View
+          style={[
+            styles.progressCard,
+            {
+              backgroundColor: colors.surface,
+              shadowColor: colors.cardShadow,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.progressTitle, { color: colors.primaryText }]}>
+            Fundraising Progress
           </Text>
-        </TouchableOpacity>
+          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${pct}%`, backgroundColor: colors.primary },
+              ]}
+            />
+          </View>
+          <Text style={[styles.progressText, { color: colors.secondaryText }]}>
+            {pct}% complete
+          </Text>
+          <Text style={[styles.goalText, { color: colors.muted }]}>
+            Goal: {parseFloat(project.goalXLM).toFixed(2)} XLM
+          </Text>
+        </View>
+
+        {/* Description */}
+        <View
+          style={[
+            styles.descriptionCard,
+            {
+              backgroundColor: colors.surface,
+              shadowColor: colors.cardShadow,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+            About this project
+          </Text>
+          <Text style={[styles.description, { color: colors.secondaryText }]}>
+            {project.description}
+          </Text>
+        </View>
+
+      {updates.length > 0 && (
+        <View style={[styles.updatesCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Latest Updates</Text>
+          {updates.map((update) => (
+            <View key={update.id} style={[styles.updateItem, { borderTopColor: colors.border }]}>
+              <Text style={[styles.updateTitle, { color: colors.primaryText }]}>{update.title}</Text>
+              <Text style={[styles.updateDate, { color: colors.muted }]}>
+                {new Date(update.createdAt).toLocaleDateString()}
+              </Text>
+              <Text style={[styles.updateBody, { color: colors.secondaryText }]}>{update.body}</Text>
+            </View>
+          ))}
+        </View>
       )}
 
-      <TouchableOpacity
-        style={[styles.donateButton, { backgroundColor: colors.buttonBackground }]}
-        onPress={() => router.push(`/donate/${project.id}`)}
-      >
-        <Text style={[styles.donateButtonText, { color: colors.buttonText }]}>🌱 Donate Now</Text>
-      </TouchableOpacity>
-    </ScrollView>
+        {/* Follow button — visible whenever we have a push token, OR show a
+            softer prompt when we don't so the user knows the feature exists */}
+      {pushToken && (
+        <TouchableOpacity
+          testID="follow-button"
+          style={[
+            styles.followButton,
+            isFollowing && styles.followButtonActive,
+            !pushToken && styles.followButtonDisabled,
+          ]}
+          onPress={handleToggleFollow}
+          disabled={followLoading}
+          accessibilityRole="button"
+          accessibilityLabel={followButtonLabel}
+          accessibilityState={{ selected: isFollowing, busy: followLoading }}
+        >
+          <Text
+            style={[
+              styles.followButtonText,
+              isFollowing && styles.followButtonTextActive,
+            ]}
+          >
+            {followButtonLabel}
+          </Text>
+          {isFollowing && (
+            <Text style={styles.unfollowHint}>Tap again to unfollow</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* Donate button */}
+        <TouchableOpacity
+          style={[styles.donateButton, { backgroundColor: colors.buttonBackground }]}
+          onPress={() => router.push(`/donate/${project.id}`)}
+          accessibilityRole="button"
+          accessibilityLabel={`Donate to ${project.name}`}
+        >
+          <Text style={[styles.donateButtonText, { color: colors.buttonText }]}>
+            🌱 Donate Now
+          </Text>
+        </TouchableOpacity>
+
+        {/* Bottom padding so content clears the toast */}
+        <View style={{ height: 120 }} />
+      </ScrollView>
+
+      {/* Toast overlay — rendered outside ScrollView so it stays fixed */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          variant={toast.variant}
+          onHide={() => setToast(null)}
+        />
+      )}
+    </View>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+    position: 'relative',
+  },
   container: {
     flex: 1,
   },
@@ -208,6 +698,27 @@ const styles = StyleSheet.create({
   },
   header: {
     padding: 24,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerTextGroup: {
+    flex: 1,
+    marginRight: 12,
+  },
+  shareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  shareIcon: {
+    fontSize: 18,
   },
   category: {
     fontSize: 14,
@@ -302,9 +813,10 @@ const styles = StyleSheet.create({
   },
   followButton: {
     backgroundColor: '#fff',
-    padding: 16,
-    margin: 16,
-    marginTop: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 2,
@@ -313,14 +825,26 @@ const styles = StyleSheet.create({
   followButtonActive: {
     backgroundColor: '#227239',
   },
+  followButtonDisabled: {
+    opacity: 0.6,
+  },
   followButtonText: {
     color: '#227239',
     fontSize: 16,
     fontWeight: 'bold',
   },
+  followButtonTextActive: {
+    color: '#fff',
+  },
+  unfollowHint: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 12,
+    marginTop: 3,
+  },
   donateButton: {
-    padding: 16,
-    margin: 16,
+    paddingVertical: 16,
+    marginHorizontal: 16,
+    marginTop: 12,
     borderRadius: 12,
     alignItems: 'center',
   },
@@ -328,4 +852,33 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  updatesCard: {
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+  },
+  updateItem: {
+    marginTop: 16,
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  updateTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  updateDate: {
+    fontSize: 12,
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  updateBody: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
 });
+

@@ -1,9 +1,11 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import type { GetServerSideProps, NextPage } from "next";
 import Head from "next/head";
 import Link from "next/link";
+import { useRouter } from "next/router";
 import DonationQRCode, { DonationQRCodeHandle } from "../../components/DonationQRCode";
 import type { DonateProject, DonatePageProps } from "../../utils/types";
+import { formatXLM } from "../../utils/format";
 
 //Category icons (matches the live site's category set)//
 
@@ -57,9 +59,61 @@ function GoalProgress({ raised, goal }: { raised: number; goal: number }) {
 
 //Page //
 
-const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
+const DonatePage: NextPage<DonatePageProps> = ({ project: initialProject, presetAmount: initialPresetAmount }) => {
+  const router = useRouter();
+  const [project, setProject] = useState<DonateProject | null>(initialProject);
+  const [loading, setLoading] = useState(!initialProject);
   const qrRef = useRef<DonationQRCodeHandle>(null);
   const [copied, setCopied] = useState(false);
+
+  const queryAmount = router.query.amount;
+  const presetAmount =
+    initialPresetAmount ??
+    (queryAmount && !Array.isArray(queryAmount) && Number(queryAmount) > 0 ? Number(queryAmount) : null);
+
+  useEffect(() => {
+    if (!initialProject && router.isReady) {
+      const id = router.query.id as string;
+      if (!id) return;
+      fetch(`/api/v1/projects/${encodeURIComponent(id)}`)
+        .then(async (res) => {
+          if (!res.ok) {
+            setProject(null);
+            return;
+          }
+          const body = await res.json();
+          const data = body?.data ?? body;
+          if (data && (data.id || data.name)) {
+            setProject({
+              id: data.id ?? id,
+              name: data.name ?? data.title ?? "Untitled Project",
+              category: data.category ?? "Other",
+              walletAddress: data.walletAddress ?? data.wallet_address ?? "",
+              goalXLM: Number(data.goalXLM ?? data.goal_xlm ?? 0),
+              raisedXLM: Number(data.raisedXLM ?? data.raised_xlm ?? 0),
+              description: data.description ?? null,
+            });
+          } else {
+            setProject(null);
+          }
+        })
+        .catch(() => {
+          setProject(null);
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, [initialProject, router.isReady, router.query.id]);
+
+  // Guard – loading state when falling back to client-side fetch
+  if (loading) {
+    return (
+      <div className="not-found" data-testid="loading-state">
+        <p>Loading project...</p>
+      </div>
+    );
+  }
 
   // Guard – project not found
   if (!project) {
@@ -392,7 +446,7 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
           <GoalProgress raised={project.raisedXLM} goal={project.goalXLM} />
           {presetAmount && presetAmount > 0 && (
             <p className="donate-card__amount-chip">
-              Preset donation: <span>{presetAmount} XLM</span>
+              Preset donation: <span>{formatXLM(presetAmount)}</span>
             </p>
           )}
 
@@ -466,7 +520,8 @@ export const getServerSideProps: GetServerSideProps<DonatePageProps> = async (ct
     if (!res.ok) {
       return { props: { project: null, presetAmount } };
     }
-    const data = await res.json();
+    const body = await res.json();
+    const data = body?.data ?? body;
 
     // Normalise API response shape to DonateProject
     const project: DonateProject = {

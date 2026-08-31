@@ -17,15 +17,20 @@ interface DonationFeedProps {
 
 export default function DonationFeed({ projectId, walletAddress, refreshKey = 0, onNewDonation }: DonationFeedProps) {
   const [donations, setDonations] = useState<Donation[]>([]);
-  const [loading,   setLoading]   = useState(true);
+  // Rather than flipping a `loading` flag synchronously inside the effect
+  // (which triggers a cascading render), `loading` is derived by comparing
+  // the request that's currently in flight to the last one that resolved.
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const latestIdRef = useRef<string | null>(null);
 
+  const requestKey = `${projectId}:${refreshKey}`;
+  const loading = loadedRequestKey !== requestKey;
+
   // Load initial donation data from the backend API
   useEffect(() => {
-    setLoading(true);
     fetchProjectDonations(projectId, 10)
       .then(({ donations: data, nextCursor: cursor }) => {
         setDonations(data);
@@ -35,8 +40,8 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
         }
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [projectId, refreshKey]);
+      .finally(() => setLoadedRequestKey(requestKey));
+  }, [projectId, refreshKey, requestKey]);
 
   // Handle incoming SSE payment
   const handleNewPayment = useCallback((payment: {
@@ -125,7 +130,7 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
           Listening for live donations…
         </div>
       )}
-      <p className="text-center text-[#5a7a5a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
+      <p className="text-center text-[#5a7a5a] dark:text-[#8aaa8a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
     </div>
   );
 
@@ -166,9 +171,9 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
                 </span>
               )}
             </div>
-            {d.message && <p className="text-xs text-[#5a7a5a] mt-0.5 italic font-body">&quot;{d.message}&quot;</p>}
+            {d.message && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-0.5 italic font-body">&quot;{d.message}&quot;</p>}
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-xs text-[#8aaa8a] font-body">{timeAgo(d.createdAt)}</span>
+              <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</span>
               <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
                 className="text-xs text-forest-500 hover:text-forest-700 transition-colors font-body">
                 View tx ↗

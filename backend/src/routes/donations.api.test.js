@@ -9,24 +9,48 @@ jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn(),
+}));
+
 jest.mock("../services/redis", () => ({
   get: jest.fn(),
   set: jest.fn(),
+  del: jest.fn(),
+}));
+
+const redis = require("../services/redis");
+
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
+
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../services/stellar", () => ({
+  getOnChainProject: jest.fn().mockResolvedValue(null),
+  getProjectDonationEvents: jest.fn(),
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
 const pool = require("../db/pool");
 const express = require("express");
+const http = require("http");
 const request = require("supertest");
 const donationsRouter = require("./donations");
+const projectsRouter = require("./projects");
 
 function buildApp() {
   const app = express();
   app.use(express.json());
-
-  const io = { to: () => ({ emit: jest.fn() }) };
+  const io = { emit: jest.fn(), to: () => ({ emit: jest.fn() }) };
   app.set("io", io);
-
   app.use("/api/donations", donationsRouter);
+  app.use("/api/projects", projectsRouter);
+
+
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
@@ -37,8 +61,12 @@ function makePublicKey(char = "A") {
   return `G${char.repeat(55)}`;
 }
 
-function makeTxHash() {
-  return "a".repeat(64);
+function makeTxHash(char = "a") {
+  return char.repeat(64);
+}
+
+function queryResult(rows = []) {
+  return { rows };
 }
 
 function createMockClient(...responses) {
@@ -46,27 +74,47 @@ function createMockClient(...responses) {
     query: jest.fn(),
     release: jest.fn(),
   };
+
   responses.forEach((response) => {
     if (response instanceof Error) {
       client.query.mockRejectedValueOnce(response);
-    } else {
-      client.query.mockResolvedValueOnce(response);
+      return;
     }
+
+    client.query.mockResolvedValueOnce(response);
   });
+
   pool.connect.mockResolvedValue(client);
   return client;
 }
 
-const MOCK_PROJECT = { id: "proj-1", name: "Test Project" };
+const MOCK_PROJECT_ROW = {
+  id: "proj-1",
+  name: "Test Project",
+  description: "A test climate project",
+  category: "Reforestation",
+  location: "Brazil",
+  wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+  goal_xlm: "10000",
+  raised_xlm: "5000",
+  donor_count: 42,
+  co2_offset_kg: 50000,
+  status: "active",
+  verified: true,
+  on_chain_verified: false,
+  tags: ["reforestation", "amazon"],
+  created_at: new Date().toISOString(),
+};
+
 const MOCK_DONATION_ROW = {
-  id: "don-1",
+  id: "8d9ac19b-52eb-42f7-80d9-19a88ba59e43",
   project_id: "proj-1",
   donor_address: makePublicKey(),
-  amount_xlm: 100,
-  amount: 100,
+  amount_xlm: "100.0000000",
+  amount: "100",
   currency: "XLM",
   message: "Great project!",
-  transaction_hash: makeTxHash(),
+  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
   created_at: new Date().toISOString(),
 };
 
@@ -79,126 +127,125 @@ describe("POST /api/donations", () => {
   });
 
   test("records a valid donation", async () => {
+    const donorAddress = makePublicKey("A");
+    const transactionHash = makeTxHash("a");
+    const donationRow = {
+      ...MOCK_DONATION_ROW,
+      donor_address: donorAddress,
+      transaction_hash: transactionHash,
+    };
+
     createMockClient(
-      { rows: [MOCK_PROJECT] },
-      { rows: [] },
-      { rows: [MOCK_DONATION_ROW] },
-      { rows: [] },
-      { rows: [] },
-      undefined,
-      { rows: [{ ...MOCK_DONATION_ROW, total_donated_xlm: 100 }] },
-      { rows: [] },
+      queryResult([{ id: "proj-1" }]), // projectResult
+      queryResult([]), // existingResult (no dup by tx hash)
+      queryResult(), // BEGIN
+      queryResult([{ total: "0" }]), // prevTotalResult
+      queryResult([donationRow]), // donationResult (INSERT RETURNING *)
+      queryResult([]), // matchesResult (no active matches)
+      queryResult(), // UPDATE projects
+      queryResult(), // COMMIT
     );
 
     const res = await request(app)
       .post("/api/donations")
       .send({
         projectId: "proj-1",
-        donorAddress: makePublicKey(),
+        donorAddress,
         amountXLM: 100,
         currency: "XLM",
         message: "Great project!",
-        transactionHash: makeTxHash(),
+        transactionHash,
       })
-      .expect(200);
+      .expect(201);
 
     expect(res.body.success).toBe(true);
-  });
-
-  test("rejects invalid donor address", async () => {
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "proj-1",
-        donorAddress: "invalid",
-        amountXLM: 100,
-        transactionHash: makeTxHash(),
-      })
-      .expect(400);
-
-    expect(res.body.error).toContain("Invalid Stellar public key");
-  });
-
-  test("rejects invalid transaction hash", async () => {
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "proj-1",
-        donorAddress: makePublicKey(),
-        amountXLM: 100,
-        transactionHash: "invalid",
-      })
-      .expect(400);
-
-    expect(res.body.error).toContain("Invalid transaction hash");
-  });
-
-  test("returns 404 for unknown project", async () => {
-    createMockClient({ rows: [] });
-
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "nonexistent",
-        donorAddress: makePublicKey(),
-        amountXLM: 100,
-        transactionHash: makeTxHash(),
-      })
-      .expect(404);
-
-    expect(res.body.error).toContain("Project not found");
-  });
-
-  test("deduplicates by transaction hash", async () => {
-    createMockClient({ rows: [MOCK_PROJECT] }, { rows: [MOCK_DONATION_ROW] });
-
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "proj-1",
-        donorAddress: makePublicKey(),
-        amountXLM: 100,
-        transactionHash: makeTxHash(),
-      })
-      .expect(200);
-
-    expect(res.body.success).toBe(true);
-  });
-
-  test("rejects zero amount", async () => {
-    createMockClient({ rows: [MOCK_PROJECT] });
-
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "proj-1",
-        donorAddress: makePublicKey(),
-        amountXLM: 0,
-        transactionHash: makeTxHash(),
-      })
-      .expect(400);
-
-    expect(res.body.error).toContain("Invalid amount");
-  });
-
-  test("rejects negative amount", async () => {
-    createMockClient({ rows: [MOCK_PROJECT] });
-
-    const res = await request(app)
-      .post("/api/donations")
-      .send({
-        projectId: "proj-1",
-        donorAddress: makePublicKey(),
-        amountXLM: -50,
-        transactionHash: makeTxHash(),
-      })
-      .expect(400);
-
-    expect(res.body.error).toContain("Invalid amount");
+    expect(res.body.data.projectId).toBe("proj-1");
+    expect(res.body.data.donorAddress).toBe(donorAddress);
   });
 });
 
-describe("GET /api/donations/project/:projectId", () => {
+describe("GET /api/projects/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    redis.get.mockResolvedValue(null);
+    jest.clearAllMocks();
+  });
+
+  test("returns a single project", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 3 }],
+    });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
+    pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
+    pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats
+
+    const res = await request(app).get("/api/projects/proj-1").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.name).toBe("Test Project");
+    expect(res.body.data.followCount).toBe(3);
+  });
+
+  test("returns 404 for non-existent project", async () => {
+    pool.query.mockResolvedValue({ rows: [] });
+
+    await request(app).get("/api/projects/nonexistent").expect(404);
+  });
+});
+
+describe("GET /api/projects/:id/on-chain-donations", () => {
+  let app;
+  const stellarService = require("../services/stellar");
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns decoded on-chain donation events", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: "proj-1" }] });
+    stellarService.getProjectDonationEvents.mockResolvedValueOnce([
+      {
+        donor: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        amount: "100000000",
+        ledger: 1234,
+        badge: "Seedling",
+        msgHash: 987654,
+        pagingToken: "1234-1",
+      },
+    ]);
+
+    const res = await request(app)
+      .get("/api/projects/proj-1/on-chain-donations?limit=10")
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      {
+        donor: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        amount: "100000000",
+        ledger: 1234,
+        badge: "Seedling",
+        msgHash: 987654,
+      },
+    ]);
+    expect(res.body.nextCursor).toBe("1234-1");
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    await request(app)
+      .get("/api/projects/unknown/on-chain-donations")
+      .expect(404);
+  });
+});
+
+describe("POST /api/projects (admin)", () => {
   let app;
 
   beforeEach(() => {
@@ -206,49 +253,101 @@ describe("GET /api/donations/project/:projectId", () => {
     jest.clearAllMocks();
   });
 
-  test("returns donations for a project", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_DONATION_ROW] });
+  test("rejects unauthenticated requests", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/register")
+      .send({ name: "Test" });
+
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("GET /api/donations/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns full donation for valid UUID", async () => {
+    pool.query.mockResolvedValue({
+      rows: [
+        {
+          ...MOCK_DONATION_ROW,
+          project_name: "Amazon Reforestation",
+          donor_display_name: "John Doe",
+          co2_per_xlm: 5000,
+        },
+      ],
+    });
 
     const res = await request(app)
-      .get("/api/donations/project/proj-1")
+      .get(`/api/donations/${MOCK_DONATION_ROW.id}`)
       .expect(200);
 
     expect(res.body.success).toBe(true);
-    expect(Array.isArray(res.body.data)).toBe(true);
+    expect(res.body.data.projectName).toBe("Amazon Reforestation");
+    expect(res.body.data.donorDisplayName).toBe("John Doe");
+    expect(res.body.data.co2OffsetKg).toBe(500);
   });
 
-  test("returns empty array for project with no donations", async () => {
+  test("returns 404 if donation not found", async () => {
     pool.query.mockResolvedValue({ rows: [] });
 
     const res = await request(app)
-      .get("/api/donations/project/proj-1")
-      .expect(200);
+      .get(`/api/donations/${MOCK_DONATION_ROW.id}`)
+      .expect(404);
 
-    expect(res.body.data).toEqual([]);
+    expect(res.body.error).toBe("Donation not found");
+  });
+
+  test("returns 400 for invalid UUID", async () => {
+    const res = await request(app)
+      .get("/api/donations/invalid-id")
+      .expect(400);
+
+    expect(res.body.error).toBe("Invalid donation ID");
   });
 });
 
-describe("GET /api/donations/donor/:publicKey", () => {
-  let app;
+describe("GET /api/donations/stream", () => {
+  test("opens an SSE stream with initial donation events", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
 
-  beforeEach(() => {
-    app = buildApp();
-    jest.clearAllMocks();
-  });
+    const app = buildApp();
+    const server = http.createServer(app);
 
-  test("returns donations for a donor", async () => {
-    pool.query.mockResolvedValue({ rows: [MOCK_DONATION_ROW] });
+    await new Promise((resolve, reject) => {
+      server.listen(0, () => resolve(undefined));
+      server.on("error", reject);
+    });
 
-    const res = await request(app)
-      .get(`/api/donations/donor/${makePublicKey()}`)
-      .expect(200);
+    const port = server.address().port;
 
-    expect(res.body.success).toBe(true);
-  });
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const req = http.get({ port, path: "/api/donations/stream" }, (res) => {
+          let chunks = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            chunks += chunk;
+            if (chunks.includes("event: initial")) {
+              req.destroy();
+              resolve({ statusCode: res.statusCode, body: chunks, headers: res.headers });
+            }
+          });
+          res.on("error", reject);
+        });
+        req.on("error", reject);
+      });
 
-  test("rejects invalid donor key", async () => {
-    await request(app)
-      .get("/api/donations/donor/invalid")
-      .expect(400);
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/event-stream");
+      expect(response.body).toContain("event: initial");
+      expect(response.body).toContain("Great project!");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

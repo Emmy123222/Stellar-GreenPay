@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Fragment, useMemo, useState } from "react";
-import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
+import { progressPercent } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 interface ProjectComparisonProps {
@@ -9,12 +9,10 @@ interface ProjectComparisonProps {
 }
 
 const ROWS = [
-  { key: "co2", label: "CO2 per XLM" },
-  { key: "progress", label: "Progress %" },
-  { key: "donorCount", label: "Donor count" },
-  { key: "goal", label: "Goal" },
-  { key: "raised", label: "Raised" },
-  { key: "status", label: "Status" },
+  { key: "co2", label: "CO₂ per XLM" },
+  { key: "progress", label: "% Goal Reached" },
+  { key: "donorCount", label: "Donor Count" },
+  { key: "averageRating", label: "Avg Rating" },
   { key: "verified", label: "Verified" },
 ] as const;
 
@@ -36,7 +34,7 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="w-full max-w-6xl card bg-white max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-display text-xl font-semibold text-forest-900">Project Comparison</h2>
@@ -49,17 +47,17 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
         </div>
 
         <div className="grid gap-4" style={{ gridTemplateColumns: `150px repeat(${projects.length}, minmax(180px, 1fr))` }}>
-          <div className="font-body text-xs uppercase tracking-widest text-[#8aaa8a]">Metric</div>
+          <div className="font-body text-xs uppercase tracking-widest text-[#8aaa8a] dark:text-forest-300">Metric</div>
           {projects.map((project) => (
             <div key={`${project.id}-header`} className="p-3 rounded-lg bg-forest-50 border border-forest-200">
               <p className="font-display text-sm font-semibold text-forest-900">{project.name}</p>
-              <p className="text-xs text-[#5a7a5a] mt-1 font-body">{project.category}</p>
+              <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-1 font-body">{project.category}</p>
             </div>
           ))}
 
           {ROWS.map((row) => (
             <Fragment key={row.key}>
-              <div className="font-body text-sm text-[#5a7a5a] py-2 border-t border-forest-100">
+              <div className="font-body text-sm text-[#5a7a5a] dark:text-[#8aaa8a] py-2 border-t border-forest-100">
                 {row.label}
               </div>
               {projects.map((project) => {
@@ -71,17 +69,16 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
                 if (row.key === "co2") value = `${co2PerXLM.toFixed(2)} kg`;
                 if (row.key === "progress") value = `${pct}%`;
                 if (row.key === "donorCount") value = project.donorCount.toLocaleString();
-                if (row.key === "goal") value = formatXLM(project.goalXLM);
-                if (row.key === "raised") value = formatXLM(project.raisedXLM);
-                if (row.key === "status") value = project.status;
-                if (row.key === "verified") value = project.verified ? "Yes" : "No";
+                if (row.key === "averageRating") {
+                  value = (project.averageRating || 0) > 0
+                    ? `${project.averageRating?.toFixed(1)} ★ (${project.ratingCount || 0})`
+                    : "No ratings";
+                }
+                if (row.key === "verified") value = project.verified ? "✓ Yes" : "No";
 
                 return (
                   <div key={`${project.id}-${row.key}`} className="py-2 border-t border-forest-100">
                     <p className="font-body text-sm text-forest-900">{value}</p>
-                    {row.key === "raised" && (
-                      <p className="font-body text-xs text-[#8aaa8a] mt-1">{formatCO2(project.co2OffsetKg)} offset</p>
-                    )}
                   </div>
                 );
               })}

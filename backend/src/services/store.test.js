@@ -36,6 +36,37 @@ describe("BADGE_THRESHOLDS contract spec", () => {
   });
 });
 
+describe("computeBadges tier threshold boundaries", () => {
+  // Exhaustive boundary coverage per issue #432: every tier threshold and the
+  // value immediately below it (to 7 decimal places — stroop-level XLM precision).
+  const tierAt = (xlm) => {
+    const earned = computeBadges(xlm);
+    return earned.length ? earned[0].tier : null;
+  };
+
+  const cases = [
+    [0, null, "0 XLM earns no badge"],
+    [9.9999999, null, "just below seedling earns no badge"],
+    [10, "seedling", "exactly 10 XLM earns seedling"],
+    [99.9999999, "seedling", "just below tree stays seedling"],
+    [100, "tree", "exactly 100 XLM earns tree"],
+    [499.9999999, "tree", "just below forest stays tree"],
+    [500, "forest", "exactly 500 XLM earns forest"],
+    [1999.9999999, "forest", "just below earth guardian stays forest"],
+    [2000, "earth", "exactly 2000 XLM earns earth guardian"],
+  ];
+
+  test.each(cases)("computeBadges(%p) → %p (%s)", (xlm, expectedTier) => {
+    expect(tierAt(xlm)).toBe(expectedTier);
+  });
+
+  test("computeBadges returns at most one (highest) tier per call", () => {
+    for (const [xlm] of cases) {
+      expect(computeBadges(xlm).length).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe("store utility functions", () => {
   test("computeBadges returns no badge below 10 XLM", () => {
     expect(computeBadges(9)).toEqual([]);
@@ -90,6 +121,7 @@ describe("store utility functions", () => {
       raised_xlm: 25,
       donor_count: 3,
       co2_offset_kg: 500,
+      co2_per_xlm: 480,
       status: "active",
       verified: true,
       on_chain_verified: false,
@@ -103,6 +135,8 @@ describe("store utility functions", () => {
       walletAddress: "GABC",
       goalXLM: "100",
       raisedXLM: "25",
+      co2OffsetKg: 500,
+      co2PerXLM: "480",
       tags: ["solar"],
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-02T00:00:00.000Z",
@@ -131,6 +165,44 @@ describe("store utility functions", () => {
     });
   });
 
+  test("mapDonationRow includes co2OffsetKg when co2_per_xlm is present", () => {
+    const row = {
+      id: "donation-1",
+      project_id: "project-1",
+      donor_address: "GDONOR",
+      amount: 12.5,
+      amount_xlm: 12.5,
+      currency: "XLM",
+      message: "Great work",
+      transaction_hash: "abc123",
+      created_at: "2026-01-01T00:00:00.000Z",
+      co2_per_xlm: 480,
+    };
+
+    // 12.5 XLM * 480 g/XLM / 1000 = 6 kg
+    expect(mapDonationRow(row)).toMatchObject({
+      amountXLM: "12.5000000",
+      co2OffsetKg: 6,
+    });
+  });
+
+  test("mapDonationRow omits co2OffsetKg when co2_per_xlm is absent", () => {
+    const result = mapDonationRow({
+      id: "donation-1",
+      project_id: "project-1",
+      donor_address: "GDONOR",
+      amount: 10,
+      amount_xlm: 10,
+      currency: "XLM",
+      message: null,
+      transaction_hash: null,
+      created_at: null,
+      co2_per_xlm: null,
+    });
+
+    expect(result.co2OffsetKg).toBeUndefined();
+  });
+
   test("mapDonationRow omits amountXLM when not present", () => {
     const result = mapDonationRow({
       id: "donation-1",
@@ -153,6 +225,7 @@ describe("store utility functions", () => {
         public_key: "GUSER",
         display_name: "Asraf",
         bio: "Donor",
+        avatar_url: "https://cdn.example.com/a.png",
         total_donated_xlm: 100,
         projects_supported: 2,
         badges: [{ tier: "tree" }],
@@ -162,12 +235,28 @@ describe("store utility functions", () => {
     ).toMatchObject({
       publicKey: "GUSER",
       displayName: "Asraf",
+      avatarUrl: "https://cdn.example.com/a.png",
       totalDonatedXLM: "100",
       projectsSupported: 2,
       badges: [{ tier: "tree" }],
       createdAt: null,
       updatedAt: null,
     });
+  });
+
+  test("mapProfileRow defaults missing avatar_url to null", () => {
+    expect(
+      mapProfileRow({
+        public_key: "GUSER",
+        display_name: "Asraf",
+        bio: null,
+        total_donated_xlm: 0,
+        projects_supported: 0,
+        badges: [],
+        created_at: null,
+        updated_at: null,
+      }).avatarUrl
+    ).toBeNull();
   });
 
   test("row mappers convert snake_case fields to camelCase", () => {

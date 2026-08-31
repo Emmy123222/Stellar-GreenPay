@@ -2,7 +2,7 @@
  * pages/index.tsx — GreenPay landing page
  */
 import Link from "next/link";
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import WalletConnect from "@/components/WalletConnect";
 import { useCountUp } from "@/hooks/useCountUp";
 import {
@@ -11,8 +11,8 @@ import {
   fetchProjects,
   fetchCategoryStats,
 } from "@/lib/api";
-import { streamGlobalProjectDonations } from "@/lib/stellar";
-import { formatCO2, formatXLM, progressPercent } from "@/utils/format";
+import { formatCO2, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
+import { formatDistanceToNowStrict } from "date-fns";
 import type { GlobalStats, CategoryStats } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
 
@@ -25,6 +25,7 @@ interface LiveDonationTickerItem {
   id: string;
   projectId: string;
   projectName: string;
+  donorAddress: string;
   amountXLM: string;
   createdAt: string;
 }
@@ -52,7 +53,7 @@ const FEATURES = [
   },
 ];
 
-const IMPACT_STATS = [
+const FALLBACK_IMPACT_STATS = [
   { value: 0, suffix: "%", label: "Platform fees", duration: 1500 },
   {
     value: 100,
@@ -62,8 +63,36 @@ const IMPACT_STATS = [
     duration: 2000,
   },
   { value: 5000, suffix: "+", label: "Monthly Donors", duration: 2500 },
-  { value: 250, suffix: "k", label: "CO₂ Offset (kg)", duration: 3000 },
+  { value: 250000, label: "CO₂ Offset (kg)", duration: 3000 },
 ];
+
+function buildHeroStats(stats: GlobalStats | null) {
+  if (!stats) return FALLBACK_IMPACT_STATS;
+
+  return [
+    {
+      value: Number.parseFloat(stats.totalXLMRaised) || 0,
+      suffix: " XLM",
+      label: "Total Raised",
+      duration: 2200,
+    },
+    {
+      value: stats.totalCO2OffsetKg,
+      label: "CO₂ Offset (kg)",
+      duration: 2500,
+    },
+    {
+      value: stats.totalDonations,
+      label: "Donations",
+      duration: 2000,
+    },
+    {
+      value: stats.totalProjects,
+      label: "Projects",
+      duration: 1800,
+    },
+  ];
+}
 
 const CATEGORIES = [
   { icon: "🌳", label: "Reforestation" },
@@ -90,11 +119,10 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
   const [liveDonations, setLiveDonations] = useState<LiveDonationTickerItem[]>(
     [],
   );
-  const [tickerIndex, setTickerIndex] = useState(0);
 
   useEffect(() => {
-    let closeStream: (() => void) | null = null;
     let isMounted = true;
+    let eventSource: EventSource | null = null;
 
     fetchGlobalStats()
       .then(setGlobalStats)
@@ -109,49 +137,62 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
     fetchProjects({ limit: 100 })
       .then((projects) => {
         if (!isMounted || projects.length === 0) return;
-        closeStream = streamGlobalProjectDonations(
-          projects.map((project) => ({
-            id: project.id,
-            name: project.name,
-            walletAddress: project.walletAddress,
-          })),
-          (donation) => {
-            setLiveDonations((prev) =>
-              [
-                {
+
+        const projectNameById = new Map(projects.map((project) => [project.id, project.name]));
+        eventSource = new EventSource("/api/donations/stream");
+
+        eventSource.addEventListener("initial", (event) => {
+          if (!isMounted) return;
+          const payload = JSON.parse((event as MessageEvent).data);
+          const initialDonations = Array.isArray(payload?.donations)
+            ? payload.donations
+                .map((donation: any) => ({
                   id: donation.id,
                   projectId: donation.projectId,
-                  projectName: donation.projectName,
-                  amountXLM: donation.amountXLM,
+                  projectName: donation.projectName || projectNameById.get(donation.projectId) || "A project",
+                  donorAddress: donation.donorAddress || donation.from || "",
+                  amountXLM: donation.amountXLM || donation.amount || "0",
                   createdAt: donation.createdAt,
-                },
-                ...prev.filter((item) => item.id !== donation.id),
-              ].slice(0, 10),
-            );
-          },
-        );
+                }))
+                .slice(0, 10)
+            : [];
+          setLiveDonations(initialDonations);
+        });
+
+        eventSource.addEventListener("donation", (event) => {
+          if (!isMounted) return;
+          const payload = JSON.parse((event as MessageEvent).data);
+          const donation = payload?.donation;
+          if (!donation) return;
+          setLiveDonations((prev) => {
+            const nextDonation = {
+              id: donation.id,
+              projectId: donation.projectId,
+              projectName: donation.projectName || projectNameById.get(donation.projectId) || "A project",
+              donorAddress: donation.donorAddress || donation.from || "",
+              amountXLM: donation.amountXLM || donation.amount || "0",
+              createdAt: donation.createdAt,
+            };
+            return [nextDonation, ...prev.filter((item) => item.id !== donation.id)].slice(0, 10);
+          });
+        });
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+        };
       })
       .catch(() => null);
 
     return () => {
       isMounted = false;
-      if (closeStream) closeStream();
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, []);
-
-  useEffect(() => {
-    if (liveDonations.length <= 1) return;
-    const timer = window.setInterval(() => {
-      setTickerIndex((current) => (current + 1) % liveDonations.length);
-    }, 3500);
-    return () => window.clearInterval(timer);
-  }, [liveDonations.length]);
-
-  useEffect(() => {
-    if (tickerIndex >= liveDonations.length) {
-      setTickerIndex(0);
-    }
-  }, [liveDonations.length, tickerIndex]);
 
   return (
     <div className="relative overflow-hidden">
@@ -174,7 +215,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
             </span>
           </h1>
 
-          <p className="text-[#5a7a5a] text-lg sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed font-body">
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-lg sm:text-xl max-w-2xl mx-auto mb-10 leading-relaxed font-body">
             Stellar GreenPay connects donors with verified climate projects
             worldwide. Donations go directly on-chain — no banks, no delays, no
             fees swallowed by middlemen.
@@ -217,7 +258,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
 
         {/* ── Stats ───────────────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-forest-200 rounded-2xl overflow-hidden border border-forest-200 mb-20 shadow-sm">
-          {IMPACT_STATS.map((s) => (
+          {buildHeroStats(globalStats).map((s) => (
             <StatItem key={s.label} stat={s} />
           ))}
         </div>
@@ -251,7 +292,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
                 <h3 className="font-display font-semibold text-forest-900 mb-2 text-base">
                   {f.title}
                 </h3>
-                <p className="text-[#5a7a5a] text-sm leading-relaxed font-body">
+                <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed font-body">
                   {f.desc}
                 </p>
               </div>
@@ -296,7 +337,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
           <h2 className="font-display text-3xl font-bold text-forest-900 mb-4">
             Earn Impact Badges
           </h2>
-          <p className="text-[#5a7a5a] max-w-xl mx-auto mb-8 font-body">
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] max-w-xl mx-auto mb-8 font-body">
             As you donate more, you unlock on-chain badges recorded on the
             Stellar blockchain. Show your commitment to the planet.
           </p>
@@ -312,7 +353,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
                 <p className="font-display font-semibold text-forest-900 text-sm">
                   {b.name}
                 </p>
-                <p className="text-xs text-[#5a7a5a] font-body">
+                <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
                   {b.threshold}
                 </p>
               </div>
@@ -348,7 +389,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
             />
             <button
               onClick={() => setShowConnect(false)}
-              className="mt-4 w-full text-center text-sm text-[#8aaa8a] hover:text-[#5a7a5a] transition-colors font-body"
+              className="mt-4 w-full text-center text-sm text-[#8aaa8a] dark:text-forest-300 hover:text-[#5a7a5a] dark:hover:text-[#8aaa8a] transition-colors font-body"
             >
               Cancel
             </button>
@@ -356,38 +397,75 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
         </div>
       )}
 
-      <LiveDonationTicker donations={liveDonations} activeIndex={tickerIndex} />
+      <LiveDonationTicker donations={liveDonations} />
     </div>
   );
 }
 
-function LiveDonationTicker({
-  donations,
-  activeIndex,
-}: {
-  donations: LiveDonationTickerItem[];
-  activeIndex: number;
-}) {
+function LiveDonationTicker({ donations }: { donations: LiveDonationTickerItem[] }) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (donations.length === 0) return;
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % donations.length);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [donations.length]);
+
   if (donations.length === 0) return null;
-  const item = donations[activeIndex];
+
+  // Clamp directly during render instead of resetting `activeIndex` via an
+  // effect: if `donations` shrinks between ticks, this keeps the index in
+  // range without an extra render, and the interval above already advances
+  // modulo the (possibly new) length.
+  const item = donations[activeIndex % donations.length];
+  const donorLabel = shortenAddress(item.donorAddress || "Unknown donor", 4);
+  const projectLabel = item.projectName || "a project";
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2">
+    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2 overflow-hidden">
       <div className="max-w-6xl mx-auto flex items-center gap-3 text-sm text-white font-body">
-        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold">
+        <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold shrink-0">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           Live donations
         </span>
-        <p key={item.id} className="animate-slide-up">
-          just donated <strong>{formatXLM(item.amountXLM)}</strong> to{" "}
-          <Link
-            href={`/projects/${item.projectId}`}
-            className="text-emerald-300 hover:text-emerald-200"
-          >
-            {item.projectName}
-          </Link>
-        </p>
+        <div key={item.id} className="flex-1 overflow-hidden">
+          <div className="flex items-center gap-2 whitespace-nowrap animate-slide-up">
+            <span className="text-emerald-300">⚡ Just now</span>
+            <span className="text-forest-100">—</span>
+            <span className="font-mono text-forest-100">{donorLabel}</span>
+            <span className="text-white">
+              donated <strong>{formatXLM(item.amountXLM)}</strong> to {projectLabel}
+            </span>
+            <span className="text-forest-300">🌱</span>
+          </div>
+        </div>
       </div>
+      <style jsx>{`
+        .animate-slide-up {
+          animation: slide-up 3s ease-in-out forwards;
+        }
+
+        @keyframes slide-up {
+          0% {
+            transform: translateY(16px);
+            opacity: 0;
+          }
+          10% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          90% {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(-16px);
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -463,7 +541,7 @@ function FeaturedProjectCard({ project }: { project: ClimateProject }) {
             <h3 className="font-display text-2xl font-bold text-forest-900 mb-2">
               {project.name}
             </h3>
-            <p className="text-[#5a7a5a] text-sm leading-relaxed font-body mb-4 line-clamp-3">
+            <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed font-body mb-4 line-clamp-3">
               {project.description}
             </p>
             <div className="flex flex-wrap gap-4 text-sm mb-5">
@@ -473,7 +551,7 @@ function FeaturedProjectCard({ project }: { project: ClimateProject }) {
               <span className="flex items-center gap-1 text-forest-700 font-body">
                 ♻️ <strong>{formatCO2(project.co2OffsetKg)}</strong> offset
               </span>
-              <span className="flex items-center gap-1 text-[#5a7a5a] font-body">
+              <span className="flex items-center gap-1 text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
                 📍 {project.location}
               </span>
             </div>
@@ -483,7 +561,7 @@ function FeaturedProjectCard({ project }: { project: ClimateProject }) {
                 <span className="font-semibold text-forest-700">
                   {formatXLM(project.raisedXLM)} raised
                 </span>
-                <span className="text-[#5a7a5a]">
+                <span className="text-[#5a7a5a] dark:text-[#8aaa8a]">
                   {pct}% of {formatXLM(project.goalXLM)}
                 </span>
               </div>
@@ -534,7 +612,7 @@ function CO2OffsetTicker({ stats }: { stats: GlobalStats }) {
         Total CO₂ Offset Across All Donations
       </p>
       <p className="text-forest-300 text-xs font-body mt-2">
-        {stats.totalDonations.toLocaleString()} donations ·{" "}
+        {stats.totalDonations.toLocaleString()} donations · {stats.totalDonors.toLocaleString()} donors ·{" "}
         {parseFloat(stats.totalXLMRaised).toLocaleString()} XLM raised
       </p>
     </div>

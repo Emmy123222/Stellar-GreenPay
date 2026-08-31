@@ -41,6 +41,23 @@ describe("Rate limiting middleware — donation endpoint", () => {
     }
   });
 
+  it("sets X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset on allowed requests", async () => {
+    const res = await request(app).get("/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe("10");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("9");
+    expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
+  });
+
+  it("sets X-RateLimit-Remaining to 0 on the last allowed request", async () => {
+    for (let i = 0; i < 9; i++) {
+      await request(app).get("/ping");
+    }
+    const res = await request(app).get("/ping");
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+  });
+
   it("blocks the 11th request with HTTP 429", async () => {
     for (let i = 0; i < 10; i++) {
       await request(app).get("/ping");
@@ -95,5 +112,20 @@ describe("Rate limiting middleware — custom window", () => {
     // appB counter is untouched — first request must succeed
     const okOnB = await request(appB).get("/ping");
     expect(okOnB.status).toBe(200);
+  });
+});
+
+describe("Rate limiting middleware — custom limits", () => {
+  it("enforces a custom limit of 3 requests", async () => {
+    const customApp = buildApp(3, 1);
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(customApp).get("/ping");
+      expect(res.status).toBe(200);
+    }
+
+    const res = await request(customApp).get("/ping");
+    expect(res.status).toBe(429);
+    expect(res.headers["retry-after"]).toBeDefined();
   });
 });

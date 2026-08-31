@@ -5,7 +5,7 @@
 import { useState, useEffect } from "react";
 import Head from "next/head";
 import Link from "next/link";
-import { getPublicKey } from "@stellar/freighter-api";
+import { getAddress as getPublicKey } from "@stellar/freighter-api";
 import { shortenAddress } from "@/utils/format";
 import { fetchProjects, recordDonation } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
@@ -26,12 +26,6 @@ export default function BridgePage() {
   const [recording, setRecording] = useState(false);
   const [recordError, setRecordError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadStellarAddress();
-    loadBridgeHistory();
-    loadProjects();
-  }, []);
-
   const loadProjects = async () => {
     try {
       const data = await fetchProjects({ status: "active", limit: 50 });
@@ -43,8 +37,8 @@ export default function BridgePage() {
 
   const loadStellarAddress = async () => {
     try {
-      const pk = await getPublicKey();
-      setStellarAddress(pk);
+      const pk: any = await getPublicKey();
+      setStellarAddress(typeof pk === 'string' ? pk : pk?.address || null);
     } catch (err) {
       console.log("Wallet not connected");
     }
@@ -57,6 +51,17 @@ export default function BridgePage() {
       setBridgeHistory(JSON.parse(history));
     }
   };
+
+  useEffect(() => {
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState — each loader
+    // manages its own state updates once its data is ready.
+    queueMicrotask(() => {
+      loadStellarAddress();
+      loadBridgeHistory();
+      loadProjects();
+    });
+  }, []);
 
   const connectMetaMask = async () => {
     if (typeof window === "undefined" || !(window as any).ethereum) {
@@ -210,7 +215,7 @@ export default function BridgePage() {
             <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
               Bridge USDC to Stellar
             </h1>
-            <p className="text-[#5a7a5a] font-body">
+            <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
               Transfer your Ethereum-based USDC to Stellar using Circle&apos;s Cross-Chain Transfer Protocol (CCTP)
             </p>
           </div>
@@ -336,7 +341,7 @@ export default function BridgePage() {
                   </div>
                   <div className="flex-1">
                     <h3 className="font-semibold text-forest-900 mb-1">{s.title}</h3>
-                    <p className="text-sm text-[#5a7a5a]">{s.description}</p>
+                    <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a]">{s.description}</p>
                   </div>
                 </div>
               ))}
@@ -363,7 +368,7 @@ export default function BridgePage() {
           {stellarAddress && projects.length > 0 && (
             <div className="card mb-6">
               <h2 className="label mb-4">🌱 Record as Project Donation</h2>
-              <p className="text-sm text-[#5a7a5a] font-body mb-4">
+              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
                 After bridging USDC, record it as a donation to a climate project.
               </p>
 
@@ -428,7 +433,7 @@ export default function BridgePage() {
                       <p className="text-sm font-semibold text-forest-900">
                         {entry.sourceChain} → Stellar
                       </p>
-                      <p className="text-xs text-[#5a7a5a]">
+                      <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a]">
                         {new Date(entry.timestamp).toLocaleString()}
                       </p>
                     </div>

@@ -22,6 +22,21 @@ Stellar GreenPay is an open-source climate donation platform where donors give X
 
 ---
 
+## 🎥 Video Walkthrough
+
+[![Stellar GreenPay - Full Donation Flow](https://img.youtube.com/vi/l9O8GSNx1nk/0.jpg)](https://youtu.be/l9O8GSNx1nk)
+
+Watch a complete walkthrough of the donation flow on **Stellar Testnet**:
+
+1. **Connect** Freighter wallet
+2. **Browse** verified climate projects
+3. **Donate** XLM on-chain
+4. **View** your impact certificate
+
+> No Stellar account needed to watch — just hit play!
+
+---
+
 ## 🗂 Project Structure
 
 ```
@@ -118,11 +133,24 @@ ALLOWED_ORIGINS=http://localhost:3000
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). All skill levels welcome!
 
+See [CHANGELOG.md](CHANGELOG.md) for the release history.
+
 Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
 
 ### Secret Scanning
 
 Every push and every pull request to `main` runs Gitleaks with the repo-local `.gitleaks.toml` config. Any detected secret fails CI, so keep real credentials out of source control; use `.env` files locally and GitHub encrypted secrets for CI/deployment values. The allowlist only covers generated archives, env templates, and deterministic test fixtures.
+
+### GitHub Actions Secrets
+
+See [`docs/github-actions-secrets.md`](docs/github-actions-secrets.md) for a
+complete reference of all encrypted secrets required by the project's CI/CD
+pipelines, including:
+
+- Database backup credentials (AWS S3 / Google Cloud Storage)
+- Mobile EAS build tokens (Expo)
+- Database connection secrets
+- Quick setup guide and rotation policy
 
 ## 🗺 Roadmap
 

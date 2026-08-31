@@ -1,7 +1,7 @@
 /**
  * pages/dashboard.tsx — Donor impact dashboard
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
@@ -29,7 +29,6 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [friendbotState, setFriendbotState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [friendbotError, setFrienbotError] = useState<string | null>(null);
-  const [dueSubscriptions, setDueSubscriptions] = useState<MonthlySubscription[]>([]);
   const { wishlist } = useWishlist();
   const [showCertificate, setShowCertificate] = useState(false);
   const [pendingRating, setPendingRating] = useState<{ id: string, name: string } | null>(null);
@@ -65,10 +64,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       .finally(() => setLoading(false));
   }, [publicKey, wishlist]);
 
-  useEffect(() => {
-    if (!publicKey) return;
-    setDueSubscriptions(getDueMonthlySubscriptions());
-  }, [publicKey]);
+  // publicKey is always null during SSR/initial hydration (wallet connection
+  // is a client-only interaction), so this is safe to derive directly during
+  // render instead of via an effect + state.
+  const dueSubscriptions = useMemo<MonthlySubscription[]>(
+    () => (publicKey ? getDueMonthlySubscriptions() : []),
+    [publicKey]
+  );
 
   const streak = calculateStreak(donations);
   
@@ -101,7 +103,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
       <div className="text-center mb-10">
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">My Impact</h1>
-        <p className="text-[#5a7a5a] font-body">Connect your wallet to see your donation history and impact</p>
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Connect your wallet to see your donation history and impact</p>
       </div>
       <WalletConnect onConnect={onConnect} />
     </div>
@@ -255,7 +257,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
           <div key={stat.label} className="card text-center shadow-sm border border-forest-100/50">
             <p className="text-2xl mb-2">{stat.icon}</p>
             <p className="font-display font-bold text-forest-900 text-lg leading-tight">{loading ? "..." : stat.value}</p>
-            <p className="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
+            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
           </div>
         ))}
       </div>
@@ -264,13 +266,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       <div className="flex border-b border-forest-100 mb-6">
         <button
           onClick={() => setActiveTab('impact')}
-          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 ${activeTab === 'impact' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[#8aaa8a] hover:text-forest-600'}`}
+          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 ${activeTab === 'impact' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[#8aaa8a] dark:text-forest-300 hover:text-forest-600'}`}
         >
           My Impact
         </button>
         <button
           onClick={() => setActiveTab('saved')}
-          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'saved' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[#8aaa8a] hover:text-forest-600'}`}
+          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'saved' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[#8aaa8a] dark:text-forest-300 hover:text-forest-600'}`}
         >
           Saved Projects
           {wishlist.length > 0 && (
@@ -286,7 +288,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
                 <h2 className="font-display text-xl font-bold text-forest-900">Your Impact Certificate</h2>
-                <p className="text-sm text-[#5a7a5a] font-body mt-1">
+                <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mt-1">
                   Download a PDF-ready certificate or share it on social media.
                 </p>
               </div>
@@ -385,7 +387,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                     <span className="text-3xl">{badgeEmoji(badge.tier)}</span>
                     <div>
                       <p className="font-semibold text-forest-900 text-sm font-body">{badgeLabel(badge.tier)}</p>
-                      <p className="text-[10px] text-[#8aaa8a] font-body uppercase tracking-widest font-bold opacity-80">Earned {timeAgo(badge.earnedAt)}</p>
+                      <p className="text-[10px] text-[#8aaa8a] dark:text-forest-300 font-body uppercase tracking-widest font-bold opacity-80">Earned {timeAgo(badge.earnedAt)}</p>
                     </div>
                   </div>
                 ))}
@@ -405,7 +407,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             ) : donations.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-4xl mb-3">🌱</p>
-                <p className="text-[#5a7a5a] mb-4 font-body">No donations yet</p>
+                <p className="text-[#5a7a5a] dark:text-[#8aaa8a] mb-4 font-body">No donations yet</p>
                 <Link href="/projects" className="btn-primary text-sm">Browse Projects →</Link>
               </div>
             ) : (
@@ -415,8 +417,8 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                     <div className="w-10 h-10 rounded-full bg-forest-100 flex items-center justify-center text-lg flex-shrink-0">🌱</div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold text-forest-900 font-body">Project donation</p>
-                      {d.message && <p className="text-xs text-[#5a7a5a] italic font-body truncate">&quot;{d.message}&quot;</p>}
-                      <p className="text-[10px] text-[#8aaa8a] font-body uppercase tracking-wider font-bold opacity-70">{timeAgo(d.createdAt)}</p>
+                      {d.message && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] italic font-body truncate">&quot;{d.message}&quot;</p>}
+                      <p className="text-[10px] text-[#8aaa8a] dark:text-forest-300 font-body uppercase tracking-wider font-bold opacity-70">{timeAgo(d.createdAt)}</p>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="font-mono font-semibold text-forest-700 text-sm">
@@ -437,7 +439,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             <div className="card text-center py-20">
               <p className="text-5xl mb-4">❤️</p>
               <h2 className="text-xl font-display font-bold text-forest-900 mb-2">No saved projects yet</h2>
-              <p className="text-[#5a7a5a] mb-8 font-body">Save projects you&apos;re interested in to track their progress.</p>
+              <p className="text-[#5a7a5a] dark:text-[#8aaa8a] mb-8 font-body">Save projects you&apos;re interested in to track their progress.</p>
               <Link href="/projects" className="btn-primary text-sm">Explore Projects</Link>
             </div>
           ) : (

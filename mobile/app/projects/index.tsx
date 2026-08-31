@@ -1,12 +1,14 @@
 /**
  * app/projects/index.tsx
- * Projects browse screen
+ * Projects browse screen — with offline cache support (#482)
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { useTheme } from '../theme';
+import { getCachedData, setCachedData } from '../../utils/cache';
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const CACHE_KEY_PROJECTS = 'projects:list';
@@ -88,12 +90,20 @@ export default function ProjectsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}> 
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>Offline — showing cached data</Text>
+        </View>
+      )}
       <TextInput
+
         style={[styles.searchInput, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.primaryText }]}
         placeholder="Search projects..."
         placeholderTextColor={colors.placeholder}
         value={searchQuery}
         onChangeText={setSearchQuery}
+        accessibilityLabel="Search projects"
+        accessibilityRole="search"
       />
       <ScrollView style={[styles.scroll, { borderColor: colors.background }]}>
         {filteredProjects.map(project => (
@@ -101,6 +111,8 @@ export default function ProjectsScreen() {
             key={project.id}
             style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}
             onPress={() => router.push(`/projects/${project.id}`)}
+            accessibilityLabel={`View ${project.name} project`}
+            accessibilityRole="button"
           >
             <View style={styles.cardHeader}>
               <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>

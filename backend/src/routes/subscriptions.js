@@ -1,6 +1,7 @@
 /**
  * src/routes/subscriptions.js
  * POST /api/subscriptions        — subscribe to project updates
+ * GET  /api/subscriptions/unsubscribe — one-click token unsubscribe
  * GET  /api/subscriptions/:projectId/count — subscriber count
  */
 "use strict";
@@ -8,8 +9,35 @@ const express = require("express");
 const router  = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db/pool");
+const { verifyUnsubscribeToken } = require("../services/unsubscribeToken");
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function escHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function buildUnsubscribePage({ title, message }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escHtml(title)}</title></head>
+<body style="margin:0;padding:32px 16px;background:#f0f7f0;font-family:sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0"><tr><td align="center">
+    <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;padding:32px;max-width:480px;width:100%;">
+      <tr><td>
+        <p style="margin:0 0 8px;font-size:20px;font-weight:700;color:#2d6a2d;">🌱 Stellar GreenPay</p>
+        <h1 style="margin:0 0 16px;font-size:22px;color:#1a3a1a;">${escHtml(title)}</h1>
+        <p style="margin:0;font-size:15px;color:#3a5a3a;line-height:1.6;">${escHtml(message)}</p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body>
+</html>`;
+}
 
 // POST /api/subscriptions
 router.post("/", async (req, res, next) => {
@@ -45,6 +73,43 @@ router.post("/", async (req, res, next) => {
   }
 });
 
+// GET /api/subscriptions/unsubscribe?token=<hmac-signed-email-projectId>
+router.get("/unsubscribe", async (req, res, next) => {
+  try {
+    const { token } = req.query;
+    if (!token || typeof token !== "string") {
+      return res.status(400).send(buildUnsubscribePage({
+        title: "Invalid link",
+        message: "This unsubscribe link is missing a token.",
+      }));
+    }
+
+    const parsed = verifyUnsubscribeToken(token);
+    if (!parsed) {
+      return res.status(400).send(buildUnsubscribePage({
+        title: "Invalid link",
+        message: "This unsubscribe link is invalid or has expired.",
+      }));
+    }
+
+    const { email, projectId } = parsed;
+    const proj = await pool.query("SELECT name FROM projects WHERE id = $1", [projectId]);
+    const projectName = proj.rows[0]?.name || "this project";
+
+    await pool.query(
+      "DELETE FROM project_subscriptions WHERE project_id = $1 AND email = $2",
+      [projectId, email],
+    );
+
+    res.status(200).send(buildUnsubscribePage({
+      title: "Unsubscribed",
+      message: `You will no longer receive monthly impact digests for ${projectName}.`,
+    }));
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/subscriptions/:projectId/count
 router.get("/:projectId/count", async (req, res, next) => {
   try {
@@ -53,6 +118,42 @@ router.get("/:projectId/count", async (req, res, next) => {
       [req.params.projectId],
     );
     res.json({ success: true, count: result.rows[0].count });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// DELETE /api/subscriptions/:id
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const { email, donorAddress } = req.body;
+    
+    if (!email && !donorAddress) {
+      return res.status(400).json({ error: "email or donorAddress is required to unsubscribe" });
+    }
+
+    const sub = await pool.query("SELECT email, donor_address FROM project_subscriptions WHERE id = $1", [req.params.id]);
+    
+    if (!sub.rows[0]) {
+      return res.status(404).json({ error: "Subscription not found" });
+    }
+    
+    const record = sub.rows[0];
+    
+    let authorized = false;
+    if (email && email.toLowerCase().trim() === record.email) {
+      authorized = true;
+    } else if (donorAddress && donorAddress === record.donor_address) {
+      authorized = true;
+    }
+    
+    if (!authorized) {
+      return res.status(403).json({ error: "Unauthorized to delete this subscription" });
+    }
+    
+    await pool.query("DELETE FROM project_subscriptions WHERE id = $1", [req.params.id]);
+    
+    res.json({ success: true, message: "Unsubscribed successfully" });
   } catch (e) {
     next(e);
   }

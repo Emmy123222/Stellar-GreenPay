@@ -13,7 +13,7 @@ import {
   ESCROW_CONTRACT_ID,
 } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
-import { shortenAddress } from "@/utils/format";
+import { shortenAddress, formatXLM } from "@/utils/format";
 import type { EscrowJob } from "@/utils/types";
 
 interface JobPageProps {
@@ -37,30 +37,37 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
 
   const [job, setJob] = useState<EscrowJob | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [step, setStep] = useState<Step>("idle");
   const [actionError, setActionError] = useState<string | null>(null);
   const [releaseHash, setReleaseHash] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<string | null>(null);
+  // `loading` is derived by comparing the job the page was loaded for to the
+  // current jobId, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const loading = !jobId || loadedForKey !== jobId;
 
   const load = useCallback(async () => {
     if (!jobId) return;
-    setLoading(true);
-    setLoadError(null);
     try {
       const j = await fetchJob(jobId);
       setJob(j);
+      setLoadError(null);
     } catch {
       setLoadError("Could not load this job. Check the link or try again later.");
       setJob(null);
     } finally {
-      setLoading(false);
+      setLoadedForKey(jobId);
     }
   }, [jobId]);
 
   useEffect(() => {
     if (!router.isReady || !jobId) return;
-    load();
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(() => {
+      load();
+    });
   }, [router.isReady, jobId, load]);
 
   const isClient =
@@ -134,7 +141,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
 
   if (!router.isReady || loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 py-16 text-center text-[#5a7a5a] font-body">
+      <div className="max-w-3xl mx-auto px-4 py-16 text-center text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
         Loading job…
       </div>
     );
@@ -160,7 +167,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
         <Link href="/jobs" className="text-forest-600 hover:underline">
           Jobs
         </Link>
-        <span className="text-[#8aaa8a] mx-2">/</span>
+        <span className="text-[#8aaa8a] dark:text-forest-300 mx-2">/</span>
         <span className="text-forest-900">{job.title}</span>
       </nav>
 
@@ -168,13 +175,13 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
         <h1 className="font-display text-2xl font-bold text-forest-900 mb-2">
           {job.title}
         </h1>
-        <p className="text-[#5a7a5a] font-body whitespace-pre-wrap mb-6">
+        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body whitespace-pre-wrap mb-6">
           {job.description}
         </p>
 
         <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm font-body mb-6">
           <div>
-            <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
+            <dt className="text-[#8aaa8a] dark:text-forest-300 uppercase tracking-wide text-xs font-bold mb-1">
               Client
             </dt>
             <dd className="font-mono text-forest-800 break-all">
@@ -182,7 +189,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
             </dd>
           </div>
           <div>
-            <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
+            <dt className="text-[#8aaa8a] dark:text-forest-300 uppercase tracking-wide text-xs font-bold mb-1">
               Freelancer
             </dt>
             <dd className="font-mono text-forest-800 break-all">
@@ -190,13 +197,13 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
             </dd>
           </div>
           <div>
-            <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
+            <dt className="text-[#8aaa8a] dark:text-forest-300 uppercase tracking-wide text-xs font-bold mb-1">
               Escrow (XLM)
             </dt>
-            <dd className="font-semibold text-forest-900">{job.amountEscrowXlm}</dd>
+            <dd className="font-semibold text-forest-900">{formatXLM(job.amountEscrowXlm)}</dd>
           </div>
           <div>
-            <dt className="text-[#8aaa8a] uppercase tracking-wide text-xs font-bold mb-1">
+            <dt className="text-[#8aaa8a] dark:text-forest-300 uppercase tracking-wide text-xs font-bold mb-1">
               Status
             </dt>
             <dd className="font-semibold text-forest-900 capitalize">
@@ -215,7 +222,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
         )}
 
         {publicKey && !isClient && job.status === "in_escrow" && (
-          <p className="text-sm text-[#5a7a5a] font-body mb-4">
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
             Connected as {shortenAddress(publicKey)}. Only the client wallet can
             release this escrow.
           </p>
@@ -255,7 +262,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
             </button>
 
             {step === "signing" && (
-              <p className="text-center text-xs text-[#5a7a5a] animate-pulse font-body">
+              <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
                 Confirm the transaction in Freighter…
               </p>
             )}
@@ -290,7 +297,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
         )}
 
         {job.status === "completed" && !job.releaseTransactionHash && (
-          <p className="text-sm text-[#5a7a5a] mt-4 font-body">
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] mt-4 font-body">
             This job is marked completed.
           </p>
         )}
