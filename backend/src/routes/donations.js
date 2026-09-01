@@ -404,8 +404,6 @@ router.get("/donor/:publicKey", async (req, res, next) => {
     const hasCursor = Boolean(req.query.cursor);
     const values = [req.params.publicKey];
 
-    let whereClause = "WHERE d.donor_address = $1";
-
     if (hasCursor) {
       try {
         const cursorData = JSON.parse(
@@ -417,20 +415,26 @@ router.get("/donor/:publicKey", async (req, res, next) => {
           return res.status(400).json({ error: "Invalid cursor" });
         }
         values.push(cursorCreatedAt, cursorId);
-        whereClause +=
-          " AND (d.created_at < $2::timestamptz OR (d.created_at = $2::timestamptz AND d.id < $3))";
       } catch {
         return res.status(400).json({ error: "Invalid cursor" });
       }
     }
 
     values.push(limit + 1);
-    const query = `SELECT d.*, p.co2_per_xlm
-      FROM donations d
-      JOIN projects p ON d.project_id = p.id
-      ${whereClause}
-      ORDER BY d.created_at DESC, d.id DESC
-      LIMIT $${values.length}`;
+    const query = hasCursor
+      ? `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+           AND (d.created_at < $2::timestamptz OR (d.created_at = $2::timestamptz AND d.id < $3))
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $4`
+      : `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $2`;
 
     const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
     const hasMore = donations.length > limit;
