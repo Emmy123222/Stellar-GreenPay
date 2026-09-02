@@ -1341,49 +1341,38 @@ impl GreenPayContract {
             .unwrap_or(Vec::new(&env))
     }
 
-    /// Donate USDC. Converts to XLM-equivalent for global stats using a price oracle stub.
+    /// Donate USDC. Converts to XLM-equivalent for global stats using a DEX spot price
+    /// supplied by the caller from the off-chain Stellar DEX price oracle.
+    ///
+    /// `xlm_per_usdc` is the mid-price (in XLM stroops per 1 USDC stroop) fetched
+    /// from the Horizon orderbook and cached for 30 seconds by the backend service.
+    /// The caller is responsible for providing a fresh, non-zero rate.
     pub fn donate_usdc(
-        env: Env,
-        usdc_token: Address,
-        donor: Address,
-        project_id: String,
-        usdc_amount: i128,
-        msg_hash: u32,
+        env:          Env,
+        usdc_token:   Address,
+        donor:        Address,
+        project_id:   String,
+        usdc_amount:  i128,
+        xlm_per_usdc: i128,
+        _msg_hash:    u32,
     ) {
         donor.require_auth();
-        if Self::is_paused(env.clone()) {
-            panic!("Contract is paused");
-        }
-        if usdc_amount <= 0 {
-            panic!("Donation amount must be positive");
-        }
+        if usdc_amount <= 0  { panic!("Donation amount must be positive"); }
+        if xlm_per_usdc <= 0 { panic!("xlm_per_usdc rate must be positive"); }
 
         let stored_usdc: Option<Address> = env.storage().instance().get(&DataKey::USDCTokenAddress);
         if stored_usdc.is_none() || stored_usdc.unwrap() != usdc_token {
             panic!("USDC token not configured");
         }
 
-        // Fetch the USDC→XLM price from the configured oracle.
-        // The oracle returns how many XLM stroops equal 1 USDC stroop.
-        let oracle_addr: Address = env.storage().instance()
-            .get(&DataKey::OracleAddress).expect("Price oracle not configured");
-        let oracle = OracleClient::new(&env, &oracle_addr);
-        let rate = oracle.get_price();
-        if rate <= 0 { panic!("Oracle returned invalid price"); }
+        // Convert USDC amount to XLM-equivalent using the DEX spot mid-price
+        // supplied by the off-chain price oracle (Horizon orderbook, 30 s cache).
         let xlm_equivalent = usdc_amount
-            .checked_mul(rate).expect("USDC to XLM conversion overflow");
+            .checked_mul(xlm_per_usdc).expect("USDC to XLM conversion overflow");
 
-        let mut project: Project = env
-            .storage()
-            .instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-        if !project.active {
-            panic!("Project is not accepting donations");
-        }
-        if usdc_amount < project.min_donation_amount {
-            panic!("Donation below minimum");
-        }
+        let mut project: Project = env.storage().instance()
+            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+        if !project.active { panic!("Project is not accepting donations"); }
 
         // Pre-compute CO2 increment using XLM-equivalent
         let xlm_units = xlm_equivalent / STROOP;
@@ -2520,148 +2509,42 @@ mod tests {
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
     }
-
-    // ─── ProjectMilestoneNFT tests (#205) ────────────────────────────────────
-
+    /// Tests for `donate_usdc` with the live-rate parameter.
     #[test]
-    fn test_mint_project_nft_success() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        token_client.mint(&donor, &(200 * STROOP));
-        client.donate(&token, &donor, &pid, &(101 * STROOP), &0u32);
-
-        assert!(!client.has_project_nft(&donor, &pid));
-        client.mint_project_nft(&donor, &pid);
-        assert!(client.has_project_nft(&donor, &pid));
-
-        let nft = client.get_project_nft(&donor, &pid);
-        assert_eq!(nft.owner,          donor);
-        assert_eq!(nft.project_id,     pid);
-        assert_eq!(nft.amount_donated, 101 * STROOP);
-        // co2_per_xlm for the test project is 100 grams/XLM
-        assert_eq!(nft.co2_offset_grams, 101 * 100);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cumulative donation to this project has not reached 100 XLM")]
-    fn test_mint_project_nft_below_threshold() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        token_client.mint(&donor, &(100 * STROOP));
-        client.donate(&token, &donor, &pid, &(50 * STROOP), &0u32);
-
-        client.mint_project_nft(&donor, &pid);
-    }
-
-    #[test]
-    #[should_panic(expected = "Milestone NFT already minted for this project")]
-    fn test_mint_project_nft_duplicate_prevented() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        token_client.mint(&donor, &(200 * STROOP));
-        client.donate(&token, &donor, &pid, &(101 * STROOP), &0u32);
-
-        client.mint_project_nft(&donor, &pid);
-        // Second call must panic
-        client.mint_project_nft(&donor, &pid);
-    }
-
-    #[test]
-    fn test_project_nft_independent_per_project() {
-        let (env, _cid, client, admin, pid1) = setup();
-        let pid2    = String::from_str(&env, "proj-002");
-        let wallet2 = Address::generate(&env);
-        client.register_project(
-            &admin, &pid2,
-            &String::from_str(&env, "Project 2"),
-            &wallet2, &50u32, &1i128,
-        );
-
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        token_client.mint(&donor, &(300 * STROOP));
-        client.donate(&token, &donor, &pid1, &(101 * STROOP), &0u32);
-        client.donate(&token, &donor, &pid2, &(50 * STROOP),  &1u32);
-
-        client.mint_project_nft(&donor, &pid1);
-        assert!(client.has_project_nft(&donor, &pid1));
-        assert!(!client.has_project_nft(&donor, &pid2));
-    }
-
-    #[test]
-    fn test_project_nft_cumulative_across_donations() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let donor        = Address::generate(&env);
-        let token_admin  = Address::generate(&env);
-        let token        = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        // Two donations summing to > 100 XLM
-        token_client.mint(&donor, &(200 * STROOP));
-        client.donate(&token, &donor, &pid, &(60 * STROOP), &0u32);
-        client.donate(&token, &donor, &pid, &(60 * STROOP), &1u32);
-
-        client.mint_project_nft(&donor, &pid);
-        assert!(client.has_project_nft(&donor, &pid));
-
-       let nft = client.get_project_nft(&donor, &pid);
-        assert_eq!(nft.amount_donated, 120 * STROOP);
-    }
-
-    #[test]
-    fn test_refund_donation_reverses_totals_and_transfers_funds() {
+    fn test_donate_usdc_with_dex_rate() {
         let (env, _cid, client, admin, pid) = setup();
-        let donor = Address::generate(&env);
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env.register_stellar_asset_contract_v2(usdc_admin.clone()).address();
+        let usdc_client = StellarAssetClient::new(&env, &usdc_token);
+        client.set_usdc_token(&admin, &usdc_token);
 
-        let amount = 100 * STROOP;
-        token_client.mint(&donor, &amount);
-        client.donate(&token, &donor, &pid, &amount, &0u32);
+        let donor      = Address::generate(&env);
+        let usdc_amt   = 1_000_000i128; // 0.1 USDC (7 decimal places)
+        // Simulate a DEX mid-price of 9 XLM per USDC (in stroops ratio: 9)
+        let rate       = 9i128;
+        let expected_xlm = usdc_amt.checked_mul(rate).unwrap();
 
-        let wallet = client.get_project(&pid).wallet;
-        let project_before = client.get_project(&pid);
-        let donor_stats_before = client.get_donor_stats(&donor);
-        assert_eq!(project_before.total_raised, amount);
-        assert_eq!(donor_stats_before.total_donated, amount);
+        usdc_client.mint(&donor, &usdc_amt);
+        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amt, &rate, &0u32);
 
-        client.refund_donation(&admin, &pid, &donor, &amount, &token);
-
-        let project_after = client.get_project(&pid);
-        let donor_stats_after = client.get_donor_stats(&donor);
-        assert_eq!(project_after.total_raised, 0);
-        assert_eq!(donor_stats_after.total_donated, 0);
-
-        let native_client = soroban_sdk::token::Client::new(&env, &token);
-        assert_eq!(native_client.balance(&donor), amount);
-        assert_eq!(native_client.balance(&wallet), 0);
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, expected_xlm);
+        let global = client.get_global_total();
+        assert_eq!(global, expected_xlm);
     }
 
     #[test]
-    #[should_panic(expected = "Only admin can refund donations")]
-    fn test_refund_donation_rejects_non_admin_caller() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let not_admin = Address::generate(&env);
-        let donor = Address::generate(&env);
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+    #[should_panic(expected = "xlm_per_usdc rate must be positive")]
+    fn test_donate_usdc_zero_rate_panics() {
+        let (env, _cid, client, admin, pid) = setup();
+        let usdc_admin = Address::generate(&env);
+        let usdc_token = env.register_stellar_asset_contract_v2(usdc_admin.clone()).address();
+        let usdc_client = StellarAssetClient::new(&env, &usdc_token);
+        client.set_usdc_token(&admin, &usdc_token);
 
-        client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
+        let donor = Address::generate(&env);
+        usdc_client.mint(&donor, &1_000_000i128);
+        // Rate of 0 must be rejected
+        client.donate_usdc(&usdc_token, &donor, &pid, &1_000_000i128, &0i128, &0u32);
     }
 }

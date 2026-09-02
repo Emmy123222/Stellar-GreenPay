@@ -107,7 +107,39 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-app.use("/api/impact", require("./routes/impact"));
+// ── Route mounts — each router registered at /api and /api/v1 ───────────────
+const projectsRouter      = require("./routes/projects");
+const donationsRouter     = require("./routes/donations");
+const profilesRouter      = require("./routes/profiles");
+const leaderboardRouter   = require("./routes/leaderboard");
+const updatesRouter       = require("./routes/updates");
+const subscriptionsRouter = require("./routes/subscriptions");
+const jobsRouter          = require("./routes/jobs");
+const statsRouter         = require("./routes/stats");
+const impactRouter        = require("./routes/impact");
+const ratingsRouter       = require("./routes/ratings");
+const adminRouter         = require("./routes/admin");
+const priceRouter         = require("./routes/price");
+
+function mount(path, router) {
+  app.use(path, router);
+  app.use("/api/v1" + path.replace(/^\/api/, ""), router);
+}
+
+app.use("/health", require("./routes/health"));
+mount("/api/projects",      projectsRouter);
+mount("/api/donations",     donationsRouter);
+mount("/api/profiles",      profilesRouter);
+mount("/api/leaderboard",   leaderboardRouter);
+mount("/api/updates",       updatesRouter);
+mount("/api/subscriptions", subscriptionsRouter);
+mount("/api/jobs",          jobsRouter);
+mount("/api/stats",         statsRouter);
+mount("/api/impact",        impactRouter);
+mount("/api/ratings",       ratingsRouter);
+mount("/api/admin",         adminRouter);
+mount("/api/price",         priceRouter);
+
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
