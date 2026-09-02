@@ -973,7 +973,7 @@ export async function fetchTagSuggestions(query: string): Promise<string[]> {
 
 export async function notifyAdmin(payload: AdminNotificationPayload): Promise<{ success: boolean }> {
   const { data } = await api.post<{ success: boolean }>(
-    "/api/admin/notify",
+    "/api/admin/notifications",
     payload,
   );
   return data;

@@ -25,7 +25,12 @@ jest.mock("../services/stellar", () => ({
 
 const fs = require("fs");
 const path = require("path");
-const { GenericContainer, Wait } = require("testcontainers");
+let GenericContainer, Wait;
+try {
+  ({ GenericContainer, Wait } = require("testcontainers"));
+} catch (err) {
+  console.warn("Could not load testcontainers:", err.message);
+}
 const { Pool } = require("pg");
 
 let container;
@@ -46,9 +51,9 @@ describe("Donation flow integration (testcontainers)", () => {
   jest.setTimeout(120000);
 
   beforeAll(async () => {
-    // Skip if explicitly disabled
-    if (process.env.SKIP_INTEGRATION === "1") {
-      console.warn("Skipping integration tests (SKIP_INTEGRATION=1)");
+    // Skip if explicitly disabled or testcontainers is unavailable
+    if (process.env.SKIP_INTEGRATION === "1" || !GenericContainer) {
+      console.warn("Skipping integration tests (SKIP_INTEGRATION=1 or testcontainers unavailable)");
       return;
     }
 

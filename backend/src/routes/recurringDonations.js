@@ -19,7 +19,7 @@ const pool   = require("../db/pool");
 const logger = require("../logger");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
-const recurringLimiter = createRateLimiter(20, 1); // 20 req/min
+const recurringLimiter = createRateLimiter(20, 1, "recurring-donations"); // 20 req/min
 
 // ── Validation helpers ────────────────────────────────────────────────────────
 

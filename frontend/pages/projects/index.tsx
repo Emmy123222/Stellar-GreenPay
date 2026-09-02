@@ -80,15 +80,19 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     if (!compareQuery || projects.length === 0) return;
-    const ids = compareQuery
-      .split(",")
-      .map((id) => id.trim())
-      .filter((id) => projects.some((project) => project.id === id))
-      .slice(0, 3);
-    if (ids.length >= 2) {
-      setSelectedProjectIds(ids);
-      setShowComparison(true);
-    }
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(() => {
+      const ids = compareQuery
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => projects.some((project) => project.id === id))
+        .slice(0, 3);
+      if (ids.length >= 2) {
+        setSelectedProjectIds(ids);
+        setShowComparison(true);
+      }
+    });
   }, [compareQuery, projects]);
 
   const setFilter = (key: string, val: string) => {
@@ -410,25 +414,26 @@ export default function ProjectsPage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {projects.map((p) => (
                 <div key={p.id} className="relative">
-                  <label
+                  <div
                     className={`absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-body shadow-sm ${
                       selectedProjectIds.includes(p.id)
                         ? "bg-forest-700 text-white border-forest-700"
                         : "bg-white text-forest-700 border-forest-200"
                     }`}
                     onClick={(e) => {
-                      e.preventDefault();
                       e.stopPropagation();
                     }}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selectedProjectIds.includes(p.id)}
-                      onChange={() => toggleSelection(p.id)}
-                      disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
-                    />
-                    Compare
-                  </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedProjectIds.includes(p.id)}
+                        onChange={() => toggleSelection(p.id)}
+                        disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
+                      />
+                      Compare
+                    </label>
+                  </div>
                   <ProjectCard project={p} />
                 </div>
               ))}

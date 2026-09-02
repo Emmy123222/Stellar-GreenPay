@@ -49,14 +49,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-    },
-  })
-);
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -71,15 +67,22 @@ const csrfProtection = csurf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 });
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+  if (
+    req.path.startsWith("/api/notifications") ||
+    req.path.startsWith("/api/v1/notifications") ||
+    req.path === "/health" ||
+    req.path === "/api/health" ||
+    req.path === "/api/v1/health"
+  ) {
     return next();
   }
   return csrfProtection(req, res, next);
 });
 
-// Bare /health (no /api prefix) is what the frontend.yml CI wait loop and
-// container orchestrators probe; keep it alongside the versioned mount.
+const healthRouter = require("./routes/health");
 app.use("/health", healthRouter);
+app.use("/api/health", healthRouter);
+app.use("/api/v1/health", healthRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
@@ -96,7 +99,7 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
-app.use(createRateLimiter(150, 15));
+app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {

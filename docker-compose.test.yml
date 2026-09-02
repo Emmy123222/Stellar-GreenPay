@@ -21,6 +21,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Run separately via `docker compose run --rm pgboss-migrate` in CI, not as
+  # a `depends_on` of backend — its own exit would otherwise trigger
+  # `up --abort-on-container-exit` before backend's tests run.
+  pgboss-migrate:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: test
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/greenpay_test
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: node src/db/pgboss-migrate.js
+
   backend:
     build:
       context: ./backend
@@ -38,10 +53,4 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    # The pgboss schema migration used to be a separate one-shot service,
-    # but `docker compose up --exit-code-from backend` implies
-    # --abort-on-container-exit, so its clean exit aborted the whole stack
-    # before `npm test` ever ran. Fold it into the backend entrypoint: the
-    # migration runs first, then the test suite, and the backend container's
-    # exit code (the tests' code) is what the CI step returns.
-    command: sh -c "node src/db/pgboss-migrate.js && npm test"
+    command: npm test

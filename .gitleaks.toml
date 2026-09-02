@@ -16,5 +16,11 @@ paths = [
 regexes = [
   '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',
   '''^$''',
-  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)'''
+  '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
+  # Demo Stellar keypair used in mobile/app/impact.tsx sample code — the
+  # literal alphabet is not a real (randomly-derived) Stellar key.
+  '''GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890''',
+  # Public Stellar Asset Contract address for native XLM on testnet — a
+  # well-known constant, not a secret. See frontend/components/DonateForm.tsx.
+  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'''
 ]

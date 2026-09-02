@@ -20,6 +20,10 @@ jest.mock("geoip-lite", () => ({
   lookup: jest.fn(),
 }));
 
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
+}));
+
 const { server } = require("../services/stellar");
 const geoip = require("geoip-lite");
 const pool = require("../db/pool");
@@ -205,7 +209,6 @@ describe("POST /api/donations", () => {
         transactionHash,
       }),
     );
-    // INSERT (query index 4) carries donor_country as the 9th parameter
     expect(client.query.mock.calls[4][1][8]).toBe("US");
     expect(client.release).toHaveBeenCalledTimes(1);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
@@ -296,7 +299,7 @@ describe("POST /api/donations", () => {
 
   test("emits donation_event via the socket when a donation is recorded", async () => {
     const donorAddress = makePublicKey("Z");
-    const transactionHash = makeTxHash("f");
+    const transactionHash = makeTxHash("0");
     const donationRow = {
       id: "donation-badge",
       project_id: "project-b",
@@ -393,22 +396,22 @@ describe("POST /api/donations", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-matched" }]), // SELECT project
-      queryResult([]), // dedup check
-      queryResult(), // BEGIN
-      queryResult([{ total: "0" }]), // previous total donated
-      queryResult([donationRow]), // INSERT donation
-      queryResult([{ // SELECT active donation_matches
+      queryResult([{ id: "project-matched" }]),   // SELECT project
+      queryResult([]),                             // dedup check
+      queryResult(),                               // BEGIN
+      queryResult([{ total: "0" }]),              // previous total donated
+      queryResult([donationRow]),                   // INSERT donation
+      queryResult([{                                // SELECT donation_matches (active offer)
         id: "match-1",
         matcher_address: matcherAddress,
         cap_xlm: "100.0000000",
         matched_xlm: "10.0000000",
         multiplier: 2,
       }]),
-      queryResult(), // INSERT matched donation
-      queryResult(), // UPDATE donation_matches
-      queryResult(), // UPDATE projects
-      queryResult(), // COMMIT
+      queryResult(),                               // INSERT donation (matching)
+      queryResult(),                               // UPDATE donation_matches
+      queryResult(),                               // UPDATE projects
+      queryResult(),                               // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -434,7 +437,7 @@ describe("POST /api/donations", () => {
       "XLM",
       `Matching donation for donation from ${donorAddress}`,
       `match-${transactionHash}-match-1`,
-      null, // donor_country (no req.ip in this invocation)
+      null,
     ]);
 
     const matchUpdate = findQueryCall(client, "UPDATE donation_matches");
@@ -457,21 +460,20 @@ describe("POST /api/donations", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-cap-reached" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([donationRow]),
-      queryResult([{
+      queryResult([{ id: "project-cap-reached" }]),  // SELECT project
+      queryResult([]),                                 // dedup check
+      queryResult(),                                    // BEGIN
+      queryResult([{ total: "0" }]),                   // previous total donated
+      queryResult([donationRow]),                        // INSERT donation
+      queryResult([{                                     // SELECT donation_matches (cap already reached)
         id: "match-capped",
         matcher_address: makePublicKey("T"),
         cap_xlm: "50.0000000",
         matched_xlm: "50.0000000",
         multiplier: 3,
       }]),
-      queryResult(),
-      queryResult([]),
-      queryResult([{ count: "1" }]),
-      queryResult(),
+      queryResult(),                                    // UPDATE projects
+      queryResult(),                                    // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -585,16 +587,14 @@ describe("POST /api/donations", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-h" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([{ total: "0" }]),
-      queryResult([donationRow]),
-      queryResult([]),
-      queryResult(),
-      queryResult([]),
-      queryResult([{ count: "1" }]),
-      queryResult(),
+      queryResult([{ id: "project-h" }]),  // SELECT project
+      queryResult([]),                      // dedup check
+      queryResult(),                        // BEGIN
+      queryResult([{ total: "0" }]),       // previous total donated
+      queryResult([donationRow]),           // INSERT donation
+      queryResult([]),                      // SELECT donation_matches (empty)
+      queryResult(),                        // UPDATE projects
+      queryResult(),                        // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -611,7 +611,12 @@ describe("POST /api/donations", () => {
     expect(calls).toContain("COMMIT");
   });
 
-  test("rolls back the transaction if a DB write fails after BEGIN", async () => {
+  test("rolls back the transaction if a query fails after BEGIN", async () => {
+    // Profile persistence now happens out-of-band via enqueueProfileUpdate
+    // (see the profileQueue service), so it can no longer fail the donation
+    // transaction. Exercise a failure in a step that is still part of the
+    // transaction — updating the project totals — to confirm rollback still
+    // works correctly.
     const client = createMockClient(
       queryResult([{ id: "project-4" }]),
       queryResult([]),
@@ -628,9 +633,9 @@ describe("POST /api/donations", () => {
         transaction_hash: makeTxHash("a"),
         created_at: "2026-03-29T10:00:00.000Z",
       }]),
-      queryResult([]), // SELECT donation_matches (empty)
-      new Error("profile write failed"), // UPDATE projects fails mid-transaction
-      queryResult(),
+      queryResult([]),
+      new Error("project update failed"),
+      queryResult(), // ROLLBACK
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -641,7 +646,7 @@ describe("POST /api/donations", () => {
     });
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(next.mock.calls[0][0].message).toBe("profile write failed");
+    expect(next.mock.calls[0][0].message).toBe("project update failed");
     expect(res.statusCode).toBe(500);
     expect(client.query).toHaveBeenLastCalledWith("ROLLBACK");
     expect(client.release).toHaveBeenCalledTimes(1);
@@ -669,16 +674,14 @@ describe("profile upsert on first donation", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-p" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([{ total: "0" }]),
-      queryResult([donationRow]),
-      queryResult([]),
-      queryResult(),
-      queryResult([]),
-      queryResult([{ count: "1" }]),
-      queryResult(),
+      queryResult([{ id: "project-p" }]),  // SELECT project
+      queryResult([]),                      // dedup check
+      queryResult(),                        // BEGIN
+      queryResult([{ total: "0" }]),       // previous total donated
+      queryResult([donationRow]),           // INSERT donation
+      queryResult([]),                      // SELECT donation_matches (empty)
+      queryResult(),                        // UPDATE projects
+      queryResult(),                        // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
@@ -709,21 +712,14 @@ describe("profile upsert on first donation", () => {
     };
 
     const client = createMockClient(
-      queryResult([{ id: "project-q" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([{ total: "90" }]),
-      queryResult([donationRow]),
-      queryResult([]),
-      queryResult(),
-      queryResult([{                          // existing profile with display_name + bio
-        public_key: donorAddress,
-        display_name: "Green Donor",
-        bio: "I care about the planet.",
-        total_donated_xlm: "90.0000000",
-      }]),
-      queryResult([{ count: "2" }]),
-      queryResult(),
+      queryResult([{ id: "project-q" }]),  // SELECT project
+      queryResult([]),                      // dedup check
+      queryResult(),                        // BEGIN
+      queryResult([{ total: "90" }]),      // previous total donated
+      queryResult([donationRow]),           // INSERT donation
+      queryResult([]),                      // SELECT donation_matches (empty)
+      queryResult(),                        // UPDATE projects
+      queryResult(),                        // COMMIT
     );
 
     const { res, next } = await invokeRecordDonation({
