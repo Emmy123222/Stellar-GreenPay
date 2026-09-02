@@ -41,6 +41,11 @@ export async function createRecurringDonation(input: {
   amountXLM: string;
   durationMonths: number | null;
 }): Promise<RecurringDonation> {
+  const parsed = parseFloat(input.amountXLM);
+  if (isNaN(parsed) || parsed < 1) {
+    throw new Error('Minimum recurring donation is 1 XLM');
+  }
+
   const now = new Date().toISOString();
   const donation: RecurringDonation = {
     id: `rec_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`,
