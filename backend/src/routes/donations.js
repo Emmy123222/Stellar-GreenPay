@@ -441,11 +441,11 @@ router.get("/donor/:publicKey", async (req, res, next) => {
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore
       ? Buffer.from(
-          JSON.stringify({
-            created_at: result[result.length - 1].createdAt,
-            id: result[result.length - 1].id,
-          }),
-        ).toString("base64")
+        JSON.stringify({
+          created_at: result[result.length - 1].createdAt,
+          id: result[result.length - 1].id,
+        }),
+      ).toString("base64")
       : null;
 
     res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor });
