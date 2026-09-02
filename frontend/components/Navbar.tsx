@@ -34,8 +34,9 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
       ? window.localStorage.getItem("greenpay:notifications:lastSeen") || undefined
       : undefined;
 
+    // unreadCount already defaults to 0, so there's nothing to synchronize
+    // when there's no device token to fetch notifications for.
     if (!token) {
-      setUnreadCount(0);
       return;
     }
 

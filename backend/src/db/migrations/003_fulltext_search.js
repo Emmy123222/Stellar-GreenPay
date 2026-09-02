@@ -6,15 +6,14 @@ module.exports = {
   async up(client) {
     await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS search_vector TSVECTOR");
 
-    // 003_add_search_vector_gin_index may already have created search_vector
-    // as a GENERATED ALWAYS AS ... STORED column (the newer design). Generated
-    // columns cannot be updated directly, so only backfill when the column is
-    // a plain (non-generated) column.
-    const colResult = await client.query(
-      `SELECT is_generated FROM information_schema.columns
-       WHERE table_name = 'projects' AND column_name = 'search_vector'`
-    );
-    const isGenerated = colResult.rows[0]?.is_generated === "ALWAYS";
+    // If search_vector was already created as a GENERATED ALWAYS column (e.g. by
+    // 003_add_search_vector_gin_index.js), updating it will throw Postgres error 428C9.
+    const check = await client.query(`
+      SELECT attgenerated
+      FROM pg_attribute
+      WHERE attrelid = 'projects'::regclass AND attname = 'search_vector'
+    `);
+    const isGenerated = check.rows.length > 0 && check.rows[0].attgenerated !== "";
 
     if (!isGenerated) {
       await client.query(`

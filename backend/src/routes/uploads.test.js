@@ -8,6 +8,10 @@
  * temporary directory, which is verified on disk and cleaned up after the suite.
  */
 
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
+
 const os = require("os");
 const fs = require("fs");
 const path = require("path");
@@ -199,12 +203,6 @@ describe("POST /api/uploads — disallowed MIME type", () => {
     app = buildApp();
   });
 
-  // The route rejects unrecognized AND disallowed files with 415 Unsupported
-  // Media Type. Recognized-but-disallowed files (e.g. a detected PE executable)
-  // get the explicit "Unsupported file type: …" message; files with no
-  // detectable magic bytes get the "could not be detected" message. file-type
-  // v18 does not detect HTML/JS from these short buffers, so those land in the
-  // undetectable branch.
   test("returns 415 when an executable (.exe) is uploaded", async () => {
     const res = await request(app)
       .post("/api/uploads")
@@ -226,7 +224,9 @@ describe("POST /api/uploads — disallowed MIME type", () => {
       })
       .expect(415);
 
-    expect(res.body.error).toMatch(/could not be detected|unsupported file type/i);
+    // HTML has no magic-byte signature, so this is rejected as an
+    // undetectable format rather than a recognized-but-disallowed type.
+    expect(res.body.error).toMatch(/could not be detected/i);
   });
 
   test("returns 415 when a JavaScript file is uploaded", async () => {
@@ -238,7 +238,9 @@ describe("POST /api/uploads — disallowed MIME type", () => {
       })
       .expect(415);
 
-    expect(res.body.error).toMatch(/could not be detected|unsupported file type/i);
+    // JS has no magic-byte signature, so this is rejected as an
+    // undetectable format rather than a recognized-but-disallowed type.
+    expect(res.body.error).toMatch(/could not be detected/i);
   });
 
   test("does not write a disallowed file to disk", async () => {

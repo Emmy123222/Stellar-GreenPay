@@ -136,13 +136,13 @@ describe("POST /api/donations", () => {
     };
 
     createMockClient(
-      queryResult([{ id: "proj-1" }]), // project lookup
-      queryResult([]), // dedup by tx hash
+      queryResult([{ id: "proj-1" }]), // projectResult
+      queryResult([]), // existingResult (no dup by tx hash)
       queryResult(), // BEGIN
-      queryResult([]), // previous donated total
-      queryResult([donationRow]), // INSERT ... RETURNING *
-      queryResult([]), // active matching offers
-      queryResult(), // UPDATE projects totals
+      queryResult([{ total: "0" }]), // prevTotalResult
+      queryResult([donationRow]), // donationResult (INSERT RETURNING *)
+      queryResult([]), // matchesResult (no active matches)
+      queryResult(), // UPDATE projects
       queryResult(), // COMMIT
     );
 
@@ -181,9 +181,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
-    pool.query.mockResolvedValueOnce({
-      rows: [{ follow_count: 3, is_following: false }],
-    }); // follow stats
+    pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -279,7 +277,7 @@ describe("GET /api/donations/:id", () => {
           ...MOCK_DONATION_ROW,
           project_name: "Amazon Reforestation",
           donor_display_name: "John Doe",
-          co2_per_xlm: 2000,
+          co2_per_xlm: 5000,
         },
       ],
     });

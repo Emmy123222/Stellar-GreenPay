@@ -2,7 +2,12 @@
 
 const fs = require("fs");
 const path = require("path");
-const { GenericContainer, Wait } = require("testcontainers");
+let GenericContainer, Wait;
+try {
+  ({ GenericContainer, Wait } = require("testcontainers"));
+} catch (err) {
+  console.warn("Could not load testcontainers:", err.message);
+}
 const { Pool } = require("pg");
 
 let container;
@@ -18,8 +23,8 @@ describe("profileQueue badge computation", () => {
   jest.setTimeout(120000);
 
   beforeAll(async () => {
-    if (process.env.SKIP_INTEGRATION === "1") {
-      console.warn("Skipping integration tests (SKIP_INTEGRATION=1)");
+    if (process.env.SKIP_INTEGRATION === "1" || !GenericContainer) {
+      console.warn("Skipping integration tests (SKIP_INTEGRATION=1 or testcontainers unavailable)");
       return;
     }
 
@@ -57,17 +62,17 @@ describe("profileQueue badge computation", () => {
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
     } catch (err) {
       console.warn("Testcontainers startup failed – integration tests will be skipped:", err.message);
-      try { if (testPool) await testPool.end(); } catch { /* ignore */ }
-      try { if (container) await container.stop(); } catch { /* ignore */ }
+      try { if (testPool) await testPool.end(); } catch { /* best-effort cleanup */ }
+      try { if (container) await container.stop(); } catch { /* best-effort cleanup */ }
       container = null;
       testPool = null;
     }
   });
 
   afterAll(async () => {
-    try { if (pool) await pool.end(); } catch { /* ignore */ }
-    try { if (testPool) await testPool.end(); } catch { /* ignore */ }
-    try { if (container) await container.stop({ timeout: 5000 }); } catch { /* ignore */ }
+    try { if (pool) await pool.end(); } catch { /* best-effort cleanup */ }
+    try { if (testPool) await testPool.end(); } catch { /* best-effort cleanup */ }
+    try { if (container) await container.stop({ timeout: 5000 }); } catch { /* best-effort cleanup */ }
   });
 
   async function cleanDb() {

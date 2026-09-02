@@ -94,7 +94,7 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws" }]),   // SELECT project
         queryResult([]),                          // dedup check
         queryResult(),                            // BEGIN
-        queryResult([{ total: "0" }]),           // previous total donated
+        queryResult([{ total: "0" }]),            // prevTotalResult
         queryResult([donationRow]),               // INSERT donation
         queryResult([]),                          // SELECT donation_matches (empty)
         queryResult(),                            // UPDATE projects
@@ -217,14 +217,14 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       };
 
       createMockClient(
-        queryResult([{ id: "project-ws-2" }]), // SELECT project
-        queryResult([]), // dedup check
-        queryResult(), // BEGIN
-        queryResult([{ total: "0" }]), // previous total donated
-        queryResult([donationRow]), // INSERT donation
-        queryResult([]), // SELECT donation_matches (empty)
-        queryResult(), // UPDATE projects
-        queryResult(), // COMMIT
+        queryResult([{ id: "project-ws-2" }]),
+        queryResult([]),
+        queryResult(),
+        queryResult([{ total: "0" }]),
+        queryResult([donationRow]),
+        queryResult([]),
+        queryResult(),
+        queryResult(),
       );
 
       const socket = ioc(baseUrl, {
@@ -320,13 +320,13 @@ describe("POST /api/donations → broadcast hardening", () => {
     // Mirrors the query order of recordDonation for a new donor, no active matches.
     createMockClient(
       queryResult([{ id: donationRow.project_id }]), // SELECT project
-      queryResult([]), // dedup check (none)
-      queryResult(), // BEGIN
-      queryResult([{ total: "0" }]), // previous total donated
-      queryResult([donationRow]), // INSERT donation
-      queryResult([]), // SELECT donation_matches (none)
-      queryResult(), // UPDATE projects
-      queryResult(), // COMMIT
+      queryResult([]),                                // dedup check (none)
+      queryResult(),                                  // BEGIN
+      queryResult([{ total: "0" }]),                  // prevTotalResult
+      queryResult([donationRow]),                     // INSERT donation
+      queryResult([]),                                // SELECT donation_matches (none)
+      queryResult(),                                  // UPDATE projects
+      queryResult(),                                  // COMMIT
     );
   }
 
@@ -532,6 +532,7 @@ describe("POST /api/donations → broadcast hardening", () => {
         queryResult([{ id: "project-match" }]),           // SELECT project
         queryResult([]),                                   // dedup check
         queryResult(),                                     // BEGIN
+        queryResult([{ total: "0" }]),                     // prevTotalResult
         queryResult([                                      // INSERT primary donation
           {
             id: "match-primary",

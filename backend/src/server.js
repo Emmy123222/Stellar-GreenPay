@@ -63,14 +63,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-    },
-  })
-);
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -85,40 +81,26 @@ const csrfProtection = csurf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 });
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+  if (
+    req.path.startsWith("/api/notifications") ||
+    req.path.startsWith("/api/v1/notifications") ||
+    req.path === "/health" ||
+    req.path === "/api/health" ||
+    req.path === "/api/v1/health"
+  ) {
     return next();
   }
   return csrfProtection(req, res, next);
 });
 
-// Bare /health (no /api prefix) is what the frontend.yml CI wait loop and
-// container orchestrators probe; keep it alongside the versioned mounts.
+const healthRouter = require("./routes/health");
 app.use("/health", healthRouter);
-
-const routeMounts = [
-  ["/health", healthRouter],
-  ["/readiness", readinessRouter],
-  ["/projects", projectsRouter],
-  ["/donations", donationsRouter],
-  ["/leaderboard", leaderboardRouter],
-  ["/profiles", profilesRouter],
-  ["/stats", statsRouter],
-  ["/updates", updatesRouter],
-  ["/uploads", uploadsRouter],
-  ["/notifications", notificationsRouter],
-  ["/admin", adminRouter],
-  ["/verification", verificationRouter],
-  ["/impact", impactRouter],
-  ["/subscriptions", subscriptionsRouter],
-  ["/ratings", ratingsRouter],
-  ["/jobs", jobsRouter],
-  ["/webhooks", webhooksRouter],
-];
-
-for (const [path, router] of routeMounts) {
-  app.use(`/api${path}`, router);
-  app.use(`/api/v1${path}`, router);
-}
+app.use("/api/health", healthRouter);
+app.use("/api/v1/health", healthRouter);
+app.use("/api/projects", projectsRouter);
+app.use("/api/uploads", uploadsRouter);
+app.use("/api/v1/projects", projectsRouter);
+app.use("/api/v1/uploads", uploadsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -131,7 +113,7 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
-app.use(createRateLimiter(150, 15));
+app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {

@@ -12,7 +12,7 @@ const { VALID_CATEGORIES, STELLAR_PUBLIC_KEY_RE } = require("../config/constants
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
-const loginLimiter = createRateLimiter(10, 15);
+const loginLimiter = createRateLimiter(10, 15, "admin-login");
 
 const TOKEN_EXPIRY = "1h";
 const REFRESH_EXPIRY = "24h";

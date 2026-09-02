@@ -28,7 +28,7 @@ describe("GET /api/impact/global", () => {
   });
 
   test("returns category breakdown with one entry per donated category and excludes empty categories", async () => {
-    redis.get.mockReturnValue(null);
+    redis.get.mockResolvedValue(null);
     pool.query
       .mockResolvedValueOnce({
         rows: [
@@ -62,7 +62,7 @@ describe("GET /api/impact/global", () => {
           },
         ],
       })
-      .mockResolvedValueOnce({ rows: [] }); // country breakdown
+      .mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app).get("/api/impact/global").expect(200);
 
