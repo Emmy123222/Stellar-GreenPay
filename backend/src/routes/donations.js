@@ -9,23 +9,10 @@ const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { sanitizedStringField, validateBody } = require("../middleware/validation");
+
 const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
-
-const donationSchema = z.object({
-  projectId: z.string().min(1, "projectId is required"),
-  donorAddress: z.string().min(1, "donorAddress is required"),
-  amountXLM: z.union([z.string(), z.number()]).transform((value) => String(value)),
-  amount: z.union([z.string(), z.number()]).optional(),
-  currency: z.string().optional(),
-  message: sanitizedStringField({ required: false, maxLength: 100, message: "must not contain HTML" }).optional(),
-  transactionHash: z.string().min(1, "transactionHash is required"),
-}).transform((data) => ({
-  ...data,
-  message: data.message ?? null,
-}));
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid Stellar public key"); e.status = 400; throw e; }

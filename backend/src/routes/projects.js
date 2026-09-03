@@ -45,16 +45,6 @@ const VALID_CATEGORIES = [
 ];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 
-const createProjectSchema = z.object({
-  name: sanitizedStringField({ required: true, minLength: 3, maxLength: 120, message: "must not contain HTML" }),
-  description: sanitizedStringField({ required: true, minLength: 10, maxLength: 5000, message: "must not contain HTML" }),
-  location: sanitizedStringField({ required: true, minLength: 2, maxLength: 200, message: "must not contain HTML" }),
-  category: z.enum(VALID_CATEGORIES),
-  wallet_address: z.string().min(1, "wallet_address is required"),
-  goal_xlm: z.union([z.string(), z.number()]).optional(),
-  tags: z.array(z.string()).optional().default([]),
-});
-
 /**
  * GET /api/projects/featured
  * Returns the project with the highest donorCount (active projects only).
