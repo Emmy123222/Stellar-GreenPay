@@ -98,7 +98,7 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
-app.use(createRateLimiter(150, 15));
+app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
@@ -133,6 +133,9 @@ async function startServer() {
 
   const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
   await startRecurringDonationQueue();
+
+  const { start: startTokenCleanupQueue } = require("./services/tokenCleanupQueue");
+  await startTokenCleanupQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 

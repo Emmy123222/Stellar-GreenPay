@@ -13,9 +13,11 @@ jest.mock("../services/storage", () => ({
   backendName: () => "local",
 }));
 
+jest.unmock("../middleware/rateLimiter");
+
 const express = require("express");
 const request = require("supertest");
-const pool = require("../db/pool");
+const redis = require("../services/redis");
 
 function buildApp() {
   const app = express();
@@ -79,17 +81,15 @@ const MOCK_DB_ROW = {
 
 describe("POST /api/verification-requests rate limiter", () => {
   let app;
+  let mockPool;
 
-  beforeEach(() => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date("2026-07-01T00:00:00.000Z"));
+  beforeEach(async () => {
+    jest.resetModules();
+    const currentRedis = require("../services/redis");
+    await currentRedis.deletePattern("greenpay:rate-limit:verification:*");
+    mockPool = require("../db/pool");
+    mockPool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
     app = buildApp();
-    jest.clearAllMocks();
-    pool.query.mockResolvedValue({ rows: [MOCK_DB_ROW] });
-  });
-
-  afterEach(() => {
-    jest.useRealTimers();
   });
 
   test("allows 10 submissions per 15 minutes per IP, blocks the 11th, then resets", async () => {
@@ -108,9 +108,10 @@ describe("POST /api/verification-requests rate limiter", () => {
 
     expect(blocked.status).toBe(429);
     expect(blocked.headers["retry-after"]).toBeDefined();
-    expect(pool.query).toHaveBeenCalledTimes(10);
+    expect(mockPool.query).toHaveBeenCalledTimes(10);
 
-    jest.advanceTimersByTime((15 * 60 * 1000) + 1);
+    const currentRedis = require("../services/redis");
+    await currentRedis.deletePattern("greenpay:rate-limit:verification:*");
 
     const allowedAfterWindow = await request(app)
       .post("/api/verification-requests")
@@ -118,6 +119,6 @@ describe("POST /api/verification-requests rate limiter", () => {
 
     expect(allowedAfterWindow.status).toBe(201);
     expect(allowedAfterWindow.body.success).toBe(true);
-    expect(pool.query).toHaveBeenCalledTimes(11);
+    expect(mockPool.query).toHaveBeenCalledTimes(11);
   });
 });
