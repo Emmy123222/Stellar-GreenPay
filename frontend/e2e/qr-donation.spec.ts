@@ -41,12 +41,12 @@ const MOCK_PROJECT = {
 // ── Helper: mock all API routes the donate page may fetch ────────────────────
 
 async function mockDonatePageApi(page: Page, projectId = PROJECT_ID) {
-  await page.route(`**/api/projects/${projectId}`, (route) =>
-    route.fulfill({ json: { success: true, data: MOCK_PROJECT } })
-  );
   // Blanket catch-all for any other /api/** calls
   await page.route("**/api/**", (route) =>
     route.fulfill({ json: { success: true, data: [] } })
+  );
+  await page.route(`**/api/v1/projects/${projectId}`, (route) =>
+    route.fulfill({ json: { success: true, data: MOCK_PROJECT } })
   );
 }
 
@@ -74,7 +74,7 @@ test.describe("QR code donation link flow", () => {
     await page.goto(`/donate/${PROJECT_ID}?amount=50`);
 
     // The donate page renders a chip like "Donate 50 XLM" when presetAmount is set
-    await expect(page.getByText(/50.*XLM/i)).toBeVisible();
+    await expect(page.getByText("50 XLM", { exact: true })).toBeVisible();
   });
 
   test("landing on the QR link without ?amount shows no preset amount chip", async ({

@@ -725,14 +725,19 @@ export default function ProjectDetail({
 
   if (loading || !project)
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
-        <div className="h-8 bg-forest-200 rounded w-2/3 mb-4" />
-        <div className="card space-y-4">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-4 bg-forest-100 rounded" />
-          ))}
+      <>
+        <Head>
+          <title>Project Details - Stellar GreenPay</title>
+        </Head>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
+          <div className="h-8 bg-forest-200 rounded w-2/3 mb-4" />
+          <div className="card space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-4 bg-forest-100 rounded" />
+            ))}
+          </div>
         </div>
-      </div>
+      </>
     );
 
   const pct = progressPercent(project.raisedXLM, project.goalXLM);

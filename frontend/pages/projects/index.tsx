@@ -416,10 +416,6 @@ export default function ProjectsPage() {
                         ? "bg-forest-700 text-white border-forest-700"
                         : "bg-white text-forest-700 border-forest-200"
                     }`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
                   >
                     <input
                       type="checkbox"

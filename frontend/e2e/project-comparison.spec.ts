@@ -76,9 +76,9 @@ async function mockApi(page: Page) {
   await page.route("**/horizon-testnet.stellar.org/**", (r) =>
     r.fulfill({ json: { _embedded: { records: [] } } }),
   );
-  await page.route("**/api/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/stats/global", (r) =>
+  await page.route("**/api/v1/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/v1/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/v1/stats/global", (r) =>
     r.fulfill({ json: { success: true, data: { totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 } } }),
   );
 }
@@ -98,8 +98,8 @@ test.describe("ProjectComparison modal", () => {
     await page.getByRole("button", { name: /compare selected/i }).click();
     await expect(page.getByRole("heading", { name: /project comparison/i })).toBeVisible();
 
-    await expect(page.getByText(MOCK_PROJECTS[0].name)).toBeVisible();
-    await expect(page.getByText(MOCK_PROJECTS[1].name)).toBeVisible();
+    await expect(page.getByText(MOCK_PROJECTS[0].name).last()).toBeVisible();
+    await expect(page.getByText(MOCK_PROJECTS[1].name).last()).toBeVisible();
     await expect(page.getByText("CO2 per XLM")).toBeVisible();
     await expect(page.getByText("Progress %")).toBeVisible();
     await expect(page.getByText("Donor count")).toBeVisible();

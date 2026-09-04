@@ -507,7 +507,15 @@ export default function DonorProfilePage() {
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  if (!publicKey || loading) return <ProfileSkeleton />;
+  if (!publicKey || loading)
+    return (
+      <>
+        <Head>
+          <title>Donor Profile - Stellar GreenPay</title>
+        </Head>
+        <ProfileSkeleton />
+      </>
+    );
   if (notFound) return <ProfileNotFound publicKey={publicKey} />;
   if (!profile) return null;
 

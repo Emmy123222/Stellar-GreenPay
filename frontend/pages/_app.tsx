@@ -1,5 +1,6 @@
 import type { AppProps } from "next/app";
 import Head from "next/head";
+import { useEffect } from "react";
 import { ThemeTiedToaster } from "@/components/ThemeTiedToaster";
 import { ThemeProvider } from "@/lib/theme";
 import { I18nProvider } from "@/lib/i18n";
@@ -9,6 +10,17 @@ import "@/styles/globals.css";
 // ThemeTiedToaster keeps the sonner toast palette in sync with the
 // resolved effective theme.
 export default function App({ Component, pageProps }: AppProps) {
+  useEffect(() => {
+    const ensureTitle = () => {
+      if (!document.title.trim()) document.title = "Stellar GreenPay";
+    };
+
+    ensureTitle();
+    const observer = new MutationObserver(ensureTitle);
+    observer.observe(document.head, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <ThemeProvider>
       <I18nProvider>

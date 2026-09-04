@@ -2,6 +2,7 @@
 
 module.exports = {
   name: "002_add_performance_indexes",
+  autocommit: true,
 
   async up(client) {
     await client.query("CREATE INDEX CONCURRENTLY idx_donations_project_created ON donations(project_id, created_at DESC)");

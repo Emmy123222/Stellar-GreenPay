@@ -42,6 +42,7 @@ export default function ProjectProgressBar({
         aria-valuemax={100}
         aria-valuenow={hasGoal ? percentage : 0}
         aria-valuetext={hasGoal ? `${percentage}% complete` : "No goal set"}
+        aria-label="Project funding progress"
       >
         <div
           className="h-full rounded-full bg-emerald-500 transition-all duration-300 dark:bg-emerald-400"
