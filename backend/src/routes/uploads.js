@@ -84,7 +84,7 @@ const memory = multer({
 async function detectMimeType(buffer) {
   try {
     if (!buffer || buffer.length === 0) return null;
-    const type = await fileType.fromBuffer(buffer);
+    const type = await fileType.fileTypeFromBuffer(buffer);
     return type ? type.mime : null;
   } catch (err) {
     logger.warn(

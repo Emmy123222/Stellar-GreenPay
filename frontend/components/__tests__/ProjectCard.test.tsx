@@ -13,7 +13,7 @@ const mockProject: ClimateProject = {
   raisedXLM: "2500",
   donorCount: 42,
   co2OffsetKg: 1200,
-  co2_per_xlm: 0.48,
+  co2PerXLM: 0.48,
   status: "active",
   verified: true,
   onChainVerified: false,

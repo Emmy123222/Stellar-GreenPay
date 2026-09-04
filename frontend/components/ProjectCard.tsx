@@ -113,7 +113,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                   ?
                 </button>
                 <span className="tooltip-text" role="tooltip">
-                  Estimated based on {(project as any).co2PerXLM || (project as any).co2PerXlm || project.co2_per_xlm || 0} g CO₂ offset per XLM donated to this project
+                  Estimated based on {(project as any).co2PerXLM || (project as any).co2PerXlm || project.co2PerXLM || 0} g CO₂ offset per XLM donated to this project
                 </span>
               </span>
             </span>

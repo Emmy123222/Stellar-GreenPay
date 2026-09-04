@@ -1,3 +1,7 @@
+-- pg_trgm powers fuzzy name similarity for the similar-projects endpoint.
+-- (Idempotent; also enabled by migration 005_pg_trgm.)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- projects: core project registry. Central entity; every other table
 -- references projects.id. Status lifecycle: active → completed / cancelled.
 -- on_chain_verified reflects Stellar anchor verification.

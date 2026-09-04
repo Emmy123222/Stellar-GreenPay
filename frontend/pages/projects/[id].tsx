@@ -26,6 +26,7 @@ import {
   toggleUpdateLike,
   followProject,
   unfollowProject,
+  fetchSimilarProjects,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
@@ -101,6 +102,7 @@ export default function ProjectDetail({
   const [isFollowing, setIsFollowing] = useState(false);
   const [followCount, setFollowCount] = useState(0);
   const [followLoading, setFollowLoading] = useState(false);
+  const [similarProjects, setSimilarProjects] = useState<ClimateProject[]>([]);
 
   // Stable per-particle randomness for the completion celebration animation.
   // A useState lazy initializer (unlike useMemo, which React may recompute
@@ -122,6 +124,13 @@ export default function ProjectDetail({
       : null;
   const prefillReplyMemo =
     typeof router.query.replyMemo === "string" ? router.query.replyMemo : undefined;
+
+  useEffect(() => {
+    if (!id) return;
+    fetchSimilarProjects(id as string)
+      .then(setSimilarProjects)
+      .catch(() => setSimilarProjects([]));
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
@@ -1570,6 +1579,55 @@ export default function ProjectDetail({
 
         {/* ── Sidebar ─────────────────────────────────────────────────── */}
         <div className="space-y-4">
+
+          {/* Similar Projects */}
+          {similarProjects.length > 0 && (
+            <div className="card bg-forest-50 border-forest-200">
+              <h2 className="font-display text-lg font-semibold text-forest-900 mb-3">
+                Similar Projects
+              </h2>
+              <div className="space-y-3">
+                {similarProjects.map((sp) => {
+                  const similarPct = progressPercent(sp.raisedXLM, sp.goalXLM);
+                  return (
+                    <Link
+                      key={sp.id}
+                      href={`/projects/${sp.id}`}
+                      className="block p-3 rounded-xl border border-forest-100 bg-white hover:border-forest-300 hover:shadow-sm transition-all duration-200 group"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-forest-100 flex items-center justify-center text-xl flex-shrink-0 group-hover:scale-110 transition-transform">
+                          {CATEGORY_ICONS[sp.category] || "🌿"}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-sm text-forest-900 truncate group-hover:text-forest-700 transition-colors">
+                            {sp.name}
+                          </h3>
+                          <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] mt-0.5">
+                            📍 {sp.location}
+                          </p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="flex-1 progress-bar h-1.5">
+                              <div
+                                className="progress-fill"
+                                style={{ width: `${Math.min(similarPct, 100)}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-semibold text-forest-600">
+                              {similarPct}%
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-[#8aaa8a] dark:text-forest-300 mt-1">
+                            {formatXLM(sp.raisedXLM)} raised of {formatXLM(sp.goalXLM)}
+                          </p>
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Sticky mobile donate button */}
           <div className="fixed bottom-0 left-0 right-0 z-40 p-3 bg-white/95 backdrop-blur-sm border-t border-forest-200 sm:hidden">

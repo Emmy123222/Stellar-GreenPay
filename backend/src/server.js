@@ -23,6 +23,7 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const healthRouter = require("./routes/health");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
