@@ -41,18 +41,6 @@ function getProjectDetailCacheKey(projectId) {
   return PROJECT_DETAIL_CACHE_PREFIX + projectId;
 }
 
-const VALID_STATUSES = ["active", "completed", "paused"];
-const VALID_CATEGORIES = [
-  "Reforestation",
-  "Solar Energy",
-  "Ocean Conservation",
-  "Clean Water",
-  "Wildlife Protection",
-  "Carbon Capture",
-  "Wind Energy",
-  "Sustainable Agriculture",
-  "Other",
-];
 const VALID_SORT_FIELDS = ["created_at", "raised_xlm", "donor_count"];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 const KG_CO2_PER_TREE = 22; // heuristic for treesEquivalent
@@ -403,10 +391,19 @@ router.post("/", async (req, res, next) => {
       return res.status(400).json({ error: "wallet_address is required" });
     }
 
+    // Validate co2_per_xlm if provided
+    const co2PerXLM = req.body.co2_per_xlm;
+    if (co2PerXLM !== undefined && co2PerXLM !== null) {
+      const co2 = Number.parseFloat(co2PerXLM);
+      if (!Number.isFinite(co2) || co2 < 0) {
+        return res.status(400).json({ error: "co2_per_xlm must be a non-negative number" });
+      }
+    }
+
     const id = uuid();
     const result = await pool.query(
-      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, tags, search_vector)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($8, ' '), '')))
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, co2_per_xlm, tags, search_vector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $2 || ' ' || $3 || ' ' || $5 || ' ' || COALESCE(array_to_string($9, ' '), '')))
        RETURNING *`,
       [
         id,
@@ -416,6 +413,7 @@ router.post("/", async (req, res, next) => {
         location.trim(),
         wallet_address,
         goal_xlm,
+        req.body.co2_per_xlm || null,
         tags,
       ],
     );
@@ -1956,6 +1954,239 @@ router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
       data: {
         id: result.rows[0].id,
         webhookUrl: result.rows[0].webhook_url || null,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/social-card
+ * Returns a shareable impact summary card as JSON.
+ * Requires ?donorAddress=G...&amount=X query params.
+ */
+/**
+ * Generate a shareable social impact card for a donor's contribution.
+ *
+ * @route GET /api/projects/:id/social-card
+ * @param {import('express').Request} req - Express request with donorAddress and amount query params.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends the social card payload.
+ * @throws {Error} If validation or database query fails.
+ */
+router.get("/:id/social-card", async (req, res, next) => {
+  try {
+    const { donorAddress, amount } = req.query;
+
+    if (!donorAddress || typeof donorAddress !== "string" || !STELLAR_PUBLIC_KEY_RE.test(donorAddress)) {
+      return res.status(400).json({ error: "donorAddress must be a valid Stellar public key" });
+    }
+    const donationAmount = Number.parseFloat(amount);
+    if (!amount || !Number.isFinite(donationAmount) || donationAmount <= 0) {
+      return res.status(400).json({ error: "amount must be a positive number" });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT name, co2_offset_kg, raised_xlm FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const project = projectResult.rows[0];
+    const projectCo2OffsetKg = Number.parseFloat(project.co2_offset_kg?.toString() || "0");
+    const raisedXlm = Number.parseFloat(project.raised_xlm?.toString() || "0");
+
+    // Calculate CO2 offset proportionally
+    const kgPerXlm = raisedXlm > 0 ? projectCo2OffsetKg / raisedXlm : 0;
+    const co2OffsetKg = Math.round(donationAmount * kgPerXlm);
+    const treesEquivalent = co2OffsetKg > 0 ? (co2OffsetKg / KG_CO2_PER_TREE).toFixed(1) : "0";
+
+    // Determine badge tier for this donation amount
+    const badges = computeBadges(donationAmount);
+    const badge = badges.length > 0 ? badges[0] : null;
+    const BADGE_EMOJIS = { seedling: "🌱", tree: "🌳", forest: "🌲", earth: "🌍" };
+    const BADGE_LABELS = { seedling: "Seedling", tree: "Tree", forest: "Forest", earth: "Earth Guardian" };
+
+    const badgeEmoji = badge ? (BADGE_EMOJIS[badge.tier] || "🌟") : "🌟";
+    const badgeLabel = badge ? (BADGE_LABELS[badge.tier] || badge.tier) : "Supporter";
+
+    const socialText = [
+      `🌍 I donated ${donationAmount} XLM to ${project.name} on Stellar GreenPay`,
+      `💚 Offsetting ~${co2OffsetKg.toLocaleString()} kg CO₂ — equivalent to planting ${treesEquivalent} trees`,
+      `🏆 My badge: ${badgeLabel} ${badgeEmoji}`,
+    ].join("\n");
+
+    res.json({
+      success: true,
+      data: {
+        text: socialText,
+        projectName: project.name,
+        amount: donationAmount.toFixed(7),
+        co2OffsetKg,
+        treesEquivalent: Number.parseFloat(treesEquivalent),
+        badgeTier: badge ? badge.tier : null,
+        badgeEmoji,
+        badgeLabel,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// ── Impact certificate ─────────────────────────────────────────────────────
+
+/**
+ * GET /api/projects/:id/impact-certificate?donorAddress=G...
+ *
+ * Returns a personalised impact certificate for a specific donor on a specific
+ * project. Includes:
+ *   - Donor name (from their profile, if set)
+ *   - Total XLM donated to this project
+ *   - Total CO₂ offset in kg (proportional to the project's overall offset)
+ *   - Trees equivalent
+ *   - Badge tier (bronze / silver / gold / platinum)
+ *   - Project name, category, and verification status
+ *   - QR code (base64 data-URL) linking to the most recent on-chain donation
+ *   - Full donation history for this donor on this project
+ *
+ * Query params:
+ *   donorAddress  (required) — Stellar G… public key of the donor
+ *
+ * Errors: 400 (missing/invalid donorAddress), 404 (project or donor not found)
+ */
+
+const KG_CO2_PER_TREE_CERT = 21.77; // consistent with impact.js
+
+/** Derive a badge tier from the donor's total XLM donated to this project. */
+function deriveBadgeTier(totalXLM) {
+  if (totalXLM >= 10000) return "platinum";
+  if (totalXLM >= 1000) return "gold";
+  if (totalXLM >= 100) return "silver";
+  if (totalXLM > 0) return "bronze";
+  return null;
+}
+
+/**
+ * Build the URL to the on-chain donation record on Stellar Explorer.
+ * Falls back to the Horizon testnet explorer.
+ */
+function buildOnChainUrl(transactionHash) {
+  const network = process.env.STELLAR_NETWORK || "testnet";
+  if (network === "mainnet" || network === "public") {
+    return `https://stellar.expert/explorer/public/tx/${transactionHash}`;
+  }
+  return `https://stellar.expert/explorer/testnet/tx/${transactionHash}`;
+}
+
+router.get("/:id/impact-certificate", async (req, res, next) => {
+  try {
+    const { donorAddress } = req.query;
+
+    // Validate donorAddress — must be a 56-char Stellar G-address
+    if (
+      !donorAddress ||
+      typeof donorAddress !== "string" ||
+      !/^G[A-Z2-7]{55}$/.test(donorAddress)
+    ) {
+      return res.status(400).json({
+        error: "donorAddress query parameter is required and must be a valid Stellar public key",
+      });
+    }
+
+    // 1. Fetch project — includes category and verification status
+    const projectResult = await pool.query(
+      `SELECT id, name, category, verified, on_chain_verified, raised_xlm, co2_offset_kg
+       FROM projects
+       WHERE id = $1`,
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // 2. Fetch donor's profile (display name) — may not exist
+    const profileResult = await pool.query(
+      "SELECT display_name FROM profiles WHERE public_key = $1",
+      [donorAddress],
+    );
+
+    // 3. Fetch all XLM donations by this donor for this project
+    const donationsResult = await pool.query(
+      `SELECT
+         id,
+         COALESCE(amount_xlm, amount) AS amount_xlm,
+         message,
+         transaction_hash,
+         created_at
+       FROM donations
+       WHERE project_id = $1
+         AND donor_address = $2
+         AND (currency = 'XLM' OR currency IS NULL)
+       ORDER BY created_at DESC`,
+      [req.params.id, donorAddress],
+    );
+
+    if (donationsResult.rows.length === 0) {
+      return res.status(404).json({
+        error: "No donations found for this donor on this project",
+      });
+    }
+
+    // 4. Compute aggregate stats
+    const project = projectResult.rows[0];
+    const raisedXlm = Number.parseFloat(project.raised_xlm?.toString() || "0");
+    const projectCo2Kg = Number.parseFloat(project.co2_offset_kg?.toString() || "0");
+    const kgPerXlm = raisedXlm > 0 ? projectCo2Kg / raisedXlm : 0;
+
+    const totalDonatedXLM = donationsResult.rows.reduce(
+      (sum, row) => sum + Number.parseFloat(row.amount_xlm?.toString() || "0"),
+      0,
+    );
+    const co2OffsetKg = Math.round(totalDonatedXLM * kgPerXlm);
+    const treesEquivalent =
+      co2OffsetKg > 0
+        ? Number((co2OffsetKg / KG_CO2_PER_TREE_CERT).toFixed(2))
+        : 0;
+
+    const donations = donationsResult.rows.map((row) => ({
+      id: row.id,
+      amountXLM: Number.parseFloat(row.amount_xlm?.toString() || "0").toFixed(7),
+      message: row.message || null,
+      transactionHash: row.transaction_hash,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
+    // 5. Generate QR code linking to the most recent on-chain donation record
+    const latestTxHash = donationsResult.rows[0].transaction_hash;
+    const onChainUrl = buildOnChainUrl(latestTxHash);
+    const qrCode = await QRCode.toDataURL(onChainUrl, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 256,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        projectId: project.id,
+        projectName: project.name,
+        projectCategory: project.category,
+        projectVerified: Boolean(project.verified) || Boolean(project.on_chain_verified),
+        donorAddress,
+        donorName: profileResult.rows[0]?.display_name || null,
+        totalDonatedXLM: totalDonatedXLM.toFixed(7),
+        co2OffsetKg,
+        treesEquivalent,
+        badgeTier: deriveBadgeTier(totalDonatedXLM),
+        donationCount: donations.length,
+        donations,
+        qrCode,
+        issuedAt: new Date().toISOString(),
       },
     });
   } catch (e) {

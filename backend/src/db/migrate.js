@@ -50,7 +50,16 @@ async function runMigrations() {
       if (applied.includes(version)) continue;
       const migration = require(file);
       console.log(`[DB] Applying migration: ${version}`);
-      await migration.up(client);
+      const usesConcurrently = /CONCURRENTLY/i.test(fs.readFileSync(file, "utf-8"));
+      if (usesConcurrently) {
+        // CREATE INDEX CONCURRENTLY cannot run inside a transaction block;
+        // run these migrations in autocommit mode and re-open the transaction.
+        await client.query("COMMIT");
+        await migration.up(client);
+        await client.query("BEGIN");
+      } else {
+        await migration.up(client);
+      }
       await client.query(
         "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
         [version, migration.name ?? version]

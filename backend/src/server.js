@@ -22,7 +22,22 @@ const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
+const donationsRouter = require("./routes/donations");
+const leaderboardRouter = require("./routes/leaderboard");
+const profilesRouter = require("./routes/profiles");
+const statsRouter = require("./routes/stats");
+const updatesRouter = require("./routes/updates");
 const uploadsRouter = require("./routes/uploads");
+const healthRouter = require("./routes/health");
+const readinessRouter = require("./routes/readiness");
+const notificationsRouter = require("./routes/notifications");
+const adminRouter = require("./routes/admin");
+const verificationRouter = require("./routes/verification");
+const impactRouter = require("./routes/impact");
+const subscriptionsRouter = require("./routes/subscriptions");
+const ratingsRouter = require("./routes/ratings");
+const jobsRouter = require("./routes/jobs");
+const webhooksRouter = require("./routes/webhooks");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -107,7 +122,6 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());

@@ -290,7 +290,8 @@ describe("GET /api/donations/:id", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.projectName).toBe("Amazon Reforestation");
     expect(res.body.data.donorDisplayName).toBe("John Doe");
-    expect(res.body.data.co2OffsetKg).toBe(500);
+    // 100 XLM × 2000 g/XLM ÷ 1000 = 200 kg CO₂ (per #365 formula)
+    expect(res.body.data.co2OffsetKg).toBe(200);
   });
 
   test("returns 404 if donation not found", async () => {

@@ -35,6 +35,7 @@ describe("GET /api/impact/global", () => {
           {
             totalDonationsXLM: "350",
             donorCount: 6,
+            uniqueCountries: 3,
             co2OffsetKg: 127,
           },
         ],

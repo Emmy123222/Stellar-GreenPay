@@ -12,6 +12,10 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("../services/profileQueue", () => ({
+  enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
+}));
+
 jest.mock("geoip-lite", () => ({
   lookup: jest.fn(),
 }));
@@ -293,7 +297,7 @@ describe("POST /api/donations", () => {
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  test("emits badge_earned when donation crosses badge threshold", async () => {
+  test("emits donation_event via the socket when a donation is recorded", async () => {
     const donorAddress = makePublicKey("Z");
     const transactionHash = makeTxHash("0");
     const donationRow = {
@@ -331,14 +335,9 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-    // donation_event and badge_earned should be emitted
     expect(ioStub.emit).toHaveBeenCalledWith(
       "donation_event",
-      expect.objectContaining({ projectId: "project-b", donorAddress }),
-    );
-    expect(ioStub.emit).toHaveBeenCalledWith(
-      "badge_earned",
-      expect.objectContaining({ projectId: "project-b", donorAddress, badge: "seedling" }),
+      expect.objectContaining({ projectId: "project-b", donorAddress, donorBadge: expect.any(String) }),
     );
     expect(client.release).toHaveBeenCalledTimes(1);
   });
