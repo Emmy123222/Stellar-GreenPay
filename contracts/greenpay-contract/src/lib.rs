@@ -960,7 +960,6 @@ impl GreenPayContract {
             total_count
         } else {
             (offset + limit).min(total_count)
-            offset + limit
         };
 
         // Collect projects from the slice

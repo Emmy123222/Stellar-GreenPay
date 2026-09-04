@@ -3,7 +3,7 @@ title = "Stellar GreenPay secret scanning"
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Global allowlist for ignored files and test values."
 paths = [
   '''^\.gitleaks\.toml$''',
