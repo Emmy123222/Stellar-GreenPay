@@ -298,6 +298,10 @@ router.get("/", async (req, res, next) => {
     values.push(pageSize + 1);
     const limitIdx = values.length;
 
+    // Build the SQL query: WHERE values are whitelisted enum strings;
+    // all user values use parameterized $N placeholders below.
+    const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")} ` : "";
+    const query = `SELECT * FROM projects ${whereClause}ORDER BY ${sortField} DESC, id DESC LIMIT $${limitIdx}`;
     let query = "SELECT * FROM projects ";
     if (where.length) {
       query += "WHERE " + where.join(" AND ") + " ";
