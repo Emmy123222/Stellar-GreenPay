@@ -21,6 +21,9 @@ services:
       timeout: 5s
       retries: 10
 
+  # Run separately via `docker compose run --rm pgboss-migrate` in CI, not as
+  # a `depends_on` of backend — its own exit would otherwise trigger
+  # `up --abort-on-container-exit` before backend's tests run.
   pgboss-migrate:
     build:
       context: ./backend
@@ -50,6 +53,4 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      pgboss-migrate:
-        condition: service_completed_successfully
     command: npm test

@@ -44,7 +44,7 @@ const { generatePresignedPutUrl, isS3Configured } = require("../services/s3Presi
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const logger = require("../logger");
 
-const uploadRateLimiter = createRateLimiter(20, 15); // 20 uploads per 15 min
+const uploadRateLimiter = createRateLimiter(20, 15, "uploads"); // 20 uploads per 15 min
 
 const MAX_BYTES = parseInt(process.env.UPLOAD_MAX_BYTES || String(10 * 1024 * 1024), 10);
 
@@ -201,7 +201,7 @@ router.post("/", uploadRateLimiter, (req, res, next) => {
  * Falls back to 503 when S3 is not configured — the client should retry
  * with a standard POST /api/uploads multipart upload in that case.
  */
-const presignRateLimiter = createRateLimiter(30, 15); // 30 presign requests per 15 min
+const presignRateLimiter = createRateLimiter(30, 15, "upload-presign"); // 30 presign requests per 15 min
 
 router.post("/presign", presignRateLimiter, async (req, res, next) => {
   const { originalName, contentType, size } = req.body || {};

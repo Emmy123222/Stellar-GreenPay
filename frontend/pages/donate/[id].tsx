@@ -59,36 +59,64 @@ function GoalProgress({ raised, goal }: { raised: number; goal: number }) {
 
 //Page //
 
-const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
+const DonatePage: NextPage<DonatePageProps> = ({ project: initialProject, presetAmount: initialPresetAmount }) => {
   const router = useRouter();
+  const [project, setProject] = useState<DonateProject | null>(initialProject);
+  const [loading, setLoading] = useState(!initialProject);
   const qrRef = useRef<DonationQRCodeHandle>(null);
   const [copied, setCopied] = useState(false);
-  const [loadedProject, setLoadedProject] = useState(project);
+
+  const queryAmount = router.query.amount;
+  const presetAmount =
+    initialPresetAmount ??
+    (queryAmount && !Array.isArray(queryAmount) && Number(queryAmount) > 0 ? Number(queryAmount) : null);
 
   useEffect(() => {
-    if (loadedProject || !router.isReady || typeof router.query.id !== "string") return;
-
-    fetch(`/api/v1/projects/${router.query.id}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Project not found");
-        const data = await response.json();
-        const payload = data.data ?? data;
-        setLoadedProject({
-          id: payload.id ?? router.query.id,
-          name: payload.name ?? payload.title ?? "Untitled Project",
-          category: payload.category ?? "Other",
-          walletAddress: payload.walletAddress ?? payload.wallet_address ?? "",
-          goalXLM: Number(payload.goalXLM ?? payload.goal_xlm ?? 0),
-          raisedXLM: Number(payload.raisedXLM ?? payload.raised_xlm ?? 0),
-          description: payload.description ?? "",
+    if (!initialProject && router.isReady) {
+      const id = router.query.id as string;
+      if (!id) return;
+      fetch(`/api/v1/projects/${encodeURIComponent(id)}`)
+        .then(async (res) => {
+          if (!res.ok) {
+            setProject(null);
+            return;
+          }
+          const body = await res.json();
+          const data = body?.data ?? body;
+          if (data && (data.id || data.name)) {
+            setProject({
+              id: data.id ?? id,
+              name: data.name ?? data.title ?? "Untitled Project",
+              category: data.category ?? "Other",
+              walletAddress: data.walletAddress ?? data.wallet_address ?? "",
+              goalXLM: Number(data.goalXLM ?? data.goal_xlm ?? 0),
+              raisedXLM: Number(data.raisedXLM ?? data.raised_xlm ?? 0),
+              description: data.description ?? null,
+            });
+          } else {
+            setProject(null);
+          }
+        })
+        .catch(() => {
+          setProject(null);
+        })
+        .finally(() => {
+          setLoading(false);
         });
-      })
-      .catch(() => setLoadedProject(null));
-  }, [loadedProject, router.isReady, router.query.id]);
+    }
+  }, [initialProject, router.isReady, router.query.id]);
+
+  // Guard – loading state when falling back to client-side fetch
+  if (loading) {
+    return (
+      <div className="not-found" data-testid="loading-state">
+        <p>Loading project...</p>
+      </div>
+    );
+  }
 
   // Guard – project not found
-  if (!loadedProject) {
-    if (!router.isReady) return null;
+  if (!project) {
     return (
       <div className="not-found">
         <h1>Project not found</h1>
@@ -97,8 +125,8 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
     );
   }
 
-  const stellarUri = buildStellarUri(loadedProject, presetAmount);
-  const icon = categoryIcon(loadedProject.category);
+  const stellarUri = buildStellarUri(project, presetAmount);
+  const icon = categoryIcon(project.category);
 
   function handleDownload() {
     qrRef.current?.downloadPNG();
@@ -121,10 +149,10 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
   return (
     <>
       <Head>
-        <title>Donate to {loadedProject.name} — Stellar GreenPay</title>
+        <title>Donate to {project.name} — Stellar GreenPay</title>
         <meta
           name="description"
-          content={`Scan the QR code to donate XLM directly to ${loadedProject.name} on the Stellar blockchain.`}
+          content={`Scan the QR code to donate XLM directly to ${project.name} on the Stellar blockchain.`}
         />
       </Head>
 
@@ -406,16 +434,16 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
 
       <main className="donate-page">
         <nav className="donate-page__nav">
-          <Link href={`/projects/${loadedProject.id}`}>← Back to project</Link>
+          <Link href={`/projects/${project.id}`}>← Back to project</Link>
           <Link href="/projects">Browse all projects</Link>
         </nav>
         <div className="donate-card">
           <div className="donate-card__badge">🌱 Climate Donation</div>
           <div className="donate-card__icon">{icon}</div>
-          <p className="donate-card__category">{loadedProject.category}</p>
+          <p className="donate-card__category">{project.category}</p>
 
-          <h1 className="donate-card__title">{loadedProject.name}</h1>
-          <GoalProgress raised={loadedProject.raisedXLM} goal={loadedProject.goalXLM} />
+          <h1 className="donate-card__title">{project.name}</h1>
+          <GoalProgress raised={project.raisedXLM} goal={project.goalXLM} />
           {presetAmount && presetAmount > 0 && (
             <p className="donate-card__amount-chip">
               Preset donation: <span>{formatXLM(presetAmount)}</span>
@@ -427,7 +455,7 @@ const DonatePage: NextPage<DonatePageProps> = ({ project, presetAmount }) => {
             <DonationQRCode
               ref={qrRef}
               stellarUri={stellarUri}
-              projectName={loadedProject.name}
+              projectName={project.name}
               size={256}
             />
           </div>
@@ -492,18 +520,18 @@ export const getServerSideProps: GetServerSideProps<DonatePageProps> = async (ct
     if (!res.ok) {
       return { props: { project: null, presetAmount } };
     }
-    const data = await res.json();
-    const payload = data.data ?? data;
+    const body = await res.json();
+    const data = body?.data ?? body;
 
     // Normalise API response shape to DonateProject
     const project: DonateProject = {
-      id: payload.id ?? id,
-      name: payload.name ?? payload.title ?? "Untitled Project",
-      category: payload.category ?? "Other",
-      walletAddress: payload.walletAddress ?? payload.wallet_address ?? "",
-      goalXLM: Number(payload.goalXLM ?? payload.goal_xlm ?? 0),
-      raisedXLM: Number(payload.raisedXLM ?? payload.raised_xlm ?? 0),
-      description: payload.description ?? "",
+      id: data.id ?? id,
+      name: data.name ?? data.title ?? "Untitled Project",
+      category: data.category ?? "Other",
+      walletAddress: data.walletAddress ?? data.wallet_address ?? "",
+      goalXLM: Number(data.goalXLM ?? data.goal_xlm ?? 0),
+      raisedXLM: Number(data.raisedXLM ?? data.raised_xlm ?? 0),
+      description: data.description ?? null,
     };
 
     return { props: { project, presetAmount } };

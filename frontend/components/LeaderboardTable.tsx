@@ -51,18 +51,25 @@ function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: s
 
 export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "week" | "month" | "year" }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const xlmUsd = useXlmPrice();
 
+  // `loading` is derived by comparing the in-flight request to the last one
+  // that resolved, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
+  const requestKey = `${limit}:${period}`;
+  const loading = loadedRequestKey !== requestKey;
+
   useEffect(() => {
-    setLoading(true);
-    setError(null);
     fetchLeaderboard(limit, period)
-      .then(setEntries)
+      .then((data) => {
+        setEntries(data);
+        setError(null);
+      })
       .catch(() => setError("Could not load leaderboard."))
-      .finally(() => setLoading(false));
-  }, [limit, period]);
+      .finally(() => setLoadedRequestKey(requestKey));
+  }, [limit, period, requestKey]);
 
   if (loading) return (
     <div className="space-y-2">
@@ -119,14 +126,12 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
           <div className="flex-1 min-w-0 flex items-center gap-3">
             <Avatar publicKey={entry.publicKey} displayName={entry.displayName} />
             <div className="min-w-0">
-              <a
-                href={accountUrl(entry.publicKey)}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href={`/donors/${entry.publicKey}`}
                 className="font-semibold text-forest-900 hover:text-forest-600 transition-colors text-sm font-body block truncate"
               >
                 {entry.displayName || shortenAddress(entry.publicKey)}
-              </a>
+              </Link>
               <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
                 {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
               </p>

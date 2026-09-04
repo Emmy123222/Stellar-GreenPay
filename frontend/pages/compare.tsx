@@ -18,29 +18,36 @@ export default function ComparePage() {
   const { ids } = router.query;
 
   const [projects, setProjects] = useState<ClimateProject[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  // The initial load is tracked by comparing the ids the projects were
+  // loaded for to the current ids query param (derived, rather than toggled
+  // synchronously inside the effect, which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+
+  const idsKey = typeof ids === "string" ? ids : null;
+  const idList = idsKey ? idsKey.split(",").slice(0, 3).map((id) => id.trim()).filter(Boolean) : [];
+
+  const loading = idsKey === null ? true : idList.length > 0 && loadedForKey !== idsKey;
+  const error = idsKey !== null && idList.length === 0
+    ? "No valid project IDs provided. Use ?ids=uuid1,uuid2,uuid3"
+    : fetchError;
 
   useEffect(() => {
-    if (!ids || typeof ids !== "string") return;
-
-    const idList = ids.split(",").slice(0, 3).map((id) => id.trim()).filter(Boolean);
-    if (idList.length === 0) {
-      setError("No valid project IDs provided. Use ?ids=uuid1,uuid2,uuid3");
-      setLoading(false);
-      return;
-    }
+    if (idList.length === 0) return;
 
     Promise.all(idList.map((id) => fetchProject(id)))
       .then((results) => {
         setProjects(results);
-        setLoading(false);
+        setFetchError(null);
       })
       .catch(() => {
-        setError("Failed to load one or more projects. Check the IDs and try again.");
-        setLoading(false);
-      });
-  }, [ids]);
+        setFetchError("Failed to load one or more projects. Check the IDs and try again.");
+      })
+      .finally(() => setLoadedForKey(idsKey));
+    // idList is a pure derivation of idsKey (already a dep) recomputed fresh
+    // every render; adding it here would refire this effect every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idsKey]);
 
   if (loading) {
     return (

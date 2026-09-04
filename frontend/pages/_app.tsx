@@ -1,25 +1,29 @@
 import type { AppProps } from "next/app";
+import { useEffect, useState } from "react";
 import Head from "next/head";
-import { useEffect } from "react";
+import Navbar from "@/components/Navbar";
 import { ThemeTiedToaster } from "@/components/ThemeTiedToaster";
 import { ThemeProvider } from "@/lib/theme";
 import { I18nProvider } from "@/lib/i18n";
 import { PriceProvider } from "@/lib/priceContext";
+import { connectWallet, getConnectedPublicKey } from "@/lib/wallet";
 import "@/styles/globals.css";
 
 // ThemeTiedToaster keeps the sonner toast palette in sync with the
 // resolved effective theme.
 export default function App({ Component, pageProps }: AppProps) {
-  useEffect(() => {
-    const ensureTitle = () => {
-      if (!document.title.trim()) document.title = "Stellar GreenPay";
-    };
+  const [publicKey, setPublicKey] = useState<string | null>(null);
 
-    ensureTitle();
-    const observer = new MutationObserver(ensureTitle);
-    observer.observe(document.head, { childList: true, subtree: true });
-    return () => observer.disconnect();
+  useEffect(() => {
+    getConnectedPublicKey().then((pk) => {
+      if (pk) setPublicKey(pk);
+    });
   }, []);
+
+  const handleConnect = async () => {
+    const { publicKey: pk } = await connectWallet();
+    if (pk) setPublicKey(pk);
+  };
 
   return (
     <ThemeProvider>
@@ -33,7 +37,14 @@ export default function App({ Component, pageProps }: AppProps) {
             />
             <meta name="viewport" content="width=device-width, initial-scale=1" />
           </Head>
-          <Component {...pageProps} />
+          <Navbar
+            publicKey={publicKey}
+            onConnect={handleConnect}
+            onDisconnect={() => setPublicKey(null)}
+          />
+          <main>
+            <Component {...pageProps} publicKey={publicKey} onConnect={handleConnect} />
+          </main>
           <ThemeTiedToaster />
         </PriceProvider>
       </I18nProvider>

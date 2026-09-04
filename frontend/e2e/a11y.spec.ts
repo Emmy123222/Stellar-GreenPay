@@ -40,8 +40,8 @@ const MOCK_PROFILE = {
   displayName: "EcoChampion",
   totalDonatedXLM: "500",
   projectsSupported: 3,
-  badges: ["tree"],
-  badgeTier: "tree",
+  badges: [{ tier: "tree", earnedAt: new Date().toISOString() }],
+  createdAt: new Date().toISOString(),
 };
 
 const ok = (data: unknown) => ({ json: { success: true, data } });
@@ -55,29 +55,27 @@ async function mockApi(page: Page) {
     r.fulfill({ json: { _embedded: { records: [] }, balances: [{ asset_type: "native", balance: "500.0000000" }] } })
   );
 
-  await page.route("**/api/v1/stats/global",   (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
-  await page.route("**/api/v1/stats/categories", (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
-  await page.route("**/api/v1/leaderboard**",  (r) => r.fulfill(ok([])));
-  await page.route("**/api/v1/donations/**",   (r) => r.fulfill(ok([])));
-  await page.route("**/api/v1/updates/**",     (r) => r.fulfill(ok([])));
-  await page.route("**/api/v1/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/stats/global",   (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
+  await page.route("**/api/**/stats/categories", (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
+  await page.route("**/api/**/leaderboard**",  (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/donations/**",   (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/updates/**",     (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
 
-  await page.route("**/api/v1/profiles/**",    (r) => r.fulfill(ok(MOCK_PROFILE)));
+  await page.route("**/api/**/profiles/**",    (r) => r.fulfill(ok(MOCK_PROFILE)));
 
-  await page.route("**/api/v1/projects?**",              (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/v1/projects",                 (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/v1/projects/featured",        (r) => r.fulfill(ok(MOCK_PROJECT)));
-  await page.route(`**/api/v1/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
-  await page.route(`**/api/v1/projects/${MOCK_PROJECT_ID}`,    (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route("**/api/**/projects?**",              (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects",                 (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects/featured",        (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
+  await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) => r.fulfill(ok(MOCK_PROJECT)));
 }
 
 // ── Axe helper — assert zero critical/serious violations ─────────────────────
 
 async function assertNoCriticalViolations(page: Page) {
-  await page.waitForFunction(() => Boolean(document.title.trim()));
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa"])
-    .disableRules(["color-contrast"])
     .analyze();
 
   const critical = results.violations.filter(
@@ -94,6 +92,13 @@ async function assertNoCriticalViolations(page: Page) {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 test.describe("Accessibility (axe)", () => {
+  // Several pages wrap their content in a CSS fade-in animation on mount.
+  // Without this, axe can sample computed colors mid-fade and report
+  // spuriously low contrast ratios on nearly every element.
+  test.beforeEach(async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+  });
+
   test("home page has no critical/serious violations", async ({ page }) => {
     await mockApi(page);
     await page.goto("/");
@@ -109,8 +114,10 @@ test.describe("Accessibility (axe)", () => {
   test("donor profile page has no critical/serious violations", async ({ page }) => {
     await mockApi(page);
     await page.goto(`/donors/${MOCK_PUBLIC_KEY}`);
-    // Wait for profile to load (skeleton disappears when profile renders)
-    await page.waitForFunction(() => document.title && document.title.trim().length > 0);
+    // Wait for the loaded profile to render (rather than racing on
+    // document.title, which next/head clears and re-inserts on every
+    // render — sampling it mid-flight can see a transient empty value).
+    await expect(page.getByRole("heading", { name: MOCK_PROFILE.displayName })).toBeVisible();
     await assertNoCriticalViolations(page);
   });
 });

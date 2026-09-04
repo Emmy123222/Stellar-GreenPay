@@ -31,13 +31,26 @@ use soroban_sdk::{
 
 // ─── Oracle interface ─────────────────────────────────────────────────────────
 
-/// External price oracle interface.
-/// Any on-chain contract implementing `get_price` can serve as the oracle.
-/// `get_price` returns the number of XLM stroops equivalent to 1 USDC stroop.
-/// Example: if 1 USDC = 8 XLM, return 8.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OracleAsset {
+    Stellar(Address),
+    Other(Symbol),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OraclePriceData {
+    pub price: i128,
+    pub timestamp: u64,
+}
+
+/// SEP-40 methods used from the configured Reflector Pulse oracle.
 #[contractclient(name = "OracleClient")]
 pub trait OracleInterface {
-    fn get_price(env: Env) -> i128;
+    fn decimals(env: Env) -> u32;
+    fn lastprice(env: Env, asset: OracleAsset) -> Option<OraclePriceData>;
+    fn resolution(env: Env) -> u32;
 }
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
@@ -223,6 +236,10 @@ pub enum DataKey {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STROOP: i128 = 10_000_000;
+/// USDC uses six decimal places.
+const USDC_SCALE: i128 = 1_000_000;
+/// Reject quotes older than three oracle update intervals.
+const ORACLE_MAX_AGE_MULTIPLIER: u64 = 3;
 
 // 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers — used as the
 // default when `create_proposal` is called without an explicit duration.
@@ -869,6 +886,8 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::DonationRecord(index)).expect("Donation record not found")
     }
 
+    /// Returns a paginated list of donation records for a given donor.
+    /// Results are ordered chronologically (oldest first).
     pub fn get_donor_history(env: Env, donor: Address, offset: u32, limit: u32) -> Vec<DonationRecord> {
         let donation_ids: Vec<u32> = env
             .storage()
@@ -933,13 +952,16 @@ impl GreenPayContract {
             return Vec::new(&env);
         }
         
-        // Calculate the end bound: min(offset + limit, total_count)
+        // Calculate the end bound: min(offset + limit, total_count).
+        // The addition is done in u64 to avoid overflow when checking the
+        // bound; once we know offset + limit <= total_count (a u32), the
+        // u32 addition below is guaranteed not to overflow.
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
             offset + limit
         };
-        
+
         // Collect projects from the slice
         let mut result = Vec::new(&env);
         let mut idx = offset;
@@ -1336,7 +1358,8 @@ impl GreenPayContract {
             .unwrap_or(Vec::new(&env))
     }
 
-    /// Donate USDC. Converts to XLM-equivalent for global stats using a price oracle stub.
+    /// Donate USDC. Converts to an XLM-equivalent amount using the configured
+    /// on-chain price oracle.
     pub fn donate_usdc(
         env: Env,
         usdc_token: Address,
@@ -1358,15 +1381,44 @@ impl GreenPayContract {
             panic!("USDC token not configured");
         }
 
-        // Fetch the USDC→XLM price from the configured oracle.
-        // The oracle returns how many XLM stroops equal 1 USDC stroop.
+        // Fetch the latest USDC price from the configured XLM-base SEP-40
+        // oracle. The returned fixed-point precision is declared by decimals().
         let oracle_addr: Address = env.storage().instance()
             .get(&DataKey::OracleAddress).expect("Price oracle not configured");
         let oracle = OracleClient::new(&env, &oracle_addr);
-        let rate = oracle.get_price();
-        if rate <= 0 { panic!("Oracle returned invalid price"); }
+        let quote = oracle
+            .lastprice(&OracleAsset::Stellar(usdc_token.clone()))
+            .expect("Oracle price not available");
+        if quote.price <= 0 {
+            panic!("Oracle returned invalid price");
+        }
+        let resolution = oracle.resolution();
+        if resolution == 0 {
+            panic!("Oracle returned invalid resolution");
+        }
+        let now = env.ledger().timestamp();
+        let max_age = u64::from(resolution)
+            .checked_mul(ORACLE_MAX_AGE_MULTIPLIER)
+            .expect("Oracle max age overflow");
+        if quote.timestamp > now || now - quote.timestamp > max_age {
+            panic!("Oracle price is stale");
+        }
+        let price_scale = 10i128
+            .checked_pow(oracle.decimals())
+            .expect("Oracle decimals are too large");
+        let conversion_scale = USDC_SCALE
+            .checked_mul(price_scale)
+            .expect("Oracle conversion scale overflow");
         let xlm_equivalent = usdc_amount
-            .checked_mul(rate).expect("USDC to XLM conversion overflow");
+            .checked_mul(quote.price)
+            .expect("USDC to XLM conversion overflow")
+            .checked_mul(STROOP)
+            .expect("USDC to XLM stroop conversion overflow")
+            .checked_div(conversion_scale)
+            .expect("USDC to XLM conversion division failed");
+        if xlm_equivalent <= 0 {
+            panic!("Oracle conversion rounded donation to zero");
+        }
 
         let mut project: Project = env
             .storage()
@@ -1622,8 +1674,16 @@ impl GreenPayContract {
         );
     }
 
-    /// Admin-only: Set the USDC token address for multi-currency donations.
-    pub fn set_usdc_token(env: Env, admin: Address, usdc_token: Address) {
+    /// Admin-only: Configure the USDC token and its price oracle.
+    ///
+    /// Both addresses are written atomically so `donate_usdc` cannot observe a
+    /// token configured without a matching oracle.
+    pub fn set_usdc_token(
+        env: Env,
+        admin: Address,
+        usdc_token: Address,
+        oracle: Address,
+    ) {
         admin.require_auth();
         let stored_admin: Address = env
             .storage()
@@ -1636,24 +1696,16 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::USDCTokenAddress, &usdc_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAddress, &oracle);
         env.events()
-            .publish((symbol_short!("usdc_set"),), usdc_token);
+            .publish((symbol_short!("usdc_set"),), (usdc_token, oracle));
     }
 
     /// Get the configured USDC token address.
     pub fn get_usdc_token(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::USDCTokenAddress)
-    }
-
-    /// Admin-only: Set the price oracle contract address used by `donate_usdc`.
-    /// The oracle must implement `OracleInterface::get_price()`.
-    pub fn set_oracle(env: Env, admin: Address, oracle: Address) {
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can set oracle"); }
-        env.storage().instance().set(&DataKey::OracleAddress, &oracle);
-        env.events().publish((symbol_short!("oracle"),), oracle);
     }
 
     /// Get the configured price oracle address.
@@ -1693,22 +1745,27 @@ impl GreenPayContract {
 
 // ─── Mock oracle (test / integration use only) ────────────────────────────────
 
-/// A minimal oracle that returns a fixed rate of 8 XLM per 1 USDC.
-/// Deploy this in tests and local integration environments via `set_oracle`.
-///
-/// Expected OracleInterface for real integrations:
-///   - Deploy a contract that implements `get_price(env: Env) -> i128`
-///   - `get_price` must return the number of XLM stroops per 1 USDC stroop
-///   - The admin registers it via `GreenPayContract::set_oracle(admin, oracle_address)`
-///
-/// Example real oracle sources: Band Protocol, DIA, or a custom TWAP contract.
+/// A minimal SEP-40 oracle that returns a fixed rate of 8 XLM per 1 USDC.
+/// Deploy this in tests and local integration environments via
+/// `set_usdc_token(admin, usdc_token, oracle)`.
 #[contract]
 pub struct MockOracle;
 
 #[contractimpl]
 impl OracleInterface for MockOracle {
-    fn get_price(_env: Env) -> i128 {
-        8
+    fn decimals(_env: Env) -> u32 {
+        6
+    }
+
+    fn lastprice(env: Env, _asset: OracleAsset) -> Option<OraclePriceData> {
+        Some(OraclePriceData {
+            price: 8_000_000,
+            timestamp: env.ledger().timestamp(),
+        })
+    }
+
+    fn resolution(_env: Env) -> u32 {
+        300
     }
 }
 
@@ -1719,6 +1776,27 @@ mod tests {
     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
     use super::*;
+
+    #[contract]
+    struct FractionalMockOracle;
+
+    #[contractimpl]
+    impl OracleInterface for FractionalMockOracle {
+        fn decimals(_env: Env) -> u32 {
+            6
+        }
+
+        fn lastprice(env: Env, _asset: OracleAsset) -> Option<OraclePriceData> {
+            Some(OraclePriceData {
+                price: 2_500_000,
+                timestamp: env.ledger().timestamp(),
+            })
+        }
+
+        fn resolution(_env: Env) -> u32 {
+            300
+        }
+    }
 
     // ─── Existing tests ───────────────────────────────────────────────────────
 
@@ -1807,9 +1885,8 @@ mod tests {
         // Set up USDC token and oracle
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        client.set_usdc_token(&admin, &token);
         let oracle_id = env.register_contract(None, MockOracle);
-        client.set_oracle(&admin, &oracle_id);
+        client.set_usdc_token(&admin, &token, &oracle_id);
         let donor = Address::generate(&env);
         // Mint USDC to donor
         StellarAssetClient::new(&env, &token).mint(&donor, &(100 * 1_000_000i128));
@@ -1820,6 +1897,26 @@ mod tests {
         assert_eq!(record.project, pid);
         assert_eq!(record.amount, usdc_amount);
         assert_eq!(record.currency, symbol_short!("USDC"));
+    }
+
+    #[test]
+    fn test_usdc_donation_uses_configured_oracle_rate() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let oracle = env.register_contract(None, FractionalMockOracle);
+
+        client.set_usdc_token(&admin, &token, &oracle);
+        assert_eq!(client.get_usdc_token(), Some(token.clone()));
+        assert_eq!(client.get_oracle(), Some(oracle));
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 4_000_000i128;
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+
+        // 4 USDC at 2.5 XLM per USDC = 10 XLM, represented in stroops.
+        assert_eq!(client.get_global_total(), 10 * STROOP);
     }
 
     #[test]

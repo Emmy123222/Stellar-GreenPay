@@ -1,5 +1,7 @@
 const rateLimit = require("express-rate-limit");
+const { RedisStore } = require("rate-limit-redis");
 const logger = require("../logger");
+const redis = require("../services/redis");
 
 /**
  * Sets X-RateLimit-{Limit,Remaining,Reset} from the req.rateLimit object
@@ -16,12 +18,20 @@ function setRateLimitHeaders(req, res, next) {
   next();
 }
 
-const createRateLimiter = (maxRequests, windowMinutes) => {
+const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
+  const limiterNamespace = namespace || `${maxRequests}-${windowMinutes}`;
+  const store = new RedisStore({
+    prefix: `greenpay:rate-limit:${limiterNamespace}:`,
+    sendCommand: (...args) => redis.sendCommand(...args),
+  });
+
   const limiter = rateLimit({
     windowMs: windowMinutes * 60 * 1000,
     max: maxRequests,
     standardHeaders: true,
     legacyHeaders: false,
+    passOnStoreError: true,
+    store,
     handler: (req, res) => {
       (req.log || logger).warn({
         event: "rate_limit_hit",

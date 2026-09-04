@@ -34,15 +34,22 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!initialAmount) return;
-    setAmount(initialAmount);
-  }, [initialAmount]);
+  // Re-seed the editable amount/message fields whenever the caller passes a
+  // new initial value (e.g. clicking a different preset/reply elsewhere on
+  // the page), while still letting the user freely edit them afterwards.
+  // This is the "adjusting state when a prop changes" pattern from the React
+  // docs, done during render instead of in an effect.
+  const [prevInitialAmount, setPrevInitialAmount] = useState(initialAmount);
+  if (initialAmount !== prevInitialAmount) {
+    setPrevInitialAmount(initialAmount);
+    if (initialAmount) setAmount(initialAmount);
+  }
 
-  useEffect(() => {
-    if (!initialMessage) return;
-    setMessage(initialMessage);
-  }, [initialMessage]);
+  const [prevInitialMessage, setPrevInitialMessage] = useState(initialMessage);
+  if (initialMessage !== prevInitialMessage) {
+    setPrevInitialMessage(initialMessage);
+    if (initialMessage) setMessage(initialMessage);
+  }
 
   useEffect(() => {
     let mounted = true;

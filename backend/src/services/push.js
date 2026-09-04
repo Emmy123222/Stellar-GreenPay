@@ -4,22 +4,119 @@
  */
 const { Expo } = require("expo-server-sdk");
 const pool = require("../db/pool");
+const logger = require("../logger");
 
-// Create a new Expo SDK client
 const expo = new Expo();
 
+const RECEIPT_POLL_DELAY_MS = 2000;
+const RECEIPT_POLL_ATTEMPTS = 3;
+
+const FATAL_ERROR_CODES = new Set(["DeviceNotRegistered"]);
+
 /**
- * Push a single message to a single Expo push token.
- * Validates the token before sending.
+ * Delete a device token (cascades to project_follows via FK).
+ */
+async function removeDeviceToken(token) {
+  await pool.query("DELETE FROM device_tokens WHERE token = $1", [token]);
+}
+
+/**
+ * Mark a token as successfully delivered.
+ */
+async function markDelivered(token) {
+  await pool.query(
+    "UPDATE device_tokens SET last_delivered_at = NOW() WHERE token = $1",
+    [token]
+  );
+}
+
+/**
+ * Poll Expo receipts and handle delivery outcomes.
+ * Called once per send batch.
  *
- * @param {string}  token  - Expo push token
- * @param {string}  title  - Notification title
- * @param {string}  body   - Notification body
- * @param {object}  [data] - Optional payload data
+ * @param {object[]} tickets  - tickets returned by sendPushNotificationsAsync
+ * @param {string[]} tokens   - the push tokens in the same order as the tickets
+ */
+async function processTickets(tickets, tokens) {
+  if (!tickets || tickets.length === 0) return;
+
+  const ticketIds = [];
+  for (let i = 0; i < tickets.length; i++) {
+    const ticket = tickets[i];
+    if (ticket.status === "error" && ticket.message) {
+      if (FATAL_ERROR_CODES.has(ticket.message)) {
+        await removeDeviceToken(tokens[i]);
+        logger.info(
+          { event: "push_token_removed", token: tokens[i].slice(0, 16), reason: ticket.message },
+          "[Push] Removed stale device token"
+        );
+      } else {
+        logger.warn(
+          { event: "push_ticket_error", token: tokens[i].slice(0, 16), error: ticket.message },
+          "[Push] Ticket rejected"
+        );
+      }
+    } else if (ticket.id) {
+      ticketIds.push({ id: ticket.id, token: tokens[i] });
+    }
+  }
+
+  if (ticketIds.length === 0) return;
+
+  const idToToken = new Map(ticketIds.map((t) => [t.id, t.token]));
+
+  for (let attempt = 0; attempt < RECEIPT_POLL_ATTEMPTS; attempt++) {
+    if (idToToken.size === 0) return;
+    const remainingIds = [...idToToken.keys()];
+    if (remainingIds.length === 0) return;
+
+    await new Promise((resolve) => setTimeout(resolve, RECEIPT_POLL_DELAY_MS));
+
+    const receiptIdChunks = expo.chunkPushNotificationReceipts(remainingIds);
+    for (const chunk of receiptIdChunks) {
+      try {
+        const receipts = await expo.getPushNotificationReceiptsAsync(chunk);
+
+        for (const [receiptId, receipt] of Object.entries(receipts)) {
+          const token = idToToken.get(receiptId);
+          if (!token) continue;
+
+          if (receipt.status === "ok") {
+            await markDelivered(token);
+          } else if (receipt.status === "error" && receipt.message) {
+            if (FATAL_ERROR_CODES.has(receipt.message)) {
+              await removeDeviceToken(token);
+              logger.info(
+                { event: "push_token_removed", token: token.slice(0, 16), reason: receipt.message },
+                "[Push] Removed stale device token (receipt)"
+              );
+            } else {
+              logger.warn(
+                { event: "push_receipt_error", token: token.slice(0, 16), error: receipt.message },
+                "[Push] Receipt error (non-fatal)"
+              );
+            }
+          }
+          idToToken.delete(receiptId);
+        }
+      } catch (err) {
+        logger.error({ event: "push_receipt_poll_error", err }, err.message);
+      }
+    }
+  }
+}
+
+/**
+ * Send a push notification to a single Expo push token.
+ *
+ * @param {string} token  - Expo push token
+ * @param {string} title  - Notification title
+ * @param {string} body   - Notification body
+ * @param {object} [data] - Optional payload data
  */
 async function sendPushToToken(token, title, body, data = {}) {
   if (!Expo.isExpoPushToken(token)) {
-    console.error(`[Push] Invalid expo push token: ${token}`);
+    logger.error({ event: "push_invalid_token", token }, "[Push] Invalid expo push token");
     return;
   }
 
@@ -32,13 +129,14 @@ async function sendPushToToken(token, title, body, data = {}) {
   };
 
   try {
-    const chunk = expo.chunkPushNotifications([message]);
-    if (chunk.length > 0) {
-      await expo.sendPushNotificationsAsync(chunk[0]);
-      console.log(`[Push] Sent notification to token ${token.slice(0, 16)}...`);
+    const chunks = expo.chunkPushNotifications([message]);
+    for (const chunk of chunks) {
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      await processTickets(tickets, [token]);
     }
+    logger.info({ event: "push_sent", token: token.slice(0, 16) }, "[Push] Sent notification");
   } catch (error) {
-    console.error("[Push] Error sending to token:", error);
+    logger.error({ event: "push_send_error", err: error }, error.message);
   }
 }
 
@@ -49,9 +147,8 @@ async function sendPushToToken(token, title, body, data = {}) {
  */
 async function sendUpdatePushNotifications({ project, update }) {
   try {
-    // Fetch all device tokens following this project
     const result = await pool.query(
-      `SELECT dt.token, dt.platform 
+      `SELECT dt.token, dt.platform
        FROM project_follows pf
        JOIN device_tokens dt ON pf.device_token_id = dt.id
        WHERE pf.project_id = $1`,
@@ -59,19 +156,17 @@ async function sendUpdatePushNotifications({ project, update }) {
     );
 
     if (result.rows.length === 0) {
-      console.log("[Push] No followers for project", project.id);
+      logger.info({ event: "push_no_followers", projectId: project.id }, "[Push] No followers");
       return;
     }
 
-    // Create push messages
     const messages = [];
+    const validTokens = [];
     for (const row of result.rows) {
-      // Check if the token is valid
       if (!Expo.isExpoPushToken(row.token)) {
-        console.error(`[Push] Invalid push token: ${row.token}`);
+        logger.error({ event: "push_invalid_token", token: row.token }, "[Push] Invalid push token");
         continue;
       }
-
       messages.push({
         to: row.token,
         sound: "default",
@@ -83,31 +178,41 @@ async function sendUpdatePushNotifications({ project, update }) {
           type: "project_update",
         },
       });
+      validTokens.push(row.token);
     }
 
-    // Send notifications in chunks
+    const allTickets = [];
+    const allTokens = [];
     const chunks = expo.chunkPushNotifications(messages);
-    for (const chunk of chunks) {
-      try {
-        const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`[Push] Sent ${tickets.length} notifications for project ${project.id}`);
-      } catch (error) {
-        console.error("[Push] Error sending chunk:", error);
-      }
+    for (let i = 0; i < chunks.length; i++) {
+      const tickets = await expo.sendPushNotificationsAsync(chunks[i]);
+      const chunkTokens = validTokens.slice(
+        chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0),
+        chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0) + chunks[i].length
+      );
+      allTickets.push(...tickets);
+      allTokens.push(...chunkTokens);
     }
+
+    await processTickets(allTickets, allTokens);
+    logger.info(
+      { event: "push_batch_sent", projectId: project.id, count: allTickets.length },
+      `[Push] Sent ${allTickets.length} notifications for project ${project.id}`
+    );
   } catch (error) {
-    console.error("[Push] Error sending push notifications:", error);
+    logger.error({ event: "push_batch_error", err: error }, error.message);
   }
 }
 
 /**
- * Send a push notification reminder for an upcoming recurring donation
+ * Send a push notification reminder for an upcoming recurring donation.
+ *
  * @param {Object} params - { token, donation }
  */
 async function sendRecurringDonationReminder({ token, donation }) {
   try {
     if (!Expo.isExpoPushToken(token)) {
-      console.error(`[Push] Invalid push token: ${token}`);
+      logger.error({ event: "push_invalid_token", token }, "[Push] Invalid push token");
       return;
     }
 
@@ -120,7 +225,7 @@ async function sendRecurringDonationReminder({ token, donation }) {
     const message = {
       to: token,
       sound: "default",
-      title: "💚 Recurring Donation Due Tomorrow",
+      title: "Recurring Donation Due Tomorrow",
       body: `Your ${frequencyLabel} donation of ${donation.amount_xlm} XLM to ${donation.project_name} is due tomorrow. Tap to donate.`,
       data: {
         projectId: donation.project_id,
@@ -131,15 +236,15 @@ async function sendRecurringDonationReminder({ token, donation }) {
 
     const chunks = expo.chunkPushNotifications([message]);
     for (const chunk of chunks) {
-      try {
-        const tickets = await expo.sendPushNotificationsAsync(chunk);
-        console.log(`[Push] Sent recurring donation reminder for ${donation.id}`);
-      } catch (error) {
-        console.error("[Push] Error sending recurring donation reminder chunk:", error);
-      }
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      await processTickets(tickets, [token]);
     }
+    logger.info(
+      { event: "push_recurring_reminder_sent", donationId: donation.id },
+      "[Push] Sent recurring donation reminder"
+    );
   } catch (error) {
-    console.error("[Push] Error sending recurring donation reminder:", error);
+    logger.error({ event: "push_recurring_reminder_error", err: error }, error.message);
   }
 }
 
@@ -147,4 +252,5 @@ module.exports = {
   sendPushToToken,
   sendUpdatePushNotifications,
   sendRecurringDonationReminder,
+  processTickets,
 };

@@ -451,17 +451,21 @@ export default function DonorProfilePage() {
 
   const [profile, setProfile] = useState<DonorProfile | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // `loading` is derived by comparing the wallet the profile was loaded for
+  // to the current one, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const loading = !publicKey || loadedForKey !== publicKey;
 
   useEffect(() => {
     if (!publicKey) return;
 
     let cancelled = false;
-    setLoading(true);
-    setNotFound(false);
 
-    (async () => {
+    // Deferred via a microtask (rather than invoked synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(async () => {
       try {
         const [prof, hist] = await Promise.all([
           fetchProfile(publicKey),
@@ -470,22 +474,17 @@ export default function DonorProfilePage() {
         if (!cancelled) {
           setProfile(prof);
           setDonations(hist.slice(0, 10));
+          setNotFound(false);
         }
-      } catch (err: unknown) {
+      } catch {
         if (!cancelled) {
           // Treat 404 or any error fetching the profile as "not found"
-          const status =
-            (err as { response?: { status?: number } })?.response?.status;
-          if (!status || status === 404) {
-            setNotFound(true);
-          } else {
-            setNotFound(true); // graceful fallback for other errors
-          }
+          setNotFound(true);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLoadedForKey(publicKey);
       }
-    })();
+    });
 
     return () => {
       cancelled = true;
@@ -507,18 +506,6 @@ export default function DonorProfilePage() {
 
   // ── Render ───────────────────────────────────────────────────────────────
 
-  if (!publicKey || loading)
-    return (
-      <>
-        <Head>
-          <title>Donor Profile - Stellar GreenPay</title>
-        </Head>
-        <ProfileSkeleton />
-      </>
-    );
-  if (notFound) return <ProfileNotFound publicKey={publicKey} />;
-  if (!profile) return null;
-
   return (
     <>
       <Head>
@@ -535,8 +522,13 @@ export default function DonorProfilePage() {
         <meta name="twitter:description" content={ogDescription} />
       </Head>
 
-      <div className="min-h-screen bg-leaf">
-        <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
+      {!publicKey || loading ? (
+        <ProfileSkeleton />
+      ) : notFound ? (
+        <ProfileNotFound publicKey={publicKey} />
+      ) : !profile ? null : (
+        <div className="min-h-screen bg-leaf">
+          <div className="max-w-2xl mx-auto px-4 py-10 space-y-6">
 
           {/* ── Header card ─────────────────────────────────────────────── */}
           <div className="card shadow-green">
@@ -619,8 +611,9 @@ export default function DonorProfilePage() {
             </Link>
           </div>
 
+          </div>
         </div>
-      </div>
+      )}
     </>
   );
 }

@@ -38,6 +38,7 @@ export default function ProjectProgressBar({
       <div
         className="h-2.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700"
         role="progressbar"
+        aria-label="Fundraising goal progress"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={hasGoal ? percentage : 0}

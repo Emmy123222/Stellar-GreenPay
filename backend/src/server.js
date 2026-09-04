@@ -18,12 +18,11 @@ const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
 const logger = require("./logger");
-const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const requestLogger = require("./middleware/requestLogger");
+const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
-const healthRouter = require("./routes/health");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -49,14 +48,10 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 app.use(helmet());
-app.use(
-  helmet.contentSecurityPolicy({
-    directives: {
-      defaultSrc: ["'none'"],
-      frameAncestors: ["'none'"],
-    },
-  })
-);
+app.use((req, res, next) => {
+  res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
+  next();
+});
 app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
@@ -71,12 +66,22 @@ const csrfProtection = csurf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 });
 app.use((req, res, next) => {
-  if (req.path.startsWith("/api/notifications") || req.path.startsWith("/api/v1/notifications")) {
+  if (
+    req.path.startsWith("/api/notifications") ||
+    req.path.startsWith("/api/v1/notifications") ||
+    req.path === "/health" ||
+    req.path === "/api/health" ||
+    req.path === "/api/v1/health"
+  ) {
     return next();
   }
   return csrfProtection(req, res, next);
 });
 
+const healthRouter = require("./routes/health");
+app.use("/health", healthRouter);
+app.use("/api/health", healthRouter);
+app.use("/api/v1/health", healthRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
@@ -93,8 +98,7 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
-app.use(createRateLimiter(150, 15));
-app.use("/health", healthRouter);
+app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
 function csrfTokenHandler(req, res) {
@@ -129,6 +133,9 @@ async function startServer() {
 
   const { start: startRecurringDonationQueue } = require("./services/recurringDonationQueue");
   await startRecurringDonationQueue();
+
+  const { start: startTokenCleanupQueue } = require("./services/tokenCleanupQueue");
+  await startTokenCleanupQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 

@@ -61,6 +61,15 @@
     background: var(--subtle);
     border-radius: 3px;
   }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
 @layer components {
@@ -85,7 +94,7 @@
   .btn-secondary {
     @apply border border-[rgba(34,114,57,0.35)] dark:border-[rgba(96,208,123,0.35)]
            hover:border-[rgba(34,114,57,0.65)] dark:hover:border-[rgba(96,208,123,0.65)]
-           text-[#227239] dark:text-[#81c784] font-medium px-6 py-3 rounded-xl transition-all duration-200
+           text-[#165327] dark:text-[#81c784] font-medium px-6 py-3 rounded-xl transition-all duration-200
            bg-[rgba(34,114,57,0.04)] dark:bg-[rgba(96,208,123,0.06)]
            hover:bg-[rgba(34,114,57,0.08)] dark:hover:bg-[rgba(96,208,123,0.12)]
            focus:outline-none focus:ring-2 focus:ring-green-500 dark:focus:ring-[#60d07b] focus:ring-offset-2
@@ -111,7 +120,7 @@
   }
 
   .label {
-    @apply block text-xs font-semibold text-[#5a7a5a] dark:text-[#b2d5b5] uppercase tracking-widest mb-2;
+    @apply block text-xs font-semibold text-[#4e6c4e] dark:text-[#b2d5b5] uppercase tracking-widest mb-2;
   }
 
   .badge {
@@ -183,7 +192,7 @@
 
   .btn-secondary {
     @apply border border-[rgba(34,114,57,0.35)] hover:border-[rgba(34,114,57,0.65)]
-           text-[#227239] font-medium px-6 py-3 rounded-xl transition-all duration-200
+           text-[#165327] font-medium px-6 py-3 rounded-xl transition-all duration-200
            bg-[rgba(34,114,57,0.04)] hover:bg-[rgba(34,114,57,0.08)]
            focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
   }
@@ -215,7 +224,7 @@
   }
 
   .label {
-    @apply block text-xs font-semibold text-[#5a7a5a] uppercase tracking-widest mb-2;
+    @apply block text-xs font-semibold text-[#4e6c4e] uppercase tracking-widest mb-2;
   }
 
   .badge {
