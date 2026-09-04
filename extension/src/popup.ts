@@ -1,11 +1,13 @@
 import {
   Asset,
   Horizon,
+  Memo,
   Networks,
   Operation,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
 import { loadSettings, type ExtensionSettings } from './settings';
+
 
 // Module-level vars
 let API_BASE = 'https://api.stellar-greenpay.app';
@@ -267,7 +269,7 @@ async function saveTotalDonated(total: number) {
 }
 
 async function updateTotalAfterDonation(amount: number) {
-  chrome.storage.local.get(['totalDonatedXLM'], async (result) => {
+  chrome.storage.local.get(['totalDonatedXLM'], async (result: Record<string, unknown>) => {
     const current = (result.totalDonatedXLM as number) || 0;
     await saveTotalDonated(current + amount);
   });
@@ -333,6 +335,57 @@ async function connectWallet() {
 // await updateTotalAfterDonation(parseFloat(amount));
 
 // ==================== MAIN INIT ====================
+
+function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function setStatus(message: string, isError = false) {
+  const statusEl = document.getElementById('status-message');
+  if (statusEl) {
+    statusEl.textContent = message;
+    statusEl.style.color = isError ? '#ef4444' : '#10b981';
+  }
+}
+
+async function initProjectSearch() {
+  const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
+  const dropdown = document.getElementById('search-dropdown') as HTMLUListElement | null;
+  if (!searchInput || !dropdown) return;
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.trim();
+    if (!query) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+    debounce(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/projects?search=${encodeURIComponent(query)}&limit=5`);
+        if (res.ok) {
+          const json = await res.json();
+          const projects: ProjectResult[] = json.data ?? json;
+          renderDropdown(projects, dropdown);
+        }
+      } catch (err) {
+        console.warn('Project search failed:', err);
+      }
+    }, 300);
+  });
+
+  searchInput.addEventListener('focus', () => {
+    if (dropdown.children.length > 0) dropdown.classList.remove('hidden');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target as Node) && !dropdown.contains(e.target as Node)) {
+      dropdown.classList.add('hidden');
+    }
+  });
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   applySettings(settings);
@@ -375,14 +428,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             searchInput.value = projectData.name;
           }
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error('Failed to pre-fill project from context menu', err);
       }
     } else if (res.pendingDonationAddress) {
       chrome.storage.local.remove('pendingDonationAddress');
       const destInput = document.getElementById('destination') as HTMLInputElement | null;
       if (destInput) {
-        destInput.value = res.pendingDonationAddress;
+        destInput.value = String(res.pendingDonationAddress);
       }
     }
   });
@@ -401,19 +454,37 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('Please fill in all required fields.', true);
       return;
     }
-  } catch {
-    // Silently ignore — the skeleton loader remains visible
-  }
 
-  // Connect button
-  const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
-  if (connectBtn) connectBtn.addEventListener('click', connectWallet);
+    setStatus('Preparing transaction…');
+    try {
+      const [fee, account] = await Promise.all([server.fetchBaseFee(), server.loadAccount(sourceAddress)]);
+      const tx = new TransactionBuilder(account, {
+        fee: fee.toString(),
+        networkPassphrase: NETWORK_PASSPHRASE,
+      })
+        .addOperation(Operation.payment({
+          destination,
+          asset: Asset.native(),
+          amount,
+        }))
+        .addMemo(Memo.text(memo || 'Donated via GreenPay'))
+        .setTimeout(180)
+        .build();
 
-  // Settings button
-  const settingsBtn = document.getElementById('settings-btn');
-  if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => window.location.href = 'settings.html');
-  }
+      setStatus('Please sign in your Freighter wallet…');
+      const signedXdr = await signWithFreighter(tx.toXDR());
+
+      setStatus('Submitting transaction…');
+      const hash = await submitTransaction(signedXdr);
+
+      await updateTotalAfterDonation(parseFloat(amount));
+
+      setStatus(`✅ Transaction submitted! Hash: ${hash.slice(0, 16)}…`);
+    } catch (err: any) {
+      console.error('Donation error:', err);
+      setStatus(`❌ Transaction failed: ${err.message || 'Unknown error'}`, true);
+    }
+  });
 
   console.log('🌿 GreenPay Extension initialized with donation badge (#490)');
 });

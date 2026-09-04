@@ -17,6 +17,7 @@ jest.mock("../services/redis", () => ({
   get: jest.fn(),
   set: jest.fn(),
   del: jest.fn(),
+  deletePattern: jest.fn(),
 }));
 
 const redis = require("../services/redis");
@@ -136,13 +137,14 @@ describe("POST /api/donations", () => {
     };
 
     createMockClient(
-      queryResult([{ id: "proj-1" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([donationRow]),
-      queryResult([]),
-      queryResult(),
-      queryResult(),
+      queryResult([{ id: "proj-1" }]), // projectResult
+      queryResult([]), // existingResult (no dup by tx hash)
+      queryResult(), // BEGIN
+      queryResult([{ total: "0" }]), // prevTotalResult
+      queryResult([donationRow]), // donationResult (INSERT RETURNING *)
+      queryResult([]), // matchesResult (no active matches)
+      queryResult(), // UPDATE projects
+      queryResult(), // COMMIT
     );
 
     const res = await request(app)
@@ -180,6 +182,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -275,7 +278,7 @@ describe("GET /api/donations/:id", () => {
           ...MOCK_DONATION_ROW,
           project_name: "Amazon Reforestation",
           donor_display_name: "John Doe",
-          co2_per_xlm: 2000,
+          co2_per_xlm: 5000,
         },
       ],
     });

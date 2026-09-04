@@ -76,9 +76,9 @@ async function mockApi(page: Page) {
   await page.route("**/horizon-testnet.stellar.org/**", (r) =>
     r.fulfill({ json: { _embedded: { records: [] } } }),
   );
-  await page.route("**/api/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
-  await page.route("**/api/stats/global", (r) =>
+  await page.route("**/api/**/projects?**", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/**/projects", (r) => r.fulfill({ json: { success: true, data: MOCK_PROJECTS } }));
+  await page.route("**/api/**/stats/global", (r) =>
     r.fulfill({ json: { success: true, data: { totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 } } }),
   );
 }
@@ -96,13 +96,14 @@ test.describe("ProjectComparison modal", () => {
     await expect(page.getByText("2 selected for comparison")).toBeVisible();
 
     await page.getByRole("button", { name: /compare selected/i }).click();
-    await expect(page.getByRole("heading", { name: /project comparison/i })).toBeVisible();
+    const modal = page.getByRole("dialog");
+    await expect(modal.getByRole("heading", { name: /project comparison/i })).toBeVisible();
 
-    await expect(page.getByText(MOCK_PROJECTS[0].name)).toBeVisible();
-    await expect(page.getByText(MOCK_PROJECTS[1].name)).toBeVisible();
-    await expect(page.getByText("CO2 per XLM")).toBeVisible();
-    await expect(page.getByText("Progress %")).toBeVisible();
-    await expect(page.getByText("Donor count")).toBeVisible();
+    await expect(modal.getByText(MOCK_PROJECTS[0].name)).toBeVisible();
+    await expect(modal.getByText(MOCK_PROJECTS[1].name)).toBeVisible();
+    await expect(modal.getByText(/co.*per.*xlm/i)).toBeVisible();
+    await expect(modal.getByText(/goal reached/i)).toBeVisible();
+    await expect(modal.getByText(/donor count/i)).toBeVisible();
   });
 
   test("select 3rd project; assert 4th checkbox is disabled", async ({ page }) => {

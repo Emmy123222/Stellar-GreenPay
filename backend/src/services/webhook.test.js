@@ -1,194 +1,800 @@
 /**
  * backend/src/services/webhook.test.js
- * Unit tests for webhook delivery SSRF protection.
+ * Unit tests for webhook signing/verification, SSRF-safe delivery, and
+ * secret rotation, plus an integration test exercising the full
+ * donation -> milestone -> webhook delivery pipeline.
  *
- * NOTE: DNS resolution is mocked to avoid flaky network-dependent tests.
- *       The one "smoke test" with real DNS is explicitly marked with a longer
- *       timeout so it can be skipped in offline / CI environments via
- *       `jest --testPathIgnorePatterns=smoke`.
+ * SSRF-blocking logic itself (isPrivateOrReservedIp / assertPublicHttpUrl)
+ * is already thoroughly covered by `backend/src/utils/ssrf.test.js` and is
+ * NOT re-tested here. `../utils/ssrf` is mocked below so delivery tests
+ * (including the loopback capture server used by the integration test)
+ * aren't coupled to that real DNS/IP-range logic; the `deliverPayload`
+ * describe block below only verifies that a rejection from
+ * `assertPublicHttpUrl` is correctly propagated.
  */
 "use strict";
 
-const dns = require("dns");
+jest.mock("../utils/ssrf", () => ({
+  assertPublicHttpUrl: jest.fn(),
+}));
+
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
 const http = require("http");
 const https = require("https");
-const { deliverPayload, isPrivateIP } = require("./webhook");
-const logger = require("../logger");
+const { assertPublicHttpUrl } = require("../utils/ssrf");
+const pool = require("../db/pool");
+const {
+  deliverPayload,
+  recordAndDeliver,
+  rotateWebhookSecret,
+  verifyWebhookSignature,
+  generateSignature,
+  isGracePeriodActive,
+  timingSafeEqualHex,
+} = require("./webhook");
 
-jest.mock("dns", () => ({
-  promises: {
-    lookup: jest.fn(),
-  },
-process.env.NODE_ENV = "test";
+beforeEach(() => {
+  assertPublicHttpUrl.mockReset();
+  assertPublicHttpUrl.mockResolvedValue(undefined);
+});
 
-    // Clean state
-    await testPool.query("TRUNCATE projects, project_milestones, donations RESTART IDENTITY CASCADE");
+// ---------------------------------------------------------------------------
+// http/https request mocking helpers, shared by deliverPayload &
+// recordAndDeliver tests.
+// ---------------------------------------------------------------------------
 
-    // Re-require after pool reset
-    const { checkAndDeliverMilestones } = require("./webhook");
+function createMockReq() {
+  const req = {
+    on: jest.fn(() => req),
+    write: jest.fn(),
+    end: jest.fn(),
+    destroy: jest.fn(),
+  };
+  return req;
+}
 
-describe("SSRF Protection - isPrivateIP", () => {
-  test("identifies loopback addresses (127.0.0.0/8)", () => {
-    expect(isPrivateIP("127.0.0.1")).toBe(true);
-    expect(isPrivateIP("127.0.0.254")).toBe(true);
-    expect(isPrivateIP("127.255.255.255")).toBe(true);
+/** Simulate a successful HTTP response with the given status code. */
+function mockRequestSuccess(lib, statusCode = 200) {
+  return jest.spyOn(lib, "request").mockImplementation((_options, callback) => {
+    const req = createMockReq();
+    const res = {
+      statusCode,
+      on: jest.fn((event, handler) => {
+        if (event === "end") handler();
+      }),
+    };
+    callback(res);
+    return req;
+  });
+}
+
+/** Simulate a request-level network error (e.g. ECONNREFUSED). */
+function mockRequestNetworkError(lib, err) {
+  return jest.spyOn(lib, "request").mockImplementation(() => {
+    const req = createMockReq();
+    req.on = jest.fn((event, handler) => {
+      if (event === "error") handler(err);
+      return req;
+    });
+    return req;
+  });
+}
+
+/** Simulate a request timeout. */
+function mockRequestTimeout(lib) {
+  return jest.spyOn(lib, "request").mockImplementation(() => {
+    const req = createMockReq();
+    req.on = jest.fn((event, handler) => {
+      if (event === "timeout") handler();
+      return req;
+    });
+    return req;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// generateSignature
+// ---------------------------------------------------------------------------
+describe("generateSignature", () => {
+  test("computes an HMAC-SHA256 hex digest for a string payload", () => {
+    const sig = generateSignature("my-secret", "hello world");
+    const expected = crypto.createHmac("sha256", "my-secret").update("hello world").digest("hex");
+    expect(sig).toBe(expected);
+    expect(sig).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  test("identifies private class A range (10.0.0.0/8)", () => {
-    expect(isPrivateIP("10.0.0.1")).toBe(true);
-    expect(isPrivateIP("10.255.255.255")).toBe(true);
-  });
-
-  test("identifies private class B range (172.16.0.0/12)", () => {
-    expect(isPrivateIP("172.16.0.1")).toBe(true);
-    expect(isPrivateIP("172.31.255.255")).toBe(true);
-    expect(isPrivateIP("172.15.255.255")).toBe(false);
-    expect(isPrivateIP("172.32.0.1")).toBe(false);
-  });
-
-  test("identifies private class C range (192.168.0.0/16)", () => {
-    expect(isPrivateIP("192.168.0.1")).toBe(true);
-    expect(isPrivateIP("192.168.255.255")).toBe(true);
-    expect(isPrivateIP("192.169.0.1")).toBe(false);
-  });
-
-  test("identifies link-local / cloud metadata range (169.254.0.0/16)", () => {
-    expect(isPrivateIP("169.254.169.254")).toBe(true);
-    expect(isPrivateIP("169.254.0.1")).toBe(true);
-  });
-
-  test("identifies 0.0.0.0/8 range", () => {
-    expect(isPrivateIP("0.0.0.0")).toBe(true);
-  });
-
-  test("allows public IPv4 addresses", () => {
-    expect(isPrivateIP("8.8.8.8")).toBe(false);
-    expect(isPrivateIP("1.1.1.1")).toBe(false);
-    expect(isPrivateIP("93.184.216.34")).toBe(false);
-  });
-
-  test("handles IPv6 loopback and restricted ranges", () => {
-    expect(isPrivateIP("::1")).toBe(true);
-    expect(isPrivateIP("::")).toBe(true);
-    expect(isPrivateIP("fe80::1")).toBe(true);
-    expect(isPrivateIP("fd00::1")).toBe(true);
-  });
-
-  test("handles IPv4-mapped IPv6 addresses", () => {
-    expect(isPrivateIP("::ffff:127.0.0.1")).toBe(true);
-    expect(isPrivateIP("::ffff:10.0.0.1")).toBe(true);
-    expect(isPrivateIP("::ffff:8.8.8.8")).toBe(false);
+  test("produces different signatures for different secrets", () => {
+    expect(generateSignature("secret-a", "body")).not.toBe(generateSignature("secret-b", "body"));
   });
 });
 
-describe("deliverPayload SSRF Protection", () => {
+// ---------------------------------------------------------------------------
+// isGracePeriodActive
+// ---------------------------------------------------------------------------
+describe("isGracePeriodActive", () => {
+  test("returns false when no expiration is provided", () => {
+    expect(isGracePeriodActive(null)).toBe(false);
+    expect(isGracePeriodActive(undefined)).toBe(false);
+  });
+
+  test("returns true when the expiration is in the future", () => {
+    const future = new Date(Date.now() + 60_000).toISOString();
+    expect(isGracePeriodActive(future, Date.now())).toBe(true);
+  });
+
+  test("returns false when the expiration is in the past", () => {
+    const past = new Date(Date.now() - 60_000).toISOString();
+    expect(isGracePeriodActive(past)).toBe(false);
+  });
+
+  test("returns false for an unparsable expiration", () => {
+    expect(isGracePeriodActive("not-a-date")).toBe(false);
+  });
+
+  test("respects an explicit `now` override", () => {
+    const expiresAt = "2026-01-01T00:00:00.000Z";
+    expect(isGracePeriodActive(expiresAt, Date.parse("2025-12-31T00:00:00.000Z"))).toBe(true);
+    expect(isGracePeriodActive(expiresAt, Date.parse("2026-02-01T00:00:00.000Z"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// timingSafeEqualHex
+// ---------------------------------------------------------------------------
+describe("timingSafeEqualHex", () => {
+  test("returns true for identical strings", () => {
+    expect(timingSafeEqualHex("abc123", "abc123")).toBe(true);
+  });
+
+  test("returns false for different strings", () => {
+    expect(timingSafeEqualHex("abc123", "abc124")).toBe(false);
+  });
+
+  test("returns false when either input is not a string", () => {
+    expect(timingSafeEqualHex(null, "abc123")).toBe(false);
+    expect(timingSafeEqualHex("abc123", undefined)).toBe(false);
+    expect(timingSafeEqualHex(123, 123)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyWebhookSignature
+// ---------------------------------------------------------------------------
+describe("verifyWebhookSignature", () => {
+  const secret = "current-secret";
+  const previousSecret = "previous-secret";
+  const payload = JSON.stringify({ event: "milestone.reached", projectId: "p1" });
+
+  test("returns true for a valid signature string", () => {
+    const sig = generateSignature(secret, payload);
+    expect(verifyWebhookSignature(payload, sig, secret)).toBe(true);
+  });
+
+  test("returns true when given an array of candidate signatures", () => {
+    const sig = generateSignature(secret, payload);
+    expect(verifyWebhookSignature(payload, ["bogus", sig], secret)).toBe(true);
+  });
+
+  test("returns true when given a headers object", () => {
+    const sig = generateSignature(secret, payload);
+    expect(verifyWebhookSignature(payload, { "x-webhook-signature": sig }, secret)).toBe(true);
+  });
+
+  test("returns false for an invalid signature", () => {
+    expect(verifyWebhookSignature(payload, "not-the-right-signature", secret)).toBe(false);
+  });
+
+  test("returns false when signatureInput or currentSecret is missing", () => {
+    expect(verifyWebhookSignature(payload, "", secret)).toBe(false);
+    expect(verifyWebhookSignature(payload, "sig", "")).toBe(false);
+  });
+
+  test("accepts the previous secret's signature during an active grace period", () => {
+    const prevSig = generateSignature(previousSecret, payload);
+    const now = Date.now();
+    const previousSecretExpiresAt = new Date(now + 60_000).toISOString();
+
+    expect(
+      verifyWebhookSignature(payload, prevSig, secret, {
+        previousSecret,
+        previousSecretExpiresAt,
+        now,
+      }),
+    ).toBe(true);
+  });
+
+  test("rejects the previous secret's signature once the grace period has expired", () => {
+    const prevSig = generateSignature(previousSecret, payload);
+    const now = Date.now();
+    const previousSecretExpiresAt = new Date(now - 60_000).toISOString();
+
+    expect(
+      verifyWebhookSignature(payload, prevSig, secret, {
+        previousSecret,
+        previousSecretExpiresAt,
+        now,
+      }),
+    ).toBe(false);
+  });
+
+  test("accepts the dual-signature format sent by deliverPayload during the grace period", () => {
+    const now = Date.now();
+    const previousSecretExpiresAt = new Date(now + 60_000).toISOString();
+    const currentSig = generateSignature(secret, payload);
+    const prevSig = generateSignature(previousSecret, payload);
+    const combined = `${currentSig}, ${prevSig}`;
+
+    expect(
+      verifyWebhookSignature(payload, combined, secret, {
+        previousSecret,
+        previousSecretExpiresAt,
+        now,
+      }),
+    ).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deliverPayload
+// ---------------------------------------------------------------------------
+describe("deliverPayload", () => {
   let httpReqSpy;
   let httpsReqSpy;
 
-  beforeEach(() => {
-    jest.clearAllMocks();
+  afterEach(() => {
+    if (httpReqSpy) httpReqSpy.mockRestore();
+    if (httpsReqSpy) httpsReqSpy.mockRestore();
+    httpReqSpy = undefined;
+    httpsReqSpy = undefined;
+  });
 
-    httpReqSpy = jest.spyOn(http, "request").mockImplementation(() => {
-      const mockReq = {
-        on: jest.fn(),
-        write: jest.fn(),
-        end: jest.fn(),
-        destroy: jest.fn(),
-      };
-      return mockReq;
-    });
-
+  test("re-validates the URL via assertPublicHttpUrl and propagates a rejection without attempting delivery", async () => {
+    const ssrfError = new Error("Blocked private/reserved IP: 127.0.0.1");
+    assertPublicHttpUrl.mockRejectedValueOnce(ssrfError);
     httpsReqSpy = jest.spyOn(https, "request").mockImplementation(() => {
-      const mockReq = {
-        on: jest.fn(),
-        write: jest.fn(),
-        end: jest.fn(),
-        destroy: jest.fn(),
-      };
-      return mockReq;
+      throw new Error("https.request should not have been called");
     });
+
+    await expect(
+      deliverPayload("https://blocked.example.com/webhook", "secret", { projectId: "p1" }),
+    ).rejects.toThrow("Blocked private/reserved IP");
+
+    expect(assertPublicHttpUrl).toHaveBeenCalledWith("https://blocked.example.com/webhook");
+    expect(httpsReqSpy).not.toHaveBeenCalled();
+  });
+
+  test("resolves with the response status code and signs with a single X-Webhook-Signature header", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 200);
+    const secret = "s".repeat(32);
+    const payload = { projectId: "p1", milestone: "M1" };
+
+    const result = await deliverPayload("https://example.com/hooks/abc", secret, payload);
+
+    expect(result).toEqual({ statusCode: 200 });
+    const [options] = httpsReqSpy.mock.calls[0];
+    expect(options.hostname).toBe("example.com");
+    expect(options.port).toBe(443);
+    expect(options.path).toBe("/hooks/abc");
+    expect(options.method).toBe("POST");
+    expect(options.headers["Content-Type"]).toBe("application/json");
+    expect(options.headers["User-Agent"]).toBe("GreenPay-Webhook/1.0");
+    expect(options.headers["X-Webhook-Signature"]).toBe(
+      generateSignature(secret, JSON.stringify(payload)),
+    );
+    expect(options.headers["X-Webhook-Signature-Previous"]).toBeUndefined();
+  });
+
+  test("uses the http module for http:// URLs and the https module for https:// URLs", async () => {
+    httpReqSpy = mockRequestSuccess(http, 200);
+    await deliverPayload("http://example.com/hook", "secret", { projectId: "p1" });
+    expect(httpReqSpy).toHaveBeenCalledTimes(1);
+    expect(httpReqSpy.mock.calls[0][0].port).toBe(80);
+  });
+
+  test("signs with both the current and previous secret during an active grace period", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 200);
+    const secret = "current-secret";
+    const previousSecret = "previous-secret";
+    const payload = { projectId: "p1" };
+    const body = JSON.stringify(payload);
+    const now = Date.now();
+    const previousSecretExpiresAt = new Date(now + 60 * 60 * 1000).toISOString();
+
+    await deliverPayload("https://example.com/hook", secret, payload, {
+      previousSecret,
+      previousSecretExpiresAt,
+      now,
+    });
+
+    const [options] = httpsReqSpy.mock.calls[0];
+    const expectedCurrentSig = generateSignature(secret, body);
+    const expectedPrevSig = generateSignature(previousSecret, body);
+    expect(options.headers["X-Webhook-Signature"]).toBe(`${expectedCurrentSig}, ${expectedPrevSig}`);
+    expect(options.headers["X-Webhook-Signature-Previous"]).toBe(expectedPrevSig);
+  });
+
+  test("does not add previous-secret headers once the grace period has expired", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 200);
+    const secret = "current-secret";
+    const previousSecret = "previous-secret";
+    const payload = { projectId: "p1" };
+    const now = Date.now();
+    const previousSecretExpiresAt = new Date(now - 1000).toISOString();
+
+    await deliverPayload("https://example.com/hook", secret, payload, {
+      previousSecret,
+      previousSecretExpiresAt,
+      now,
+    });
+
+    const [options] = httpsReqSpy.mock.calls[0];
+    expect(options.headers["X-Webhook-Signature-Previous"]).toBeUndefined();
+    expect(options.headers["X-Webhook-Signature"]).toBe(
+      generateSignature(secret, JSON.stringify(payload)),
+    );
+  });
+
+  test("rejects when the underlying request errors", async () => {
+    const err = new Error("ECONNREFUSED");
+    httpsReqSpy = mockRequestNetworkError(https, err);
+    await expect(
+      deliverPayload("https://example.com/hook", "secret", { projectId: "p1" }),
+    ).rejects.toThrow("ECONNREFUSED");
+  });
+
+  test("rejects and destroys the request on timeout", async () => {
+    httpsReqSpy = mockRequestTimeout(https);
+    await expect(
+      deliverPayload("https://example.com/hook", "secret", { projectId: "p1" }),
+    ).rejects.toThrow("Webhook request timed out");
+    const req = httpsReqSpy.mock.results[0].value;
+    expect(req.destroy).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recordAndDeliver
+// ---------------------------------------------------------------------------
+describe("recordAndDeliver", () => {
+  let poolQuerySpy;
+  let httpsReqSpy;
+
+  beforeEach(() => {
+    poolQuerySpy = jest.spyOn(pool, "query").mockResolvedValue({ rows: [] });
   });
 
   afterEach(() => {
-    httpReqSpy.mockRestore();
-    httpsReqSpy.mockRestore();
+    poolQuerySpy.mockRestore();
+    if (httpsReqSpy) httpsReqSpy.mockRestore();
+    httpsReqSpy = undefined;
   });
 
-  test("blocks delivery when DNS resolves to a private IP (127.0.0.1)", async () => {
-    dns.promises.lookup.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+  test("persists a pending row, delivers successfully, and marks it delivered", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 200);
 
-    await deliverPayload("http://internal-service.local/webhook", "secret123", { projectId: "p1", milestone: "M1" });
+    await recordAndDeliver({
+      projectId: "proj-1",
+      url: "https://example.com/webhook",
+      secret: "s".repeat(32),
+      payload: { event: "milestone.reached", projectId: "proj-1", milestone: "50%" },
+    });
 
-    expect(dns.promises.lookup).toHaveBeenCalledWith("internal-service.local", { all: true });
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "webhook_delivery_error",
-        ip: "127.0.0.1",
+    expect(poolQuerySpy).toHaveBeenCalledTimes(2);
+
+    const [insertSql, insertParams] = poolQuerySpy.mock.calls[0];
+    expect(insertSql).toMatch(/INSERT INTO webhook_deliveries/);
+    expect(insertSql).toMatch(/'pending'/);
+    expect(insertParams[1]).toBe("proj-1");
+    expect(insertParams[2]).toBe("https://example.com/webhook");
+    expect(insertParams[4]).toBe("milestone.reached");
+
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/UPDATE webhook_deliveries/);
+    const [id, status, responseStatus, delivered, lastError] = updateParams;
+    expect(id).toBe(insertParams[0]);
+    expect(status).toBe("delivered");
+    expect(responseStatus).toBe(200);
+    expect(delivered).toBe(true);
+    expect(lastError).toBeNull();
+  });
+
+  test("marks the row failed (without throwing) when the endpoint responds with a non-2xx status", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 500);
+
+    await recordAndDeliver({
+      projectId: "proj-1",
+      url: "https://example.com/webhook",
+      secret: "s".repeat(32),
+      payload: { event: "milestone.reached", projectId: "proj-1" },
+    });
+
+    const [, updateParams] = poolQuerySpy.mock.calls[1];
+    const [, status, responseStatus, delivered, lastError] = updateParams;
+    expect(status).toBe("failed");
+    expect(responseStatus).toBe(500);
+    expect(delivered).toBe(false);
+    expect(lastError).toBe("Webhook responded with HTTP 500");
+  });
+
+  test("marks the row failed and rethrows when the delivery request errors", async () => {
+    const err = new Error("ECONNREFUSED");
+    httpsReqSpy = mockRequestNetworkError(https, err);
+
+    await expect(
+      recordAndDeliver({
+        projectId: "proj-1",
+        url: "https://example.com/webhook",
+        secret: "s".repeat(32),
+        payload: { event: "milestone.reached", projectId: "proj-1" },
       }),
-      expect.stringContaining("Blocked private or restricted IP address")
-    );
-    expect(http.request).not.toHaveBeenCalled();
+    ).rejects.toThrow("ECONNREFUSED");
+
+    expect(poolQuerySpy).toHaveBeenCalledTimes(2);
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'failed'/);
+    expect(updateParams[1]).toBe("ECONNREFUSED");
   });
 
-  test("blocks delivery when DNS resolves to cloud metadata IP (169.254.169.254)", async () => {
-    dns.promises.lookup.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+  test("marks the row failed and rethrows when assertPublicHttpUrl rejects the URL", async () => {
+    const ssrfError = new Error("Blocked private/reserved IP: 127.0.0.1");
+    assertPublicHttpUrl.mockRejectedValueOnce(ssrfError);
 
-    await deliverPayload("http://169.254.169.254/latest/meta-data/", "secret123", { projectId: "p1", milestone: "M1" });
-
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "webhook_delivery_error",
-        ip: "169.254.169.254",
+    await expect(
+      recordAndDeliver({
+        projectId: "proj-1",
+        url: "https://blocked.example.com/webhook",
+        secret: "s".repeat(32),
+        payload: { event: "milestone.reached", projectId: "proj-1" },
       }),
-      expect.stringContaining("Blocked private or restricted IP address")
-    );
-    expect(http.request).not.toHaveBeenCalled();
+    ).rejects.toThrow("Blocked private/reserved IP");
+
+    const [, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateParams[1]).toBe(ssrfError.message);
   });
 
-  test("blocks delivery when DNS resolution fails", async () => {
-    dns.promises.lookup.mockRejectedValue(new Error("ENOTFOUND"));
+  test("passes previousSecret/previousSecretExpiresAt through to deliverPayload's dual-signature signing", async () => {
+    httpsReqSpy = mockRequestSuccess(https, 200);
+    const secret = "current-secret-32-chars-long!!!";
+    const previousSecret = "previous-secret-32-chars-long!!";
+    const now = Date.now();
 
-    await deliverPayload("http://invalid-domain-does-not-exist.test/webhook", "secret123", { projectId: "p1", milestone: "M1" });
+    await recordAndDeliver({
+      projectId: "proj-1",
+      url: "https://example.com/webhook",
+      secret,
+      payload: { event: "milestone.reached", projectId: "proj-1" },
+      options: {
+        previousSecret,
+        previousSecretExpiresAt: new Date(now + 60_000).toISOString(),
+      },
+    });
 
-    expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: "webhook_delivery_error",
-      }),
-      expect.stringContaining("DNS resolution error")
-    );
-    expect(http.request).not.toHaveBeenCalled();
+    const [options] = httpsReqSpy.mock.calls[0];
+    expect(options.headers["X-Webhook-Signature-Previous"]).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rotateWebhookSecret
+// ---------------------------------------------------------------------------
+describe("rotateWebhookSecret", () => {
+  let poolQuerySpy;
+
+  afterEach(() => {
+    if (poolQuerySpy) poolQuerySpy.mockRestore();
+    poolQuerySpy = undefined;
   });
 
-  test("allows delivery when DNS resolves to a public IP address", async () => {
-    dns.promises.lookup.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+  test("throws a 404 error when the project does not exist", async () => {
+    poolQuerySpy = jest.spyOn(pool, "query").mockResolvedValueOnce({ rows: [] });
+    await expect(rotateWebhookSecret("missing-id")).rejects.toMatchObject({ status: 404 });
+  });
 
-    await deliverPayload("https://api.example.com/webhook", "secret123", { projectId: "p1", milestone: "M1" });
+  test("rotates the secret, preserves the old one as previous, and activates the grace period", async () => {
+    const now = Date.now();
+    const oldSecret = "whsec_old_secret";
 
-    expect(dns.promises.lookup).toHaveBeenCalledWith("api.example.com", { all: true });
-    expect(https.request).toHaveBeenCalled();
-jest.mock("http", () => ({ request: jest.fn() }));
-jest.mock("https", () => ({ request: jest.fn() }));
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({
+        rows: [{ id: "proj-1", webhook_secret: oldSecret, previous_webhook_secret: null }],
+      })
+      .mockImplementationOnce((_sql, params) =>
+        Promise.resolve({
+          rows: [
+            {
+              id: "proj-1",
+              webhook_secret: params[0],
+              previous_webhook_secret: params[1],
+              webhook_secret_rotated_at: params[2],
+              previous_webhook_secret_expires_at: params[3],
+            },
+          ],
+        }),
+      );
 
-    // Track received requests
+    const result = await rotateWebhookSecret("proj-1", { now });
+
+    expect(result.success).toBe(true);
+    expect(result.webhookSecret).toMatch(/^whsec_/);
+    expect(result.webhookSecret).not.toBe(oldSecret);
+    expect(result.previousSecretExpiresAt).not.toBeNull();
+    expect(result.gracePeriodActive).toBe(true);
+  });
+
+  test("does not activate a grace period when there was no previous secret to preserve", async () => {
+    const now = Date.now();
+
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({
+        rows: [{ id: "proj-1", webhook_secret: null, previous_webhook_secret: null }],
+      })
+      .mockImplementationOnce((_sql, params) =>
+        Promise.resolve({
+          rows: [
+            {
+              id: "proj-1",
+              webhook_secret: params[0],
+              previous_webhook_secret: params[1],
+              webhook_secret_rotated_at: params[2],
+              previous_webhook_secret_expires_at: params[3],
+            },
+          ],
+        }),
+      );
+
+    const result = await rotateWebhookSecret("proj-1", { now });
+
+    expect(result.previousSecretExpiresAt).toBeNull();
+    expect(result.gracePeriodActive).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration: donation -> milestone -> webhook delivery pipeline
+//
+// Uses a real Postgres testcontainer plus a local HTTP capture server.
+// Skipped gracefully (matching the convention used by
+// `routes/donations.integration.test.js` and `services/profileQueue.test.js`)
+// when Docker/testcontainers isn't available in the current environment.
+// ---------------------------------------------------------------------------
+describe("Webhook delivery integration (testcontainers)", () => {
+  jest.setTimeout(120000);
+
+  let container;
+  let testPool;
+  let serverContainerReady = false;
+
+  beforeAll(async () => {
+    if (process.env.SKIP_INTEGRATION === "1") {
+      console.warn("Skipping integration tests (SKIP_INTEGRATION=1)");
+      return;
+    }
+
+    try {
+      // eslint-disable-next-line global-require
+      const { GenericContainer, Wait } = require("testcontainers");
+      // eslint-disable-next-line global-require
+      const { Pool } = require("pg");
+
+      container = await new GenericContainer("postgres:15-alpine")
+        .withEnvironment({
+          POSTGRES_USER: "test",
+          POSTGRES_PASSWORD: "test",
+          POSTGRES_DB: "greenpay_test",
+        })
+        .withExposedPorts(5432)
+        .withWaitStrategy(Wait.forLogMessage("database system is ready to accept connections", 2))
+        .withStartupTimeout(60000)
+        .start();
+
+      const host = container.getHost();
+      const port = container.getMappedPort(5432);
+      const connectionString = `postgres://test:test@${host}:${port}/greenpay_test`;
+
+      testPool = new Pool({ connectionString, max: 5 });
+
+      const schemaPath = path.join(__dirname, "..", "db", "schema.sql");
+      const schemaSql = fs.readFileSync(schemaPath, "utf8");
+      await testPool.query(schemaSql);
+
+      // schema.sql doesn't include the secret-rotation columns added by
+      // migrations/003_webhook_secret_rotation.js. checkAndDeliverMilestones
+      // selects them from `projects`, so add them here directly.
+      await testPool.query(`
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret TEXT;
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret_rotated_at TIMESTAMPTZ;
+        ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret_expires_at TIMESTAMPTZ;
+      `);
+
+      process.env.DATABASE_URL = connectionString;
+      delete require.cache[require.resolve("../db/pool")];
+      delete require.cache[require.resolve("./webhook")];
+
+      const appPool = require("../db/pool");
+      await appPool.query("SELECT 1");
+
+      serverContainerReady = true;
+      console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
+    } catch (err) {
+      console.warn("Testcontainers startup failed – integration tests will be skipped:", err.message);
+      serverContainerReady = false;
+      try {
+        if (testPool) await testPool.end();
+      } catch { /* best-effort cleanup */ }
+      try {
+        if (container) await container.stop();
+      } catch { /* best-effort cleanup */ }
+      container = null;
+      testPool = null;
+    }
+  });
+
+  afterAll(async () => {
+    try {
+      // eslint-disable-next-line global-require
+      const appPool = require("../db/pool");
+      await appPool.end();
+    } catch { /* best-effort cleanup */ }
+    try {
+      if (testPool) await testPool.end();
+    } catch { /* best-effort cleanup */ }
+    try {
+      if (container) await container.stop({ timeout: 5000 });
+    } catch { /* best-effort cleanup */ }
+  });
+
+  /** Start a tiny HTTP server on a random port. Returns { port, server }. */
+  function startCaptureServer() {
+    return new Promise((resolve, reject) => {
+      const server = http.createServer();
+      server.on("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        resolve({ port: server.address().port, server });
+      });
+    });
+  }
+
+  function closeServer(server) {
+    return new Promise((resolve) => server.close(resolve));
+  }
+
+  test("delivers signed milestone webhooks and persists a 'delivered' webhook_deliveries row", async () => {
+    if (!serverContainerReady) {
+      console.warn("Skipping – testcontainer not available");
+      return expect(true).toBe(true);
+    }
+
+    await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
+
+    // eslint-disable-next-line global-require
+    const { checkAndDeliverMilestones } = require("./webhook");
+
+    const { port, server } = await startCaptureServer();
+    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
+    const webhookSecret = "whsec_supersecret_test_key_12345";
+
     const received = [];
-    server.removeAllListeners("request");
     server.on("request", (req, res) => {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
         const body = Buffer.concat(chunks).toString("utf8");
-        received.push({
-          method: req.method,
-          url: req.url,
-          headers: req.headers,
-          body,
-        });
+        received.push({ method: req.method, url: req.url, headers: req.headers, body });
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ ok: true }));
       });
     });
 
-    // ── 2. Seed a project with webhook config and NO initial raised_xlm ─
+    const projectId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    await testPool.query(
+      `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, raised_xlm, webhook_url, webhook_secret)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        projectId,
+        "Webhook Test Project",
+        "Testing milestone webhooks",
+        "Reforestation",
+        "Brazil",
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "100",
+        "55",
+        webhookUrl,
+        webhookSecret,
+      ],
+    );
+
+    const milestone25Id = "22222222-2222-2222-2222-222222222222";
+    const milestone50Id = "33333333-3333-3333-3333-333333333333";
+    const milestone75Id = "44444444-4444-4444-4444-444444444444";
+
+    await testPool.query(
+      `INSERT INTO project_milestones (id, project_id, percentage, title)
+       VALUES ($1, $2, $3, $4), ($5, $6, $7, $8), ($9, $10, $11, $12)`,
+      [
+        milestone25Id, projectId, 25, "Quarter funded",
+        milestone50Id, projectId, 50, "Halfway there",
+        milestone75Id, projectId, 75, "Almost done",
+      ],
+    );
+
+    await checkAndDeliverMilestones(projectId);
+    await new Promise((r) => setTimeout(r, 2000));
+    await closeServer(server);
+
+    expect(received.length).toBe(2);
+    expect(received.every((r) => r.method === "POST" && r.url === "/webhook")).toBe(true);
+
+    for (const req of received) {
+      const sigHeader = req.headers["x-webhook-signature"];
+      const expectedSig = crypto.createHmac("sha256", webhookSecret).update(req.body).digest("hex");
+      expect(sigHeader).toBe(expectedSig);
+      expect(req.headers["content-type"]).toBe("application/json");
+      expect(req.headers["user-agent"]).toBe("GreenPay-Webhook/1.0");
+
+      const payload = JSON.parse(req.body);
+      expect(payload.event).toBe("milestone.reached");
+      expect(payload.projectId).toBe(projectId);
+      expect(payload.totalRaisedXLM).toBe("55.0000000");
+      expect([25, 50]).toContain(payload.percentage);
+    }
+
+    const percentages = received.map((r) => JSON.parse(r.body).percentage);
+    expect(percentages).not.toContain(75);
+
+    const dbMilestones = await testPool.query(
+      "SELECT id, percentage, reached_at FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
+      [projectId],
+    );
+    expect(dbMilestones.rows).toHaveLength(3);
+    expect(dbMilestones.rows[0].reached_at).not.toBeNull();
+    expect(dbMilestones.rows[1].reached_at).not.toBeNull();
+    expect(dbMilestones.rows[2].reached_at).toBeNull();
+
+    // recordAndDeliver persists each delivery attempt to webhook_deliveries.
+    const deliveryRows = await testPool.query(
+      "SELECT status, response_status, event, delivered_at FROM webhook_deliveries WHERE project_id = $1 ORDER BY created_at ASC",
+      [projectId],
+    );
+    expect(deliveryRows.rows).toHaveLength(2);
+    for (const row of deliveryRows.rows) {
+      expect(row.status).toBe("delivered");
+      expect(row.response_status).toBe(200);
+      expect(row.event).toBe("milestone.reached");
+      expect(row.delivered_at).not.toBeNull();
+    }
+  });
+
+  test("triggers milestone webhooks via a donation that pushes raised_xlm past a threshold", async () => {
+    if (!serverContainerReady) {
+      console.warn("Skipping – testcontainer not available");
+      return expect(true).toBe(true);
+    }
+
+    await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
+
+    // eslint-disable-next-line global-require
+    const { checkAndDeliverMilestones } = require("./webhook");
+
+    const { port, server } = await startCaptureServer();
+    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
+    const webhookSecret = "whsec_donation_triggered_test_key";
+
+    const received = [];
+    server.on("request", (req, res) => {
+      const chunks = [];
+      req.on("data", (chunk) => chunks.push(chunk));
+      req.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        received.push({ method: req.method, url: req.url, headers: req.headers, body });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    });
+
     const projectId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     await testPool.query(
       `INSERT INTO projects (id, name, description, category, location, wallet_address, goal_xlm, raised_xlm, webhook_url, webhook_secret)
@@ -196,34 +802,30 @@ jest.mock("https", () => ({ request: jest.fn() }));
       [
         projectId,
         "Donation-Triggered Webhook Project",
-        "Testing donation → milestone → webhook pipeline",
+        "Testing donation -> milestone -> webhook pipeline",
         "Solar Energy",
         "India",
         "GDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDY",
-        "200",       // goal: 200 XLM
-        "0",         // initially 0 raised — no milestones reached yet
+        "200",
+        "0",
         webhookUrl,
         webhookSecret,
-      ]
+      ],
     );
 
-    // ── 3. Seed milestones ────────────────────────────────────────────
-    // None should be initially reached (raised_xlm = 0)
     const milestone15Id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
     const milestone30Id = "ffffffff-ffff-ffff-ffff-ffffffffffff";
-
     await testPool.query(
       `INSERT INTO project_milestones (id, project_id, percentage, title)
        VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
       [
         milestone15Id, projectId, 15, "15% funded — first light",
         milestone30Id, projectId, 30, "30% funded — panels ordered",
-      ]
+      ],
     );
 
-    // ── 4. Record a donation that pushes raised past the 15% milestone ─
     const donorAddress = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-    const donationAmount = 35; // 35 / 200 = 17.5% → crosses the 15% milestone
+    const donationAmount = 35; // 35 / 200 = 17.5% -> crosses the 15% milestone
 
     await testPool.query(
       `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
@@ -236,114 +838,72 @@ jest.mock("https", () => ({ request: jest.fn() }));
         donationAmount,
         "XLM",
         "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-      ]
+      ],
     );
 
-    // Update raised_xlm on the project to reflect the donation
     await testPool.query(
       `UPDATE projects
        SET raised_xlm = raised_xlm + $1::numeric,
-           donor_count = (
-             SELECT COUNT(DISTINCT donor_address)
-             FROM donations
-             WHERE project_id = $2
-           ),
+           donor_count = (SELECT COUNT(DISTINCT donor_address) FROM donations WHERE project_id = $2),
            updated_at = NOW()
        WHERE id = $2`,
-      [donationAmount, projectId]
+      [donationAmount, projectId],
     );
 
-    // ── 5. Trigger milestone check (as would happen after a donation) ──
     await checkAndDeliverMilestones(projectId);
-
-    // Webhook delivery is async (fire-and-forget), so wait a bit
     await new Promise((r) => setTimeout(r, 2000));
-
-    // ── 6. Shut down the capture server ───────────────────────────────
     await closeServer(server);
 
-    // ── 7. Assertions ─────────────────────────────────────────────────
-
-    // Expect exactly one webhook delivered (15% milestone)
     expect(received.length).toBe(1);
     expect(received[0].method).toBe("POST");
     expect(received[0].url).toBe("/webhook");
 
-    // ── 7a. Verify X-Webhook-Signature header ──────────────────────────
     const sigHeader = received[0].headers["x-webhook-signature"];
-    expect(sigHeader).toBeDefined();
-
-    const expectedSig = crypto
-      .createHmac("sha256", webhookSecret)
-      .update(received[0].body)
-      .digest("hex");
+    const expectedSig = crypto.createHmac("sha256", webhookSecret).update(received[0].body).digest("hex");
     expect(sigHeader).toBe(expectedSig);
 
-    // ── 7b. Verify content-type and user-agent ─────────────────────────
-    expect(received[0].headers["content-type"]).toBe("application/json");
-    expect(received[0].headers["user-agent"]).toBe("GreenPay-Webhook/1.0");
-
-    // ── 7c. Verify payload shape ──────────────────────────────────────
     const payload = JSON.parse(received[0].body);
-
     expect(payload.event).toBe("milestone.reached");
     expect(payload.projectId).toBe(projectId);
     expect(payload.percentage).toBe(15);
     expect(payload.milestone).toBe("15% funded — first light");
-    expect(payload).toHaveProperty("timestamp");
-    expect(payload).toHaveProperty("totalRaisedXLM");
-
-    // totalRaisedXLM should reflect the donation amount (35 / 200 = 17.5%)
     expect(payload.totalRaisedXLM).toBe("35.0000000");
 
-    // timestamp should be valid ISO 8601
-    expect(() => new Date(payload.timestamp)).not.toThrow();
-    expect(new Date(payload.timestamp).toISOString()).toBe(payload.timestamp);
-
-    // ── 7d. Verify 30% milestone was NOT triggered ─────────────────────
     const dbMilestones = await testPool.query(
       "SELECT id, percentage, reached_at FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
-      [projectId]
+      [projectId],
     );
-
     expect(dbMilestones.rows).toHaveLength(2);
-    // 15% milestone: reached_at should be set
     expect(dbMilestones.rows[0].reached_at).not.toBeNull();
-    // 30% milestone: reached_at should still be null (17.5% < 30%)
     expect(dbMilestones.rows[1].reached_at).toBeNull();
 
-    // ── 7e. Verify the donation record is intact ───────────────────────
-    const donationRows = await testPool.query(
-      "SELECT id, amount_xlm, donor_address FROM donations WHERE project_id = $1",
-      [projectId]
+    const deliveryRows = await testPool.query(
+      "SELECT status, response_status, event FROM webhook_deliveries WHERE project_id = $1",
+      [projectId],
     );
-    expect(donationRows.rows).toHaveLength(1);
-    expect(Number.parseFloat(donationRows.rows[0].amount_xlm)).toBe(donationAmount);
-    expect(donationRows.rows[0].donor_address).toBe(donorAddress);
+    expect(deliveryRows.rows).toHaveLength(1);
+    expect(deliveryRows.rows[0].status).toBe("delivered");
+    expect(deliveryRows.rows[0].response_status).toBe(200);
+    expect(deliveryRows.rows[0].event).toBe("milestone.reached");
   });
 
-  test("does not deliver webhooks when project has no webhook_url configured", async () => {
+  test("does not deliver or persist webhooks when the project has no webhook_url configured", async () => {
     if (!serverContainerReady) {
       console.warn("Skipping – testcontainer not available");
       return expect(true).toBe(true);
     }
 
-    await testPool.query("TRUNCATE projects, project_milestones RESTART IDENTITY CASCADE");
+    await testPool.query("TRUNCATE projects, project_milestones, webhook_deliveries RESTART IDENTITY CASCADE");
 
+    // eslint-disable-next-line global-require
     const { checkAndDeliverMilestones } = require("./webhook");
 
     const { server } = await startCaptureServer();
-
     const received = [];
-    server.removeAllListeners("request");
     server.on("request", (req, res) => {
-      const chunks = [];
-      req.on("data", (chunk) => chunks.push(chunk));
-      req.on("end", () => {
-        received.push({ url: req.url });
-        res.writeHead(200);
-        res.end();
-      });
+      received.push({ url: req.url });
+      res.writeHead(200);
+      res.end();
     });
 
     const projectId = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -358,433 +918,26 @@ jest.mock("https", () => ({ request: jest.fn() }));
         "Kenya",
         "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBY",
         "100",
-        "60", // 60% progress
-      ]
+        "60",
+      ],
     );
 
-    // Seed a milestone that would be reached
     await testPool.query(
       `INSERT INTO project_milestones (id, project_id, percentage, title)
        VALUES ($1, $2, $3, $4)`,
-      ["cccccccc-cccc-cccc-cccc-cccccccccccc", projectId, 50, "Halfway there"]
+      ["cccccccc-cccc-cccc-cccc-cccccccccccc", projectId, 50, "Halfway there"],
     );
 
     await checkAndDeliverMilestones(projectId);
     await new Promise((r) => setTimeout(r, 2000));
     await closeServer(server);
 
-    // No webhook should have been delivered
     expect(received.length).toBe(0);
-  }, 15000);
-});
 
-process.env.NODE_ENV = "test";
-const dns = require("dns");
-const net = require("net");
-const {
-  validateUrl,
-  checkPrivateIPv4,
-  checkPrivateIPv6,
-  normalizeIPv6,
-  ip4ToInt,
-  stripBrackets,
-} = require("./webhook");
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-/** Create a canned `dns.lookup` response for a list of IP addresses. */
-function mockDnsResponse(addresses) {
-  return jest.spyOn(dns, "lookup").mockImplementation((hostname, opts, cb) => {
-    if (typeof opts === "function") {
-      cb = opts;
-      opts = {};
-    }
-    const results = addresses.map((addr) => ({
-      address: addr,
-      family: net.isIPv4(addr) ? 4 : 6,
-    }));
-    if (results.length === 1 && !opts.all) {
-      cb(null, results[0].address, results[0].family);
-    } else {
-      cb(null, results);
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// stripBrackets
-// ---------------------------------------------------------------------------
-describe("stripBrackets", () => {
-  test("strips brackets from IPv6 address", () => {
-    expect(stripBrackets("[::1]")).toBe("::1");
-    expect(stripBrackets("[fc00::1]")).toBe("fc00::1");
-  });
-
-  test("returns unchanged if no brackets", () => {
-    expect(stripBrackets("::1")).toBe("::1");
-    expect(stripBrackets("example.com")).toBe("example.com");
-    expect(stripBrackets("192.168.1.1")).toBe("192.168.1.1");
-  });
-
-  test("handles empty string", () => {
-    expect(stripBrackets("")).toBe("");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// ip4ToInt
-// ---------------------------------------------------------------------------
-describe("ip4ToInt", () => {
-  test("converts a dotted-quad to a 32-bit integer", () => {
-    expect(ip4ToInt("0.0.0.0")).toBe(0);
-    expect(ip4ToInt("255.255.255.255")).toBe(4294967295);
-    expect(ip4ToInt("127.0.0.1")).toBe(2130706433);
-    expect(ip4ToInt("192.168.1.1")).toBe(3232235777);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkPrivateIPv4
-// ---------------------------------------------------------------------------
-describe("checkPrivateIPv4", () => {
-  const privateCases = [
-    ["127.0.0.1", "127.0.0.0/8"],
-    ["127.255.255.255", "127.0.0.0/8"],
-    ["10.0.0.1", "10.0.0.0/8"],
-    ["10.255.255.255", "10.0.0.0/8"],
-    ["172.16.0.1", "172.16.0.0/12"],
-    ["172.31.255.255", "172.16.0.0/12"],
-    ["192.168.0.1", "192.168.0.0/16"],
-    ["192.168.255.255", "192.168.0.0/16"],
-    ["169.254.1.1", "169.254.0.0/16"],
-    ["0.0.0.0", "0.0.0.0/8"],
-    ["0.255.255.255", "0.0.0.0/8"],
-    ["203.0.113.1", "203.0.113.0/24"],
-    ["198.51.100.1", "198.51.100.0/24"],
-    ["192.0.2.1", "192.0.2.0/24"],
-  ];
-
-  test.each(privateCases)(
-    "detects %s as private (%s)",
-    (ip, expectedRange) => {
-      const result = checkPrivateIPv4(ip);
-      expect(result.blocked).toBe(true);
-      expect(result.range).toBe(expectedRange);
-    },
-  );
-
-  const publicCases = ["8.8.8.8", "1.1.1.1", "142.250.80.46", "93.184.216.34"];
-
-  test.each(publicCases)("allows public IPv4 %s", (ip) => {
-    expect(checkPrivateIPv4(ip).blocked).toBe(false);
-  });
-
-  test("returns { blocked: false } for non-IPv4 strings", () => {
-    expect(checkPrivateIPv4("not-an-ip").blocked).toBe(false);
-    expect(checkPrivateIPv4("::1").blocked).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// normalizeIPv6
-// ---------------------------------------------------------------------------
-describe("normalizeIPv6", () => {
-  test("normalises ::1 to full form", () => {
-    expect(normalizeIPv6("::1")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
-  });
-
-  test("normalises [::1] (bracketed) to full form", () => {
-    expect(normalizeIPv6("[::1]")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
-  });
-
-  test("normalises :: (unspecified)", () => {
-    expect(normalizeIPv6("::")).toBe("0000:0000:0000:0000:0000:0000:0000:0000");
-  });
-
-  test("normalises fc00::", () => {
-    expect(normalizeIPv6("fc00::")).toBe("fc00:0000:0000:0000:0000:0000:0000:0000");
-  });
-
-  test("normalises fe80::1", () => {
-    expect(normalizeIPv6("fe80::1")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
-  });
-
-  test("normalises 2001:db8::1", () => {
-    expect(normalizeIPv6("2001:db8::1")).toBe("2001:0db8:0000:0000:0000:0000:0000:0001");
-  });
-
-  test("normalises upper-case to lower-case", () => {
-    expect(normalizeIPv6("FD00::1")).toBe("fd00:0000:0000:0000:0000:0000:0000:0001");
-  });
-
-  test("handles full form without compression", () => {
-    expect(normalizeIPv6("fd12:3456:789a:0000:0000:0000:0000:0001")).toBe(
-      "fd12:3456:789a:0000:0000:0000:0000:0001",
+    const deliveryRows = await testPool.query(
+      "SELECT id FROM webhook_deliveries WHERE project_id = $1",
+      [projectId],
     );
+    expect(deliveryRows.rows).toHaveLength(0);
   });
-
-  test("returns null for non-IPv6", () => {
-    expect(normalizeIPv6("8.8.8.8")).toBeNull();
-    expect(normalizeIPv6("not-an-ip")).toBeNull();
-    expect(normalizeIPv6("")).toBeNull();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// checkPrivateIPv6
-// ---------------------------------------------------------------------------
-describe("checkPrivateIPv6", () => {
-  const privateCases = [
-    "::1",
-    "0:0:0:0:0:0:0:1",
-    "[::1]",
-    "[fc00::1]",
-    "fc00::",
-    "fc00::1",
-    "fd12:3456:789a:bcde::1",
-    "fe80::1",
-    "feb0::abcd",
-    "FD00::1",
-  ];
-
-  test.each(privateCases)("detects %s as private IPv6", (ip) => {
-    const result = checkPrivateIPv6(ip);
-    expect(result.blocked).toBe(true);
-    expect(result.range).toBeDefined();
-  });
-
-  const publicCases = [
-    "2001:4860:4860::8888",
-    "2606:4700:4700::1111",
-    "2a00:1450:4001:82c::200e",
-    "2001:db8::1",
-  ];
-
-  test.each(publicCases)("allows public IPv6 %s", (ip) => {
-    expect(checkPrivateIPv6(ip).blocked).toBe(false);
-  });
-
-  test("returns { blocked: false } for non-IPv6 strings", () => {
-    expect(checkPrivateIPv6("8.8.8.8").blocked).toBe(false);
-    expect(checkPrivateIPv6("not-an-ip").blocked).toBe(false);
-  });
-
-  // --- IPv4-mapped IPv6 ---
-  describe("IPv4-mapped IPv6 addresses", () => {
-    const privateMapped = [
-      ["::ffff:127.0.0.1", "127.0.0.0/8"],
-      ["::ffff:10.0.0.1", "10.0.0.0/8"],
-      ["::ffff:192.168.1.1", "192.168.0.0/16"],
-      ["::ffff:169.254.169.254", "169.254.0.0/16"],
-      ["::ffff:0:192.168.1.1", "192.168.0.0/16"],
-      ["::FFFF:10.0.0.1", "10.0.0.0/8"],
-    ];
-
-    test.each(privateMapped)(
-      "detects %s as private via embedded IPv4 (%s)",
-      (ip, expectedRange) => {
-        const result = checkPrivateIPv6(ip);
-        expect(result.blocked).toBe(true);
-        expect(result.range).toBe(expectedRange);
-      },
-    );
-
-    const publicMapped = [
-      "::ffff:8.8.8.8",
-      "::ffff:1.1.1.1",
-    ];
-
-    test.each(publicMapped)("allows public mapped IPv6 %s", (ip) => {
-      expect(checkPrivateIPv6(ip).blocked).toBe(false);
-    });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// validateUrl — static checks (no DNS needed)
-// ---------------------------------------------------------------------------
-describe("validateUrl — static checks", () => {
-  beforeEach(() => {
-    jest.spyOn(dns, "lookup").mockImplementation(() => {
-      throw new Error("DNS should not be called for static checks");
-    });
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  test("rejects malformed URL", async () => {
-    await expect(validateUrl("not-a-url")).rejects.toThrow("Invalid webhook URL");
-  });
-
-  test("rejects unsupported protocol (ftp)", async () => {
-    await expect(
-      validateUrl("ftp://example.com/hook"),
-    ).rejects.toThrow(/unsupported protocol/);
-  });
-
-  test.each([
-    "http://localhost:3000/hook",
-    "http://127.0.0.1:8080/hook",
-    "http://0.0.0.0/hook",
-    "http://169.254.169.254/latest/meta-data",
-  ])("rejects blocked hostname URL %s", async (url) => {
-    await expect(validateUrl(url)).rejects.toThrow(
-      /blocked hostname|private IPv4/,
-    );
-  });
-
-  test.each([
-    "http://10.0.0.1:8080/hook",
-    "http://192.168.1.1/hook",
-    "http://172.16.0.5/hook",
-  ])("rejects private IPv4 URL %s", async (url) => {
-    await expect(validateUrl(url)).rejects.toThrow(/private IPv4/);
-  });
-
-  test("rejects private IPv6 hostname in URL", async () => {
-    await expect(
-      validateUrl("http://[::1]:8080/hook"),
-    ).rejects.toThrow(/blocked hostname|private IPv6/);
-    await expect(
-      validateUrl("http://[fc00::1]/hook"),
-    ).rejects.toThrow(/private IPv6/);
-  });
-
-  test("rejects IPv4-mapped IPv6 addresses statically", async () => {
-    await expect(
-      validateUrl("http://[::ffff:192.168.1.1]/hook"),
-    ).rejects.toThrow(/private IPv6|blocked/);
-  });
-
-  test("rejects empty URL", async () => {
-    await expect(validateUrl("")).rejects.toThrow("Invalid webhook URL");
-  });
-
-  test("rejects URL with only protocol", async () => {
-    await expect(validateUrl("http://")).rejects.toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// validateUrl — DNS resolution (mocked)
-// ---------------------------------------------------------------------------
-describe("validateUrl — DNS resolution (mocked)", () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  test("allows hostname that resolves to a public IP", async () => {
-    mockDnsResponse(["1.1.1.1"]);
-    await expect(
-      validateUrl("https://example.com/webhook"),
-    ).resolves.not.toThrow();
-  });
-
-  test("rejects hostname that resolves to a private IPv4", async () => {
-    mockDnsResponse(["127.0.0.1"]);
-    await expect(
-      validateUrl("https://evil-internal.com/hook"),
-    ).rejects.toThrow(/private IPv4|127\.0\.0\.0\/8/);
-  });
-
-  test("rejects hostname that resolves to a private IPv6", async () => {
-    mockDnsResponse(["fc00::1"]);
-    await expect(
-      validateUrl("https://evil-internal-v6.com/hook"),
-    ).rejects.toThrow(/private IPv6|fc00::\/7/);
-  });
-
-  test("rejects hostname that resolves to link-local IPv6", async () => {
-    mockDnsResponse(["fe80::1"]);
-    await expect(
-      validateUrl("https://link-local-v6.com/hook"),
-    ).rejects.toThrow(/private IPv6|fe80::\/10/);
-  });
-
-  test("rejects hostname when any resolved IP is private", async () => {
-    mockDnsResponse(["1.1.1.1", "10.0.0.1", "8.8.8.8"]);
-    await expect(
-      validateUrl("https://multi-ip.com/hook"),
-    ).rejects.toThrow(/private IPv4|10\.0\.0\.0\/8/);
-  });
-
-  test("rejects hostname that resolves to IPv4-mapped private IPv6", async () => {
-    mockDnsResponse(["::ffff:192.168.1.1"]);
-    await expect(
-      validateUrl("https://mapped-private.com/hook"),
-    ).rejects.toThrow(/private/);
-  });
-
-  test("allows hostname that resolves to IPv4-mapped public IPv6", async () => {
-    mockDnsResponse(["::ffff:8.8.8.8"]);
-    await expect(
-      validateUrl("https://mapped-public.com/hook"),
-    ).resolves.not.toThrow();
-  });
-
-  test("rejects unresolved hostname", async () => {
-    jest.spyOn(dns, "lookup").mockImplementation((hostname, opts, cb) => {
-      if (typeof opts === "function") cb = opts;
-      const err = new Error("queryA ENOTFOUND example.com");
-      err.code = "ENOTFOUND";
-      cb(err);
-    });
-    await expect(
-      validateUrl("http://nonexistent-domain-hopefully.com/hook"),
-    ).rejects.toThrow(/DNS resolution failed/);
-  });
-
-  test("rejects AAAA-only hostname that resolves to private IPv6", async () => {
-    jest.spyOn(dns, "lookup").mockImplementation((_hostname, _opts, cb) => {
-      const callback = typeof _opts === "function" ? _opts : cb;
-      callback(null, [{ address: "fc00::1", family: 6 }]);
-    });
-    await expect(
-      validateUrl("https://ipv6-only-private.com/hook"),
-    ).rejects.toThrow(/private IPv6|fc00::\/7/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// validateUrl — edge cases (mocked)
-// ---------------------------------------------------------------------------
-describe("validateUrl — edge cases (mocked)", () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  test("allows HTTPS URLs that resolve to public IP", async () => {
-    mockDnsResponse(["151.101.1.140"]);
-    await expect(
-      validateUrl("https://hooks.slack.com/services/T00/B00/xxxxx"),
-    ).resolves.not.toThrow();
-  });
-
-  test("allows URL with embedded credentials when host resolves to public IP", async () => {
-    jest.spyOn(dns, "lookup").mockImplementation((hostname, _opts, cb) => {
-      const callback = typeof _opts === "function" ? _opts : cb;
-      if (hostname === "evil.com") {
-        callback(null, [{ address: "8.8.8.8", family: 4 }]);
-      } else {
-        callback(new Error("ENOTFOUND"));
-      }
-    });
-    await expect(
-      validateUrl("http://user:pass@evil.com/hook"),
-    ).resolves.not.toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Smoke test with real DNS (can be skipped in CI)
-// ---------------------------------------------------------------------------
-describe("validateUrl — real DNS smoke test", () => {
-  test("allows a well-known public hostname via real DNS", async () => {
-    await expect(
-      validateUrl("https://one.one.one.one/hook"),
-    ).resolves.not.toThrow();
-  }, 15000);
 });

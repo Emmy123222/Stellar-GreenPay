@@ -14,6 +14,7 @@ jest.mock("../services/redis", () => ({
 jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn(),
   getProjectDonationEvents: jest.fn(),
+  getRegisteredProjectIdFromTransaction: jest.fn(),
   CONTRACT_ID: "test-contract",
   server: { getTransaction: jest.fn() },
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
@@ -28,6 +29,12 @@ jest.mock("dns", () => ({
     resolve4: jest.fn(),
     resolve6: jest.fn(),
   },
+}));
+
+// Real QR code generation takes ~500ms-3s; mocked so the impact-certificate
+// tests don't risk the suite's 5000ms timeout under load.
+jest.mock("qrcode", () => ({
+  toDataURL: jest.fn().mockResolvedValue("data:image/png;base64,mock-qr-code"),
 }));
 
 const dns = require("dns");
@@ -126,7 +133,7 @@ describe("GET /api/projects", () => {
     await request(app).get("/api/projects?search=amazon").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("ILIKE");
+    expect(query).toContain("websearch_to_tsquery");
   });
 
   test("rejects invalid cursor", async () => {
@@ -228,13 +235,14 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns a single project", async () => {
-    pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 7 }],
-    }); // SELECT project + follow count join
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 7, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -245,13 +253,14 @@ describe("GET /api/projects/:id", () => {
   });
 
   test("returns followCount zero when project has no followers", async () => {
-    pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_PROJECT_ROW, follow_count: 0 }],
-    });
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 0, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -512,6 +521,7 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     app = buildApp();
     jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
+    require("qrcode").toDataURL.mockResolvedValue("data:image/png;base64,mock-qr-code");
   });
 
   test("returns 200 with all required certificate fields for a valid donor", async () => {
@@ -874,20 +884,21 @@ describe("POST /api/projects/:id/webhook", () => {
 
     expect(res.status).toBe(403);
   });
-});
-
-describe("POST /api/projects/admin/confirm", () => {
+});describe("POST /api/projects/admin/confirm", () => {
   let app;
+  let stellarService;
   const transactionHash = "a".repeat(64);
   const projectId = "proj-1";
 
   beforeEach(() => {
     app = buildApp();
+    stellarService = require("../services/stellar");
     jest.clearAllMocks();
   });
 
-  test("sets on_chain_verified and verified in DB when transaction succeeds", async () => {
+  test("sets on_chain_verified and verified in DB when transaction registers the project", async () => {
     server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(projectId);
 
     const updatedRow = {
       ...MOCK_PROJECT_ROW,
@@ -898,10 +909,14 @@ describe("POST /api/projects/admin/confirm", () => {
 
     const res = await request(app)
       .post("/api/projects/admin/confirm")
+      // adminRequired (see ../middleware/auth.js) accepts a raw admin key only via
+      // the X-Admin-Key header; Authorization: Bearer is reserved for JWTs.
+      .set("X-Admin-Key", "test-admin-key")
       .send({ transactionHash, projectId })
       .expect(200);
 
     expect(server.getTransaction).toHaveBeenCalledWith(transactionHash);
+    expect(stellarService.getRegisteredProjectIdFromTransaction).toHaveBeenCalled();
 
     const updateCall = pool.query.mock.calls.find(([sql]) =>
       sql.includes("UPDATE projects"),
@@ -915,6 +930,98 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.data.verified).toBe(true);
     expect(res.body.data.onChainVerified).toBe(true);
   });
+
+  test("rejects when the transaction registered a different project", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(
+      "some-other-project",
+    );
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction is not a project registration", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(null);
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction failed on-chain", async () => {
+    server.getTransaction.mockResolvedValue({ successful: false });
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(500);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/transaction failed/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 400 when transactionHash or projectId is missing", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash })
+      .expect(400);
+    expect(res.body.error).toMatch(/projectId is required/i);
+
+    const res2 = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ projectId })
+      .expect(400);
+    expect(res2.body.error).toMatch(/transactionHash is required/i);
+
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 401 without a valid admin key", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .send({ transactionHash, projectId })
+      .expect(401);
+
+    expect(res.body.error).toMatch(/X-Admin-Key|authorization/i);
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+
 });
 
 describe("GET /api/projects/:id/summary-status", () => {

@@ -39,6 +39,8 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS image_url TEXT;
 
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
@@ -203,8 +205,12 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   platform TEXT NOT NULL,
   wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_delivered_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_device_tokens_last_delivered
+  ON device_tokens (last_delivered_at)
+  WHERE last_delivered_at IS NULL;
 
 -- recurring_donations: recurring donation schedules set by donors.
 -- next_due_date is calculated from the schedule when the donation is created

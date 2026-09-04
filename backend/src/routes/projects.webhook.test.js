@@ -45,7 +45,9 @@ const VALID_SECRET = "a".repeat(32);
 const VALID_URL    = "https://hooks.example.com/greenpay";
 
 function authHeader() {
-  return { Authorization: "Bearer test-admin-key" };
+  // adminRequired (see ../middleware/auth.js) accepts a raw admin key only via
+  // the X-Admin-Key header; Authorization: Bearer is reserved for JWTs.
+  return { "X-Admin-Key": "test-admin-key" };
 }
 
 describe("PATCH /api/projects/:id/webhook (#794)", () => {

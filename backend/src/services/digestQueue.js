@@ -26,11 +26,6 @@ const QUEUE = "monthly-impact-digest";
 // Default: 1st of every month at 08:00 UTC
 const DEFAULT_CRON = "0 8 1 * *";
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const FROM_ADDRESS   = process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>";
-const APP_URL        = process.env.APP_URL || "http://localhost:3000";
-const API_URL        = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-
 let boss = null;
 
 // ── HTML / text builders ─────────────────────────────────────────────────────
@@ -129,6 +124,11 @@ function buildDigestText({ project, stats, milestones, updates, projectUrl, mont
 // ── Email sender (individual BCC sends to protect subscriber privacy) ────────
 
 async function sendDigestEmails({ project, stats, milestones, updates, emails, monthLabel }) {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+  const FROM_ADDRESS   = process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>";
+  const APP_URL        = process.env.APP_URL || "http://localhost:3000";
+  const API_URL        = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+
   if (!RESEND_API_KEY) {
     logger.warn({ event: "digest_skip_no_key", projectId: project.id }, "[digestQueue] RESEND_API_KEY not set — skipping");
     return;

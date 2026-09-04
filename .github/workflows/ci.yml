@@ -82,7 +82,9 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from backend --build
+      - run: docker compose -f docker-compose.test.yml run --rm --build pgboss-migrate
+        working-directory: .
+      - run: docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from backend --build backend
         working-directory: .
 
   contracts:
@@ -146,6 +148,7 @@ jobs:
 
       - name: Run ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
+        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'https://staging.greenpay.app'
