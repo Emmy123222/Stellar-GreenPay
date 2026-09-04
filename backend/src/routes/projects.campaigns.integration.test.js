@@ -16,6 +16,12 @@
 
 const fs = require("fs");
 const path = require("path");
+
+const workerThreads = require("worker_threads");
+if (typeof workerThreads.markAsUncloneable !== "function") {
+  workerThreads.markAsUncloneable = () => {};
+}
+
 const { GenericContainer, Wait } = require("testcontainers");
 const { Pool } = require("pg");
 
