@@ -12,8 +12,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 
 export function loadSettings(): Promise<ExtensionSettings> {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(DEFAULT_SETTINGS, (items) => {
-      resolve(items as ExtensionSettings);
+    chrome.storage.sync.get(DEFAULT_SETTINGS as unknown as Record<string, unknown>, (items: Record<string, unknown>) => {
+      resolve(items as unknown as ExtensionSettings);
     });
   });
 }
