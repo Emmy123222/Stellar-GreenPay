@@ -30,3 +30,18 @@ paths = [
 regexes = [
   '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
 ]
+
+[[allowlists]]
+description = "Canonical AWS documentation example credentials used in unit tests."
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
+]
+
+[[allowlists]]
+description = "Demo / placeholder public Stellar addresses and doc example webhook secrets that are not real credentials."
+regexes = [
+  '''whsec_a3f82c1de4b5[A-Za-z0-9_\-\.]*''',
+  '''GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890''',
+  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC''',
+]

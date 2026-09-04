@@ -522,18 +522,6 @@ impl GreenPayContract {
         );
     }
 
-    pub fn pause_project(env: Env, admin: Address, project_id: String) {
-        admin.require_auth();
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
-        if stored_admin != admin { panic!("Only admin can pause projects"); }
-        let mut project: Project = env.storage().instance()
-            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
-        if !project.active { panic!("Cannot pause a deactivated project"); }
-        project.active = false;
-        env.storage().instance().set(&DataKey::Project(project_id), &project);
-    }
-
     /// Deactivate all active projects at once. Admin only.
     /// Iterates the project ID list stored during `register_project`.
     pub fn deactivate_all_projects(env: Env, admin: Address) {
@@ -915,12 +903,12 @@ impl GreenPayContract {
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
-            offset as usize + limit as usize
+            (offset + limit).min(total_count)
         };
         
         // Collect projects from the slice
         let mut result = Vec::new(&env);
-        let mut idx = offset as usize;
+        let mut idx = offset;
         while idx < end {
             if let Some(project_id) = project_ids.get(idx) {
                 if let Some(project) = env
