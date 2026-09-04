@@ -60,6 +60,7 @@ test.describe("QR code donation link flow", () => {
 
     // Simulate scanning a QR code that encodes this URL
     await page.goto(`/donate/${PROJECT_ID}`);
+    await page.waitForLoadState("networkidle");
 
     await expect(
       page.getByRole("heading", { name: "Amazon Reforestation Initiative" })

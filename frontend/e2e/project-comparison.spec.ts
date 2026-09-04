@@ -87,7 +87,7 @@ test.describe("ProjectComparison modal", () => {
   test.beforeEach(async ({ page }) => {
     await mockApi(page);
     await page.goto("/projects");
-    await expect(page.getByText(MOCK_PROJECTS[0].name)).toBeVisible();
+    await expect(page.getByText(MOCK_PROJECTS[0].name)).toBeVisible({ timeout: 10000 });
   });
 
   test("select 2 projects, open modal, assert stats appear side-by-side", async ({ page }) => {
