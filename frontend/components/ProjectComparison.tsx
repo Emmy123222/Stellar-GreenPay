@@ -9,9 +9,9 @@ interface ProjectComparisonProps {
 }
 
 const ROWS = [
-  { key: "co2", label: "CO₂ per XLM" },
-  { key: "progress", label: "% Goal Reached" },
-  { key: "donorCount", label: "Donor Count" },
+  { key: "co2", label: "CO2 per XLM" },
+  { key: "progress", label: "Progress %" },
+  { key: "donorCount", label: "Donor count" },
   { key: "averageRating", label: "Avg Rating" },
   { key: "verified", label: "Verified" },
 ] as const;

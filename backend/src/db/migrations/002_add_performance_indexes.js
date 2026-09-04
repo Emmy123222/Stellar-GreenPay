@@ -2,6 +2,7 @@
 
 module.exports = {
   name: "002_add_performance_indexes",
+  autocommit: true,
 
   // CONCURRENTLY can't run inside a transaction block, and every migration
   // here runs inside the shared transaction opened by runMigrations().

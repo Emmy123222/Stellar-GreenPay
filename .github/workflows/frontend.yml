@@ -61,6 +61,14 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Run database & pg-boss migrations
+        working-directory: backend
+        run: |
+          npm run db:migrate
+          node src/db/pgboss-migrate.js
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
+
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium

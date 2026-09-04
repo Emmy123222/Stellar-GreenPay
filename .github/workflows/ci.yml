@@ -130,14 +130,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install gitleaks
-        run: |
-          GITLEAKS_VERSION=8.24.3
-          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xzf -
-          sudo mv gitleaks /usr/local/bin/gitleaks
-          gitleaks version
+        with:
+          fetch-depth: 0
       - name: Secret scanning
-        run: gitleaks detect --config .gitleaks.toml --source . --exit-code 1
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1
 
   zap_scan:
     name: DAST Security Scan (OWASP ZAP)
@@ -148,6 +148,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run ZAP Baseline Scan
+        continue-on-error: true
         uses: zaproxy/action-baseline@v0.14.0
         continue-on-error: true
         with:
@@ -157,6 +158,7 @@ jobs:
           fail_action: false
 
       - name: Run Security Triage Script
+        if: ${{ always() && hashFiles('report.json') != '' }}
         run: node scripts/triage-zap.js
 
       - name: Upload ZAP Reports
