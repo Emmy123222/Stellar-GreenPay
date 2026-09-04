@@ -9,7 +9,7 @@
     "@stellar/stellar-sdk": "^16.2.0"
   },
   "devDependencies": {
-    "@types/chrome": "^0.2.2",
+    "@types/chrome": "^0.2.7",
     "ts-loader": "^9.5.1",
     "typescript": "~6.0.3",
     "webpack": "^5.109.2",
