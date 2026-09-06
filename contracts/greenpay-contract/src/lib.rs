@@ -959,7 +959,7 @@ impl GreenPayContract {
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
-            offset + limit
+            (offset + limit).min(total_count)
         };
 
         // Collect projects from the slice
