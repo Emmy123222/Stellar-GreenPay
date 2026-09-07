@@ -16,6 +16,7 @@ const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
+const { start: startAuditLogCleanupQueue } = require("./services/auditLogCleanupQueue");
 const { startIndexer } = require("./services/indexerService");
 const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
@@ -127,6 +128,7 @@ async function startServer() {
   const { start: startDigestQueue } = require("./services/digestQueue");
   await startDigestQueue();
   await startStatsRefreshQueue();
+  await startAuditLogCleanupQueue();
 
   const { start: startWebhookQueue } = require("./services/webhook");
   await startWebhookQueue();
