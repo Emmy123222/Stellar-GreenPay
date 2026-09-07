@@ -42,7 +42,13 @@ function verifyUnsubscribeToken(token) {
   if (!secret || !token || typeof token !== "string") return null;
 
   try {
-    const decoded = Buffer.from(token, "base64url").toString("utf8");
+    const decodedBuf = Buffer.from(token, "base64url");
+    // Buffer.from() silently drops trailing characters that don't complete a
+    // base64 group, so a tampered token can decode to the same bytes as the
+    // original. Reject anything that doesn't round-trip to the exact input.
+    if (decodedBuf.toString("base64url") !== token) return null;
+
+    const decoded = decodedBuf.toString("utf8");
     const sigSep = decoded.lastIndexOf(":");
     if (sigSep <= 0) return null;
 

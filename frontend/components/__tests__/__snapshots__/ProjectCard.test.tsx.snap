@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
 <div>
@@ -24,12 +24,12 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
             </div>
             <div>
               <p
-                class="text-xs text-[#5a7a5a] font-body"
+                class="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body"
               >
                 Reforestation
               </p>
               <p
-                class="text-xs text-[#8aaa8a] font-body"
+                class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
               >
                 Brazil
               </p>
@@ -51,7 +51,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[#5a7a5a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -88,13 +88,15 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
                   class="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
                   type="button"
                 >
-                  ℹ️
+                  ?
                 </button>
                 <span
                   class="tooltip-text"
                   role="tooltip"
                 >
-                  Estimated CO₂ offset based on this project's declared impact rate per XLM donated. Actual results may vary.
+                  Estimated based on 
+                  0.48
+                   g CO₂ offset per XLM donated to this project
                 </span>
               </span>
             </span>
@@ -153,12 +155,12 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
             </div>
             <div>
               <p
-                class="text-xs text-[#5a7a5a] font-body"
+                class="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body"
               >
                 Reforestation
               </p>
               <p
-                class="text-xs text-[#8aaa8a] font-body"
+                class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
               >
                 Brazil
               </p>
@@ -185,7 +187,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[#5a7a5a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -216,6 +218,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                 </span>
               </div>
               <div
+                aria-label="Fundraising goal progress"
                 aria-valuemax="100"
                 aria-valuemin="0"
                 aria-valuenow="25"
@@ -266,13 +269,15 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                   class="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
                   type="button"
                 >
-                  ℹ️
+                  ?
                 </button>
                 <span
                   class="tooltip-text"
                   role="tooltip"
                 >
-                  Estimated CO₂ offset based on this project's declared impact rate per XLM donated. Actual results may vary.
+                  Estimated based on 
+                  0.48
+                   g CO₂ offset per XLM donated to this project
                 </span>
               </span>
             </span>

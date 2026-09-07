@@ -96,11 +96,14 @@ export default function VerificationStatusPage() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const fromQuery = (params.get("wallet") || "").trim();
-    if (STELLAR_ADDRESS_RE.test(fromQuery)) {
+    if (!STELLAR_ADDRESS_RE.test(fromQuery)) return;
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(() => {
       setWallet(fromQuery);
       setQueryWallet(fromQuery);
       void load(fromQuery);
-    }
+    });
   }, [load]);
 
   function onSubmit(e: React.FormEvent) {

@@ -65,25 +65,25 @@ async function mockApi(page: Page) {
   );
 
   // Stats / categories / impact / leaderboard.
-  await page.route("**/api/impact/**",          (r) => r.fulfill(ok({})));
-  await page.route("**/api/stats/categories",   (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
-  await page.route("**/api/stats/global",       (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
-  await page.route("**/api/leaderboard**",      (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
+  await page.route("**/api/**/impact/**",          (r) => r.fulfill(ok({})));
+  await page.route("**/api/**/stats/categories",   (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
+  await page.route("**/api/**/stats/global",       (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
+  await page.route("**/api/**/leaderboard**",      (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
 
   // Profile, donations, subscriptions, updates.
-  await page.route("**/api/profiles/**",        (r) => r.fulfill(ok({ publicKey: MOCK_PUBLIC_KEY, totalDonatedXLM: "0", projectsSupported: 0, badges: [] })));
-  await page.route("**/api/donations",          (r) => r.fulfill(ok({ id: "d1" })));
-  await page.route("**/api/donations/**",       (r) => r.fulfill(ok([])));
-  await page.route("**/api/subscriptions",      (r) => r.fulfill(okMsg("subscribed")));
-  await page.route("**/api/subscriptions/**",   (r) => r.fulfill({ json: { success: true, count: 0 } }));
-  await page.route("**/api/updates/**",         (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/profiles/**",        (r) => r.fulfill(ok({ publicKey: MOCK_PUBLIC_KEY, totalDonatedXLM: "0", projectsSupported: 0, badges: [] })));
+  await page.route("**/api/**/donations",          (r) => r.fulfill(ok({ id: "d1" })));
+  await page.route("**/api/**/donations/**",       (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions",      (r) => r.fulfill(okMsg("subscribed")));
+  await page.route("**/api/**/subscriptions/**",   (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/updates/**",         (r) => r.fulfill(ok([])));
 
   // Projects (broadest first within this group, then more specific).
-  await page.route("**/api/projects?**",                        (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects",                           (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects/featured",                  (r) => r.fulfill(ok(MOCK_PROJECT)));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}/**`,     (r) => r.fulfill(ok([])));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}`,        (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route("**/api/**/projects?**",                        (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects",                           (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects/featured",                  (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`,     (r) => r.fulfill(ok([])));
+  await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) => r.fulfill(ok(MOCK_PROJECT)));
 }
 
 /**
@@ -141,8 +141,8 @@ test.describe("Projects page", () => {
     await mockApi(page);
     // Override the projects list mock — registered AFTER mockApi so the
     // reverse-insertion-order tiebreaker picks this one.
-    await page.route("**/api/projects",    (r) => r.fulfill(ok([])));
-    await page.route("**/api/projects?**", (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects",    (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects?**", (r) => r.fulfill(ok([])));
     await page.goto("/projects");
     await expect(page.getByText(/no projects found/i)).toBeVisible();
   });

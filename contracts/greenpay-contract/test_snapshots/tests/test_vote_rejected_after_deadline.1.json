@@ -307,6 +307,9 @@
                         "vec": [
                           {
                             "string": "proj-001"
+                          },
+                          {
+                            "string": "proj-001"
                           }
                         ]
                       }

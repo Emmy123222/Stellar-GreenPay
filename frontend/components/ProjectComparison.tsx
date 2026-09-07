@@ -34,7 +34,7 @@ export default function ProjectComparison({ projects, onClose }: ProjectComparis
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
+    <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 bg-black/30 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="w-full max-w-6xl card bg-white max-h-[90vh] overflow-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-display text-xl font-semibold text-forest-900">Project Comparison</h2>

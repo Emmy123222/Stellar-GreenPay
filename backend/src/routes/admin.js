@@ -6,7 +6,7 @@ const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
 
-const loginLimiter = createRateLimiter(10, 15);
+const loginLimiter = createRateLimiter(10, 15, "admin-login");
 
 const TOKEN_EXPIRY = "1h";
 const REFRESH_EXPIRY = "24h";

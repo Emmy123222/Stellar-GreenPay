@@ -36,8 +36,12 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
   const [project, setProject] = useState<ClimateProject | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // `loading` is derived by comparing the in-flight request to the last one
+  // that resolved, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+  const loading = loadedProjectId !== projectId;
 
   const [updateTitle, setUpdateTitle] = useState("");
   const [updateBody, setUpdateBody] = useState("");
@@ -149,8 +153,6 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
-    setLoading(true);
-    setError(null);
 
     Promise.all([
       fetchProject(projectId),
@@ -165,9 +167,10 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         setMatches(mt);
         setWebhookUrl(p.webhookUrl || "");
         setWebhookSecret(p.webhookSecret || "");
+        setError(null);
       })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
-      .finally(() => setLoading(false));
+      .finally(() => setLoadedProjectId(projectId));
   }, [projectId]);
 
   const isOwner = !!publicKey && !!project && publicKey === project.walletAddress;

@@ -37,7 +37,7 @@ const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
 
-const submitLimiter = createRateLimiter(10, 15); // 10 submissions / 15 min / IP
+const submitLimiter = createRateLimiter(10, 15, "verification"); // 10 submissions / 15 min / IP
 
 const VALID_CATEGORIES = [
   "Reforestation",
@@ -346,6 +346,49 @@ router.get("/stats", adminRequired, async (req, res, next) => {
         rejected: raw.rejected,
       },
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/verification-requests/:id/documents
+ * Returns only the supporting document metadata for a request. Accessible to
+ * admins via Bearer token, or to the submitter via a matching ?wallet= param.
+ *
+ * The admin detail page calls this lazily (on scroll / expand) so the main
+ * GET /:id response stays lightweight even for 20-document submissions.
+ */
+router.get("/:id/documents", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "SELECT supporting_documents, wallet_address FROM verification_requests WHERE id = $1",
+      [req.params.id],
+    );
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    const documents = Array.isArray(row.supporting_documents) ? row.supporting_documents : [];
+
+    // Allow admin-readable without wallet guard.
+    const auth = req.headers.authorization || "";
+    if (auth.startsWith("Bearer ")) {
+      try {
+        const { verifyToken } = require("../middleware/auth");
+        const decoded = verifyToken(auth.slice(7));
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
+          return res.json({ success: true, data: { documents } });
+        }
+      } catch (_err) {
+        // fall through to wallet check
+      }
+    }
+
+    const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
+    if (!wallet || wallet !== row.wallet_address) {
+      return res.status(403).json({ error: "Provide a matching ?wallet= query param to view these documents" });
+    }
+    res.json({ success: true, data: { documents } });
   } catch (e) {
     next(e);
   }

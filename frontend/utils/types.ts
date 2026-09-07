@@ -93,6 +93,7 @@ export interface ProjectCampaign {
   description: string;
   goalXLM: string;
   raisedXLM: string;
+  raisedUSDC: string;
   deadline: string;
   progressPercent: number;
   completed: boolean;
@@ -252,6 +253,23 @@ export interface MonthlySubscription {
   status: "active" | "completed";
   createdAt: string;
   history: MonthlyDonationHistoryItem[];
+}
+
+/**
+ * A merged pull request displayed on the /contributors timeline.
+ */
+export interface ContributorPR {
+  id: number;
+  number: number;
+  title: string;
+  htmlUrl: string;
+  mergedAt: string;
+  feature: string;
+  author: {
+    login: string;
+    avatarUrl: string;
+    htmlUrl: string;
+  };
 }
 
 export interface VerificationRequest {

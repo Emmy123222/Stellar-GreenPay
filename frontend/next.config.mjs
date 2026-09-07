@@ -39,6 +39,9 @@ const LEAFLET_TILE_SOURCES = [
 // unpkg serves the Leaflet CSS (dynamically injected by ProjectMap.tsx)
 const UNPKG = 'https://unpkg.com'
 
+// GitHub avatars rendered on the /contributors timeline
+const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
+
 function buildStaticCsp(allowFraming = false) {
   const frameAncestors = allowFraming ? "frame-ancestors *" : "frame-ancestors 'none'"
   return [
@@ -49,8 +52,9 @@ function buildStaticCsp(allowFraming = false) {
     // unpkg serves the Leaflet CSS stylesheet loaded dynamically in ProjectMap.
     `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com ${UNPKG}`,
     "font-src 'self' https://fonts.gstatic.com",
-    // OSM tiles loaded as images; Leaflet marker icons use data: URIs.
-    `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES}`,
+    // OSM tiles loaded as images; Leaflet marker icons use data: URIs;
+    // GitHub avatars are loaded on the /contributors timeline.
+    `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES} ${GITHUB_AVATARS}`,
     `connect-src 'self' ${STELLAR_CONNECT} https://api.coingecko.com`,
     "object-src 'none'",
     "base-uri 'self'",

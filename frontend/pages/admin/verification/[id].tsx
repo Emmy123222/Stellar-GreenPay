@@ -13,7 +13,7 @@
  *   If no token is present the user is redirected to /admin/login.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
@@ -50,6 +50,20 @@ const AVAILABLE_ACTIONS: Record<string, Array<"in_review" | "approved" | "reject
 
 // ── Detail row helper ──────────────────────────────────────────────────────────
 
+// sessionStorage isn't available during SSR, so this renders null (matching
+// the server) during SSR and initial hydration, then swaps to the real
+// stored token right after mount — useSyncExternalStore is the
+// React-recommended way to do this without a manual effect + setState.
+function readAdminTokenFromStorage(): string | null {
+  return sessionStorage.getItem("adminToken");
+}
+function subscribeToAdminToken() {
+  return () => {};
+}
+function getServerAdminToken(): string | null {
+  return null;
+}
+
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-start gap-1 py-2.5 border-b border-forest-100 last:border-0">
@@ -70,10 +84,13 @@ export default function AdminVerificationDetail({
   const router = useRouter();
   const { id } = router.query;
 
-  const [adminToken, setAdminToken] = useState<string | null>(null);
+  const adminToken = useSyncExternalStore(subscribeToAdminToken, readAdminTokenFromStorage, getServerAdminToken);
   const [request, setRequest] = useState<VerificationRequestResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // `loading` is derived by comparing the request that's currently in
+  // flight to the last one that resolved, rather than toggled synchronously
+  // inside the effect (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
 
   // Moderation state
   const [actionState, setActionState] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -89,31 +106,31 @@ export default function AdminVerificationDetail({
   const documentsSectionRef = useRef<HTMLDivElement | null>(null);
   const documentsLoadedRef = useRef(false);
 
-  // ── Read token from sessionStorage on mount ──────────────────────────────────
+  // ── Redirect to login if there's no admin token ──────────────────────────────
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const token = sessionStorage.getItem("adminToken");
-    if (!token) {
+    if (!adminToken) {
       router.replace("/admin/login");
-      return;
     }
-    setAdminToken(token);
-  }, [router]);
+  }, [adminToken, router]);
 
   // ── Fetch verification request ───────────────────────────────────────────────
+  const requestKey = adminToken && typeof id === "string" ? `${adminToken}:${id}` : null;
+  const loading = requestKey !== null && loadedForKey !== requestKey;
+
   useEffect(() => {
     if (!adminToken || !id || typeof id !== "string") return;
 
-    setLoading(true);
-    setError(null);
-
     fetchVerificationRequestAdmin(id, adminToken)
-      .then(setRequest)
+      .then((data) => {
+        setRequest(data);
+        setError(null);
+      })
       .catch((e: unknown) => {
         const msg = (e as Error).message || "Failed to load verification request";
         setError(msg);
       })
-      .finally(() => setLoading(false));
+      .finally(() => setLoadedForKey(`${adminToken}:${id}`));
   }, [adminToken, id]);
 
   // ── Lazy-load supporting documents once expanded ────────────────────────────
@@ -136,7 +153,12 @@ export default function AdminVerificationDetail({
 
   useEffect(() => {
     if (documentsExpanded && request && request.documentCount > 0) {
-      loadDocuments();
+      // Deferred via a microtask (rather than called synchronously) so this
+      // effect doesn't itself perform a synchronous setState; loadDocuments
+      // guards re-entrancy itself via documentsLoadedRef.
+      queueMicrotask(() => {
+        loadDocuments();
+      });
     }
   }, [documentsExpanded, request, loadDocuments]);
 

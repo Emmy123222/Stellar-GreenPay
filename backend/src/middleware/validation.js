@@ -50,8 +50,6 @@ function validateBody(schema) {
 }
 
 module.exports = {
-  containsHtml,
   sanitizedStringField,
-  stripHtml,
   validateBody,
 };

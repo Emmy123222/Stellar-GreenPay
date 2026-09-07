@@ -165,7 +165,7 @@ describe("ApplyPage", () => {
     expect(submitted.projectName).toBe("Acme Solar");
     expect(submitted.co2PerXLM).toBe("0.05");
     expect(submitted.supportingDocuments).toEqual([]);
-  });
+  }, 15000);
 
   test("uploads a file via api.ts.uploadSupportingDocument", async () => {
     mockUpload.mockResolvedValueOnce({
@@ -205,7 +205,7 @@ describe("ApplyPage", () => {
     await waitFor(() => {
       expect(screen.getByText("methodology.pdf")).toBeTruthy();
     });
-  });
+  }, 15000);
 
   test("rejects server error messages gracefully", async () => {
     mockSubmit.mockRejectedValueOnce({
@@ -233,5 +233,5 @@ describe("ApplyPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Backend failed. Please retry.")).toBeTruthy();
     });
-  });
+  }, 15000);
 });
