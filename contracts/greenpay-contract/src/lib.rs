@@ -1354,7 +1354,7 @@ impl GreenPayContract {
         project_id:   String,
         usdc_amount:  i128,
         xlm_per_usdc: i128,
-        _msg_hash:    u32,
+        msg_hash:     u32,
     ) {
         donor.require_auth();
         if usdc_amount <= 0  { panic!("Donation amount must be positive"); }
@@ -1808,7 +1808,7 @@ mod tests {
         // Mint USDC to donor
         StellarAssetClient::new(&env, &token).mint(&donor, &(100 * 1_000_000i128));
         let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &8i128, &0u32);
         let record = client.get_donation_record(&0u32);
         assert_eq!(record.donor, donor);
         assert_eq!(record.project, pid);
