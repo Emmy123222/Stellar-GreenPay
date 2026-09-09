@@ -8,6 +8,10 @@
  * temporary directory, which is verified on disk and cleaned up after the suite.
  */
 
+jest.mock("../middleware/rateLimiter", () => ({
+  createRateLimiter: () => (req, res, next) => next(),
+}));
+
 const os = require("os");
 const fs = require("fs");
 const path = require("path");

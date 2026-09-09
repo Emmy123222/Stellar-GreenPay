@@ -8,18 +8,25 @@ const pool = require("../db/pool");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
 // 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
-const leaderboardLimiter = createRateLimiter(30, 1);
+const leaderboardLimiter = createRateLimiter(30, 1, "leaderboard");
+
+// Cursor-based pagination constants (matching /api/projects conventions).
+const LEADERBOARD_DEFAULT_LIMIT = 50;
+const LEADERBOARD_MAX_LIMIT = 200;
 
 router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
-    const cursor = parseInt(req.query.cursor, 10) || 0;
+    const pageSize = Math.min(
+      Number.parseInt(req.query.limit, 10) || LEADERBOARD_DEFAULT_LIMIT,
+      LEADERBOARD_MAX_LIMIT
+    );
+    const cursor = req.query.cursor;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
     const onlyVerified = req.query.onlyVerified === "true";
 
     const conditions = [];
-    const params = [limit];
+    const params = [];
 
     if (period === "month") {
       conditions.push("d.created_at >= NOW() - INTERVAL '30 days'");
@@ -43,6 +50,31 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       `;
       conditions.push(`(${verifiedSubQuery})`);
     }
+
+    // Cursor-based pagination on (sortBy, public_key), mirroring /api/projects.
+    if (cursor) {
+      let cursorData;
+      try {
+        cursorData = JSON.parse(Buffer.from(cursor, "base64").toString("utf8"));
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      const sortValue = cursorData[sortBy];
+      const publicKey = cursorData.publicKey;
+      if (sortValue === undefined || !publicKey) {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+      params.push(sortValue, publicKey);
+      const sortIdx = params.length - 1;
+      const keyIdx = params.length;
+      conditions.push(
+        `(${sortBy} < $${sortIdx} OR (${sortBy} = $${sortIdx} AND p.public_key < $${keyIdx}))`,
+      );
+    }
+
+    // Fetch pageSize + 1 so we can detect whether another page exists.
+    params.push(pageSize + 1);
+    const limitIdx = params.length;
 
     const whereClause = conditions.length > 0
       ? `WHERE ${conditions.join("\n  AND ")}`
@@ -80,13 +112,17 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       LEFT JOIN projects pr ON pr.id = d.project_id
       ${whereClause}
       GROUP BY p.public_key, p.display_name, p.badges
-      ORDER BY ${sortBy} DESC
-      LIMIT $1
+      ORDER BY ${sortBy} DESC, p.public_key DESC
+      LIMIT $${limitIdx}
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
     const result = await pool.query(query, params);
-    const entries = result.rows.map((p, i) => ({
+    const rows = result.rows;
+    const hasMore = rows.length > pageSize;
+    const pageRows = rows.slice(0, pageSize);
+
+    const entries = pageRows.map((p, i) => ({
       rank: i + 1,
       publicKey: p.public_key,
       displayName: p.display_name || null,
@@ -97,8 +133,13 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       totalCO2OffsetKg: p.total_co2_offset_kg?.toString() || "0",
     }));
 
-    const hasMore = entries.length === limit;
-    const nextCursor = hasMore ? entries[entries.length - 1].rank : null;
+    let nextCursor = null;
+    if (hasMore) {
+      const last = pageRows[pageRows.length - 1];
+      nextCursor = Buffer.from(
+        JSON.stringify({ [sortBy]: last[sortBy], publicKey: last.public_key }),
+      ).toString("base64");
+    }
 
     res.json({
       success: true,

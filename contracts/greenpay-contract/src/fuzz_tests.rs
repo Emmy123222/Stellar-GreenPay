@@ -314,7 +314,8 @@ mod fuzz {
 
             let token_admin = Address::generate(&env);
             let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
-            client.set_usdc_token(&admin, &usdc_token);
+            let oracle = env.register_contract(None, MockOracle);
+            client.set_usdc_token(&admin, &usdc_token, &oracle);
 
             client.deactivate_project(&admin, &project_id);
 

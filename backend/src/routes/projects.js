@@ -13,6 +13,7 @@ const { mapProjectRow, mapProjectMilestoneRow, updateWebhook, computeBadges } = 
 const {
   getOnChainProject,
   getProjectDonationEvents,
+  getRegisteredProjectIdFromTransaction,
   CONTRACT_ID,
   server,
   NETWORK_PASSPHRASE,
@@ -56,6 +57,19 @@ const VALID_SORT_FIELDS = ["created_at", "raised_xlm", "donor_count"];
 const STELLAR_PUBLIC_KEY_RE = /^G[A-Z0-9]{55}$/;
 const KG_CO2_PER_TREE = 22; // heuristic for treesEquivalent
 
+// USDC → XLM conversion rate used when aggregating campaign progress.
+//
+// Donations can be settled in XLM or USDC. USDC is a USD-pegged stablecoin,
+// while XLM's USD price fluctuates, so operators SHOULD set USDC_TO_XLM_RATE
+// to the current market rate (how many XLM 1 USDC is worth). The default below
+// is a documented fallback only and may under- or over-state campaign progress
+// until the real rate is configured via the environment.
+const DEFAULT_USDC_TO_XLM_RATE = 3;
+function getUsdcToXlmRate() {
+  const parsed = Number.parseFloat(process.env.USDC_TO_XLM_RATE);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_USDC_TO_XLM_RATE;
+}
+
 /**
  * GET /api/projects/featured
  * Returns the project with the highest donorCount (active projects only).
@@ -68,6 +82,7 @@ function mapCampaignRow(row) {
   const now = Date.now();
   const goalXLM = Number.parseFloat(row.goal_xlm?.toString() || "0");
   const raisedXLM = Number.parseFloat(row.raised_xlm?.toString() || "0");
+  const raisedUSDC = Number.parseFloat(row.raised_usdc?.toString() || "0");
   const deadlineMs = new Date(row.deadline).getTime();
   const completed = raisedXLM >= goalXLM || now >= deadlineMs;
   const progressPercent =
@@ -80,6 +95,7 @@ function mapCampaignRow(row) {
     description: row.description || "",
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: raisedXLM.toFixed(7),
+    raisedUSDC: raisedUSDC.toFixed(7),
     deadline: new Date(row.deadline).toISOString(),
     progressPercent,
     completed,
@@ -89,17 +105,28 @@ function mapCampaignRow(row) {
 }
 
 async function fetchCampaignsForProject(projectId) {
+  const usdcToXlmRate = getUsdcToXlmRate();
   const result = await pool.query(
     `SELECT c.*,
             COALESCE(
               SUM(
                 CASE
-                  WHEN d.currency = 'XLM' THEN d.amount_xlm
+                  WHEN d.currency = 'XLM' THEN COALESCE(d.amount_xlm, 0)
+                  WHEN d.currency = 'USDC' THEN COALESCE(d.amount, 0) * $2
                   ELSE 0
                 END
               ),
               0
-            ) AS raised_xlm
+            ) AS raised_xlm,
+            COALESCE(
+              SUM(
+                CASE
+                  WHEN d.currency = 'USDC' THEN COALESCE(d.amount, 0)
+                  ELSE 0
+                END
+              ),
+              0
+            ) AS raised_usdc
      FROM project_campaigns c
      LEFT JOIN donations d
        ON d.project_id = c.project_id
@@ -108,7 +135,7 @@ async function fetchCampaignsForProject(projectId) {
      WHERE c.project_id = $1
      GROUP BY c.id
      ORDER BY c.created_at DESC`,
-    [projectId],
+    [projectId, usdcToXlmRate],
   );
   return result.rows.map(mapCampaignRow);
 }
@@ -476,8 +503,10 @@ router.get("/:id/verify", async (req, res) => {
       },
     });
   } catch (err) {
-    res.json({
-      success: true,
+    console.error(`[verify] Error checking on-chain status for project ${req.params.id}:`, err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to verify on-chain status",
       data: {
         projectId: req.params.id,
         onChainVerified: false,
@@ -620,6 +649,11 @@ router.post("/:id/campaigns", async (req, res, next) => {
 
 /**
  * List campaigns linked to a project.
+ *
+ * Each campaign's `raisedXLM` is the total raised in XLM-equivalent units and
+ * now INCLUDES USDC donations converted at the configured USDC_TO_XLM_RATE
+ * (see getUsdcToXlmRate). `raisedUSDC` is the raw, unconverted USDC total so
+ * clients can display the breakdown. Both feed `progressPercent`/`completed`.
  *
  * @route GET /api/projects/:id/campaigns
  * @param {import('express').Request} req - Express request containing the project id.
@@ -844,13 +878,39 @@ router.post("/admin/register", adminRequired, async (req, res) => {
 /**
  * POST /api/projects/admin/confirm
  * Verifies a registration transaction and updates the local store.
+ *
+ * Security: the transaction is read from Horizon and parsed on the server
+ * (never trusted from the request body) so a caller cannot mark an arbitrary
+ * project as verified by replaying a registration transaction hash that
+ * belongs to a different project.
  */
 router.post("/admin/confirm", adminRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
+    if (!transactionHash || typeof transactionHash !== "string") {
+      return res
+        .status(400)
+        .json({ success: false, error: "transactionHash is required" });
+    }
+    if (!projectId || typeof projectId !== "string") {
+      return res
+        .status(400)
+        .json({ success: false, error: "projectId is required" });
+    }
+
     const tx = await server.getTransaction(transactionHash);
     if (!tx.successful) throw new Error("Transaction failed");
+
+    // Confirm the transaction actually registered this project on-chain
+    // before updating the local store.
+    const registeredProjectId = getRegisteredProjectIdFromTransaction(tx);
+    if (registeredProjectId !== projectId) {
+      return res.status(400).json({
+        success: false,
+        error: "Transaction does not register the requested project",
+      });
+    }
 
     const result = await pool.query(
       `UPDATE projects
@@ -1939,4 +1999,6 @@ module.exports = router;
 // Export internal functions for testing
 if (process.env.NODE_ENV === "test") {
   module.exports.mapCampaignRow = mapCampaignRow;
+  module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
+  module.exports.fetchCampaignsForProject = fetchCampaignsForProject;
 }

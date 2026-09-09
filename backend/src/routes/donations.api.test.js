@@ -17,6 +17,7 @@ jest.mock("../services/redis", () => ({
   get: jest.fn(),
   set: jest.fn(),
   del: jest.fn(),
+  deletePattern: jest.fn(),
 }));
 
 const redis = require("../services/redis");
