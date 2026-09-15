@@ -33,7 +33,7 @@
     "geoip-lite": "^1.4.0",
     "helmet": "^8.2.0",
     "iconv-lite": "^0.7.2",
-    "ioredis": "^5.4.2",
+    "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.11.0",
     "multer": "^2.2.0",
