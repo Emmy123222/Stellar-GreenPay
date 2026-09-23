@@ -1,3 +1,4 @@
+```markdown
 # 🌱 Stellar GreenPay
 
 > Donate directly to verified climate projects using XLM — every transaction tracked on-chain.
@@ -6,6 +7,7 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Stellar](https://img.shields.io/badge/Stellar-Testnet-blue)](https://stellar.org)
 [![Soroban](https://img.shields.io/badge/Soroban-Smart%20Contracts-green)](https://soroban.stellar.org)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-7289DA?logo=discord&logoColor=white)](https://discord.gg/stellar)
 
 Stellar GreenPay is an open-source climate donation platform where donors give XLM directly to verified environmental projects. Every donation is recorded on the Stellar blockchain via Soroban smart contracts — providing radical transparency and zero platform fees.
 
@@ -137,6 +139,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
 
+### Community
+
+Have questions or want to discuss ideas? Join the [Stellar Discord](https://discord.gg/stellar) and ask for the `#greenpay` channel.
+
 ### Secret Scanning
 
 Every push and every pull request to `main` runs Gitleaks with the repo-local `.gitleaks.toml` config. Any detected secret fails CI, so keep real credentials out of source control; use `.env` files locally and GitHub encrypted secrets for CI/deployment values. The allowlist only covers generated archives, env templates, and deterministic test fixtures.
@@ -158,5 +164,5 @@ See [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE) 
-fixed
+MIT — see [LICENSE](LICENSE)
+```
