@@ -1,6 +1,9 @@
 {
   "name": "greenpay-mobile",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
@@ -47,7 +50,7 @@
     "@testing-library/react-native": "^12.4.0",
     "jest": "^29.7.0",
     "jest-expo": "~51.0.0",
-    "react-test-renderer": "18.2.0"
+    "react-test-renderer": "18.2.0",
 
     "@babel/core": "^7.26.0",
     "@testing-library/jest-native": "^5.4.3",

@@ -1,6 +1,9 @@
 {
   "name": "greenpay-extension",
   "version": "0.1.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build": "webpack --config webpack.config.js",
     "dev": "webpack --watch --config webpack.config.js"

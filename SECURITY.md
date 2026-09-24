@@ -1,5 +1,14 @@
 # Security Policy
 
+## Automated Secret Scanning
+
+Every pull request targeting `main`, as well as every push, is scanned by Gitleaks
+in GitHub Actions before the change can merge. The scan checks the full repository
+history for API keys, private keys, database credentials, and other hardcoded
+secrets. Test fixtures, environment templates, and other deterministic sample
+values are covered by the repository's `.gitleaks.toml` allowlist; real credentials
+must never be added to source control.
+
 ## Reporting a Vulnerability
 
 We take the security of Stellar-GreenPay seriously. If you discover a security vulnerability, please report it to us responsibly. 
