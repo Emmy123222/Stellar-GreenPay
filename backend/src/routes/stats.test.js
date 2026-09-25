@@ -121,3 +121,72 @@ describe("GET /api/stats/global", () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 });
+
+describe("GET /api/stats", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns aggregate donation stats using donations table query", async () => {
+    redis.get.mockResolvedValue(null);
+    pool.query.mockResolvedValue({
+      rows: [
+        {
+          totalXLMRaised: "50000.5",
+          totalDonors: 120,
+          totalDonations: 450,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get("/api/stats")
+      .expect(200);
+
+    expect(res.body).toEqual({
+      totalXLMRaised: "50000.5000000",
+      totalDonors: 120,
+      totalDonations: 450,
+    });
+
+    const query = pool.query.mock.calls[0][0];
+    expect(query).toContain("FROM donations");
+    expect(query).toContain("SUM(amount)");
+    expect(query).toContain("COUNT(DISTINCT donor)");
+    expect(redis.set).toHaveBeenCalledWith("stats:global", res.body, 60);
+  });
+
+  test("serves cached stats on GET /api/stats", async () => {
+    const cached = {
+      totalXLMRaised: "500.0000000",
+      totalDonors: 10,
+      totalDonations: 25,
+    };
+    redis.get.mockResolvedValue(cached);
+
+    const res = await request(app)
+      .get("/api/stats")
+      .expect(200);
+
+    expect(res.body).toEqual(cached);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("migration 006 creates index on donations(amount)", async () => {
+    const migration = require("../db/migrations/006_add_donations_amount_index");
+    const mockClient = { query: jest.fn().mockResolvedValue({}) };
+
+    await migration.up(mockClient);
+    expect(mockClient.query).toHaveBeenCalledWith(
+      "CREATE INDEX IF NOT EXISTS idx_donations_amount ON donations(amount)"
+    );
+
+    await migration.down(mockClient);
+    expect(mockClient.query).toHaveBeenCalledWith(
+      "DROP INDEX IF EXISTS idx_donations_amount"
+    );
+  });
+});

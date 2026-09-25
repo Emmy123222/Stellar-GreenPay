@@ -120,11 +120,48 @@ export async function fetchProjects(params?: {
   verified?: boolean;
   search?: string;
   limit?: number;
+  cursor?: string;
 }): Promise<ClimateProject[]> {
   const { data } = await api.get<{ success: boolean; data: ClimateProject[] }>(
     "/api/projects",
     { params },
   );
+  return data.data;
+}
+
+/**
+ * Fetch a list of climate projects along with pagination metadata (nextCursor, hasMore).
+ */
+export async function fetchProjectsWithPagination(params?: {
+  category?: string;
+  status?: string;
+  verified?: boolean;
+  search?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<{ projects: ClimateProject[]; nextCursor: string | null; hasMore: boolean }> {
+  const { data } = await api.get<{
+    success: boolean;
+    data: ClimateProject[];
+    next_cursor?: string | null;
+    has_more?: boolean;
+  }>("/api/projects", { params });
+  return {
+    projects: data.data || [],
+    nextCursor: data.next_cursor || null,
+    hasMore: Boolean(data.has_more),
+  };
+}
+
+/**
+ * Fetch projects within a geographical bounding box.
+ *
+ * @param bbox - Optional bounding box formatted as minLng,minLat,maxLng,maxLat.
+ * @returns A list of projects located within the bounding box.
+ */
+export async function fetchGeoProjects(bbox?: string): Promise<ClimateProject[]> {
+  const url = bbox ? `/api/projects/geo?bbox=${encodeURIComponent(bbox)}` : "/api/projects/geo";
+  const { data } = await api.get<{ success: boolean; data: ClimateProject[] }>(url);
   return data.data;
 }
 

@@ -25,6 +25,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
               <img
                 src={project.imageUrl}
                 alt={project.name}
+                loading="lazy"
                 className="h-40 w-full object-cover"
               />
             </div>
