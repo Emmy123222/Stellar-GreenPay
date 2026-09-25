@@ -29,11 +29,13 @@ async function processProfileUpdate(donorAddress) {
   const badges = computeBadges(totalDonatedXlm);
 
   const existingProfileResult = await dbPool.query(
-    "SELECT display_name, bio FROM profiles WHERE public_key = $1",
+    "SELECT display_name, bio, total_donated_xlm FROM profiles WHERE public_key = $1",
     [donorAddress],
   );
 
   const existingProfile = existingProfileResult.rows[0] || {};
+  const existingTotal = parseFloat(existingProfile.total_donated_xlm || "0");
+  const finalTotalXlm = Math.max(totalDonatedXlm, existingTotal);
 
   await dbPool.query(
     `INSERT INTO profiles (
@@ -56,13 +58,13 @@ async function processProfileUpdate(donorAddress) {
       donorAddress,
       existingProfile.display_name || null,
       existingProfile.bio || null,
-      totalDonatedXlm.toFixed(7),
+      finalTotalXlm.toFixed(7),
       projectsSupported,
       JSON.stringify(badges),
     ],
   );
 
-  return { totalDonatedXLM: totalDonatedXlm.toFixed(7), projectsSupported, badges };
+  return { totalDonatedXLM: finalTotalXlm.toFixed(7), projectsSupported, badges };
 }
 
 async function start(io) {
