@@ -46,7 +46,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
+      - name: Set nightly default
+        run: rustup default nightly
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --locked || cargo install cargo-fuzz
       - name: Run donate() fuzz test (60 seconds)
-        run: cargo fuzz run fuzz_donate -- -max_total_time=60
+        run: cargo +nightly fuzz run fuzz_donate -- -max_total_time=60

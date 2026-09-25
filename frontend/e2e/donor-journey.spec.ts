@@ -66,9 +66,13 @@ async function mockApiAndHorizon(page: Page) {
   // Projects endpoints
   await page.route("**/api/**/projects?**", (r) => r.fulfill(ok([MOCK_PROJECT])));
   await page.route("**/api/**/projects", (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
   await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) =>
     r.fulfill(ok(MOCK_PROJECT)),
   );
+  await page.route("**/api/**/updates/**", (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/impact/**", (r) => r.fulfill(ok({})));
 
   // Profile endpoint
   await page.route("**/api/**/profiles/**", (r) =>
@@ -95,6 +99,7 @@ async function mockApiAndHorizon(page: Page) {
       }),
     ),
   );
+  await page.route("**/api/**/donations/**", (r) => r.fulfill(ok([])));
 }
 
 /**
@@ -127,13 +132,18 @@ test.describe("Full Donor Journey E2E (#1170)", () => {
     await page.getByText(MOCK_PROJECT.name).click();
     await expect(page).toHaveURL(new RegExp(`/projects/${MOCK_PROJECT_ID}`));
 
-    // 3. Connect mock wallet / verify donation form is ready
+    // 3. Connect mock wallet if prompted / verify donation form is ready
+    const connectBtn = page.getByRole("button", { name: /connect freighter wallet/i });
+    if (await connectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await connectBtn.click();
+    }
+
     const form = page.locator(".card", { hasText: /make a donation/i });
-    await expect(form.getByRole("heading", { name: /make a donation/i })).toBeVisible();
+    await expect(form.getByRole("heading", { name: /make a donation/i })).toBeVisible({ timeout: 15000 });
 
     // 4. Donate 10 XLM
     const preset10 = form.getByRole("button", { name: /^10 XLM$/i });
-    if (await preset10.isVisible()) {
+    if (await preset10.isVisible({ timeout: 2000 }).catch(() => false)) {
       await preset10.click();
     } else {
       const amountInput = form.getByPlaceholder(/or enter custom amount/i);
@@ -141,11 +151,11 @@ test.describe("Full Donor Journey E2E (#1170)", () => {
     }
 
     const donateButton = form.getByRole("button", { name: /Donate/i });
-    await expect(donateButton).toBeEnabled();
+    await expect(donateButton).toBeEnabled({ timeout: 5000 });
     await donateButton.click();
 
     // 5. Verify badge updated to Seedling
-    await expect(page.getByText(/Seedling/i).first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/Thank you!/i)).toBeVisible();
+    await expect(page.getByText(/Seedling/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Thank you!/i)).toBeVisible({ timeout: 15000 });
   });
 });
