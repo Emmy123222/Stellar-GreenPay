@@ -259,6 +259,7 @@ router.get("/", async (req, res, next) => {
       status,
       verified,
       search,
+      q,
       limit = 20,
       cursor,
       sort = "created_at",
@@ -272,7 +273,7 @@ router.get("/", async (req, res, next) => {
         category,
         status,
         verified,
-        search,
+        search: search || q,
         sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
@@ -296,9 +297,10 @@ router.get("/", async (req, res, next) => {
     if (verified === "true") {
       where.push("verified = true");
     }
-    if (search && typeof search === "string") {
-      values.push(search.trim());
-      where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
+    const searchTerm = q || search;
+    if (searchTerm && typeof searchTerm === "string") {
+      values.push(searchTerm.trim());
+      where.push(`unaccent(name) ILIKE unaccent('%' || $${values.length} || '%')`);
     }
 
     if (cursor) {
