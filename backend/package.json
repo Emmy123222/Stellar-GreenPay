@@ -17,6 +17,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
     "@aws-sdk/client-s3": "^3.1120.0",
+    "@aws-sdk/s3-presigned-post": "^3.1120.0",
     "@aws-sdk/s3-request-presigner": "^3.1120.0",
     "@noble/hashes": "^1.7.1",
     "@sentry/node": "^7.51.0",
