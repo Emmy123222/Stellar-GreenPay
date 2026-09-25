@@ -103,9 +103,17 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     const page = await context.newPage();
 
     try {
-      await page.goto(popupUrl);
+      // Use waitForNavigation to handle potential abortion better
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded" })
+          .catch(() => {}),
+        page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch(() => {}),
+      ]);
+
+      await page.waitForTimeout(500);
       const logo = page.locator(".logo");
-      await expect(logo).toContainText("GreenPay");
+      await expect(logo).toContainText("GreenPay", { timeout: 3000 });
     } finally {
       await context.close();
     }
@@ -116,9 +124,16 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     const page = await context.newPage();
 
     try {
-      await page.goto(popupUrl);
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded" })
+          .catch(() => {}),
+        page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch(() => {}),
+      ]);
+
+      await page.waitForTimeout(500);
       const projectList = page.locator("#project-list");
-      await expect(projectList).toBeVisible();
+      await expect(projectList).toBeVisible({ timeout: 3000 });
 
       const projectItems = page.locator(".project-item");
       const count = await projectItems.count();
@@ -133,12 +148,18 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     const page = await context.newPage();
 
     try {
-      await page.goto(popupUrl);
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded" })
+          .catch(() => {}),
+        page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch(() => {}),
+      ]);
+
+      await page.waitForTimeout(500);
       const projectList = page.locator("#project-list");
-      await expect(projectList).toBeVisible();
+      await expect(projectList).toBeVisible({ timeout: 3000 });
 
       // Just verify the donation form section exists without clicking
-      // (clicking might be problematic in test environment)
       const donationForm = page.locator(".donate-section");
       const isVisible = await donationForm.count().then((c) => c > 0);
       expect(isVisible).toBeTruthy();
@@ -152,7 +173,13 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     const page = await context.newPage();
 
     try {
-      await page.goto(popupUrl);
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded" })
+          .catch(() => {}),
+        page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch(() => {}),
+      ]);
+
       await page.waitForTimeout(500);
 
       const errorMsg = page.locator("text=Freighter Wallet Required");
@@ -172,7 +199,13 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     const page = await context.newPage();
 
     try {
-      await page.goto(popupUrl);
+      await Promise.all([
+        page
+          .waitForNavigation({ waitUntil: "domcontentloaded" })
+          .catch(() => {}),
+        page.goto(popupUrl, { waitUntil: "domcontentloaded" }).catch(() => {}),
+      ]);
+
       await page.waitForTimeout(500);
 
       const donateSection = page.locator(".donate-section");
