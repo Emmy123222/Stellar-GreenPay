@@ -21,3 +21,6 @@ name = "fuzz_donate"
 path = "fuzz_targets/fuzz_donate.rs"
 test = false
 doc = false
+
+[profile.release]
+panic = "unwind"

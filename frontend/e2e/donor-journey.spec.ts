@@ -9,8 +9,8 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
 const MOCK_PROJECT_ID = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
-const MOCK_WALLET = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
-const MOCK_PUBLIC_KEY = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGLEWZE5BGYTG2XTGQBC3VP";
+const MOCK_WALLET = "GAWVFP2KNZF36QPT6EURB2UGCDN6ESGFU5DAT5RYYWILQWLNXBF42T2P";
+const MOCK_PUBLIC_KEY = "GDOKZLIK5VGBVF4ZYD4CB5JOU4E7REZLITVFKCJFZDMYABFFE5XDYLR4";
 
 const MOCK_PROJECT = {
   id: MOCK_PROJECT_ID,
@@ -51,9 +51,15 @@ async function mockApiAndHorizon(page: Page) {
     }
     return r.fulfill({
       json: {
-        _embedded: { records: [] },
+        id: MOCK_PUBLIC_KEY,
+        account_id: MOCK_PUBLIC_KEY,
         sequence: "123456789",
         balances: [{ asset_type: "native", balance: "500.0000000" }],
+        subentry_count: 0,
+        thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
+        flags: { auth_required: false, auth_revocable: false },
+        signers: [],
+        _embedded: { records: [] },
       },
     });
   });
