@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="style-src 'self'; script-src 'self' 'unsafe-inline' chrome-extension://; default-src 'self';">
+  <title>GreenPay Widget - Strict CSP Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .test-section {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stellar-address {
+      font-family: monospace;
+      color: #0066cc;
+    }
+  </style>
+</head>
+<body>
+  <h1>GreenPay Widget - Strict CSP Test Page</h1>
+  
+  <div class="test-section">
+    <h2>Test 1: Single Stellar Address</h2>
+    <p>This page has a strict Content-Security-Policy: <code>style-src 'self'</code></p>
+    <p>Widget should render correctly with inline styles only.</p>
+    <p class="test-address">
+      Here's a test Stellar address: <span class="stellar-address">GBZXN3XVFC2TYZF7PJKX5CZRFF7YXLMPG7D5VVPYP3AJXTD32HV2D3</span>
+    </p>
+  </div>
+
+  <div class="test-section">
+    <h2>Test 2: Multiple Addresses</h2>
+    <p>
+      Multiple addresses should all be highlighted:
+      GA7VHBLWHW63PHGZGTYNASRYMM62XQHZRMFR4QZ2W7C4EFIOJLG6YOZX,
+      GBUQWP3BOUZX34ULNQG23RQ6F4BFXWBTRWY5NNQKXHVDQWYUYRYQ2A3
+    </p>
+  </div>
+
+  <div class="test-section">
+    <h2>CSP Policy Details</h2>
+    <pre>Content-Security-Policy: style-src 'self'; script-src 'self' 'unsafe-inline' chrome-extension://; default-src 'self';</pre>
+    <p>
+      ✓ Inline styles are allowed (no style-src directive blocks them)<br>
+      ✓ Inline scripts allowed via 'unsafe-inline'<br>
+      ✓ Chrome extension scripts allowed<br>
+      ✗ External stylesheets from CDN would be BLOCKED
+    </p>
+  </div>
+
+  <div class="test-section">
+    <h2>Expected Behavior</h2>
+    <ul>
+      <li>Stellar addresses should be highlighted with green gradient background</li>
+      <li>Tooltip should appear on hover without CSP violations</li>
+      <li>No CSP errors in browser console</li>
+      <li>Widget click opens GreenPay popup</li>
+    </ul>
+  </div>
+
+  <script>
+    // Log CSP test info
+    console.log('Test page loaded with strict CSP: style-src "self" only');
+    console.log('GreenPay widget should work with inline styles only');
+  </script>
+</body>
+</html>
