@@ -1,0 +1,10 @@
+{
+  "testnet": {
+    "greenpay": "",
+    "escrow": ""
+  },
+  "mainnet": {
+    "greenpay": "",
+    "escrow": ""
+  }
+}

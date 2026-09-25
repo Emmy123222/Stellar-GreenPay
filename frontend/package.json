@@ -3,11 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/set-contract-env.js",
     "dev": "next dev",
     "dev:docker": "next dev --hostname 0.0.0.0",
+    "prebuild": "node scripts/set-contract-env.js",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint .",
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
     "test": "jest",
