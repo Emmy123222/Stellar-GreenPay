@@ -191,16 +191,18 @@ async function recordDonation(req, res, next) {
 
     await redis.deletePattern("projects:list:*");
 
-    enqueueProfileUpdate(donorAddress).catch((err) => {
-      logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
-    });
+    if (currency === "XLM") {
+      enqueueProfileUpdate(donorAddress).catch((err) => {
+        logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
+      });
 
-    if (process.env.NODE_ENV === "test") {
-      try {
-        const { processProfileUpdate } = require("../services/profileQueue");
-        await processProfileUpdate(donorAddress);
-      } catch {
-        // ignore in tests where pg-boss or db is mocked
+      if (process.env.NODE_ENV === "test") {
+        try {
+          const { processProfileUpdate } = require("../services/profileQueue");
+          await processProfileUpdate(donorAddress);
+        } catch {
+          // ignore in tests where pg-boss or db is mocked
+        }
       }
     }
 
