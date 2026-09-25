@@ -48,55 +48,47 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
       extensionId = extId;
       popupUrl = `chrome-extension://${extensionId}/popup.html`;
     } else {
-      // CI/headless mode: extract extension ID from background page
-      // The extension's background.js should be accessible
-      // Try to find it by accessing known extension pages
-
-      // Use Playwright's ability to find extension ID by accessing any extension page
-      // and checking the URL that gets created
-      let foundId = false;
-
-      // Method: Listen for any extension-related error or use debugger
-      // For now, use the fact that Chromium loads extensions with deterministic IDs
-      // We'll try to enumerate by checking common ID patterns or waiting for popup to load
-
-      // Simpler approach: use chrome devtools protocol or infer from context
-      // For unpacked extensions, use the manifest to compute likely ID
+      // CI/headless mode: use CDP to get the actual extension ID
       try {
-        // Try to access background service worker page
-        const swPages = await context.backgroundPages();
-        if (swPages && swPages.length > 0) {
-          const bgUrl = swPages[0].url();
-          // Extract extension ID from URL like chrome-extension://xyz/background.js
-          const match = bgUrl.match(/chrome-extension:\/\/([a-z]+)\//);
+        const cdpSession = await context.newCDPSession(page);
+        const targets = await cdpSession.send("Target.getTargets");
+
+        // Find the background service worker target
+        const bgTarget = (targets as any).targetInfos?.find(
+          (t: any) =>
+            t.type === "background_page" ||
+            t.type === "service_worker" ||
+            t.url?.includes("background"),
+        );
+
+        if (bgTarget?.url) {
+          const match = bgTarget.url.match(/chrome-extension:\/\/([a-z]+)\//);
           if (match) {
             extensionId = match[1];
-            foundId = true;
           }
         }
       } catch (e) {
-        // Background pages might not be accessible
+        // CDP might not be available, try backgroundPages()
       }
 
-      if (!foundId) {
-        // Fallback: derive from manifest and use predictable computation
-        // For headless testing of unpacked extensions, use a fixed ID
-        // based on the extension manifest signature
-        const manifest = JSON.parse(
-          fs.readFileSync(path.join(extPath, "manifest.json"), "utf8"),
-        );
+      // Fallback: try backgroundPages() method
+      if (!extensionId) {
+        try {
+          const bgPages = await context.backgroundPages();
+          if (bgPages && bgPages.length > 0) {
+            const bgUrl = bgPages[0].url();
+            const match = bgUrl.match(/chrome-extension:\/\/([a-z]+)\//);
+            if (match) {
+              extensionId = match[1];
+            }
+          }
+        } catch (e) {
+          // Continue to error
+        }
+      }
 
-        // Create a deterministic ID from the manifest
-        // Chromium uses the extension's public key if present, otherwise derives from path
-        // For testing unpacked extensions without a key, we use a hash of the name
-        const crypto = require("crypto");
-        const hash = crypto
-          .createHash("md5")
-          .update(manifest.name || "greenpay")
-          .digest("hex")
-          .substring(0, 32);
-
-        extensionId = hash;
+      if (!extensionId) {
+        throw new Error("Could not determine extension ID in headless mode");
       }
 
       popupUrl = `chrome-extension://${extensionId}/popup.html`;
