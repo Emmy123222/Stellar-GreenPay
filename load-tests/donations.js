@@ -1,5 +1,6 @@
 import http from 'k6/http';
 import { check } from 'k6';
+import { sleep } from 'k6';
 
 const baseUrl = __ENV.BASE_URL || 'https://staging.greenpay.app';
 const payload = __ENV.DONATION_PAYLOAD || JSON.stringify({
@@ -25,4 +26,5 @@ export default function donationLoad() {
     tags: { endpoint: 'donations' },
   });
   check(response, { 'donation endpoint responds': (res) => res.status < 500 });
+  sleep(1);
 }
