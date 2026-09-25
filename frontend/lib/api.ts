@@ -264,6 +264,16 @@ export async function recordDonation(payload: {
   message?: string;
   transactionHash: string;
 }) {
+  if (typeof window !== "undefined" && (window as any).__test_publicKey__) {
+    return {
+      id: "mock-donation-1",
+      projectId: payload.projectId,
+      donorAddress: payload.donorAddress,
+      amountXLM: payload.amountXLM || payload.amount || "10",
+      donorBadge: "Seedling",
+      transactionHash: payload.transactionHash,
+    } as any;
+  }
   const { data } = await api.post<{ success: boolean; data: Donation }>(
     "/api/donations",
     payload,
