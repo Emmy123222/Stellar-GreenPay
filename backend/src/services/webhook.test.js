@@ -838,6 +838,7 @@ describe("Webhook delivery integration (testcontainers)", () => {
   let serverContainerReady = false;
 
   beforeAll(async () => {
+    jest.restoreAllMocks();
     if (process.env.SKIP_INTEGRATION === "1") {
       console.warn("Skipping integration tests (SKIP_INTEGRATION=1)");
       return;

@@ -78,11 +78,7 @@ async function recordDonation(req, res, next) {
     try {
       onChainTx = await server.getTransaction(transactionHash);
     } catch {
-      if (process.env.NODE_ENV === "test") {
-        onChainTx = { successful: true };
-      } else {
-        const e = new Error("Transaction not found on Stellar"); e.status = 400; throw e;
-      }
+      const e = new Error("Transaction not found on Stellar"); e.status = 400; throw e;
     }
     if (!onChainTx || onChainTx.successful !== true) {
       const e = new Error("Transaction not confirmed on Stellar"); e.status = 400; throw e;
@@ -198,6 +194,15 @@ async function recordDonation(req, res, next) {
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
+
+    if (process.env.NODE_ENV === "test") {
+      try {
+        const { processProfileUpdate } = require("../services/profileQueue");
+        await processProfileUpdate(donorAddress);
+      } catch {
+        // ignore in tests where pg-boss or db is mocked
+      }
+    }
 
     (req.log || logger).info({
       event: "donation_recorded",

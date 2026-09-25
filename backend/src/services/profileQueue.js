@@ -1,14 +1,14 @@
 "use strict";
 
 const PgBoss = require("pg-boss");
-const pool = require("../db/pool");
 const { computeBadges } = require("./store");
 
 const QUEUE = "profile-update";
 let boss = null;
 
 async function processProfileUpdate(donorAddress) {
-  const totalResult = await pool.query(
+  const dbPool = require("../db/pool");
+  const totalResult = await dbPool.query(
     `SELECT COALESCE(SUM(amount_xlm), 0)::numeric AS total
      FROM donations
      WHERE donor_address = $1
@@ -18,7 +18,7 @@ async function processProfileUpdate(donorAddress) {
 
   const totalDonatedXlm = parseFloat(totalResult.rows[0]?.total || "0");
 
-  const projectsSupportedResult = await pool.query(
+  const projectsSupportedResult = await dbPool.query(
     `SELECT COUNT(DISTINCT project_id) AS count
      FROM donations
      WHERE donor_address = $1`,
@@ -28,14 +28,14 @@ async function processProfileUpdate(donorAddress) {
   const projectsSupported = Number.parseInt(projectsSupportedResult.rows[0]?.count || "0", 10);
   const badges = computeBadges(totalDonatedXlm);
 
-  const existingProfileResult = await pool.query(
+  const existingProfileResult = await dbPool.query(
     "SELECT display_name, bio FROM profiles WHERE public_key = $1",
     [donorAddress],
   );
 
   const existingProfile = existingProfileResult.rows[0] || {};
 
-  await pool.query(
+  await dbPool.query(
     `INSERT INTO profiles (
        public_key,
        display_name,
