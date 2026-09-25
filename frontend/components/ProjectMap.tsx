@@ -100,9 +100,14 @@ export default function ProjectMap({ projects = [] }: ProjectMapProps) {
   const [visibleProjects, setVisibleProjects] = useState<ClimateProject[]>(projects);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  useEffect(() => {
+  // Sync visible projects when the prop changes using the render-time
+  // "adjusting state when a prop changes" pattern recommended by the React
+  // docs, rather than useEffect (which triggers the react-hooks/set-state-in-effect lint).
+  const [prevProjects, setPrevProjects] = useState(projects);
+  if (projects !== prevProjects) {
+    setPrevProjects(projects);
     setVisibleProjects(projects);
-  }, [projects]);
+  }
 
   const handleBoundsChange = useCallback((bounds: L.LatLngBounds) => {
     if (debounceTimerRef.current) {
