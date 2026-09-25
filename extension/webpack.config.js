@@ -1,4 +1,17 @@
+const fs = require('fs');
 const path = require('path');
+const webpack = require('webpack');
+
+function contractDefines() {
+  const p = path.resolve(__dirname, '../contracts/addresses.json');
+  if (!fs.existsSync(p)) return {};
+  const addresses = JSON.parse(fs.readFileSync(p, 'utf8'));
+  const net = addresses.testnet || {};
+  return {
+    __GREENPAY_CONTRACT_ID__: JSON.stringify(net.greenpay || ''),
+    __ESCROW_CONTRACT_ID__: JSON.stringify(net.escrow || ''),
+  };
+}
 
 module.exports = {
   mode: 'production',
@@ -38,6 +51,9 @@ module.exports = {
       },
     ],
   },
+  plugins: [
+    new webpack.DefinePlugin(contractDefines()),
+  ],
   optimization: {
     minimize: true,
   },
