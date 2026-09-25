@@ -42,6 +42,9 @@ describe("Donation flow integration (testcontainers)", () => {
   jest.setTimeout(120000);
 
   beforeAll(async () => {
+    if (typeof server.getTransaction !== "function") {
+      server.getTransaction = () => Promise.resolve({ successful: true });
+    }
     jest.spyOn(server, "getTransaction").mockResolvedValue({ successful: true });
     // Skip if explicitly disabled or testcontainers is unavailable
     if (process.env.SKIP_INTEGRATION === "1" || !GenericContainer) {
