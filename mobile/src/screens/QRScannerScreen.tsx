@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { BarCodeScanner, BarCodeScannerResult } from 'expo-barcode-scanner';
 import { useNavigation } from '@react-navigation/native';
+import { useTheme } from '../../app/theme';
 
 // Expected QR URL format: https://greenpay.app/donate?projectId=<id>
 // or the short form:      greenpay://donate/<id>
@@ -23,6 +24,7 @@ function extractProjectId(raw: string): string | null {
 
 export function QRScannerScreen() {
   const navigation = useNavigation<any>();
+  const { colors } = useTheme();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
 
@@ -50,25 +52,25 @@ export function QRScannerScreen() {
 
   if (hasPermission === null) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Requesting camera permission…</Text>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.message, { color: colors.text }]}>Requesting camera permission…</Text>
       </View>
     );
   }
 
   if (!hasPermission) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Camera access is required to scan QR codes.</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
-          <Text style={styles.backButtonText}>Go back</Text>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.message, { color: colors.text }]}>Camera access is required to scan QR codes.</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.buttonBackground }]} accessibilityLabel="Go back" accessibilityRole="button">
+          <Text style={[styles.backButtonText, { color: colors.buttonText }]}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <BarCodeScanner
         onBarCodeScanned={handleBarCodeScanned}
         style={StyleSheet.absoluteFillObject}
@@ -76,15 +78,15 @@ export function QRScannerScreen() {
       />
 
       <View style={styles.overlay}>
-        <Text style={styles.hint}>Point camera at a GreenPay QR code</Text>
-        <View style={styles.frame} />
+        <Text style={[styles.hint, { color: colors.headerText }]}>Point camera at a GreenPay QR code</Text>
+        <View style={[styles.frame, { borderColor: colors.primary }]} />
         {scanned && (
-          <TouchableOpacity style={styles.rescanButton} onPress={() => setScanned(false)} accessibilityLabel="Tap to scan again" accessibilityRole="button">
-            <Text style={styles.rescanText}>Tap to scan again</Text>
+          <TouchableOpacity style={[styles.rescanButton, { backgroundColor: colors.buttonBackground }]} onPress={() => setScanned(false)} accessibilityLabel="Tap to scan again" accessibilityRole="button">
+            <Text style={[styles.rescanText, { color: colors.buttonText }]}>Tap to scan again</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton} accessibilityLabel="Cancel QR scanning" accessibilityRole="button">
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={[styles.cancelText, { color: colors.headerText }]}>Cancel</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -92,22 +94,21 @@ export function QRScannerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  message: { fontSize: 15, color: '#374151', textAlign: 'center' },
+  message: { fontSize: 15, textAlign: 'center' },
   overlay: { flex: 1, justifyContent: 'space-between', alignItems: 'center', padding: 32 },
-  hint: { color: '#fff', fontSize: 15, marginTop: 20, textAlign: 'center' },
+  hint: { fontSize: 15, marginTop: 20, textAlign: 'center' },
   frame: {
     width: 240,
     height: 240,
     borderWidth: 3,
-    borderColor: '#22c55e',
     borderRadius: 16,
   },
-  rescanButton: { backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20 },
-  rescanText: { color: '#fff', fontWeight: '600' },
+  rescanButton: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20 },
+  rescanText: { fontWeight: '600' },
   cancelButton: { paddingVertical: 12, paddingHorizontal: 24 },
-  cancelText: { color: '#fff', fontSize: 15 },
-  backButton: { marginTop: 16, backgroundColor: '#22c55e', padding: 12, borderRadius: 8 },
-  backButtonText: { color: '#fff', fontWeight: '600' },
+  cancelText: { fontSize: 15 },
+  backButton: { marginTop: 16, padding: 12, borderRadius: 8 },
+  backButtonText: { fontWeight: '600' },
 });

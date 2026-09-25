@@ -28,6 +28,7 @@ import {
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useFocusEffect } from 'expo-router';
 import axios from 'axios';
+import { useTheme } from './theme';
 import {
   loadRecurringDonations,
   cancelRecurringDonation,
@@ -63,6 +64,8 @@ function DonationCard({
   donation: RecurringDonation;
   onCancel: (id: string) => void;
 }) {
+  const { colors } = useTheme();
+
   const handleCancel = () => {
     Alert.alert(
       'Cancel Recurring Donation',
@@ -84,22 +87,22 @@ function DonationCard({
       : 'Ongoing';
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
       <View style={styles.cardHeader}>
-        <Text style={styles.projectName} numberOfLines={1}>
+        <Text style={[styles.projectName, { color: colors.text }]} numberOfLines={1}>
           {donation.projectName}
         </Text>
-        <Text style={styles.amount}>{donation.amountXLM} XLM/mo</Text>
+        <Text style={[styles.amount, { color: colors.primary }]}>{donation.amountXLM} XLM/mo</Text>
       </View>
 
       <View style={styles.cardBody}>
         <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>Next payment</Text>
-          <Text style={styles.metaValue}>{formatNextDate(donation.nextDueDate)}</Text>
+          <Text style={[styles.metaLabel, { color: colors.secondaryText }]}>Next payment</Text>
+          <Text style={[styles.metaValue, { color: colors.text }]}>{formatNextDate(donation.nextDueDate)}</Text>
         </View>
         <View style={styles.metaRow}>
-          <Text style={styles.metaLabel}>Duration</Text>
-          <Text style={styles.metaValue}>{durationText}</Text>
+          <Text style={[styles.metaLabel, { color: colors.secondaryText }]}>Duration</Text>
+          <Text style={[styles.metaValue, { color: colors.text }]}>{durationText}</Text>
         </View>
       </View>
 
@@ -117,6 +120,7 @@ function DonationCard({
 }
 
 export default function RecurringScreen() {
+  const { colors } = useTheme();
   const [donations, setDonations] = useState<RecurringDonation[]>([]);
   const [history, setHistory] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,12 +175,6 @@ export default function RecurringScreen() {
     loadProjects();
   }, [loadProjects]);
 
-  useFocusEffect(
-    useCallback(() => {
-      refresh();
-    }, [refresh])
-  );
-
 
   const handleCancel = async (id: string) => {
     await cancelRecurringDonation(id);
@@ -222,26 +220,26 @@ export default function RecurringScreen() {
 
   if (loading) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#227239" />
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Monthly Giving</Text>
-        <Text style={styles.headerSub}>Manage your recurring donations</Text>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
+      <View style={[styles.header, { backgroundColor: colors.header }]}>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]}>Monthly Giving</Text>
+        <Text style={[styles.headerSub, { color: colors.secondaryText }]}>Manage your recurring donations</Text>
       </View>
 
 
       {/* Set up a new recurring donation */}
       {!projectsLoading && projects.length > 0 && (
-        <View style={styles.setupCard}>
-          <Text style={styles.setupTitle}>Set up a monthly donation</Text>
+        <View style={[styles.setupCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
+          <Text style={[styles.setupTitle, { color: colors.text }]}>Set up a monthly donation</Text>
 
-          <Text style={styles.label}>Project</Text>
+          <Text style={[styles.label, { color: colors.text }]}>Project</Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -254,7 +252,10 @@ export default function RecurringScreen() {
                   key={project.id}
                   style={[
                     styles.projectChip,
-                    isActive && styles.projectChipActive,
+                    {
+                      backgroundColor: isActive ? colors.primary : colors.surface,
+                      borderColor: isActive ? colors.primary : colors.border,
+                    },
                   ]}
                   onPress={() => setSelectedProjectId(project.id)}
                   accessibilityLabel={`Select project ${project.name}`}
@@ -264,7 +265,7 @@ export default function RecurringScreen() {
                   <Text
                     style={[
                       styles.projectChipText,
-                      isActive && styles.projectChipTextActive,
+                      { color: isActive ? colors.buttonText : colors.text },
                     ]}
                   >
                     {project.name}
@@ -274,13 +275,13 @@ export default function RecurringScreen() {
             })}
           </ScrollView>
 
-          <Text style={styles.label}>Amount (XLM)</Text>
+          <Text style={[styles.label, { color: colors.text }]}>Amount (XLM)</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.text }]}
             value={setupAmount}
             onChangeText={setSetupAmount}
             placeholder="e.g. 25"
-            placeholderTextColor="#8aaa8a"
+            placeholderTextColor={colors.placeholder}
             keyboardType="decimal-pad"
             accessibilityLabel="Recurring donation amount in XLM"
             accessibilityRole="none"
@@ -288,23 +289,23 @@ export default function RecurringScreen() {
 
           <View style={styles.setupActions}>
             <TouchableOpacity
-              style={[styles.actionBtn, styles.confirmBtn]}
+              style={[styles.actionBtn, styles.confirmBtn, { backgroundColor: colors.buttonBackground }]}
               onPress={handleConfirmSetup}
               activeOpacity={0.7}
               accessibilityLabel="Confirm recurring donation"
               accessibilityRole="button"
             >
-              <Text style={styles.confirmBtnText}>Confirm</Text>
+              <Text style={[styles.confirmBtnText, { color: colors.buttonText }]}>Confirm</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.actionBtn, styles.setupCancelBtn]}
+              style={[styles.actionBtn, styles.setupCancelBtn, { borderColor: colors.secondaryText }]}
               onPress={handleCancelSetup}
               activeOpacity={0.7}
               accessibilityLabel="Cancel recurring donation setup"
               accessibilityRole="button"
             >
-              <Text style={styles.setupCancelBtnText}>Cancel</Text>
+              <Text style={[styles.setupCancelBtnText, { color: colors.secondaryText }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -313,32 +314,30 @@ export default function RecurringScreen() {
       {/* Live region — announces donation status changes to the screen reader */}
       {statusMessage ? (
         <View
-          style={styles.statusBox}
+          style={[styles.statusBox, { backgroundColor: colors.surface, borderColor: colors.primary }]}
           accessible
           accessibilityRole="alert"
           accessibilityLiveRegion="polite"
         >
-          <Text style={styles.statusText}>{statusMessage}</Text>
+          <Text style={[styles.statusText, { color: colors.text }]}>{statusMessage}</Text>
         </View>
       ) : null}
 
       {/* Active recurring donations */}
-      {donations.length === 0 ? (
-
-      <View style={styles.tabBar}>
+      <View style={[styles.tabBar, { backgroundColor: colors.surface }]}>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'active' && styles.tabActive]}
+          style={[styles.tab, activeTab === 'active' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('active')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>Active</Text>
+          <Text style={[styles.tabText, { color: activeTab === 'active' ? colors.buttonText : colors.secondaryText }]}>Active</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.tab, activeTab === 'history' && styles.tabActive]}
+          style={[styles.tab, activeTab === 'history' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('history')}
           activeOpacity={0.7}
         >
-          <Text style={[styles.tabText, activeTab === 'history' && styles.tabTextActive]}>History</Text>
+          <Text style={[styles.tabText, { color: activeTab === 'history' ? colors.buttonText : colors.secondaryText }]}>History</Text>
         </TouchableOpacity>
       </View>
 
@@ -346,8 +345,8 @@ export default function RecurringScreen() {
         donations.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>🌱</Text>
-            <Text style={styles.emptyTitle}>No active recurring donations</Text>
-            <Text style={styles.emptyText}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No active recurring donations</Text>
+            <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
               Set up a monthly donation from any project page to support ongoing impact.
             </Text>
           </View>
@@ -360,23 +359,23 @@ export default function RecurringScreen() {
 
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>📋</Text>
-          <Text style={styles.emptyTitle}>No payment history</Text>
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No payment history</Text>
+          <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
             Your past donation payments will appear here.
           </Text>
         </View>
       ) : (
         history.map((record) => (
-          <View key={record.id} style={styles.historyCard}>
+          <View key={record.id} style={[styles.historyCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
             <View style={styles.historyCardHeader}>
-              <Text style={styles.historyProjectName} numberOfLines={1}>
+              <Text style={[styles.historyProjectName, { color: colors.text }]} numberOfLines={1}>
                 {record.projectName}
               </Text>
-              <Text style={styles.historyAmount}>{record.amountXLM} XLM</Text>
+              <Text style={[styles.historyAmount, { color: colors.primary }]}>{record.amountXLM} XLM</Text>
             </View>
             <View style={styles.historyMeta}>
-              <Text style={styles.historyDate}>{formatNextDate(record.date)}</Text>
-              <Text style={[styles.historyStatus, record.status === 'completed' && styles.historyStatusSuccess]}>
+              <Text style={[styles.historyDate, { color: colors.secondaryText }]}>{formatNextDate(record.date)}</Text>
+              <Text style={[styles.historyStatus, record.status === 'completed' && { color: colors.primary }]}>
                 {record.status}
               </Text>
             </View>
@@ -390,7 +389,6 @@ export default function RecurringScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f7f0',
   },
   content: {
     paddingBottom: 32,
@@ -401,28 +399,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    backgroundColor: '#227239',
     padding: 24,
     alignItems: 'center',
   },
   headerTitle: {
     fontSize: 26,
     fontWeight: 'bold',
-    color: '#fff',
   },
   headerSub: {
     fontSize: 13,
-    color: '#c8e6c9',
     marginTop: 4,
   },
   setupCard: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginTop: 16,
     borderRadius: 12,
     padding: 16,
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
@@ -430,13 +423,11 @@ const styles = StyleSheet.create({
   setupTitle: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#1a2e1a',
     marginBottom: 12,
   },
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1a2e1a',
     marginBottom: 6,
     marginTop: 4,
   },
@@ -449,30 +440,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#d8e4d8',
-    backgroundColor: '#fff',
     marginRight: 8,
-  },
-  projectChipActive: {
-    backgroundColor: '#227239',
-    borderColor: '#227239',
   },
   projectChipText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1a2e1a',
-  },
-  projectChipTextActive: {
-    color: '#fff',
   },
   input: {
     borderWidth: 1,
-    borderColor: '#d8e4d8',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    color: '#1a2e1a',
-    backgroundColor: '#fff',
     marginBottom: 14,
   },
   setupActions: {
@@ -485,34 +463,26 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
   },
-  confirmBtn: {
-    backgroundColor: '#227239',
-  },
+  confirmBtn: {},
   confirmBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#fff',
   },
   setupCancelBtn: {
     borderWidth: 1.5,
-    borderColor: '#5a7a5a',
   },
   setupCancelBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#5a7a5a',
   },
   statusBox: {
     marginHorizontal: 16,
     marginTop: 12,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#ecfdf5',
-    borderColor: '#34d399',
     borderWidth: 1,
   },
   statusText: {
-    color: '#0f172a',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -527,23 +497,19 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#1a2e1a',
     marginBottom: 8,
   },
   emptyText: {
     fontSize: 14,
-    color: '#5a7a5a',
     textAlign: 'center',
     lineHeight: 20,
   },
   card: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 12,
     padding: 16,
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
@@ -558,13 +524,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 16,
     fontWeight: '700',
-    color: '#1a2e1a',
     marginRight: 8,
   },
   amount: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#227239',
   },
   cardBody: {
     gap: 6,
@@ -576,12 +540,10 @@ const styles = StyleSheet.create({
   },
   metaLabel: {
     fontSize: 13,
-    color: '#5a7a5a',
   },
   metaValue: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#1a2e1a',
   },
   cancelBtn: {
     borderWidth: 1.5,
@@ -600,7 +562,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
     marginBottom: 8,
-    backgroundColor: '#fff',
     borderRadius: 8,
     overflow: 'hidden',
   },
@@ -609,25 +570,16 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
   },
-  tabActive: {
-    backgroundColor: '#227239',
-  },
   tabText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#5a7a5a',
-  },
-  tabTextActive: {
-    color: '#fff',
   },
   historyCard: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 12,
     padding: 16,
     elevation: 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,
@@ -642,13 +594,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: '#1a2e1a',
     marginRight: 8,
   },
   historyAmount: {
     fontSize: 15,
     fontWeight: 'bold',
-    color: '#227239',
   },
   historyMeta: {
     flexDirection: 'row',
@@ -657,15 +607,11 @@ const styles = StyleSheet.create({
   },
   historyDate: {
     fontSize: 13,
-    color: '#5a7a5a',
   },
   historyStatus: {
     fontSize: 13,
     fontWeight: '600',
     color: '#c62828',
     textTransform: 'capitalize',
-  },
-  historyStatusSuccess: {
-    color: '#227239',
   },
 });

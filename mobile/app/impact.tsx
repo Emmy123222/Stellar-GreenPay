@@ -150,17 +150,17 @@ export default function ImpactScreen() {
       <View
         ref={certificateRef}
         collapsable={false}
-        style={styles.certificateCard}
+        style={[styles.certificateCard, { backgroundColor: colors.primary }]}
       >
-        <Text style={styles.certBrand}>Stellar GreenPay</Text>
-        <Text style={styles.certTitle}>Climate Impact Certificate</Text>
-        <Text style={styles.certRow}>
+        <Text style={[styles.certBrand, { color: colors.buttonText }]}>Stellar GreenPay</Text>
+        <Text style={[styles.certTitle, { color: colors.headerText }]}>Climate Impact Certificate</Text>
+        <Text style={[styles.certRow, { color: colors.buttonText }]}>
           {publicKey.slice(0, 8)}...{publicKey.slice(-4)}
         </Text>
-        <Text style={styles.certRow}>
+        <Text style={[styles.certRow, { color: colors.buttonText }]}>
           CO₂ Offset: {impactStats?.co2OffsetKg ?? 0} kg
         </Text>
-        <Text style={styles.certRow}>
+        <Text style={[styles.certRow, { color: colors.buttonText }]}>
           Total Donated: {profile ? parseFloat(profile.totalDonatedXLM).toFixed(2) : '0'} XLM
         </Text>
       </View>
@@ -168,11 +168,11 @@ export default function ImpactScreen() {
       <TouchableOpacity
         onPress={handleShare}
         disabled={loading}
-        style={styles.shareButton}
+        style={[styles.shareButton, { backgroundColor: colors.buttonBackground }]}
         accessibilityLabel="Share your climate impact certificate"
         accessibilityRole="button"
       >
-        <Text style={styles.shareButtonText}>Share Certificate</Text>
+        <Text style={[styles.shareButtonText, { color: colors.buttonText }]}>Share Certificate</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -278,21 +278,17 @@ const styles = StyleSheet.create({
     margin: 16,
     padding: 24,
     borderRadius: 12,
-    backgroundColor: '#227239',
   },
   certBrand: {
-    color: '#ffffff',
     fontSize: 18,
     fontWeight: 'bold',
     marginBottom: 4,
   },
   certTitle: {
-    color: '#d4edda',
     fontSize: 14,
     marginBottom: 16,
   },
   certRow: {
-    color: '#ffffff',
     fontSize: 16,
     marginBottom: 8,
   },
@@ -301,11 +297,9 @@ const styles = StyleSheet.create({
     marginTop: 0,
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#227239',
     alignItems: 'center',
   },
   shareButtonText: {
-    color: '#ffffff',
     fontWeight: 'bold',
     fontSize: 16,
   },
