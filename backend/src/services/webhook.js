@@ -15,7 +15,14 @@ const crypto = require("crypto");
 const PgBoss = require("pg-boss");
 const https = require("https");
 const http = require("http");
-const pool = require("../db/pool");
+const pool = new Proxy({}, {
+  get(target, prop) {
+    // eslint-disable-next-line global-require
+    const currentPool = require("../db/pool");
+    const val = currentPool[prop];
+    return typeof val === "function" ? val.bind(currentPool) : val;
+  },
+});
 const logger = require("../logger");
 const { assertPublicHttpUrl } = require("../utils/ssrf");
 
