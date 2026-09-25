@@ -8,24 +8,21 @@
 
 // ── Top-level mocks (hoisted by Jest) ────────────────────────────────────────
 
-let mockGetSignedUrl;
+let mockCreatePresignedPost;
 
 jest.mock("@aws-sdk/client-s3", () => ({
   S3Client: jest.fn().mockImplementation(() => ({})),
-  PutObjectCommand: jest.fn().mockImplementation((params) => ({ _params: params })),
 }));
 
-jest.mock("@aws-sdk/s3-request-presigner", () => ({
-  // We proxy through a stable reference so individual tests can control
-  // what getSignedUrl resolves to.
-  getSignedUrl: jest.fn((...args) => mockGetSignedUrl(...args)),
+jest.mock("@aws-sdk/s3-presigned-post", () => ({
+  createPresignedPost: jest.fn((...args) => mockCreatePresignedPost(...args)),
 }));
 
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
 
 const { generatePresignedPutUrl, isS3Configured, buildKey } = require("./s3Presign");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { S3Client } = require("@aws-sdk/client-s3");
+const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -66,8 +63,8 @@ beforeEach(() => {
   clearS3Env();
   delete process.env.UPLOAD_MAX_BYTES;
   delete process.env.PRESIGN_EXPIRY_SECONDS;
-  // Default: SDK returns a fake signed URL
-  mockGetSignedUrl = jest.fn().mockResolvedValue(FAKE_URL);
+  // Default: SDK returns a fake signed URL and fields
+  mockCreatePresignedPost = jest.fn().mockResolvedValue({ url: FAKE_URL, fields: { key: "abc" } });
 });
 
 // ── isS3Configured ───────────────────────────────────────────────────────────
@@ -231,13 +228,13 @@ describe("generatePresignedPutUrl — S3 not configured", () => {
     expect(caught.message).toMatch(/STORAGE_BACKEND=s3/i);
   });
 
-  test("does not call getSignedUrl when S3 is not configured", async () => {
+  test("does not call createPresignedPost when S3 is not configured", async () => {
     try {
       await generatePresignedPutUrl({ originalName: "doc.pdf", contentType: "application/pdf" });
     } catch (_) {
       // expected
     }
-    expect(getSignedUrl).not.toHaveBeenCalled();
+    expect(createPresignedPost).not.toHaveBeenCalled();
   });
 });
 
@@ -259,7 +256,7 @@ describe("generatePresignedPutUrl — happy path", () => {
     expect(result).toHaveProperty("expiry");
   });
 
-  test("url matches the value returned by getSignedUrl", async () => {
+  test("url matches the value returned by createPresignedPost", async () => {
     const result = await generatePresignedPutUrl({
       originalName: "report.pdf",
       contentType: "application/pdf",
@@ -297,16 +294,23 @@ describe("generatePresignedPutUrl — happy path", () => {
     expect(result.expiry).toBeLessThanOrEqual(before + 61);
   });
 
-  test("calls PutObjectCommand with the correct Bucket and ContentType", async () => {
+  test("calls createPresignedPost with the correct Bucket, Conditions, and Fields", async () => {
     await generatePresignedPutUrl({
       originalName: "doc.pdf",
       contentType: "application/pdf",
     });
 
-    expect(PutObjectCommand).toHaveBeenCalledWith(
+    expect(createPresignedPost).toHaveBeenCalledWith(
+      expect.anything(),
       expect.objectContaining({
         Bucket: "test-bucket",
-        ContentType: "application/pdf",
+        Conditions: [
+          ["content-length-range", 0, 5242880],
+          ["eq", "$Content-Type", "application/pdf"]
+        ],
+        Fields: {
+          "Content-Type": "application/pdf"
+        }
       })
     );
   });
@@ -328,7 +332,7 @@ describe("generatePresignedPutUrl — happy path", () => {
   });
 
   test("wraps SDK errors as statusCode 500", async () => {
-    mockGetSignedUrl = jest.fn().mockRejectedValue(new Error("AWS SDK exploded"));
+    mockCreatePresignedPost = jest.fn().mockRejectedValue(new Error("AWS SDK exploded"));
 
     await expect(
       generatePresignedPutUrl({

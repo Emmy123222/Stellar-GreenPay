@@ -127,13 +127,22 @@ describe("GET /api/projects", () => {
     expect(query).toContain("status =");
   });
 
-  test("handles search query", async () => {
+  test("handles search query 'reforest' matches 'Reforestation'", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
 
-    await request(app).get("/api/projects?search=amazon").expect(200);
+    await request(app).get("/api/projects?q=reforest").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("websearch_to_tsquery");
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
+  });
+
+  test("handles search query 'ecologie' matches 'Écologie'", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app).get("/api/projects?q=ecologie").expect(200);
+
+    const query = pool.query.mock.calls[1][0];
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
   });
 
   test("rejects invalid cursor", async () => {
