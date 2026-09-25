@@ -56,6 +56,21 @@ jobs:
 
       - run: npm run build
 
+      - name: Validate Manifest V3 browser actions
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          for (const file of ['manifest.json', 'manifest.firefox.json']) {
+            const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (manifest.manifest_version !== 3) {
+              throw new Error(`${file} must use Manifest V3`);
+            }
+            if (manifest.browser_action || !manifest.action) {
+              throw new Error(`${file} must use the Manifest V3 action key`);
+            }
+          }
+          NODE
+
       - name: Verify build output
         run: test -f dist/content-script.js
 
