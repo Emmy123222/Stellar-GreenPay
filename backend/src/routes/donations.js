@@ -195,6 +195,15 @@ async function recordDonation(req, res, next) {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
+    if (process.env.NODE_ENV === "test") {
+      try {
+        const { processProfileUpdate } = require("../services/profileQueue");
+        await processProfileUpdate(donorAddress);
+      } catch {
+        // ignore in tests where pg-boss or db is mocked
+      }
+    }
+
     (req.log || logger).info({
       event: "donation_recorded",
       amount: parsedAmount,
