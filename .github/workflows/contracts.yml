@@ -32,5 +32,21 @@ jobs:
         with:
           targets: wasm32v1-none
       - run: cargo test --workspace
+
       - run: cargo clippy --workspace -- -D warnings || true
-      - run: cargo build --workspace --target wasm32v1-none --release
+
+      # Build the WASM artifacts before running integration tests.
+      # The integration test crate embeds the compiled greenpay-contract WASM
+      # via `contractfile!` at compile time, so the artifact must exist first.
+      - name: Build WASM artifacts
+        run: cargo build --workspace --target wasm32v1-none --release
+
+      # Integration tests exercise multi-contract interaction, oracle TTL
+      # expiry via ledger timestamp manipulation, and the admin upgrade flow.
+      # They require the `testutils` feature and the compiled WASM (built above).
+      - name: Run integration tests
+        run: >
+          cargo test
+          --features testutils
+          --test integration
+          --manifest-path greenpay-contract/Cargo.toml

@@ -25,7 +25,7 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype,
+    contract, contractclient, contractimpl, contracttype, contracterror,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
@@ -63,6 +63,24 @@ pub enum BadgeTier {
     Tree,          // ≥ 100 XLM
     Forest,        // ≥ 500 XLM
     EarthGuardian, // ≥ 2000 XLM
+}
+
+// ─── Contract errors ──────────────────────────────────────────────────────────
+
+/// Typed errors returned by contract entry-points that require authorisation.
+///
+/// Using `#[contracterror]` (rather than `panic!`) gives callers a stable,
+/// machine-readable signal they can match on, and satisfies the Soroban SDK's
+/// `try_*` generated-client interface.
+#[contracterror]
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[repr(u32)]
+pub enum ContractError {
+    /// The transaction invoker is neither the donor nor the contract admin.
+    Unauthorized = 1,
+    /// An arithmetic operation would have overflowed its integer type, or a
+    /// donation amount exceeds the protocol-defined maximum.
+    Overflow = 2,
 }
 
 // ─── Data structures ──────────────────────────────────────────────────────────
@@ -255,6 +273,16 @@ const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 // panics and misleading impact figures from misconfigured projects.
 const MAX_CO2_PER_XLM: u32 = 100_000;
 
+/// Maximum single-donation size accepted by `donate()` and `donate_usdc()`.
+///
+/// Set to 100 000 XLM in stroops. This is intentionally conservative:
+///   * At MAX_CO2_PER_XLM = 100 000 g/XLM the worst-case CO₂ increment is
+///     100 000 XLM × 100 000 g = 10 000 000 000 g ≈ 10⁷ i128 — nowhere near
+///     i128::MAX (~1.7 × 10³⁸), so every intermediate product stays safe.
+///   * The cap is a policy boundary that prevents runaway storage values from
+///     a single outlier transaction, not an arithmetic necessity.
+const MAX_DONATION: i128 = 100_000 * STROOP; // 100 000 XLM in stroops
+
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
     if xlm >= 2000 {
@@ -268,6 +296,35 @@ fn calculate_badge(total_stroops: i128) -> BadgeTier {
     } else {
         BadgeTier::None
     }
+}
+
+/// Compute the CO₂ offset in grams for a donation.
+///
+/// # Parameters
+/// * `amount_stroops` — donation size in stroops (XLM × 10⁷). Must be
+///   `≤ MAX_DONATION`; larger values return `ContractError::Overflow`.
+/// * `co2_per_xlm`    — grams of CO₂ offset per whole XLM, as registered
+///   for the project (capped at `MAX_CO2_PER_XLM` at registration time).
+///
+/// # Returns
+/// `Ok(grams)` on success, or `Err(ContractError::Overflow)` if:
+/// * `amount_stroops > MAX_DONATION`, **or**
+/// * the intermediate `xlm_units × co2_per_xlm` product overflows `i128`.
+///
+/// # Why both guards?
+/// The cap (`MAX_DONATION`) is a *policy* barrier — it prevents a single
+/// donation from dominating global statistics and is enforced before any
+/// arithmetic.  The `checked_mul` is an *arithmetic* safety net that catches
+/// any residual overflow (e.g. a corrupted `co2_per_xlm` that slipped past
+/// the `MAX_CO2_PER_XLM` registration gate).
+fn compute_co2_offset(amount_stroops: i128, co2_per_xlm: u32) -> Result<i128, ContractError> {
+    if amount_stroops > MAX_DONATION {
+        return Err(ContractError::Overflow);
+    }
+    let xlm_units = amount_stroops / STROOP; // infallible: divisor is non-zero constant
+    xlm_units
+        .checked_mul(co2_per_xlm as i128)
+        .ok_or(ContractError::Overflow)
 }
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -576,6 +633,9 @@ impl GreenPayContract {
         if amount <= 0 {
             panic!("Donation amount must be positive");
         }
+        if amount > MAX_DONATION {
+            panic!("Donation amount exceeds maximum");
+        }
 
         let mut project: Project = env
             .storage()
@@ -589,11 +649,10 @@ impl GreenPayContract {
             panic!("Donation below minimum");
         }
 
-        // Pre-compute CO2 increment with checked multiplication so an attacker
-        // can't trigger a silent wrap via a project with a huge co2_per_xlm.
-        let xlm_units = amount / STROOP;
-        let co2_increment = xlm_units
-            .checked_mul(project.co2_per_xlm as i128)
+        // Delegate CO2 arithmetic to the shared helper that enforces the
+        // MAX_DONATION cap and uses checked_mul to return ContractError::Overflow
+        // instead of panicking on pathological inputs.
+        let co2_increment = compute_co2_offset(amount, project.co2_per_xlm)
             .expect("CO2 calculation overflow");
 
         let mut donor_stats: DonorStats = env
@@ -1041,8 +1100,33 @@ impl GreenPayContract {
 
     // ─── Placeholders ─────────────────────────────────────────────────────────
 
-    pub fn mint_impact_nft(env: Env, donor: Address, tier: BadgeTier) {
-        donor.require_auth();
+    /// Manually mint an impact-tier NFT for `donor`.
+    ///
+    /// # Authorization
+    /// `caller` must equal `donor` (self-service) **or** the contract admin.
+    /// Any other address receives [`ContractError::Unauthorized`].
+    ///
+    /// # Errors
+    /// * [`ContractError::Unauthorized`] — `caller` is neither `donor` nor admin.
+    ///
+    /// # Panics
+    /// * `"Cannot mint NFT for None tier"` — `tier` is `BadgeTier::None`.
+    /// * `"No badge tier reached yet"` — donor has not earned any badge.
+    /// * `"Tier does not match donor's current badge"` — `tier` doesn't match.
+    /// * `"NFT already minted for this tier"` — duplicate mint attempt.
+    pub fn mint_impact_nft(env: Env, caller: Address, donor: Address, tier: BadgeTier) -> Result<(), ContractError> {
+        // ── Authorization: caller must be donor or admin ──────────────────────
+        caller.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if caller != donor && caller != stored_admin {
+            return Err(ContractError::Unauthorized);
+        }
+
+        // ── Validation ───────────────────────────────────────────────────────
         if tier == BadgeTier::None {
             panic!("Cannot mint NFT for None tier");
         }
@@ -1069,6 +1153,7 @@ impl GreenPayContract {
             panic!("NFT already minted for this tier");
         }
 
+        // ── Effects ──────────────────────────────────────────────────────────
         let nft = ImpactNFT {
             owner: donor.clone(),
             tier: tier.clone(),
@@ -1078,6 +1163,7 @@ impl GreenPayContract {
         env.storage().instance().set(&key, &nft);
         env.events()
             .publish((symbol_short!("nft_mint"), donor), tier);
+        Ok(())
     }
 
     /// Returns the impact NFT minted for `owner` at `tier`, if it exists.
@@ -1377,6 +1463,9 @@ impl GreenPayContract {
         if usdc_amount <= 0 {
             panic!("Donation amount must be positive");
         }
+        if usdc_amount > MAX_DONATION {
+            panic!("Donation amount exceeds maximum");
+        }
 
         let stored_usdc: Option<Address> = env.storage().instance().get(&DataKey::USDCTokenAddress);
         if stored_usdc.is_none() || stored_usdc.unwrap() != usdc_token {
@@ -1434,10 +1523,9 @@ impl GreenPayContract {
             panic!("Donation below minimum");
         }
 
-        // Pre-compute CO2 increment using XLM-equivalent
-        let xlm_units = xlm_equivalent / STROOP;
-        let co2_increment = xlm_units
-            .checked_mul(project.co2_per_xlm as i128)
+        // Delegate CO2 arithmetic to the shared helper — uses checked_mul and
+        // enforces the MAX_DONATION cap on the XLM-equivalent amount.
+        let co2_increment = compute_co2_offset(xlm_equivalent, project.co2_per_xlm)
             .expect("CO2 calculation overflow");
 
         let mut donor_stats: DonorStats = env
@@ -2868,5 +2956,160 @@ mod tests {
 
         assert_eq!(client.get_project(&pid).total_raised, amount);
         assert_eq!(client.get_donation_count(), 1);
+    }
+
+    // ── mint_impact_nft authorization tests (#1149) ───────────────────────────
+
+    /// A third party (neither the donor nor the admin) calling mint_impact_nft
+    /// must receive ContractError::Unauthorized and the NFT must NOT be minted.
+    #[test]
+    fn test_mint_impact_nft_third_party_is_unauthorized() {
+        let (env, cid, client, _admin, _pid) = setup();
+
+        let donor = Address::generate(&env);
+        let third_party = Address::generate(&env);
+
+        // Give the donor a Seedling badge so the call would otherwise succeed.
+        grant_badge(&env, &cid, &donor);
+
+        // Call as a completely unrelated third party — must be rejected.
+        let result = client.try_mint_impact_nft(&third_party, &donor, &BadgeTier::Seedling);
+        assert_eq!(
+            result,
+            Err(Ok(ContractError::Unauthorized)),
+            "Expected ContractError::Unauthorized when caller is a third party"
+        );
+
+        // Confirm no NFT was stored.
+        assert!(
+            !client.has_nft(&donor, &BadgeTier::Seedling),
+            "NFT must not be minted when caller is unauthorized"
+        );
+    }
+
+    /// The donor themselves can successfully mint their own impact NFT.
+    #[test]
+    fn test_mint_impact_nft_donor_self_service_succeeds() {
+        let (env, cid, client, _admin, _pid) = setup();
+
+        let donor = Address::generate(&env);
+        grant_badge(&env, &cid, &donor);
+
+        // Donor signs their own mint — must succeed.
+        client.mint_impact_nft(&donor, &donor, &BadgeTier::Seedling);
+
+        assert!(
+            client.has_nft(&donor, &BadgeTier::Seedling),
+            "NFT must be stored after donor self-service mint"
+        );
+    }
+
+    /// The contract admin can mint an impact NFT on behalf of any donor.
+    #[test]
+    fn test_mint_impact_nft_admin_on_behalf_of_donor_succeeds() {
+        let (env, cid, client, admin, _pid) = setup();
+
+        let donor = Address::generate(&env);
+        grant_badge(&env, &cid, &donor);
+
+        // Admin mints on behalf of the donor — must succeed.
+        client.mint_impact_nft(&admin, &donor, &BadgeTier::Seedling);
+
+        assert!(
+            client.has_nft(&donor, &BadgeTier::Seedling),
+            "NFT must be stored when admin mints on behalf of donor"
+        );
+    }
+
+    // ── compute_co2_offset unit tests (#1154) ─────────────────────────────────
+
+    /// Normal input: 10 XLM at 500 g/XLM → 5 000 g.
+    /// Validates the happy-path arithmetic and the Ok(grams) return shape.
+    #[test]
+    fn test_compute_co2_offset_normal_input_returns_correct_grams() {
+        let amount = 10 * STROOP; // 10 XLM in stroops
+        let rate: u32 = 500;      // g CO₂ per XLM
+        let result = compute_co2_offset(amount, rate);
+        assert_eq!(result, Ok(5_000), "10 XLM × 500 g/XLM must equal 5 000 g");
+    }
+
+    /// Exact MAX_DONATION is accepted — the cap is inclusive (≤, not <).
+    #[test]
+    fn test_compute_co2_offset_at_max_donation_succeeds() {
+        let result = compute_co2_offset(MAX_DONATION, MAX_CO2_PER_XLM);
+        // MAX_DONATION = 100_000 XLM; MAX_CO2_PER_XLM = 100_000 g/XLM
+        // expected = 100_000 × 100_000 = 10_000_000_000 g
+        assert_eq!(
+            result,
+            Ok(100_000 * 100_000),
+            "MAX_DONATION × MAX_CO2_PER_XLM must not overflow"
+        );
+    }
+
+    /// One stroop above MAX_DONATION must return ContractError::Overflow
+    /// immediately, before any multiplication is attempted.
+    #[test]
+    fn test_compute_co2_offset_one_stroop_over_cap_returns_overflow() {
+        let result = compute_co2_offset(MAX_DONATION + 1, 1);
+        assert_eq!(
+            result,
+            Err(ContractError::Overflow),
+            "Amount one stroop above MAX_DONATION must return Overflow"
+        );
+    }
+
+    /// Near-overflow input (i128::MAX / 2 stroops) must return
+    /// ContractError::Overflow, not panic or silently wrap.
+    /// This is the exact scenario described in issue #1154.
+    #[test]
+    fn test_compute_co2_offset_near_i128_max_returns_overflow() {
+        // i128::MAX / 2 far exceeds MAX_DONATION so the cap fires first.
+        let huge = i128::MAX / 2;
+        let result = compute_co2_offset(huge, 3);
+        assert_eq!(
+            result,
+            Err(ContractError::Overflow),
+            "i128::MAX/2 input must return Overflow, not panic"
+        );
+    }
+
+    /// Even with co2_per_xlm = 0 the result is 0 g — not an error.
+    #[test]
+    fn test_compute_co2_offset_zero_rate_returns_zero() {
+        let result = compute_co2_offset(10 * STROOP, 0);
+        assert_eq!(result, Ok(0), "Zero CO₂ rate must return Ok(0)");
+    }
+
+    /// donate() rejects a donation of MAX_DONATION + 1 stroops.
+    /// Validates the cap is wired into the entry-point, not just the helper.
+    #[test]
+    #[should_panic(expected = "Donation amount exceeds maximum")]
+    fn test_donate_over_max_donation_is_rejected() {
+        let (env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        // Mint enough tokens so the cap — not a balance error — triggers first.
+        StellarAssetClient::new(&env, &token).mint(&donor, &(MAX_DONATION + 1));
+
+        client.donate(&token, &donor, &pid, &(MAX_DONATION + 1), &0u32);
+    }
+
+    /// donate() accepts a donation of exactly MAX_DONATION stroops.
+    /// Confirms the boundary is ≤, not <.
+    #[test]
+    fn test_donate_at_max_donation_succeeds() {
+        let (env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        // Top up the donor's balance to exactly MAX_DONATION.
+        // setup_min_donation already minted 100 XLM; mint the remainder.
+        let top_up = MAX_DONATION - 100 * STROOP;
+        StellarAssetClient::new(&env, &token).mint(&donor, &top_up);
+
+        client.donate(&token, &donor, &pid, &MAX_DONATION, &0u32);
+
+        assert_eq!(
+            client.get_project(&pid).total_raised,
+            MAX_DONATION,
+            "Donation of exactly MAX_DONATION must be accepted"
+        );
     }
 }

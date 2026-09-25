@@ -6,14 +6,28 @@ description = "Stellar GreenPay — Soroban smart contract for transparent clima
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+# cdylib   — produces the .wasm artifact deployed on-chain.
+# rlib     — produces a linkable Rust library so the integration test crate
+#            (tests/integration.rs) can import the contract's public types and
+#            generated client via `use greenpay_contract::...`.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "27.0.3"
 
 [dev-dependencies]
 soroban-sdk = { version = "27.0.3", features = ["testutils"] }
-proptest = "1.4"
+proptest    = "1.4"
+
+# ── Integration test target ──────────────────────────────────────────────────
+# Declaring the target explicitly lets us gate it behind `required-features`
+# so that `cargo test` (without --features testutils) skips the integration
+# tests cleanly instead of producing a confusing compile error about missing
+# test utilities.
+[[test]]
+name             = "integration"
+path             = "tests/integration.rs"
+required-features = ["testutils"]
 
 [features]
 testutils = ["soroban-sdk/testutils"]
