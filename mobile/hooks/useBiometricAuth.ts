@@ -41,8 +41,12 @@ export interface BiometricAuthResult {
    * vs. "Authentication failed — please try again").
    */
   outcome: BiometricAuthOutcome;
-  /** Underlying error message returned by expo-local-authentication, if any. */
-  error?: string;
+  /** Underlying error message, e.g. 'cancelled', 'not_available', or null on success. */
+  error?: string | null;
+}
+
+export interface AuthenticateOptions {
+  allowDeviceFallback?: boolean;
 }
 
 export interface BiometricCapabilities {
@@ -65,7 +69,7 @@ export interface UseBiometricAuthReturn extends BiometricCapabilities {
    * {@link BiometricAuthResult} — check `.success` before performing
    * sensitive operations like signing a Stellar / Soroban transaction.
    */
-  authenticate: (prompt?: string) => Promise<BiometricAuthResult>;
+  authenticate: (prompt?: string, options?: AuthenticateOptions) => Promise<BiometricAuthResult>;
   refresh: () => Promise<void>;
 }
 
@@ -100,9 +104,10 @@ async function resolveBiometricLabel(): Promise<string> {
  * should prefer {@link useBiometricAuth}.
  */
 export async function authenticate(
-  promptMessage: string = DEFAULT_PROMPT
+  promptMessage: string = DEFAULT_PROMPT,
+  options?: AuthenticateOptions
 ): Promise<boolean> {
-  const result = await runAuthentication(promptMessage);
+  const result = await runAuthentication(promptMessage, options);
   return result.success;
 }
 
@@ -111,7 +116,8 @@ export async function authenticate(
  * standalone helper so behavior stays consistent.
  */
 async function runAuthentication(
-  promptMessage: string
+  promptMessage: string,
+  options: AuthenticateOptions = {}
 ): Promise<BiometricAuthResult> {
   let hasHardware = false;
   let enrolled = false;
@@ -128,9 +134,14 @@ async function runAuthentication(
     };
   }
 
-  const label = await resolveBiometricLabel();
-
   if (!hasHardware || !enrolled) {
+    if (options.allowDeviceFallback === false) {
+      return {
+        success: false,
+        outcome: 'error',
+        error: 'not_available',
+      };
+    }
     // No biometrics available — drop directly to device PIN/passcode.
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: PIN_PROMPT,
@@ -141,11 +152,13 @@ async function runAuthentication(
     return mapResult(result);
   }
 
+  const label = await resolveBiometricLabel();
+
   const result = await LocalAuthentication.authenticateAsync({
     promptMessage,
     fallbackLabel: `Use ${label === 'Face ID' ? 'Passcode' : 'PIN'}`,
     cancelLabel: 'Cancel',
-    disableDeviceFallback: false,
+    disableDeviceFallback: options.allowDeviceFallback === false,
   });
   return mapResult(result);
 }
@@ -159,16 +172,19 @@ function mapResult(
   result: LocalAuthentication.LocalAuthenticationResult
 ): BiometricAuthResult {
   if (result.success) {
-    return { success: true, outcome: 'success' };
+    return { success: true, outcome: 'success', error: null };
   }
   const code = result.error;
   if (code === 'user_cancel' || code === 'system_cancel' || code === 'app_cancel') {
-    return { success: false, outcome: 'cancel', error: code };
+    return { success: false, outcome: 'cancel', error: 'cancelled' };
+  }
+  if (code === 'not_available' || code === 'not_enrolled') {
+    return { success: false, outcome: 'error', error: 'not_available' };
   }
   if (code === 'user_fallback') {
     return { success: false, outcome: 'fallback', error: code };
   }
-  return { success: false, outcome: 'error', error: code };
+  return { success: false, outcome: 'error', error: code ?? 'unknown' };
 }
 
 /**
@@ -228,14 +244,17 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
   }, [refresh]);
 
   const authenticateFn = useCallback(
-    async (prompt: string = DEFAULT_PROMPT): Promise<BiometricAuthResult> => {
+    async (
+      prompt: string = DEFAULT_PROMPT,
+      options?: AuthenticateOptions
+    ): Promise<BiometricAuthResult> => {
       safeSetIsAuthenticating(true);
       try {
         // `runAuthentication` re-probes hardware capabilities on each
         // call. We accept that extra round-trip here so the same code
         // path is used for both the hook and the standalone helper —
         // keeps the security logic in one place and avoids drift.
-        const result = await runAuthentication(prompt);
+        const result = await runAuthentication(prompt, options);
         safeSetLastResult(result);
         return result;
       } finally {

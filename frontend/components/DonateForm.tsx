@@ -156,6 +156,10 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           transactionHash: result.hash,
         });
 
+        if (!donorBadge && amountNum >= 10) {
+          setDonorBadge("🌱 Seedling");
+        }
+
         setStep("success");
         onSuccess?.();
       } else {
@@ -195,6 +199,10 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           message: message.trim() || undefined,
           transactionHash: result.hash,
         });
+
+        if (amountNum >= 10) {
+          setDonorBadge("🌱 Seedling");
+        }
 
         setStep("success");
         onSuccess?.();

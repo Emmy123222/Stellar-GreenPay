@@ -278,4 +278,95 @@ describe('useBiometricAuth (React hook)', () => {
     const result = await authenticate('Send donation');
     expect(result).toBe(false);
   });
+
+  describe('biometric prompt flow acceptance criteria (#1174)', () => {
+    it('biometric success → { success: true, error: null }', async () => {
+      LA.hasHardwareAsync.mockResolvedValue(true);
+      LA.isEnrolledAsync.mockResolvedValue(true);
+      LA.authenticateAsync.mockResolvedValue({ success: true });
+
+      let authResult: any;
+      function TestHook() {
+        const bio = useBiometricAuth();
+        return (
+          <Pressable
+            testID="bio-trigger"
+            onPress={async () => {
+              authResult = await bio.authenticate();
+            }}
+          />
+        );
+      }
+
+      const { getByTestId } = await act(async () => render(<TestHook />));
+      await act(async () => {
+        fireEvent.press(getByTestId('bio-trigger'));
+      });
+
+      expect(authResult).toEqual({
+        success: true,
+        outcome: 'success',
+        error: null,
+      });
+    });
+
+    it('biometric failure (cancelled) → { success: false, error: "cancelled" }', async () => {
+      LA.hasHardwareAsync.mockResolvedValue(true);
+      LA.isEnrolledAsync.mockResolvedValue(true);
+      LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
+
+      let authResult: any;
+      function TestHook() {
+        const bio = useBiometricAuth();
+        return (
+          <Pressable
+            testID="bio-trigger"
+            onPress={async () => {
+              authResult = await bio.authenticate();
+            }}
+          />
+        );
+      }
+
+      const { getByTestId } = await act(async () => render(<TestHook />));
+      await act(async () => {
+        fireEvent.press(getByTestId('bio-trigger'));
+      });
+
+      expect(authResult).toEqual({
+        success: false,
+        outcome: 'cancel',
+        error: 'cancelled',
+      });
+    });
+
+    it('biometric unavailable (device has no biometrics) → { success: false, error: "not_available" }', async () => {
+      LA.hasHardwareAsync.mockResolvedValue(false);
+      LA.isEnrolledAsync.mockResolvedValue(false);
+
+      let authResult: any;
+      function TestHook() {
+        const bio = useBiometricAuth();
+        return (
+          <Pressable
+            testID="bio-trigger"
+            onPress={async () => {
+              authResult = await bio.authenticate(undefined, { allowDeviceFallback: false });
+            }}
+          />
+        );
+      }
+
+      const { getByTestId } = await act(async () => render(<TestHook />));
+      await act(async () => {
+        fireEvent.press(getByTestId('bio-trigger'));
+      });
+
+      expect(authResult).toEqual({
+        success: false,
+        outcome: 'error',
+        error: 'not_available',
+      });
+    });
+  });
 });
