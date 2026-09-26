@@ -4,6 +4,9 @@
  * A full-viewport Leaflet world map that renders active climate project
  * markers. Each marker opens a mini popup card (see ProjectMapMarker).
  *
+ * Viewport-aware loading: only fetches and renders projects within the
+ * current map bounds + 20% buffer, debounced at 300ms on pan/zoom.
+ *
  * ⚠ Leaflet has no server-side rendering support — this component MUST be
  *   imported with `{ ssr: false }` via next/dynamic:
  *
@@ -17,18 +20,15 @@
  */
 "use client";
 
-import { useEffect } from "react";
-import { MapContainer, TileLayer, ZoomControl } from "react-leaflet";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { MapContainer, TileLayer, ZoomControl, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import type { ClimateProject } from "@/utils/types";
 import { geocodeLocation, jitterCoords } from "@/utils/geocode";
+import { fetchGeoProjects } from "@/lib/api";
 import ProjectMapMarker from "./ProjectMapMarker";
 
 // ── Fix Leaflet's broken default-icon asset resolution under webpack ───────────
-// Leaflet resolves icon URLs at runtime from `L.Icon.Default.imagePath`; under
-// webpack/Next.js the image files aren't shipped correctly.  We replace the
-// default with a small inline SVG divIcon so nothing is imported from the
-// leaflet assets directory.
 const DEFAULT_ICON = L.divIcon({
   className: "",
   html: `
@@ -47,25 +47,95 @@ const DEFAULT_ICON = L.divIcon({
   popupAnchor:[0,  -38],
 });
 
-// Patch the prototype so every Marker in this page gets the custom icon
-// without having to pass it explicitly.
 L.Marker.prototype.options.icon = DEFAULT_ICON;
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface ProjectMapProps {
   /** Active climate projects to pin on the map. */
-  projects: ClimateProject[];
+  projects?: ClimateProject[];
+}
+
+/**
+ * Calculates a bounding box string (minLng,minLat,maxLng,maxLat) with an optional buffer
+ * (default 20%).
+ */
+export function computeBufferedBbox(bounds: L.LatLngBounds, bufferFraction = 0.2): string {
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  const latBuffer = (north - south) * bufferFraction;
+  const lngBuffer = (east - west) * bufferFraction;
+  const minLat = Math.max(-90, south - latBuffer);
+  const maxLat = Math.min(90, north + latBuffer);
+  const minLng = Math.max(-180, west - lngBuffer);
+  const maxLng = Math.min(180, east + lngBuffer);
+  return `${minLng.toFixed(4)},${minLat.toFixed(4)},${maxLng.toFixed(4)},${maxLat.toFixed(4)}`;
+}
+
+/**
+ * Inner component to hook into Leaflet map events for viewport awareness.
+ */
+function ViewportHandler({
+  onBoundsChange,
+}: {
+  onBoundsChange: (bounds: L.LatLngBounds) => void;
+}) {
+  const map = useMapEvents({
+    moveend: () => onBoundsChange(map.getBounds()),
+    zoomend: () => onBoundsChange(map.getBounds()),
+  });
+
+  useEffect(() => {
+    onBoundsChange(map.getBounds());
+  }, [map, onBoundsChange]);
+
+  return null;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function ProjectMap({ projects }: ProjectMapProps) {
-  // Leaflet needs the CSS — import it once at runtime (not at module level so
-  // it doesn't run on the server via accidental imports).
+export default function ProjectMap({ projects = [] }: ProjectMapProps) {
+  const [visibleProjects, setVisibleProjects] = useState<ClimateProject[]>(projects);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync visible projects when the prop changes using the render-time
+  // "adjusting state when a prop changes" pattern recommended by the React
+  // docs, rather than useEffect (which triggers the react-hooks/set-state-in-effect lint).
+  const [prevProjects, setPrevProjects] = useState(projects);
+  if (projects !== prevProjects) {
+    setPrevProjects(projects);
+    setVisibleProjects(projects);
+  }
+
+  const handleBoundsChange = useCallback((bounds: L.LatLngBounds) => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        const bbox = computeBufferedBbox(bounds, 0.2);
+        const geoProjects = await fetchGeoProjects(bbox);
+        if (Array.isArray(geoProjects)) {
+          setVisibleProjects(geoProjects);
+        }
+      } catch (err) {
+        console.error("Failed to fetch geo projects in bounds:", err);
+      }
+    }, 300);
+  }, []);
+
   useEffect(() => {
-    // Only import once; subsequent HMR reloads skip this because the link
-    // element already exists in the document head.
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (typeof document !== "undefined" &&
         !document.head.querySelector('link[href*="leaflet"]')) {
       const link = document.createElement("link");
@@ -86,23 +156,23 @@ export default function ProjectMap({ projects }: ProjectMapProps) {
       scrollWheelZoom={true}
       zoomControl={false}
       className="h-full w-full"
-      // Restrict panning so users can't scroll past the poles
       maxBounds={[[-90, -180], [90, 180]]}
       maxBoundsViscosity={1.0}
       aria-label="World map of active climate projects"
     >
-      {/* OpenStreetMap tile layer — no API key needed */}
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors'
         maxZoom={19}
       />
 
-      {/* Custom positioned zoom control (bottom-right avoids navbar overlap) */}
       <ZoomControl position="bottomright" />
 
-      {/* Project markers */}
-      {projects.map((project) => {
+      {/* Viewport listener with 300ms debounce */}
+      <ViewportHandler onBoundsChange={handleBoundsChange} />
+
+      {/* Viewport-aware project markers */}
+      {visibleProjects.map((project) => {
         const base     = geocodeLocation(project.location);
         const position = jitterCoords(base, project.id);
         return (

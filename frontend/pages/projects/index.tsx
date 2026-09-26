@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/router";
 import ProjectCard, { ProjectCardSkeleton } from "@/components/ProjectCard";
 import ProjectComparison from "@/components/ProjectComparison";
-import { fetchProjects, fetchTagSuggestions } from "@/lib/api";
+import { fetchProjects, fetchProjectsWithPagination, fetchTagSuggestions } from "@/lib/api";
 import { PROJECT_CATEGORIES, CATEGORY_ICONS } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 import { useAutocomplete } from "@/hooks/useAutocomplete";
@@ -15,10 +15,15 @@ export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<ClimateProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [pageSize, setPageSize] = useState<number>(20);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [showComparison, setShowComparison] = useState(false);
   
   const searchRef = useRef<HTMLDivElement>(null);
+  const observerTarget = useRef<HTMLDivElement>(null);
   
   const {
     query: search,
@@ -59,24 +64,69 @@ export default function ProjectsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Debounced search effect
+  // Debounced search / filter fetch effect with pagination
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoading(true);
-      fetchProjects({
+      fetchProjectsWithPagination({
         category: category || undefined,
         status: status || undefined,
         verified: verified || undefined,
         search: search || undefined,
-        limit: 50,
+        limit: pageSize,
       })
-        .then(setProjects)
+        .then((res) => {
+          setProjects(res.projects);
+          setNextCursor(res.nextCursor);
+          setHasMore(res.hasMore);
+        })
         .catch(console.error)
         .finally(() => setLoading(false));
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [category, status, verified, search]);
+  }, [category, status, verified, search, pageSize]);
+
+  // Infinite scroll loader: fetches the next page when near bottom
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || !nextCursor) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchProjectsWithPagination({
+        category: category || undefined,
+        status: status || undefined,
+        verified: verified || undefined,
+        search: search || undefined,
+        limit: pageSize,
+        cursor: nextCursor,
+      });
+      setProjects((prev) => [...prev, ...res.projects]);
+      setNextCursor(res.nextCursor);
+      setHasMore(res.hasMore);
+    } catch (err) {
+      console.error("Failed to load more projects:", err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loading, loadingMore, hasMore, nextCursor, category, status, verified, search, pageSize]);
+
+  // Observer to trigger loadMore when user scrolls near the bottom
+  useEffect(() => {
+    const target = observerTarget.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
+          loadMore();
+        }
+      },
+      { rootMargin: "300px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadMore, hasMore, loading, loadingMore]);
 
   useEffect(() => {
     if (!compareQuery || projects.length === 0) return;
@@ -373,6 +423,26 @@ export default function ProjectsPage() {
               ))}
             </div>
           </div>
+
+          <div>
+            <p className="label">Page Size</p>
+            <div className="flex gap-2">
+              {[20, 50, 100].map((size) => (
+                <button
+                  key={size}
+                  onClick={() => setPageSize(size)}
+                  className={clsx(
+                    "flex-1 py-1 px-2 rounded-lg text-xs font-body font-semibold transition-colors border",
+                    pageSize === size
+                      ? "bg-forest-700 text-white border-forest-700"
+                      : "bg-white text-forest-700 border-forest-200 hover:bg-forest-50",
+                  )}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          </div>
         </aside>
 
         {/* Grid */}
@@ -411,33 +481,50 @@ export default function ProjectsPage() {
               </p>
             </div>
           ) : (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((p) => (
-                <div key={p.id} className="relative">
-                  <div
-                    className={`absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-body shadow-sm ${
-                      selectedProjectIds.includes(p.id)
-                        ? "bg-forest-700 text-white border-forest-700"
-                        : "bg-white text-forest-700 border-forest-200"
-                    }`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                    }}
-                  >
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedProjectIds.includes(p.id)}
-                        onChange={() => toggleSelection(p.id)}
-                        disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
-                      />
-                      Compare
-                    </label>
+            <>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {projects.map((p) => (
+                  <div key={p.id} className="relative">
+                    <div
+                      className={`absolute left-3 top-3 z-30 flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-body shadow-sm ${
+                        selectedProjectIds.includes(p.id)
+                          ? "bg-forest-700 text-white border-forest-700"
+                          : "bg-white text-forest-700 border-forest-200"
+                      }`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                    >
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedProjectIds.includes(p.id)}
+                          onChange={() => toggleSelection(p.id)}
+                          disabled={selectedProjectIds.length >= 3 && !selectedProjectIds.includes(p.id)}
+                        />
+                        Compare
+                      </label>
+                    </div>
+                    <ProjectCard project={p} />
                   </div>
-                  <ProjectCard project={p} />
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+
+              {/* Infinite scroll sentinel & status */}
+              <div ref={observerTarget} className="h-12 flex items-center justify-center my-6">
+                {loadingMore && (
+                  <div className="flex items-center gap-2 text-forest-600 text-sm font-body">
+                    <span className="animate-spin text-lg">🌱</span>
+                    Loading more projects…
+                  </div>
+                )}
+                {!hasMore && projects.length > 0 && (
+                  <p className="text-xs text-forest-400 font-body">
+                    All projects loaded ({projects.length})
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>

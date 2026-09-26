@@ -25,6 +25,7 @@ const { adminRequired } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
+const { geocodeLocation, jitterCoords } = require("../utils/geocode");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -237,6 +238,80 @@ router.get("/trending", async (req, res, next) => {
     await redis.set(cacheKey, responseBody, 300);
 
     res.json(responseBody);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/projects/geo?bbox=minLng,minLat,maxLng,maxLat
+router.get("/geo", async (req, res, next) => {
+  try {
+    const { bbox, status = "active" } = req.query;
+
+    const result = await pool.query(
+      "SELECT * FROM projects WHERE status = $1 ORDER BY created_at DESC",
+      [status],
+    );
+
+    const projects = result.rows.map(mapProjectRow);
+    const features = [];
+    const filteredProjects = [];
+
+    let minLng = -180, minLat = -90, maxLng = 180, maxLat = 90;
+    let hasBbox = false;
+
+    if (bbox && typeof bbox === "string") {
+      const parts = bbox.split(",").map((p) => parseFloat(p.trim()));
+      if (parts.length === 4 && parts.every((n) => !isNaN(n))) {
+        [minLng, minLat, maxLng, maxLat] = parts;
+        hasBbox = true;
+      }
+    }
+
+    for (const project of projects) {
+      const baseCoords = geocodeLocation(project.location);
+      const pos = jitterCoords(baseCoords, project.id);
+
+      if (
+        !hasBbox ||
+        (pos.lng >= minLng && pos.lng <= maxLng && pos.lat >= minLat && pos.lat <= maxLat)
+      ) {
+        filteredProjects.push({
+          ...project,
+          coordinates: { lat: pos.lat, lng: pos.lng },
+        });
+
+        features.push({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [pos.lng, pos.lat],
+          },
+          properties: {
+            id: project.id,
+            name: project.name,
+            description: project.description,
+            category: project.category,
+            location: project.location,
+            walletAddress: project.walletAddress,
+            goalXLM: project.goalXLM,
+            raisedXLM: project.raisedXLM,
+            donorCount: project.donorCount,
+            co2OffsetKg: project.co2OffsetKg,
+            status: project.status,
+            verified: project.verified,
+          },
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      type: "FeatureCollection",
+      features,
+      data: filteredProjects,
+      count: filteredProjects.length,
+    });
   } catch (e) {
     next(e);
   }

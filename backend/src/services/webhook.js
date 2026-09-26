@@ -15,7 +15,10 @@ const crypto = require("crypto");
 const PgBoss = require("pg-boss");
 const https = require("https");
 const http = require("http");
-const pool = require("../db/pool");
+function getPool() {
+  // eslint-disable-next-line global-require
+  return require("../db/pool");
+}
 const logger = require("../logger");
 const { assertPublicHttpUrl } = require("../utils/ssrf");
 
@@ -212,7 +215,7 @@ async function recordAttemptOutcome({
   permanent = false,
 }) {
   if (delivered) {
-    await pool.query(
+    await getPool().query(
       `UPDATE webhook_deliveries
        SET status = 'delivered',
            attempt_count = $2,
@@ -230,7 +233,7 @@ async function recordAttemptOutcome({
   const delaySeconds = permanent ? null : retryDelaySeconds(attemptNumber);
 
   if (delaySeconds === null) {
-    await pool.query(
+    await getPool().query(
       `UPDATE webhook_deliveries
        SET status = 'failed',
            attempt_count = $2,
@@ -248,7 +251,7 @@ async function recordAttemptOutcome({
     return { status: "failed", nextAttemptInSeconds: null };
   }
 
-  await pool.query(
+  await getPool().query(
     `UPDATE webhook_deliveries
      SET status = 'pending',
          attempt_count = $2,
@@ -332,7 +335,7 @@ async function recordAndDeliver({ projectId, url, secret, payload, options = {} 
   const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
   const event = typeof payload?.event === "string" ? payload.event : null;
 
-  await pool.query(
+  await getPool().query(
     `INSERT INTO webhook_deliveries (
        id, project_id, url, payload, event, payload_hash, status, attempt_count
      ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', 0)`,
@@ -353,7 +356,7 @@ async function recordAndDeliver({ projectId, url, secret, payload, options = {} 
  * @returns {Promise<Array<{id: string, status: string}>>}
  */
 async function processDueRetries({ limit = 50 } = {}) {
-  const { rows } = await pool.query(
+  const { rows } = await getPool().query(
     `SELECT d.id, d.url, d.payload, d.attempt_count,
             p.webhook_secret,
             p.previous_webhook_secret,
@@ -427,7 +430,7 @@ async function rotateWebhookSecret(projectId, options = {}) {
   const rotatedAtDate = new Date(nowMs);
   const expiresAtDate = new Date(nowMs + gracePeriodMs);
 
-  const projectResult = await pool.query(
+  const projectResult = await getPool().query(
     "SELECT id, webhook_secret, previous_webhook_secret FROM projects WHERE id = $1",
     [projectId]
   );
@@ -442,7 +445,7 @@ async function rotateWebhookSecret(projectId, options = {}) {
   const oldSecret = project.webhook_secret || null;
   const newSecret = "whsec_" + crypto.randomBytes(24).toString("hex");
 
-  const updateResult = await pool.query(
+  const updateResult = await getPool().query(
     `UPDATE projects
      SET webhook_secret = $1,
          previous_webhook_secret = $2,
@@ -486,7 +489,7 @@ async function rotateWebhookSecret(projectId, options = {}) {
  */
 async function checkAndDeliverMilestones(projectId) {
   try {
-    const projectResult = await pool.query(
+    const projectResult = await getPool().query(
       `SELECT id, goal_xlm, raised_xlm, webhook_url, webhook_secret,
               previous_webhook_secret, previous_webhook_secret_expires_at
        FROM projects
@@ -503,7 +506,7 @@ async function checkAndDeliverMilestones(projectId) {
 
     const progressPercent = Math.min(Math.round((raised / goal) * 100), 100);
 
-    const milestoneResult = await pool.query(
+    const milestoneResult = await getPool().query(
       `SELECT id, percentage, title
        FROM project_milestones
        WHERE project_id = $1
@@ -516,7 +519,7 @@ async function checkAndDeliverMilestones(projectId) {
     const milestones = milestoneResult.rows;
     if (milestones.length === 0) return;
 
-    const client = await pool.connect();
+    const client = await getPool().connect();
     try {
       await client.query("BEGIN");
 

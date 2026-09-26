@@ -90,6 +90,10 @@ app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
 
+const statsRouter = require("./routes/stats");
+app.use("/api/stats", statsRouter);
+app.use("/api/v1/stats", statsRouter);
+
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
 

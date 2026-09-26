@@ -36,10 +36,16 @@ function makeTxHash(char = "a") {
   return char.repeat(64);
 }
 
+const { server } = require("../services/stellar");
+
 describe("Donation flow integration (testcontainers)", () => {
   jest.setTimeout(120000);
 
   beforeAll(async () => {
+    if (typeof server.getTransaction !== "function") {
+      server.getTransaction = () => Promise.resolve({ successful: true });
+    }
+    jest.spyOn(server, "getTransaction").mockResolvedValue({ successful: true });
     // Skip if explicitly disabled or testcontainers is unavailable
     if (process.env.SKIP_INTEGRATION === "1" || !GenericContainer) {
       console.warn("Skipping integration tests (SKIP_INTEGRATION=1 or testcontainers unavailable)");
@@ -79,6 +85,7 @@ describe("Donation flow integration (testcontainers)", () => {
       delete require.cache[require.resolve("../db/pool")];
       delete require.cache[require.resolve("./donations")];
       delete require.cache[require.resolve("../services/store")];
+      try { delete require.cache[require.resolve("../services/profileQueue")]; } catch { /* ignore */ }
 
       // Require after env is set
       pool = require("../db/pool");
@@ -103,6 +110,7 @@ describe("Donation flow integration (testcontainers)", () => {
   });
 
   afterAll(async () => {
+    server.getTransaction?.mockRestore?.();
     try {
       if (pool) await pool.end();
     } catch { /* ignore */ }

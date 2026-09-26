@@ -1,4 +1,4 @@
-﻿/**
+/**
  * src/routes/stats.js
  * GET /api/stats/global — landing-page aggregate platform totals.
  */
@@ -20,6 +20,36 @@ function mapGlobalStatsRow(row = {}) {
     totalDonors: Number.parseInt(row.totalDonors, 10) || 0,
   };
 }
+
+// GET /api/stats — landing-page aggregate donation stats
+router.get("/", async (req, res, next) => {
+  try {
+    const cached = await redis.get(GLOBAL_STATS_CACHE_KEY);
+    if (cached) {
+      return res.json(cached);
+    }
+
+    const result = await pool.query(`
+      SELECT
+        COALESCE(SUM(amount), 0) AS "totalXLMRaised",
+        COUNT(DISTINCT donor)::int AS "totalDonors",
+        COUNT(*)::int AS "totalDonations"
+      FROM donations
+    `);
+
+    const row = result.rows[0] || {};
+    const stats = {
+      totalXLMRaised: Number.parseFloat(row.totalXLMRaised || "0").toFixed(7),
+      totalDonors: Number.parseInt(row.totalDonors, 10) || 0,
+      totalDonations: Number.parseInt(row.totalDonations, 10) || 0,
+    };
+    await redis.set(GLOBAL_STATS_CACHE_KEY, stats, GLOBAL_STATS_CACHE_TTL_SECONDS);
+
+    res.json(stats);
+  } catch (e) {
+    next(e);
+  }
+});
 
 // GET /api/stats/global
 router.get("/global", async (req, res, next) => {

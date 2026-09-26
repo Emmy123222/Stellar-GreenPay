@@ -524,4 +524,146 @@ mod tests {
         assert_eq!(job.status, JobStatus::Disputed);
         assert!(job.disputed);
     }
+
+    #[test]
+    fn test_lock_funds_balance_escrowed() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+        token_client.mint(&client_addr, &1000i128);
+
+        let job_id = String::from_str(&env, "job-lock");
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        // Before lock
+        assert_eq!(token_client.balance(&client_addr), 1000i128);
+        assert_eq!(token_client.balance(&client.address), 0i128);
+
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+
+        // After lock: client balance debited, contract balance credited
+        assert_eq!(token_client.balance(&client_addr), 0i128);
+        assert_eq!(token_client.balance(&client.address), 1000i128);
+        let job = client.get_job(&job_id).expect("Job should exist");
+        assert_eq!(job.status, JobStatus::Escrowed);
+    }
+
+    #[test]
+    fn test_release_balance_transferred_to_freelancer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+        token_client.mint(&client_addr, &1000i128);
+
+        let job_id = String::from_str(&env, "job-release");
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 60,
+            released: false,
+        });
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M2"),
+            percentage: 40,
+            released: false,
+        });
+
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+
+        // Release milestone 0 (60%)
+        client.release_milestone(&client_addr, &job_id, &0u32);
+
+        assert_eq!(token_client.balance(&freelancer), 600i128);
+        assert_eq!(token_client.balance(&client.address), 400i128);
+        let job = client.get_job(&job_id).unwrap();
+        assert_eq!(job.status, JobStatus::PartiallyReleased);
+
+        // Release milestone 1 (40%)
+        client.release_milestone(&client_addr, &job_id, &1u32);
+        assert_eq!(token_client.balance(&freelancer), 1000i128);
+        assert_eq!(token_client.balance(&client.address), 0i128);
+        let job = client.get_job(&job_id).unwrap();
+        assert_eq!(job.status, JobStatus::Completed);
+    }
+
+    #[test]
+    fn test_refund_balance_returned_to_donor() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+        token_client.mint(&client_addr, &1000i128);
+
+        let job_id = String::from_str(&env, "job-refund");
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        assert_eq!(token_client.balance(&client_addr), 0i128);
+
+        // Raise dispute and refund to client (release_to_freelancer = false)
+        client.raise_dispute(&client_addr, &job_id);
+        client.resolve_dispute(&admin, &job_id, &false);
+
+        // Balance refunded back to client
+        assert_eq!(token_client.balance(&client_addr), 1000i128);
+        assert_eq!(token_client.balance(&freelancer), 0i128);
+        assert_eq!(token_client.balance(&client.address), 0i128);
+        let job = client.get_job(&job_id).unwrap();
+        assert_eq!(job.status, JobStatus::Completed);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the client can release")]
+    fn test_unauthorized_release_attempt_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let unauthorized = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
+
+        let job_id = String::from_str(&env, "job-unauth");
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+
+        // Unauthorized address tries to release
+        client.release_milestone(&unauthorized, &job_id, &0u32);
+    }
 }
