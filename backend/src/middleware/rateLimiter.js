@@ -20,18 +20,13 @@ function setRateLimitHeaders(req, res, next) {
 
 const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
   const limiterNamespace = namespace || `${maxRequests}-${windowMinutes}`;
-  const store = new RedisStore({
-    prefix: `greenpay:rate-limit:${limiterNamespace}:`,
-    sendCommand: (...args) => redis.sendCommand(...args),
-  });
-
-  const limiter = rateLimit({
+  
+  const options = {
     windowMs: windowMinutes * 60 * 1000,
     max: maxRequests,
     standardHeaders: true,
     legacyHeaders: false,
     passOnStoreError: true,
-    store,
     handler: (req, res) => {
       (req.log || logger).warn({
         event: "rate_limit_hit",
@@ -46,7 +41,18 @@ const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
         message: "Too many requests — Try again later.",
       });
     },
-  });
+  };
+
+  try {
+    options.store = new RedisStore({
+      prefix: `greenpay:rate-limit:${limiterNamespace}:`,
+      sendCommand: (...args) => redis.sendCommand(...args),
+    });
+  } catch {
+    // Uses default MemoryStore if RedisStore initialization fails
+  }
+
+  const limiter = rateLimit(options);
 
   // Return both middleware in order: limiter first (populates req.rateLimit),
   // then the header setter. Express flattens middleware arrays automatically.
