@@ -36,13 +36,18 @@ export interface BiometricAuthResult {
   /** `true` only when the user successfully authenticated. */
   success: boolean;
   /**
-   * Why authentication ended the way it did. Useful for surfacing a
-   * more specific message in the UI (e.g. "Authentication cancelled"
-   * vs. "Authentication failed — please try again").
+   * Why authentication ended the way it did. Useful for branching UI on the
+   * kind of failure (cancelled vs. failed vs. PIN fallback).
    */
   outcome: BiometricAuthOutcome;
-  /** Underlying error message returned by expo-local-authentication, if any. */
-  error?: string;
+  /**
+   * Human-readable failure reason, safe to show directly to the user. Empty
+   * string when `success` is `true`. Callers should surface this rather than
+   * the raw SDK code, which is not meant for end users.
+   */
+  error: string;
+  /** Raw `expo-local-authentication` error code, when the SDK supplied one. */
+  code?: string;
 }
 
 export interface BiometricCapabilities {
@@ -124,7 +129,8 @@ async function runAuthentication(
     return {
       success: false,
       outcome: 'error',
-      error: error?.message ?? 'Unable to query biometric capabilities',
+      error: error?.message ?? 'Unable to query biometric capabilities on this device.',
+      code: 'capability_probe_failed',
     };
   }
 
@@ -150,6 +156,28 @@ async function runAuthentication(
   return mapResult(result);
 }
 
+/** Failure outcomes that carry a user-facing message. */
+const FAILURE_MESSAGES: Record<'cancel' | 'fallback' | 'error', string> = {
+  cancel: 'Authentication was cancelled, so nothing was sent.',
+  fallback: 'Biometric authentication was not completed — the device passcode/PIN fallback was used. Nothing was sent.',
+  error: 'Biometric authentication failed. Please try again.',
+};
+
+/**
+ * Maps a failure outcome (and the raw SDK code, when present) to a
+ * message that can be shown to the user as-is.
+ */
+export function biometricFailureMessage(
+  outcome: BiometricAuthOutcome,
+  code?: string
+): string {
+  if (outcome === 'success') return '';
+  if (outcome === 'error' && (code === 'lockout' || code === 'lockout_permanent')) {
+    return 'Biometrics are locked after too many failed attempts. Unlock your device or use your device PIN, then try again.';
+  }
+  return FAILURE_MESSAGES[outcome] ?? FAILURE_MESSAGES.error;
+}
+
 /**
  * Translate the SDK result object into our richer outcome enum.
  * `result.success === true` ⇒ `'success'`; otherwise we distinguish
@@ -159,16 +187,16 @@ function mapResult(
   result: LocalAuthentication.LocalAuthenticationResult
 ): BiometricAuthResult {
   if (result.success) {
-    return { success: true, outcome: 'success' };
+    return { success: true, outcome: 'success', error: '' };
   }
   const code = result.error;
+  let outcome: BiometricAuthOutcome = 'error';
   if (code === 'user_cancel' || code === 'system_cancel' || code === 'app_cancel') {
-    return { success: false, outcome: 'cancel', error: code };
+    outcome = 'cancel';
+  } else if (code === 'user_fallback') {
+    outcome = 'fallback';
   }
-  if (code === 'user_fallback') {
-    return { success: false, outcome: 'fallback', error: code };
-  }
-  return { success: false, outcome: 'error', error: code };
+  return { success: false, outcome, error: biometricFailureMessage(outcome, code), code };
 }
 
 /**
