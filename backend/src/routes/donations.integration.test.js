@@ -22,11 +22,13 @@ try {
   console.warn("Could not load testcontainers:", err.message);
 }
 const { Pool } = require("pg");
+const stellarModule = require("../services/stellar");
 
 let container;
 let pool;
 let testPool;
 let serverContainerReady = false;
+let originalGetTransaction;
 
 // Helper to build a valid Stellar public key
 function makePublicKey(char = "A") {
@@ -86,6 +88,11 @@ describe("Donation flow integration (testcontainers)", () => {
       await pool.query("SELECT 1");
 
       serverContainerReady = true;
+      originalGetTransaction = stellarModule.server.getTransaction;
+      stellarModule.server.getTransaction = jest.fn(async (txHash) => ({
+        id: txHash,
+        successful: true,
+      }));
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
     } catch (err) {
       console.warn("Testcontainers startup failed – integration tests will be skipped:", err.message);
@@ -103,6 +110,9 @@ describe("Donation flow integration (testcontainers)", () => {
   });
 
   afterAll(async () => {
+    if (originalGetTransaction) {
+      stellarModule.server.getTransaction = originalGetTransaction;
+    }
     try {
       if (pool) await pool.end();
     } catch { /* ignore */ }
