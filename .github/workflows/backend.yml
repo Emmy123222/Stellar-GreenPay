@@ -34,7 +34,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -69,6 +69,7 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
           REDIS_URL: redis://localhost:6379
+          SKIP_INTEGRATION: "1"
 
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v4

@@ -131,6 +131,16 @@ describe("Donation flow integration (testcontainers)", () => {
     await testPool.query("TRUNCATE donations, profiles, projects RESTART IDENTITY CASCADE");
   }
 
+  async function waitForQuery(sql, params, predicate, maxAttempts = 20, delayMs = 100) {
+    let res;
+    for (let i = 0; i < maxAttempts; i++) {
+      res = await testPool.query(sql, params);
+      if (predicate(res)) return res;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    return res;
+  }
+
   test("complete donation flow updates all aggregates correctly", async () => {
     if (!serverContainerReady) {
       console.warn("Skipping – testcontainer not available");
@@ -203,7 +213,11 @@ describe("Donation flow integration (testcontainers)", () => {
     expect(donationCheck.rows[0].donor_address).toBe(donorAddress);
     expect(parseFloat(donationCheck.rows[0].amount_xlm)).toBeCloseTo(10, 5);
 
-    const profile1 = await testPool.query("SELECT * FROM profiles WHERE public_key = $1", [donorAddress]);
+    const profile1 = await waitForQuery(
+      "SELECT * FROM profiles WHERE public_key = $1",
+      [donorAddress],
+      (r) => r.rows.length > 0,
+    );
     expect(profile1.rows).toHaveLength(1);
     expect(parseFloat(profile1.rows[0].total_donated_xlm)).toBeCloseTo(10, 5);
     expect(profile1.rows[0].projects_supported).toBe(1);
@@ -227,7 +241,11 @@ describe("Donation flow integration (testcontainers)", () => {
     });
     expect(res2.statusCode).toBe(201);
 
-    const profile2 = await testPool.query("SELECT total_donated_xlm, badges FROM profiles WHERE public_key = $1", [donorAddress]);
+    const profile2 = await waitForQuery(
+      "SELECT total_donated_xlm, badges FROM profiles WHERE public_key = $1",
+      [donorAddress],
+      (r) => r.rows.length > 0 && r.rows[0].badges?.[0]?.tier === "tree",
+    );
     expect(parseFloat(profile2.rows[0].total_donated_xlm)).toBeCloseTo(100, 5);
     expect(profile2.rows[0].badges[0].tier).toBe("tree");
 
@@ -252,7 +270,11 @@ describe("Donation flow integration (testcontainers)", () => {
     expect(parseFloat(project3.rows[0].raised_xlm)).toBeCloseTo(125, 5);
     expect(project3.rows[0].donor_count).toBe(2);
 
-    const profileDonor2 = await testPool.query("SELECT total_donated_xlm FROM profiles WHERE public_key = $1", [donor2]);
+    const profileDonor2 = await waitForQuery(
+      "SELECT total_donated_xlm FROM profiles WHERE public_key = $1",
+      [donor2],
+      (r) => r.rows.length > 0,
+    );
     expect(parseFloat(profileDonor2.rows[0].total_donated_xlm)).toBeCloseTo(25, 5);
 
     // Verify donations table count

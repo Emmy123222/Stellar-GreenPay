@@ -192,7 +192,7 @@ async function recordDonation(req, res, next) {
 
     await redis.deletePattern("projects:list:*");
 
-    enqueueProfileUpdate(donorAddress).catch((err) => {
+    await enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
@@ -261,7 +261,7 @@ async function recordDonation(req, res, next) {
       donorBadge,
     });
 
-    checkAndDeliverMilestones(projectId).catch((err) => {
+    await checkAndDeliverMilestones(projectId).catch((err) => {
       logger.error({ event: "milestone_webhook_error", projectId, err: err.message }, "Failed to deliver milestone webhooks");
     });
 

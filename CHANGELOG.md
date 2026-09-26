@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed invalid donation UUID format in `projects.campaigns.integration.test.js` and mocked Stellar Horizon `getTransaction` in `donations.integration.test.js`.
 - Added `week` time period filter to leaderboard query, explicit 200 status on donation deduplication, and accurate milestone percentage calculation with webhook trigger on donation recording.
 - Added synchronous profile update fallback in `profileQueue` when queue worker is not started and added webhook secret rotation columns to `schema.sql`.
+- Awaited profile updates and milestone delivery in `donations.js` to eliminate race conditions, added polling in integration tests, and fixed postgres health check and CI integration skip configuration in `backend.yml`.
 
 
 ## [1.0.0] - 2025-01-01

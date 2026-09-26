@@ -937,6 +937,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       return expect(true).toBe(true);
     }
 
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
+
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
     // eslint-disable-next-line global-require
@@ -991,7 +994,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 2) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(2);
@@ -1042,6 +1048,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       console.warn("Skipping – testcontainer not available");
       return expect(true).toBe(true);
     }
+
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
 
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
@@ -1120,7 +1129,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(1);
