@@ -25,6 +25,19 @@ export function formatXLM(amount: string | number, decimals = 2): string {
 }
 
 /**
+ * Normalize an XLM amount to 7 decimal places (1 stroop = 0.0000001 XLM).
+ * Handles numbers, strings, and scientific notation (e.g. 1e-6).
+ *
+ * @param amount - XLM amount as number or string.
+ * @returns Normalized fixed decimal string with 7 decimal places (e.g. "0.0000010").
+ */
+export function normalizeXLMAmount(amount: number | string): string {
+  const n = typeof amount === "string" ? parseFloat(amount.replace(/,/g, "")) : Number(amount);
+  if (isNaN(n) || !Number.isFinite(n)) return "0.0000000";
+  return n.toFixed(7);
+}
+
+/**
  * Convert an XLM amount into an approximate USD string.
  *
  * @param xlmAmount - Amount in XLM.
