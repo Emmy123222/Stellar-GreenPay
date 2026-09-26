@@ -17,7 +17,14 @@ interface Donation {
   amount: string;
   currency: string;
   createdAt: string;
+  co2OffsetKg?: number;
   message?: string;
+}
+
+interface MonthlyImpactPoint {
+  key: string;
+  label: string;
+  value: number;
 }
 
 interface DonorProfile {
@@ -33,6 +40,43 @@ interface ImpactStats {
   projectsSupported: number;
 }
 
+function buildMonthlyImpactPoints(donations: Donation[]): MonthlyImpactPoint[] {
+  const monthlyTotals = new Map<number, number>();
+
+  donations.forEach(donation => {
+    if (typeof donation.co2OffsetKg !== 'number' || !Number.isFinite(donation.co2OffsetKg)) return;
+
+    const date = new Date(donation.createdAt);
+    if (Number.isNaN(date.getTime())) return;
+
+    const monthIndex = date.getUTCFullYear() * 12 + date.getUTCMonth();
+    monthlyTotals.set(monthIndex, (monthlyTotals.get(monthIndex) ?? 0) + donation.co2OffsetKg);
+  });
+
+  if (monthlyTotals.size === 0) return [];
+
+  const firstMonth = Math.min(...monthlyTotals.keys());
+  const lastMonth = Math.max(...monthlyTotals.keys());
+  const points: MonthlyImpactPoint[] = [];
+
+  for (let monthIndex = firstMonth; monthIndex <= lastMonth; monthIndex += 1) {
+    const year = Math.floor(monthIndex / 12);
+    const month = monthIndex % 12;
+    const date = new Date(Date.UTC(year, month, 1));
+    points.push({
+      key: `${year}-${month + 1}`,
+      label: date.toLocaleDateString(undefined, {
+        month: 'short',
+        year: '2-digit',
+        timeZone: 'UTC',
+      }),
+      value: monthlyTotals.get(monthIndex) ?? 0,
+    });
+  }
+
+  return points;
+}
+
 export default function ImpactScreen() {
   const { colors } = useTheme();
   const [profile, setProfile] = useState<DonorProfile | null>(null);
@@ -40,7 +84,24 @@ export default function ImpactScreen() {
   const [impactStats, setImpactStats] = useState<ImpactStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [publicKey, setPublicKey] = useState('');
+  const [chartViewportWidth, setChartViewportWidth] = useState(0);
+  const [selectedImpactKey, setSelectedImpactKey] = useState<string | null>(null);
   const certificateRef = useRef<any>(null);
+  const monthlyImpact = buildMonthlyImpactPoints(donations);
+  const chartWidth = Math.max(chartViewportWidth, monthlyImpact.length * 68, 120);
+  const chartMaxValue = Math.max(
+    1,
+    Math.ceil(Math.max(0, ...monthlyImpact.map(point => point.value)) / 4) * 4
+  );
+  const chartHeight = 188;
+  const chartCoordinates = monthlyImpact.map((point, index) => ({
+    ...point,
+    x: monthlyImpact.length === 1
+      ? chartWidth / 2
+      : 24 + index * (chartWidth - 48) / (monthlyImpact.length - 1),
+    y: chartHeight - 20 - (point.value / chartMaxValue) * (chartHeight - 40),
+  }));
+  const selectedImpact = chartCoordinates.find(point => point.key === selectedImpactKey);
 
   useEffect(() => {
     const demoKey = 'GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890';
@@ -116,6 +177,111 @@ export default function ImpactScreen() {
           </Text>
           <Text style={[styles.statLabel, { color: colors.muted }]}>Badges</Text>
         </View>
+      </View>
+
+      <View style={[styles.chartCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Monthly CO₂ offset</Text>
+        {monthlyImpact.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.secondaryText }]}>No monthly impact data available</Text>
+        ) : (
+          <>
+            <Text style={[styles.chartAxisTitle, { color: colors.secondaryText }]}>CO₂ offset (kg)</Text>
+            <View style={styles.chartRow}>
+              <View style={styles.chartTicks}>
+                {[4, 3, 2, 1, 0].map(tick => (
+                  <Text key={tick} style={[styles.chartTick, { color: colors.muted }]}>
+                    {Math.round(chartMaxValue * tick / 4)}
+                  </Text>
+                ))}
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator
+                onLayout={event => setChartViewportWidth(event.nativeEvent.layout.width)}
+              >
+                <View style={{ width: chartWidth }}>
+                  <View style={[styles.chartPlot, { height: chartHeight }]}>
+                    {[0, 1, 2, 3, 4].map(tick => (
+                      <View
+                        key={tick}
+                        style={[styles.chartGridline, { top: 20 + tick * (chartHeight - 40) / 4, backgroundColor: colors.border }]}
+                      />
+                    ))}
+                    {chartCoordinates.slice(0, -1).map((point, index) => {
+                      const nextPoint = chartCoordinates[index + 1];
+                      const width = Math.hypot(nextPoint.x - point.x, nextPoint.y - point.y);
+                      const angle = Math.atan2(nextPoint.y - point.y, nextPoint.x - point.x);
+
+                      return (
+                        <View
+                          key={`${point.key}-${nextPoint.key}`}
+                          style={[
+                            styles.chartLine,
+                            {
+                              width,
+                              left: (point.x + nextPoint.x - width) / 2,
+                              top: (point.y + nextPoint.y) / 2,
+                              backgroundColor: colors.accent,
+                              transform: [{ rotate: `${angle}rad` }],
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                    {chartCoordinates.map(point => (
+                      <TouchableOpacity
+                        key={point.key}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${point.label}: ${point.value} kg CO₂ offset`}
+                        accessibilityState={{ selected: point.key === selectedImpactKey }}
+                        onPress={() => setSelectedImpactKey(point.key)}
+                        style={[styles.chartPointHit, { left: point.x - 18, top: point.y - 18 }]}
+                      >
+                        <View
+                          style={[
+                            styles.chartPoint,
+                            { backgroundColor: colors.accent, borderColor: colors.surface },
+                            point.key === selectedImpactKey && styles.chartPointSelected,
+                          ]}
+                        />
+                      </TouchableOpacity>
+                    ))}
+                    {selectedImpact && (
+                      <View
+                        pointerEvents="none"
+                        style={[
+                          styles.chartTooltip,
+                          {
+                            left: Math.max(0, Math.min(selectedImpact.x - 48, chartWidth - 96)),
+                            top: Math.max(0, selectedImpact.y - 52),
+                            backgroundColor: colors.primaryText,
+                          },
+                        ]}
+                      >
+                        <Text style={styles.chartTooltipText}>{selectedImpact.label}</Text>
+                        <Text style={styles.chartTooltipValue}>{selectedImpact.value} kg CO₂</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={[styles.chartXLabels, { height: 28 }]}>
+                    {chartCoordinates.map(point => (
+                      <Text
+                        key={point.key}
+                        numberOfLines={1}
+                        style={[
+                          styles.chartXLabel,
+                          { left: point.x - 30, color: colors.muted },
+                        ]}
+                      >
+                        {point.label}
+                      </Text>
+                    ))}
+                  </View>
+                </View>
+              </ScrollView>
+            </View>
+          </>
+        )}
       </View>
 
       <View style={[styles.historyCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
@@ -225,6 +391,95 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     marginTop: 4,
+  },
+  chartCard: {
+    marginHorizontal: 16,
+    marginBottom: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+  },
+  chartAxisTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  chartRow: {
+    flexDirection: 'row',
+  },
+  chartTicks: {
+    width: 36,
+    height: 188,
+    paddingVertical: 20,
+    justifyContent: 'space-between',
+  },
+  chartTick: {
+    fontSize: 10,
+    textAlign: 'right',
+    paddingRight: 8,
+  },
+  chartPlot: {
+    position: 'relative',
+  },
+  chartGridline: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+  },
+  chartLine: {
+    position: 'absolute',
+    height: 2,
+    transformOrigin: 'center',
+  },
+  chartPointHit: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chartPoint: {
+    width: 12,
+    height: 12,
+    borderWidth: 2,
+    borderRadius: 6,
+  },
+  chartPointSelected: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+  },
+  chartTooltip: {
+    position: 'absolute',
+    minWidth: 96,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 4,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  chartTooltipText: {
+    color: '#ffffff',
+    fontSize: 10,
+  },
+  chartTooltipValue: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  chartXLabels: {
+    position: 'relative',
+  },
+  chartXLabel: {
+    position: 'absolute',
+    width: 60,
+    textAlign: 'center',
+    fontSize: 10,
   },
   historyCard: {
     margin: 16,
