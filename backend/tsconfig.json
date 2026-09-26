@@ -3,12 +3,11 @@
     "allowJs": true,
     "checkJs": false,
     "jsx": "react",
-    "module": "commonjs",
+    "module": "ES2020",
     "target": "ES2020",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "noEmit": true,
-    "skipLibCheck": true,
-    "ignoreDeprecations": "6.0"
+    "skipLibCheck": true
   },
   "include": ["src/services/**/*.js"]
 }
