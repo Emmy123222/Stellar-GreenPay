@@ -190,6 +190,10 @@ async function recordDonation(req, res, next) {
     inTransaction = false;
 
     await redis.deletePattern("projects:list:*");
+    // The leaderboard aggregates the row just inserted, so every cached page is
+    // now stale (issue #1093). Donations recorded out-of-band by the indexer are
+    // not invalidated here; the 60-second TTL bounds how long they stay stale.
+    await redis.deletePattern("leaderboard:*");
 
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
@@ -395,13 +399,18 @@ router.get("/project/:projectId", async (req, res, next) => {
 });
 
 /**
- * List donations for a specific donor.
+ * List donations for a specific donor, one keyset-paginated page at a time.
+ *
+ * Query params: `limit` (default 20, max 100) and `cursor` (base64 of
+ * `{ created_at, id }`, echoed back as `next_cursor`). The response carries
+ * `total` — the donor's whole donation count — so a caller can show progress
+ * through the history without fetching all of it (issue #1080).
  *
  * @route GET /api/donations/donor/:publicKey
  * @param {import('express').Request} req - Express request containing the donor public key.
  * @param {import('express').Response} res - Express response object.
  * @param {import('express').NextFunction} next - Express error middleware.
- * @returns {Promise<void>} Sends the donor donation history.
+ * @returns {Promise<void>} Sends one page of the donor's history plus the total count.
  * @throws {Error} If validation or the donation query fails.
  */
 router.get("/donor/:publicKey", async (req, res, next) => {
@@ -443,7 +452,19 @@ router.get("/donor/:publicKey", async (req, res, next) => {
          ORDER BY d.created_at DESC, d.id DESC
          LIMIT $2`;
 
-    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    // A keyset window can't answer "how many are there in total", which the
+    // donor page needs to show progress through its history (issue #1080).
+    // Counted concurrently with the page, and served by the same
+    // donor_address index the page query uses.
+    const [pageResult, totalResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(
+        "SELECT COUNT(*)::int AS total FROM donations WHERE donor_address = $1",
+        [req.params.publicKey],
+      ),
+    ]);
+    const donations = pageResult.rows.map(mapDonationRow);
+    const total = Number(totalResult.rows[0]?.total ?? 0);
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore
@@ -455,7 +476,7 @@ router.get("/donor/:publicKey", async (req, res, next) => {
       ).toString("base64")
       : null;
 
-    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor });
+    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor, total });
   } catch (e) { next(e); }
 });
 

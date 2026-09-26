@@ -20,6 +20,14 @@ jest.mock("../services/profileQueue", () => ({
   enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
 }));
 
+// Named with the `mock` prefix so the hoisted jest.mock factory may close over it.
+const mockRedis = {
+  get: jest.fn(async () => null),
+  set: jest.fn(async () => {}),
+  deletePattern: jest.fn(async () => {}),
+};
+jest.mock("../services/redis", () => mockRedis);
+
 const { server } = require("../services/stellar");
 const geoip = require("geoip-lite");
 const pool = require("../db/pool");
@@ -777,5 +785,64 @@ describe("profile upsert on first donation", () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+  });
+});
+
+describe("cache invalidation on recorded donation (issue #1093)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("drops cached leaderboard pages once a donation is committed", async () => {
+    const donorAddress = makePublicKey("C");
+    const transactionHash = makeTxHash("c");
+    const donationRow = {
+      id: "donation-cache",
+      project_id: "project-c",
+      donor_address: donorAddress,
+      amount_xlm: "2",
+      amount: "2",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    createMockClient(
+      queryResult([{ id: "project-c" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([{ total: "9" }]),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-c",
+      donorAddress,
+      amountXLM: "2",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    // The new row feeds the leaderboard aggregate, so every cached page is stale.
+    expect(mockRedis.deletePattern).toHaveBeenCalledWith("leaderboard:*");
+  });
+
+  test("leaves the leaderboard cache alone when the insert fails", async () => {
+    createMockClient(queryResult([]));
+
+    const { next } = await invokeRecordDonation({
+      projectId: "project-c",
+      donorAddress: makePublicKey("C"),
+      amountXLM: "2",
+      transactionHash: makeTxHash("c"),
+    });
+
+    expect(next).toHaveBeenCalled();
+    expect(mockRedis.deletePattern).not.toHaveBeenCalled();
   });
 });
