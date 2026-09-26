@@ -47,10 +47,6 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
 
@@ -79,3 +75,61 @@ jobs:
           files: backend/coverage/lcov.info
           flags: backend
           fail_ci_if_error: false
+
+  migrations:
+    name: DB Migrations (idempotency + lock)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: greenpay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: Run migrations twice (must be idempotent)
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
+        run: |
+          npm run migrate
+          npm run migrate | tee /tmp/second-migration.log
+          grep -q "No pending migrations" /tmp/second-migration.log
+
+      - name: Migration lock rejects a concurrent run
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
+        run: |
+          # Hold the migration lock for 10s in the background, then assert that a
+          # second run is refused instead of racing the first through the
+          # pending-migration list.
+          node -e "const { withMigrationLock } = require('./src/db/migrationLock'); withMigrationLock(() => new Promise((resolve) => setTimeout(resolve, 10000))).then(() => process.exit(0)).catch((err) => { console.error(err); process.exit(1); })" &
+          LOCK_HOLDER_PID=$!
+          sleep 2
+          if MIGRATION_LOCK_TIMEOUT_SECONDS=0 npm run migrate; then
+            echo "::error::A concurrent migration run acquired the lock instead of being rejected"
+            kill "$LOCK_HOLDER_PID" 2>/dev/null || true
+            exit 1
+          fi
+          wait "$LOCK_HOLDER_PID"

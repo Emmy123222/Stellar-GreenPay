@@ -81,6 +81,46 @@ Apply the updated configuration:
 helm upgrade greenpay helm/greenpay/ -f values-prod.yaml
 ```
 
+## Running database migrations
+
+Migrations are **applied automatically** and no longer need to be run by hand on
+the production server:
+
+- `.github/workflows/deploy.yml` runs `npm run migrate` inside the freshly built
+  backend container as a **pre-deploy** step, before the new revision is rolled
+  out. If `DATABASE_URL` is not configured it skips with a warning.
+- The backend also runs migrations on boot (`runMigrations()` in
+  `backend/src/server.js`), so a rolling deploy cannot serve traffic against an
+  un-migrated schema.
+
+### Concurrency: the migration lock
+
+`backend/src/db/migrate.js` takes a Postgres session-level advisory lock
+(`backend/src/db/migrationLock.js`) before touching `schema_migrations`, so two
+processes can never apply the same migration twice or interleave them. The lock
+is owned by the connection, so it is released automatically if the process
+dies — there are no stale lock files to clean up.
+
+- A competing run waits up to `MIGRATION_LOCK_TIMEOUT_SECONDS` (default `60`)
+  and then fails with a clear error instead of racing.
+- `npm run migrate` and `npm run db:rollback` are the supported entry points;
+  both go through the lock.
+
+### Idempotency is enforced in CI
+
+The `Backend CI` workflow's `DB Migrations (idempotency + lock)` job applies
+migrations twice against a throwaway Postgres and asserts the second run reports
+`No pending migrations`, then verifies the lock rejects a concurrent run. A new
+migration that is not idempotent fails CI.
+
+Run the same checks locally with:
+
+```bash
+cd backend
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/greenpay npm run migrate
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/greenpay npm run db:rollback
+```
+
 ## Running database migrations post-deploy
 
 After the application is deployed, you must run the database migrations to set up the production schema.
