@@ -29,7 +29,7 @@
     "expo-server-sdk": "^6.1.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
-    "file-type": "^16.5.4",
+    "file-type": "^22.0.2",
     "geoip-lite": "^1.4.0",
     "helmet": "^8.2.0",
     "iconv-lite": "^0.7.2",
