@@ -21,7 +21,7 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, isValidAdminKey, verifyToken } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
@@ -262,9 +262,25 @@ router.get("/", async (req, res, next) => {
       limit = 20,
       cursor,
       sort = "created_at",
+      include_inactive,
     } = req.query;
     const sortField = VALID_SORT_FIELDS.includes(sort) ? sort : "created_at";
     const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+
+    const adminKey = req.get("X-Admin-Key");
+    const authHeader = req.headers.authorization;
+    const isAdminOverride =
+      include_inactive === "true" &&
+      ((typeof adminKey === "string" && isValidAdminKey(adminKey)) ||
+        (typeof authHeader === "string" &&
+          authHeader.startsWith("Bearer ") &&
+          (() => {
+            try {
+              return Boolean(verifyToken(authHeader.slice(7)));
+            } catch {
+              return false;
+            }
+          })()));
 
     const cacheKey =
       PROJECTS_LIST_CACHE_PREFIX +
@@ -273,6 +289,7 @@ router.get("/", async (req, res, next) => {
         status,
         verified,
         search,
+        includeInactive: include_inactive === "true" && isAdminOverride,
         sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
@@ -288,6 +305,8 @@ router.get("/", async (req, res, next) => {
     if (status && VALID_STATUSES.includes(status)) {
       values.push(status);
       where.push(`status = $${values.length}`);
+    } else if (!status && !isAdminOverride && include_inactive !== "true") {
+      where.push("status = 'active'");
     }
     if (category && VALID_CATEGORIES.includes(category)) {
       values.push(category);
