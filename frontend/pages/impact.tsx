@@ -9,7 +9,7 @@ import DonationTicker from "@/components/DonationTicker";
 import WorldMap from "@/components/WorldMap";
 import { fetchImpactGlobal, fetchLeaderboard, fetchProjects } from "@/lib/api";
 import { getGlobalImpactStats } from "@/lib/stellar";
-import { formatCO2, formatXLM, shortenAddress } from "@/utils/format";
+import { formatCO2, formatXLM, shortenAddress, normalizeXLMAmount } from "@/utils/format";
 import type { LeaderboardEntry } from "@/utils/types";
 import type { ImpactGlobalStats } from "@/lib/api";
 
@@ -185,13 +185,14 @@ export default function ImpactPage() {
   );
 }
 
-function StatCard({
+export function StatCard({
   label,
   icon,
   value,
   unit,
   isLoading,
   formatter,
+  duration,
 }: {
   label: string;
   icon: string;
@@ -199,7 +200,11 @@ function StatCard({
   unit?: string;
   isLoading: boolean;
   formatter?: (val: number) => string;
+  duration?: number;
 }) {
+  const isXLM = unit === "XLM" || label.toUpperCase().includes("XLM");
+  const normalizedValue = isXLM ? normalizeXLMAmount(value) : value;
+
   return (
     <div className="bg-white p-8 rounded-3xl border border-forest-100 shadow-sm hover:shadow-md transition-shadow relative group">
       <div className="w-12 h-12 rounded-2xl bg-forest-50 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform">
@@ -208,7 +213,7 @@ function StatCard({
       <p className="text-forest-500 font-medium text-sm uppercase tracking-wider mb-2">{label}</p>
       <div className="text-4xl font-display font-bold text-forest-900 flex items-baseline gap-1.5">
         {!isLoading ? (
-          <AnimatedNumber value={value} formatter={formatter} />
+          <AnimatedNumber value={normalizedValue} formatter={formatter} duration={duration} />
         ) : (
           <span className="w-24 h-8 bg-forest-50 animate-pulse rounded" />
         )}
