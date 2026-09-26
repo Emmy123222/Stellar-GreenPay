@@ -17,34 +17,52 @@ const successRate = new Rate('donation_success_rate');
 const SCENARIO = __ENV.SCENARIO || 'sustained';
 
 export const options = {
-  scenarios: {
-    sustained: {
-      executor: 'constant-vus',
-      vus: 100,
-      duration: '60s',
-      startTime: '0s',
-      ...(SCENARIO !== 'sustained' && { exec: '_noop' }),
-    },
-    'ramp-up': {
-      executor: 'ramping-vus',
-      startVUs: 0,
-      stages: [
-        { target: 100, duration: '30s' },
-        { target: 100, duration: '60s' },
-        { target: 0,   duration: '30s' },
-      ],
-      ...(SCENARIO !== 'ramp-up' && { exec: '_noop' }),
-    },
-  },
+  // Only the selected scenario is registered. The previous guard set `exec: '_noop'`
+// on the other one, but its virtual users still started: they spun on an empty
+// function for the whole run, so "baseline" actually measured the constant 100 VUs
+// *and* ran a ramp profile alongside them (200 VUs peak, 83 million no-op iterations
+// in a 60-second run). Selecting one scenario is what the header above already
+// claims happens.
+  scenarios: SCENARIO === 'ramp-up'
+    ? {
+        'ramp-up': {
+          executor: 'ramping-vus',
+          startVUs: 0,
+          stages: [
+            { target: 100, duration: '30s' },
+            { target: 100, duration: '60s' },
+            { target: 0,   duration: '30s' },
+          ],
+        },
+      }
+    : {
+        sustained: {
+          executor: 'constant-vus',
+          vus: 100,
+          duration: '60s',
+        },
+      },
   thresholds: {
-    // p95 must stay under 500 ms — see docs/performance.md for rationale
+    // Acceptance criteria from issue #1182: p95 under 500 ms and an error rate
+    // under 0.1%. The error thresholds used to allow 1%, which is ten times the
+    // budget the issue sets.
     donation_latency:       ['p(95)<500'],
-    donation_success_rate:  ['rate>0.99'],
-    http_req_failed:        ['rate<0.01'],
+    donation_success_rate:  ['rate>0.999'],
+    http_req_failed:        ['rate<0.001'],
   },
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4000';
+
+// `projects.id` is a UUID, so the old `project-${n}` placeholders could never match a
+// row: every request came back 404 and the run measured the lookup failure, not the
+// donation path. The id is taken from the environment and `.github/workflows/load-test.yml`
+// seeds exactly this project before the run.
+//
+// The run also needs the transaction-hash check to pass. `scripts/stub-horizon.js`
+// serves that in CI via HORIZON_URL; against a real Horizon every hash here would be
+// rejected as unconfirmed, so a local run against production Horizon measures 400s.
+const PROJECT_ID = __ENV.PROJECT_ID || '11111111-1111-4111-8111-111111111111';
 
 // Valid Stellar testnet public keys (G... 56-char base32)
 const SAMPLE_ADDRESSES = [
@@ -70,7 +88,7 @@ export default function () {
   const amountXLM = (Math.random() * 9 + 1).toFixed(7);
 
   const payload = JSON.stringify({
-    projectId:       `project-${((__VU + __ITER) % 10) + 1}`,
+    projectId:       PROJECT_ID,
     amountXLM,
     donorAddress:    donor,
     transactionHash: txHash,
