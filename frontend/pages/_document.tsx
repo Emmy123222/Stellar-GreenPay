@@ -6,6 +6,7 @@ import Document, {
   type DocumentContext,
   type DocumentInitialProps,
 } from "next/document";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 interface Props extends DocumentInitialProps {
   nonce?: string;
@@ -26,11 +27,12 @@ class MyDocument extends Document<Props> {
 
   render() {
     const { nonce } = this.props;
-    // Pre-hydration FOUC prevention. The inline script reads the
-    // `greenpay-theme` value from localStorage and applies (or removes)
-    // the `.dark` class on <html> BEFORE React mounts, which keeps the
-    // first paint at the user's preferred palette. It mirrors the
-    // logic in `lib/theme.tsx`'s `applyThemeToDocument`.
+    // Pre-hydration FOUC prevention. THEME_INIT_SCRIPT reads the
+    // `greenpay:theme` value from localStorage (falling back to
+    // prefers-color-scheme) and applies (or removes) the `.dark` class on
+    // <html> BEFORE React mounts, so the first paint matches the user's
+    // saved palette. It lives in `lib/theme.tsx` next to the provider so
+    // both always agree on the storage key.
     return (
       <Html lang="en">
         <Head nonce={nonce}>
@@ -45,7 +47,7 @@ class MyDocument extends Document<Props> {
           <script
             nonce={nonce}
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k="greenpay-theme";var m=window.localStorage.getItem(k);var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;var d=false;if(m==="dark"){d=true}else if(m==="light"){d=false}else if(sys){d=true}var r=document.documentElement;if(d){r.classList.add("dark");r.style.colorScheme="dark"}else{r.classList.remove("dark");r.style.colorScheme="light"}}catch(e){}})();`,
+              __html: THEME_INIT_SCRIPT,
             }}
           />
           <Main />
