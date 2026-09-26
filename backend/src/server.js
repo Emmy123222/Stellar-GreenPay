@@ -18,8 +18,6 @@ const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
 const { isStellarTimeoutError } = require("./services/stellar");
-const { metricsHandler } = require("./services/metrics");
-const { adminKeyRequired } = require("./middleware/auth");
 const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
@@ -128,12 +126,6 @@ function csrfTokenHandler(req, res) {
 }
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
-
-// ── Prometheus scrape endpoint ───────────────────────────────────────
-// Gated behind the admin key like the other privileged surfaces: the exposition
-// reveals request mix and cache behaviour, so it is not public. A scraper must
-// send `X-Admin-Key` (see ADMIN_KEYS / admin key config in middleware/auth.js).
-app.get("/metrics", adminKeyRequired, metricsHandler);
 
 app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
