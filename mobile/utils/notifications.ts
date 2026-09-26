@@ -16,25 +16,52 @@ Notifications.setNotificationHandler({
 });
 
 const LAST_SEEN_KEY = 'greenpay:notifications:lastSeen';
+const PERMISSION_CHOICE_KEY = 'greenpay:notifications:permissionChoice';
+
+export async function shouldShowNotificationRationale(): Promise<boolean> {
+  const choice = await AsyncStorage.getItem(PERMISSION_CHOICE_KEY);
+  if (choice) return false;
+
+  const permission = await Notifications.getPermissionsAsync();
+  if (permission.status === 'granted') {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
+    return false;
+  }
+  if (permission.status === 'denied' || !permission.canAskAgain) {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
+    return false;
+  }
+
+  return true;
+}
+
+export async function dismissNotificationRationale(): Promise<void> {
+  await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'dismissed');
+}
 
 /**
  * Request notification permissions
  */
 export async function requestNotificationPermissions(): Promise<string | null> {
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
+  const permission = await Notifications.getPermissionsAsync();
+  if (permission.status === 'granted') {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
+    return permission.status;
   }
-  
-  if (finalStatus !== 'granted') {
+  if (permission.status === 'denied' || !permission.canAskAgain) {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
     console.log('Failed to get push token for push notification!');
     return null;
   }
-  
-  return finalStatus;
+
+  const { status } = await Notifications.requestPermissionsAsync();
+  await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, status === 'granted' ? 'granted' : 'denied');
+  if (status !== 'granted') {
+    console.log('Failed to get push token for push notification!');
+    return null;
+  }
+
+  return status;
 }
 
 /**
@@ -42,8 +69,9 @@ export async function requestNotificationPermissions(): Promise<string | null> {
  */
 export async function getPushToken(): Promise<string | null> {
   try {
-    const permissionStatus = await requestNotificationPermissions();
-    if (!permissionStatus) return null;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') return null;
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
     
     const token = await Notifications.getExpoPushTokenAsync({
       projectId: process.env.EXPO_PUBLIC_PROJECT_ID || '',
