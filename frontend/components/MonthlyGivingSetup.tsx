@@ -27,6 +27,7 @@ export default function MonthlyGivingSetup({
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [duration, setDuration] = useState("3");
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   // Reading localStorage synchronously and filtering by projectId is pure
   // derivation, not a synchronization with an external system that changes
@@ -50,6 +51,10 @@ export default function MonthlyGivingSetup({
       return;
     }
     setError(null);
+    setConfirming(true);
+  };
+
+  const confirmCreate = () => {
     const durationMonths = duration === "indefinite" ? null : Number.parseInt(duration, 10);
     const created = createMonthlySubscription({
       projectId,
@@ -126,6 +131,28 @@ export default function MonthlyGivingSetup({
         >
           Save Monthly Giving
         </button>
+
+        {confirming && (
+          <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="monthly-giving-confirmation-title">
+            <div className="w-full max-w-md card bg-white p-6">
+              <h4 id="monthly-giving-confirmation-title" className="font-display text-lg font-semibold text-forest-900">
+                Confirm monthly giving
+              </h4>
+              <p className="mt-3 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+                You are setting up a monthly donation of <strong>{formatXLM(Number.parseFloat(amountXLM) || 0)} XLM</strong> to <strong>{projectName}</strong>.
+              </p>
+              <dl className="mt-4 space-y-2 text-sm font-body text-forest-800">
+                <div className="flex justify-between"><dt>Next charge</dt><dd>{new Date(startDate).toLocaleDateString()}</dd></div>
+                <div className="flex justify-between"><dt>Estimated annual total</dt><dd>{formatXLM((Number.parseFloat(amountXLM) || 0) * 12)} XLM</dd></div>
+                <div className="flex justify-between"><dt>Duration</dt><dd>{DURATION_OPTIONS.find((option) => option.value === duration)?.label}</dd></div>
+              </dl>
+              <div className="mt-6 flex justify-end gap-3">
+                <button type="button" className="btn-secondary" onClick={() => setConfirming(false)}>Cancel</button>
+                <button type="button" className="btn-primary" onClick={confirmCreate}>Continue</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-8 border-t border-forest-100 pt-5">
           <h4 className="font-display text-lg font-semibold text-forest-900 mb-3">Subscription History</h4>
