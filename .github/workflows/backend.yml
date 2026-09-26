@@ -9,9 +9,11 @@ on:
     paths: [backend/**]
 
 # ── Required Secrets ──────────────────────────────────────────────────────────
-# SENTRY_DSN  — Sentry DSN for error tracking (optional). Tests pass without it.
-#               Configure as a GitHub Actions secret when deploying to production
-#               to enable error reporting in CI builds.
+# SENTRY_DSN     — Sentry DSN for error tracking (optional). Tests pass without it.
+#                  Configure as a GitHub Actions secret when deploying to production
+#                  to enable error reporting in CI builds.
+# CODECOV_TOKEN  — Codecov token for uploading test coverage (optional).
+#                  Configured as a repository secret.
 # ──────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -84,4 +86,3 @@ jobs:
           files: backend/coverage/lcov.info
           flags: backend
           fail_ci_if_error: false
-
