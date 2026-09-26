@@ -290,6 +290,79 @@ async function fetchProfile(publicKey: string): Promise<any> {
 // ==================== WALLET CONNECT ====================
 let currentPublicKey: string | null = null;
 
+/** Key used to cache the connected address in `chrome.storage.session`. */
+const SESSION_ADDRESS_KEY = 'connectedWalletAddress';
+
+/**
+ * Session storage is in-memory and dropped when the browser closes, so the
+ * cached address never outlives the browsing session. Browsers without
+ * `storage.session` (older Firefox) fall back to no caching.
+ */
+const sessionArea = (): chrome.storage.StorageArea | null =>
+  chrome.storage?.session ?? null;
+
+function getSessionAddress(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const area = sessionArea();
+    if (!area) {
+      resolve(null);
+      return;
+    }
+    try {
+      area.get([SESSION_ADDRESS_KEY], (result) => {
+        const value = result?.[SESSION_ADDRESS_KEY];
+        resolve(typeof value === 'string' && value ? value : null);
+      });
+    } catch (e) {
+      console.warn('Session storage read failed:', e);
+      resolve(null);
+    }
+  });
+}
+
+function setSessionAddress(address: string): void {
+  const area = sessionArea();
+  if (!area) return;
+  try {
+    area.set({ [SESSION_ADDRESS_KEY]: address }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {
+    console.warn('Session storage write failed:', e);
+  }
+}
+
+function clearSessionAddress(): void {
+  const area = sessionArea();
+  if (!area) return;
+  try {
+    area.remove([SESSION_ADDRESS_KEY], () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {
+    console.warn('Session storage clear failed:', e);
+  }
+}
+
+function abbreviateAddress(address: string): string {
+  return `${address.slice(0, 8)}...${address.slice(-4)}`;
+}
+
+/** Paint the wallet header for a known address (cached or freshly resolved). */
+function renderConnectedAddress(publicKey: string) {
+  const addressEl = document.getElementById('wallet-address') as HTMLSpanElement | null;
+  if (addressEl) addressEl.textContent = abbreviateAddress(publicKey);
+
+  const walletInfo = document.getElementById('wallet-info') as HTMLElement | null;
+  if (walletInfo) walletInfo.classList.remove('hidden');
+
+  const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
+  if (connectBtn) {
+    connectBtn.textContent = '✓ Connected';
+    connectBtn.disabled = true;
+  }
+}
+
 async function connectWallet() {
   try {
     const freighter = (window as any).freighter;
@@ -300,19 +373,8 @@ async function connectWallet() {
 
     const publicKey = await freighter.getPublicKey();
     currentPublicKey = publicKey;
-
-    // UI Updates
-    const addressEl = document.getElementById('wallet-address') as HTMLSpanElement | null;
-    if (addressEl) addressEl.textContent = `${publicKey.slice(0, 8)}...${publicKey.slice(-4)}`;
-
-    const walletInfo = document.getElementById('wallet-info') as HTMLElement | null;
-    if (walletInfo) walletInfo.classList.remove('hidden');
-
-    const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
-    if (connectBtn) {
-      connectBtn.textContent = '✓ Connected';
-      connectBtn.disabled = true;
-    }
+    setSessionAddress(publicKey);
+    renderConnectedAddress(publicKey);
 
     // Fetch total donated from backend
     const profile = await fetchProfile(publicKey);
@@ -325,6 +387,43 @@ async function connectWallet() {
   } catch (err: any) {
     console.error('Wallet connect error:', err);
     alert('Failed to connect wallet: ' + (err.message || 'Unknown error'));
+  }
+}
+
+/**
+ * Restore the wallet header on popup open (#1132).
+ *
+ * 1. Read the address cached in `chrome.storage.session` and paint it
+ *    synchronously so the popup never shows an empty wallet.
+ * 2. Re-validate against Freighter in the background; if the user switched
+ *    accounts, the display and the cache are updated to the new address.
+ */
+async function restoreWalletSession() {
+  const cached = await getSessionAddress();
+  if (cached) {
+    currentPublicKey = cached;
+    renderConnectedAddress(cached);
+  }
+
+  const freighter = (window as any).freighter;
+  if (!freighter) {
+    // No wallet available — drop any stale cached address.
+    if (cached) clearSessionAddress();
+    return;
+  }
+
+  try {
+    const publicKey: string = await freighter.getPublicKey();
+    if (!publicKey) return;
+    if (publicKey !== currentPublicKey) {
+      console.log('[GreenPay] Connected wallet changed — updating');
+      currentPublicKey = publicKey;
+      renderConnectedAddress(publicKey);
+      setSessionAddress(publicKey);
+    }
+  } catch (err) {
+    // Freighter locked / unreachable — keep showing the cached address.
+    console.warn('Wallet re-validation failed (showing cached address):', err);
   }
 }
 
@@ -406,6 +505,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   initProjectSearch();
   initProjectListKeyNav();
+
+  // Paint the cached wallet address first, then re-validate in the background.
+  // Not awaited: the popup must finish wiring up while Freighter is queried.
+  void restoreWalletSession();
+
+  const connectBtn = document.getElementById('connect-btn');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', () => {
+      void connectWallet();
+    });
+  }
 
   // Check for pending context-menu donation
   chrome.storage.local.get(['pendingDonationProjectId', 'pendingDonationAddress'], async (res) => {
