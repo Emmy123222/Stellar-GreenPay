@@ -10,6 +10,7 @@
 
 const dns = require("dns").promises;
 const net = require("net");
+const { isInSubnet } = require("is-in-subnet");
 
 const PRIVATE_IPV4_RANGES = [
   { base: "10.0.0.0", bits: 8 },
@@ -32,16 +33,21 @@ function isPrivateIpv4(ip) {
   });
 }
 
+const IPV6_BLOCKED_SUBNETS = [
+  "::1/128",
+  "::/128",
+  "fe80::/10",
+  "fc00::/7",
+  "::ffff:0:0/96",
+];
+
 function isPrivateIpv6(ip) {
-  const normalized = ip.toLowerCase();
-  if (normalized === "::1") return true; // loopback
-  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // fc00::/7 unique local
-  if (normalized.startsWith("fe80")) return true; // link-local
-  if (normalized.startsWith("::ffff:")) {
-    const mapped = normalized.replace("::ffff:", "");
-    return net.isIP(mapped) === 4 ? isPrivateIpv4(mapped) : false;
+  const normalized = String(ip).toLowerCase().split("%")[0];
+  try {
+    return IPV6_BLOCKED_SUBNETS.some((subnet) => isInSubnet(normalized, subnet));
+  } catch {
+    return true;
   }
-  return false;
 }
 
 function isPrivateIp(ip) {

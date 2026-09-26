@@ -20,6 +20,7 @@ import axios from 'axios';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+import NetInfo from '@react-native-community/netinfo';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -108,6 +109,7 @@ export default function DonateScreen() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<StatusKind>(null);
   const [showFundingGuide, setShowFundingGuide] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
 
   const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
   const surfaceAuthFailure = (outcome: string) => {
@@ -143,6 +145,13 @@ export default function DonateScreen() {
     setStatusMessage(null);
     setStatusType(null);
     setShowFundingGuide(false);
+    setIsOffline(false);
+
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      setIsOffline(true);
+      return;
+    }
 
     if (!selectedProject) {
       Alert.alert('Error', 'Please choose a project to donate to.');
@@ -540,6 +549,20 @@ export default function DonateScreen() {
         </TouchableOpacity>
       ) : null}
 
+      {isOffline ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            You're offline. Connect to the internet to donate.
+          </Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={handleDonate}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <TouchableOpacity
         style={[styles.donateButton, submitting && styles.donateButtonDisabled]}
         onPress={handleDonate}
@@ -733,8 +756,36 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
+  donateButtonDisabled: {
+    opacity: 0.6,
+  },
   donateButtonText: {
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  offlineBanner: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    backgroundColor: '#fff3cd',
+    borderColor: '#ffeeba',
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  offlineBannerText: {
+    color: '#856404',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#ffc107',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#212529',
     fontWeight: 'bold',
   },
 });

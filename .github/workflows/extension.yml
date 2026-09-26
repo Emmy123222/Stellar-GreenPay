@@ -3,11 +3,11 @@ name: Extension CI
 on:
   push:
     paths:
-      - 'extension/**'
+      - "extension/**"
     branches: [main, develop]
   pull_request:
     paths:
-      - 'extension/**'
+      - "extension/**"
     branches: [main]
 
 jobs:
@@ -48,8 +48,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: extension/package-lock.json
 
       - run: npm ci
@@ -57,7 +57,10 @@ jobs:
       - run: npm run build
 
       - name: Verify build output
-        run: test -f dist/content-script.js
+        run: |
+          test -f dist/content-script.js
+          test -f dist/popup.js
+          test -f dist/background.js
 
       - uses: actions/upload-artifact@v4
         with:
