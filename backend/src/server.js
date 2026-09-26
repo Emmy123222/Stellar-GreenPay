@@ -71,7 +71,8 @@ app.use((req, res, next) => {
     req.path.startsWith("/api/v1/notifications") ||
     req.path === "/health" ||
     req.path === "/api/health" ||
-    req.path === "/api/v1/health"
+    req.path === "/api/v1/health" ||
+    req.path === "/api/readiness"
   ) {
     return next();
   }
@@ -79,9 +80,11 @@ app.use((req, res, next) => {
 });
 
 const healthRouter = require("./routes/health");
+const readinessRouter = require("./routes/readiness");
 app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/v1/health", healthRouter);
+app.use("/api/readiness", readinessRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
@@ -98,6 +101,10 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
+
+const { registerSocketHandlers } = require("./services/socketHandler");
+registerSocketHandlers(io);
+
 app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────

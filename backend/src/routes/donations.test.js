@@ -308,7 +308,10 @@ describe("POST /api/donations", () => {
       created_at: "2026-03-29T10:00:00.000Z",
     };
 
-    const ioStub = { emit: jest.fn() };
+    const ioStub = {
+      to: jest.fn().mockReturnThis(),
+      emit: jest.fn(),
+    };
 
     const client = createMockClient(
       queryResult([{ id: "project-b" }]),
@@ -331,11 +334,13 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-    // donation_event and badge_earned should be emitted
+    // donation_event and badge_earned should be emitted with room scoping
+    expect(ioStub.to).toHaveBeenCalledWith(["project:project-b", "all-donations"]);
     expect(ioStub.emit).toHaveBeenCalledWith(
       "donation_event",
       expect.objectContaining({ projectId: "project-b", donorAddress }),
     );
+    expect(ioStub.to).toHaveBeenCalledWith("project:project-b");
     expect(ioStub.emit).toHaveBeenCalledWith(
       "badge_earned",
       expect.objectContaining({ projectId: "project-b", donorAddress, badge: "seedling" }),

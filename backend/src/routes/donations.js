@@ -214,8 +214,8 @@ async function recordDonation(req, res, next) {
 
     const projectName = (projectResult.rows[0] && projectResult.rows[0].name) || "GreenPay Project";
 
-    if (io && typeof io.emit === "function") {
-      io.emit("donation_event", {
+    if (io) {
+      const donationPayload = {
         projectId,
         projectName,
         donorAddress,
@@ -226,18 +226,28 @@ async function recordDonation(req, res, next) {
         campaignGoalXLM: null,
         campaignRaisedXLM: null,
         donorBadge,
-      });
+      };
+      if (typeof io.to === "function") {
+        io.to([`project:${projectId}`, "all-donations"]).emit("donation_event", donationPayload);
+      } else if (typeof io.emit === "function") {
+        io.emit("donation_event", donationPayload);
+      }
     }
 
     // Detect badge tier upgrades caused by this donation and emit badge_earned
     try {
       const prevTier = computeBadges(prevTotalDonated)[0]?.tier || null;
-      if (newTier && prevTier !== newTier && io && typeof io.emit === "function") {
-        io.emit("badge_earned", {
+      if (newTier && prevTier !== newTier && io) {
+        const badgePayload = {
           donorAddress,
           badge: newTier,
           projectId,
-        });
+        };
+        if (typeof io.to === "function") {
+          io.to(`project:${projectId}`).emit("badge_earned", badgePayload);
+        } else if (typeof io.emit === "function") {
+          io.emit("badge_earned", badgePayload);
+        }
       }
     } catch (err) {
       // Do not let badge emit failures break donation flow

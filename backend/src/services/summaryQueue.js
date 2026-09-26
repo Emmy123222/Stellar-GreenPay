@@ -69,12 +69,17 @@ async function start(io) {
     if (!row) return; // project was deleted while job was queued
 
     if (io) {
-      io.emit("ai_summary_ready", {
+      const summaryPayload = {
         projectId,
         aiSummary:            row.ai_summary,
         aiSummaryGeneratedAt: new Date(row.ai_summary_generated_at).toISOString(),
         aiSummaryModel:       row.ai_summary_model,
-      });
+      };
+      if (typeof io.to === "function") {
+        io.to(`project:${projectId}`).emit("ai_summary_ready", summaryPayload);
+      } else if (typeof io.emit === "function") {
+        io.emit("ai_summary_ready", summaryPayload);
+      }
     }
 
     logAdminAction({
