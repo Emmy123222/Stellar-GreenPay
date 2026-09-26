@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Set Release Version
+      - name: Set Release Version and Image Tag
         id: version
         run: |
           if [ -n "${GITHUB_REF_NAME}" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
@@ -38,8 +38,13 @@ jobs:
           else
             VERSION="${GITHUB_SHA::7}"
           fi
+          # Immutable image tag: always the short git SHA so a deployment is
+          # fully reproducible and can never silently drift to a new `latest`.
+          IMAGE_TAG="${GITHUB_SHA::7}"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "Release version: $VERSION"
+          echo "Image tag: $IMAGE_TAG"
 
       - name: Install Frontend Dependencies
         working-directory: frontend
@@ -61,13 +66,38 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Build container images with the immutable image tag
+        run: |
+          docker build --tag "greenpay/backend:${IMAGE_TAG}" ./backend
+          docker build --tag "greenpay/frontend:${IMAGE_TAG}" ./frontend
+          echo "Built greenpay/backend:${IMAGE_TAG} and greenpay/frontend:${IMAGE_TAG}"
+          # Push these tags to your registry before applying the manifests, e.g.:
+          #   echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          #   docker tag greenpay/backend:${IMAGE_TAG} "$REGISTRY/greenpay/backend:${IMAGE_TAG}"
+          #   docker push "$REGISTRY/greenpay/backend:${IMAGE_TAG}"
+
+      - name: Render Kubernetes manifests with the immutable image tag
+        run: |
+          ./scripts/render-k8s-manifests.sh "${IMAGE_TAG}" /tmp/greenpay-k8s.yaml
+          echo "--- image references ---"
+          grep -E 'image: ' /tmp/greenpay-k8s.yaml
+
       - name: Deploy Application
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
         run: |
-          echo "Deploying GreenPay services..."
+          echo "Deploying GreenPay services with image tag ${IMAGE_TAG}..."
+          if [ -n "${KUBE_CONFIG}" ]; then
+            echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+            KUBECONFIG=/tmp/kubeconfig kubectl apply -f /tmp/greenpay-k8s.yaml
+            KUBECONFIG=/tmp/kubeconfig kubectl rollout status deployment/backend -n greenpay --timeout=120s
+            KUBECONFIG=/tmp/kubeconfig kubectl rollout status deployment/frontend -n greenpay --timeout=120s
+          else
+            echo "KUBE_CONFIG secret is not configured; manifests were rendered and validated. Skipping cluster apply."
+          fi
           echo "Deployment successful."
 
       - name: Create Sentry Release

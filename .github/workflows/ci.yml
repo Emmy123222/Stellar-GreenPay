@@ -124,6 +124,24 @@ jobs:
           pip install --quiet pyyaml
           python3 -c "import yaml,sys; list(yaml.safe_load_all(open('/tmp/greenpay-manifests.yaml')))"
 
+  k8s:
+    name: Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render manifests with an immutable image tag
+        run: ./scripts/render-k8s-manifests.sh "$(git rev-parse --short=7 HEAD)" /tmp/greenpay-k8s.yaml
+      - name: Validate rendered manifests
+        run: |
+          pip install --quiet pyyaml
+          python3 -c "import yaml; docs=[d for d in yaml.safe_load_all(open('/tmp/greenpay-k8s.yaml')) if d]; assert len(docs) >= 8, f'expected at least 8 resources, got {len(docs)}'; print(f'validated {len(docs)} resources')"
+      - name: Assert no mutable image tags
+        run: |
+          if grep -E 'image: .*:latest([[:space:]]|$)' /tmp/greenpay-k8s.yaml; then
+            echo "::error::Found a mutable 'latest' image tag in the rendered manifests"
+            exit 1
+          fi
+
   gitleaks:
     name: Secret scanning
     runs-on: ubuntu-latest
