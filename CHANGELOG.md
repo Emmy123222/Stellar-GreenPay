@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-donation CO₂ offset in donation API responses via `co2OffsetKg` field, computed as `amount_xlm × co2_per_xlm / 1000` across all donation endpoints (#365).
 - On-chain USDC to XLM price conversion through a configured oracle adapter (#345).
 
+### Fixed
+
+- `deploy.yml` now gates every release on a 120-second `/api/readiness` poll and automatically runs `helm rollback greenpay --wait` while notifying Slack `#deployments` when the check fails (#1214).
+
 ## [1.0.0] - 2025-01-01
 
 ### Added
