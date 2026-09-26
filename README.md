@@ -158,5 +158,4 @@ See [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE) 
-fixed
+MIT — see [LICENSE](LICENSE)
