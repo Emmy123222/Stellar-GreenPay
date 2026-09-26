@@ -922,12 +922,12 @@ describe("Webhook delivery integration (testcontainers)", () => {
     } catch { /* best-effort cleanup */ }
   });
 
-  /** Start a tiny HTTP server on a random port. Returns { port, server }. */
-  function startCaptureServer() {
+  /** Start a tiny HTTP server on a random port on 127.0.0.1 loopback. Returns { port, server }. */
+  function startCaptureServer(requestHandler) {
     return new Promise((resolve, reject) => {
-      const server = http.createServer();
+      const server = http.createServer(requestHandler);
       server.on("error", reject);
-      server.listen(0, () => {
+      server.listen(0, "127.0.0.1", () => {
         resolve({ port: server.address().port, server });
       });
     });
@@ -948,12 +948,8 @@ describe("Webhook delivery integration (testcontainers)", () => {
     // eslint-disable-next-line global-require
     const { checkAndDeliverMilestones } = require("./webhook");
 
-    const { port, server } = await startCaptureServer();
-    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
-    const webhookSecret = "whsec_supersecret_test_key_12345";
-
     const received = [];
-    server.on("request", (req, res) => {
+    const { port, server } = await startCaptureServer((req, res) => {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
@@ -963,6 +959,8 @@ describe("Webhook delivery integration (testcontainers)", () => {
         res.end(JSON.stringify({ ok: true }));
       });
     });
+    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
+    const webhookSecret = "whsec_supersecret_test_key_12345";
 
     const projectId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     await testPool.query(
@@ -1054,12 +1052,8 @@ describe("Webhook delivery integration (testcontainers)", () => {
     // eslint-disable-next-line global-require
     const { checkAndDeliverMilestones } = require("./webhook");
 
-    const { port, server } = await startCaptureServer();
-    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
-    const webhookSecret = "whsec_donation_triggered_test_key";
-
     const received = [];
-    server.on("request", (req, res) => {
+    const { port, server } = await startCaptureServer((req, res) => {
       const chunks = [];
       req.on("data", (chunk) => chunks.push(chunk));
       req.on("end", () => {
@@ -1069,6 +1063,8 @@ describe("Webhook delivery integration (testcontainers)", () => {
         res.end(JSON.stringify({ ok: true }));
       });
     });
+    const webhookUrl = `http://127.0.0.1:${port}/webhook`;
+    const webhookSecret = "whsec_donation_triggered_test_key";
 
     const projectId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
     await testPool.query(
@@ -1173,9 +1169,8 @@ describe("Webhook delivery integration (testcontainers)", () => {
     // eslint-disable-next-line global-require
     const { checkAndDeliverMilestones } = require("./webhook");
 
-    const { server } = await startCaptureServer();
     const received = [];
-    server.on("request", (req, res) => {
+    const { server } = await startCaptureServer((req, res) => {
       received.push({ url: req.url });
       res.writeHead(200);
       res.end();
