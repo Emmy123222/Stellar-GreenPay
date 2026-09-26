@@ -150,7 +150,7 @@ export default function GovernancePage() {
       if (pk) {
         try {
           const stats = await getDonorStats(pk);
-          if (mounted && stats.badge !== "None") setIsBadgeHolder(true);
+          if (mounted && stats && (stats as any).badge !== "None") setIsBadgeHolder(true);
         } catch {
           // not a badge holder yet
         }
@@ -170,7 +170,7 @@ export default function GovernancePage() {
     if (pk) {
       try {
         const stats = await getDonorStats(pk);
-        if (stats.badge !== "None") setIsBadgeHolder(true);
+        if (stats && (stats as any).badge !== "None") setIsBadgeHolder(true);
       } catch { /* not a badge holder */ }
     }
   }

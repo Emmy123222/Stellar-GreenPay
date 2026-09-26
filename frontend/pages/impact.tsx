@@ -86,6 +86,12 @@ export default function ImpactPage() {
             isLoading={isLoading}
           />
           <StatCard
+            label="Unique Countries"
+            icon="🌎"
+            value={stats?.uniqueCountries ?? 0}
+            isLoading={isLoading}
+          />
+          <StatCard
             label="Projects"
             icon="🌍"
             value={projectCount}
@@ -104,7 +110,7 @@ export default function ImpactPage() {
           <h2 className="text-2xl font-display font-bold text-forest-900 mb-6 flex items-center gap-2">
             🗺️ Global Reach
           </h2>
-          <WorldMap />
+          <WorldMap countryBreakdown={stats?.countryBreakdown ?? []} />
         </div>
 
         {/* Category Breakdown */}

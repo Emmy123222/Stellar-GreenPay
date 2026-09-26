@@ -169,6 +169,8 @@ components:
           type: string
         raisedXLM:
           type: string
+        raisedUSDC:
+          type: string
         donorCount:
           type: integer
         co2OffsetKg:
@@ -222,6 +224,8 @@ components:
         goalXLM:
           type: string
         raisedXLM:
+          type: string
+        raisedUSDC:
           type: string
         deadline:
           type: string
@@ -400,32 +404,17 @@ components:
         updatedAt:
           type: string
           format: date-time
-    StatsTrends:
+    JobStats:
       type: object
       properties:
-        thisWeekXLM:
-          type: string
-          description: Total XLM donated in the current 7-day window (7-decimal string).
-          example: "1250.0000000"
-        lastWeekXLM:
-          type: string
-          description: Total XLM donated in the prior 7-day window (7-decimal string).
-          example: "980.0000000"
-        growthPercent:
-          type: number
-          nullable: true
-          description: >
-            Percentage growth from last week to this week.
-            Null when lastWeekXLM is zero (no prior donations to compare).
-          example: 27.55
-        thisWeekDonations:
+        totalJobsInEscrow:
           type: integer
-          description: Number of donations in the current 7-day window.
-          example: 42
-        lastWeekDonations:
+        totalJobsCompleted:
           type: integer
-          description: Number of donations in the prior 7-day window.
-          example: 35
+        totalEscrowXLM:
+          type: string
+        totalReleasedXLM:
+          type: string
     StatsGlobal:
       type: object
       properties:
@@ -827,6 +816,13 @@ paths:
           in: query
           schema:
             type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created_at, raised_xlm, donor_count]
+            default: created_at
+          description: Sort projects by field in descending order.
       responses:
         '200':
           description: Paginated project list.
@@ -1636,6 +1632,18 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Job'
+  /api/jobs/stats:
+    get:
+      tags: [Jobs]
+      summary: Get escrow marketplace aggregate metrics
+      description: Returns total jobs in escrow, completed jobs, and aggregate XLM amounts. Cached for 60 seconds.
+      responses:
+        '200':
+          description: Aggregate job statistics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStats'
   /api/jobs/{id}/release:
     patch:
       tags: [Jobs]

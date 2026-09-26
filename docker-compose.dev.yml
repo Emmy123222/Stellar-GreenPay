@@ -17,8 +17,23 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - CHOKIDAR_INTERVAL=500
+      - STORAGE_BACKEND=ipfs
+      - IPFS_API_URL=http://ipfs:5001
     volumes:
       - ./backend/src:/app/src
       - ./backend/package.json:/app/package.json:ro
       - ./backend/package-lock.json:/app/package-lock.json:ro
       - /app/node_modules
+    depends_on:
+      - ipfs
+
+  ipfs:
+    image: ipfs/go-ipfs:latest
+    ports:
+      - '5001:5001'
+      - '8080:8080'
+    volumes:
+      - ipfs_data:/data/ipfs
+
+volumes:
+  ipfs_data:

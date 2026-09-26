@@ -27,3 +27,12 @@ The following issues are currently considered out of scope for our security resp
 ## Bug Bounty Scope
 
 At this time, we do not have an active, paid bug bounty program. However, we deeply appreciate community contributions and will gladly provide public acknowledgment or credit to security researchers who responsibly disclose valid vulnerabilities.
+
+
+
+## Implemented Security Controls
+
+This document covers how to **report** a vulnerability. For a reference on the
+security controls already implemented in the codebase — file-upload validation,
+allowed types, rate limits and security log events — see
+[docs/security.md](docs/security.md).

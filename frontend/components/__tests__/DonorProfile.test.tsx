@@ -56,11 +56,11 @@ describe('DonorProfile Component', () => {
       createdAt: '2023-01-01T00:00:00.000Z',
     });
 
-    let component;
+    let component: ReturnType<typeof render> | undefined;
     await act(async () => {
       component = render(<DonorProfilePage />);
     });
 
-    expect(component.container).toMatchSnapshot();
+    expect(component?.container).toMatchSnapshot();
   });
 });

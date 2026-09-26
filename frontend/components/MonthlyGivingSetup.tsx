@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { createMonthlySubscription, loadMonthlySubscriptions } from "@/lib/monthlyGiving";
 import { formatXLM, timeAgo } from "@/utils/format";
 import type { MonthlySubscription } from "@/utils/types";
@@ -26,13 +26,16 @@ export default function MonthlyGivingSetup({
   const [amountXLM, setAmountXLM] = useState("25");
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [duration, setDuration] = useState("3");
-  const [subscriptions, setSubscriptions] = useState<MonthlySubscription[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const all = loadMonthlySubscriptions();
-    setSubscriptions(all.filter((sub) => sub.projectId === projectId));
-  }, [projectId]);
+  // Reading localStorage synchronously and filtering by projectId is pure
+  // derivation, not a synchronization with an external system that changes
+  // over time, so it's computed directly during render instead of via an
+  // effect + state.
+  const subscriptions = useMemo<MonthlySubscription[]>(
+    () => loadMonthlySubscriptions().filter((sub) => sub.projectId === projectId),
+    [projectId]
+  );
 
   const canCreate = useMemo(() => {
     const amount = Number.parseFloat(amountXLM);

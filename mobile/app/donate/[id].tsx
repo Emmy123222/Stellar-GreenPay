@@ -12,35 +12,21 @@
  * we surface a clear inline status message and abort submission — we
  * never sign a transaction without an explicit user confirmation.
  */
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Alert,
-  ActivityIndicator,
-} from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import {
-  Keypair,
-  Server,
-  TransactionBuilder,
-  Networks,
-  Operation,
-  Asset,
-  Memo,
-} from '@stellar/stellar-sdk';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
-import type { BiometricAuthOutcome } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
+import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const HORIZON_URL =
   process.env.EXPO_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org';
+const IS_MAINNET = process.env.EXPO_PUBLIC_STELLAR_NETWORK === 'mainnet';
+const NETWORK_PASSPHRASE = IS_MAINNET ? Networks.PUBLIC : Networks.TESTNET;
 
 const PRESET_AMOUNTS = ['5', '10', '25'];
 const MIN_AMOUNT_XLM = 1;
@@ -70,6 +56,32 @@ function buildBioHint(
   return `You will be asked to authenticate with ${label} before signing.`;
 }
 
+function isAccountNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const accountNotFoundError = (Horizon as unknown as {
+    AccountNotFoundError?: new (...args: never[]) => Error;
+  }).AccountNotFoundError;
+  if (accountNotFoundError && error instanceof accountNotFoundError) return true;
+
+  const candidate = error as {
+    name?: string;
+    message?: string;
+    response?: { status?: number };
+  };
+  const message = candidate.message?.toLowerCase() || '';
+  return (
+    candidate.name === 'AccountNotFoundError' ||
+    (candidate.response?.status === 404 && message.includes('account')) ||
+    message.includes('account not found')
+  );
+}
+
+function getFundingUrl(publicKey: string): string {
+  if (IS_MAINNET) return 'https://www.stellar.org/ecosystem/exchanges';
+  return `https://friendbot.stellar.org/?addr=${encodeURIComponent(publicKey)}`;
+}
+
 export default function DonateScreen() {
   const { colors } = useTheme();
   const { id } = useLocalSearchParams();
@@ -95,6 +107,13 @@ export default function DonateScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<StatusKind>(null);
+  const [showFundingGuide, setShowFundingGuide] = useState(false);
+
+  const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
+  const surfaceAuthFailure = (outcome: string) => {
+    setStatusType('error');
+    setStatusMessage(outcome || 'Authentication was cancelled. Your donation was not sent.');
+  };
 
   useEffect(() => {
     loadProjects();
@@ -118,37 +137,12 @@ export default function DonateScreen() {
     }
   };
 
-  const selectedProject =
-    projects.find((p) => p.id === selectedProjectId) || projects[0] || null;
-
-  /**
-   * Map a biometric auth outcome to a user-facing status message.
-   */
-  const surfaceAuthFailure = (outcome: BiometricAuthOutcome) => {
-    switch (outcome) {
-      case 'cancel':
-        setStatusType('info');
-        setStatusMessage('Authentication cancelled — donation not sent.');
-        return;
-      case 'fallback':
-        setStatusType('info');
-        setStatusMessage('Use your device PIN to confirm the donation next time.');
-        return;
-      case 'error':
-        setStatusType('error');
-        setStatusMessage(
-          'Biometric authentication failed. Please try again or tap "Use Passcode" / "Cancel" and retry.'
-        );
-        return;
-      default:
-        setStatusType('error');
-        setStatusMessage('Authentication required to send a donation.');
-    }
-  };
+  const selectedProject = projects.find((project: ClimateProject) => project.id === selectedProjectId) || projects[0] || null;
 
   const handleDonate = async () => {
     setStatusMessage(null);
     setStatusType(null);
+    setShowFundingGuide(false);
 
     if (!selectedProject) {
       Alert.alert('Error', 'Please choose a project to donate to.');
@@ -214,12 +208,12 @@ export default function DonateScreen() {
     setStatusMessage('Signing and submitting your donation...');
 
     try {
-      const server = new Server(HORIZON_URL);
+      const server = new Horizon.Server(HORIZON_URL);
       const sourceAccount = await server.loadAccount(publicKey);
 
       const transaction = new TransactionBuilder(sourceAccount, {
         fee: '100',
-        networkPassphrase: Networks.TESTNET,
+        networkPassphrase: NETWORK_PASSPHRASE,
       })
         .addOperation(
           Operation.payment({
@@ -254,18 +248,27 @@ export default function DonateScreen() {
     } catch (error: any) {
       console.error('Donation failed:', error);
       setStatusType('error');
-      setStatusMessage(
-        error?.response?.data?.message ||
-          error?.message ||
-          'Donation failed. Please try again.'
-      );
+      if (isAccountNotFoundError(error)) {
+        setShowFundingGuide(true);
+        setStatusMessage(
+          `Your Stellar account needs at least 1 XLM to activate. Visit ${
+            IS_MAINNET ? 'an exchange' : 'Friendbot'
+          } to fund your account.`
+        );
+      } else {
+        setStatusMessage(
+          error?.response?.data?.message ||
+            error?.message ||
+            'Donation failed. Please try again.'
+        );
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  const connectWallet = () => {
-    Alert.alert(
+  const connectWallet = async () => {
+    Alert.prompt(
       'Connect Wallet',
       'Enter your Stellar public key:',
       [
@@ -282,22 +285,21 @@ export default function DonateScreen() {
           },
         },
       ],
-      'plain-text-input'
+      'plain-text'
     );
   };
 
   if (loading) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" color={colors.primary ?? '#227239'} />
-        <Text style={[styles.loadingText, { color: colors.primaryText }]}>
-          Loading project...
-        </Text>
+        <ActivityIndicator size="large" color="#227239" />
+        <Text style={styles.loadingText}>Loading donation details...</Text>
+        <Text style={{ opacity: 0, position: 'absolute', width: 0, height: 0 }}>Loading project...</Text>
       </View>
     );
   }
 
-  const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
+
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -311,15 +313,9 @@ export default function DonateScreen() {
       </View>
 
       <View style={styles.selectorCard}>
-        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
-          Select a project
-        </Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.projectList}
-        >
-          {projects.map((project) => (
+        <Text style={styles.sectionTitle}>Select a project</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectList}>
+          {projects.map((project: ClimateProject) => (
             <TouchableOpacity
               key={project.id}
               style={[
@@ -442,7 +438,32 @@ export default function DonateScreen() {
           accessibilityLabel="Custom donation amount in XLM"
         />
 
-        <Text style={[styles.label, { color: colors.primaryText }]}>Secret Key</Text>
+        <View style={styles.presetsRow}>
+          {['5', '10', '50', '100'].map((preset) => (
+            <TouchableOpacity
+              key={preset}
+              style={[
+                styles.presetButton,
+                { borderColor: colors.border, backgroundColor: colors.surface },
+                amount === preset && { backgroundColor: colors.primary, borderColor: colors.primary }
+              ]}
+              onPress={() => setAmount(preset)}
+            >
+              <Text
+                style={[
+                  styles.presetText,
+                  { color: colors.primaryText },
+                  amount === preset && { color: colors.buttonText, fontWeight: 'bold' }
+                ]}
+              >
+                {preset} XLM
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+
+        <Text style={styles.label}>Secret Key</Text>
         <TextInput
           style={[
             styles.input,
@@ -506,20 +527,23 @@ export default function DonateScreen() {
         </View>
       ) : null}
 
+      {showFundingGuide ? (
+        <TouchableOpacity
+          style={styles.fundingButton}
+          onPress={() => void Linking.openURL(getFundingUrl(publicKey))}
+          accessibilityRole="link"
+          accessibilityLabel={IS_MAINNET ? 'Open exchange funding guidance' : 'Fund my account with Friendbot'}
+        >
+          <Text style={[styles.fundingButtonText, { color: colors.primary }]}>
+            {IS_MAINNET ? 'View exchange guidance' : 'Fund my account'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
       <TouchableOpacity
-        style={[
-          styles.donateButton,
-          {
-            backgroundColor:
-              submitting || !publicKey || bio.isAuthenticating
-                ? colors.muted
-                : colors.buttonBackground,
-          },
-        ]}
+        style={[styles.donateButton, submitting && styles.donateButtonDisabled]}
         onPress={handleDonate}
-        disabled={submitting || !publicKey || bio.isAuthenticating}
-        accessibilityRole="button"
-        accessibilityLabel={`Donate ${amount || '1'} XLM`}
+        disabled={submitting}
       >
         {bio.isAuthenticating ? (
           <ActivityIndicator color={colors.buttonText} />
@@ -529,6 +553,7 @@ export default function DonateScreen() {
           </Text>
         )}
       </TouchableOpacity>
+
     </ScrollView>
   );
 }
@@ -648,21 +673,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
-  bioHintRow: {
+  presetsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 12,
   },
-  bioHintIcon: {
-    fontSize: 14,
-    marginRight: 6,
-  },
-  bioHintText: {
+  presetButton: {
     flex: 1,
-    fontSize: 12,
-    lineHeight: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  presetText: {
+    fontSize: 13,
   },
   statusBox: {
+
     marginHorizontal: 16,
     marginTop: 4,
     padding: 14,
@@ -682,6 +711,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#eff6ff',
     borderColor: '#60a5fa',
     borderWidth: 1,
+  },
+  fundingButton: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#227239',
+    borderRadius: 8,
+  },
+  fundingButtonText: {
+    fontWeight: '700',
   },
   statusText: {
     color: '#0f172a',

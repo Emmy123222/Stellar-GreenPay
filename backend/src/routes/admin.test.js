@@ -1,7 +1,12 @@
 "use strict";
 const express = require("express");
 const request = require("supertest");
+const pool = require("../db/pool");
 const { signToken, adminRequired, adminKeyRequired } = require("../middleware/auth");
+
+jest.mock("../db/pool", () => ({
+  query: jest.fn(),
+}));
 
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
@@ -84,6 +89,51 @@ describe("POST /api/admin/refresh", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.token).toBeDefined();
     expect(res.body.data.expiresIn).toBe(3600);
+  });
+});
+
+describe("POST /api/admin/digest/preview", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("returns the rendered HTML digest body for an admin preview request", async () => {
+    const loginRes = await request(app).post("/api/admin/login").send({ username: "admin", password: "testpass" });
+    const token = loginRes.body.data.token;
+
+    pool.query.mockImplementation(async (query, params) => {
+      if (query.includes("FROM projects")) {
+        return { rows: [{ id: "project-123", name: "Solar Haven", co2_offset_kg: 300 }] };
+      }
+      if (query.includes("FROM donations")) {
+        return { rows: [{ raised_xlm: "120.50", donation_count: 2 }] };
+      }
+      if (query.includes("FROM project_milestones")) {
+        return { rows: [{ title: "Carbon neutral", percentage: 75 }] };
+      }
+      if (query.includes("FROM project_updates")) {
+        return { rows: [{ title: "Launch update", body: "The new solar array is live." }] };
+      }
+      if (query.includes("FROM project_subscriptions")) {
+        return { rows: [{ email: "admin@example.com" }] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .post("/api/admin/digest/preview")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ projectId: "project-123", month: "2026-07" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.text).toContain("Monthly Impact Digest");
+    expect(res.text).toContain("Solar Haven");
+    expect(res.text).toContain("120.50 XLM");
+    expect(res.text).toContain("Carbon neutral");
   });
 });
 

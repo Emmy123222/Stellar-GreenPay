@@ -14,6 +14,7 @@ const { Server: SocketServer } = require("socket.io");
 const { io: ioc } = require("socket.io-client");
 const supertest = require("supertest");
 const pool = require("../db/pool");
+const { registerSocketHandlers } = require("../services/socketHandler");
 
 function makePublicKey(char = "A") {
   return `G${char.repeat(55)}`;
@@ -54,6 +55,7 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       cors: { origin: "*" },
       transports: ["websocket"],
     });
+    registerSocketHandlers(ioServer);
     app.set("io", ioServer);
     app.use("/api/donations", require("./donations"));
 
@@ -94,12 +96,11 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws" }]),   // SELECT project
         queryResult([]),                          // dedup check
         queryResult(),                            // BEGIN
+        queryResult([{ total: "0" }]),            // prevTotalResult
         queryResult([donationRow]),               // INSERT donation
         queryResult([]),                          // SELECT donation_matches (empty)
         queryResult(),                            // UPDATE projects
-        queryResult([]),                          // SELECT * FROM profiles (new donor)
-        queryResult([{ count: "1" }]),            // SELECT COUNT(DISTINCT project_id)
-        queryResult(),                            // INSERT INTO profiles
+        queryResult(),                            // COMMIT
       );
 
       const socket = ioc(baseUrl, {
@@ -113,35 +114,37 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       }, 500);
 
       socket.on("connect", () => {
-        socket.on("donation_event", (data) => {
-          clearTimeout(deadline);
-          socket.disconnect();
-          try {
-            expect(data.projectId).toBe("project-ws");
-            expect(data.donorAddress).toBe(donorAddress);
-            expect(data.transactionHash).toBe(transactionHash);
-            expect(typeof data.timestamp).toBe("string");
-            done();
-          } catch (assertionError) {
-            done(assertionError);
-          }
-        });
-
-        request
-          .post("/api/donations")
-          .send({
-            projectId: "project-ws",
-            donorAddress,
-            amountXLM: "25",
-            transactionHash,
-          })
-          .end((err) => {
-            if (err) {
-              clearTimeout(deadline);
-              socket.disconnect();
-              done(err);
+        socket.emit("join_project", "project-ws", () => {
+          socket.on("donation_event", (data) => {
+            clearTimeout(deadline);
+            socket.disconnect();
+            try {
+              expect(data.projectId).toBe("project-ws");
+              expect(data.donorAddress).toBe(donorAddress);
+              expect(data.transactionHash).toBe(transactionHash);
+              expect(typeof data.timestamp).toBe("string");
+              done();
+            } catch (assertionError) {
+              done(assertionError);
             }
           });
+
+          request
+            .post("/api/donations")
+            .send({
+              projectId: "project-ws",
+              donorAddress,
+              amountXLM: "25",
+              transactionHash,
+            })
+            .end((err) => {
+              if (err) {
+                clearTimeout(deadline);
+                socket.disconnect();
+                done(err);
+              }
+            });
+        });
       });
 
       socket.on("connect_error", (err) => {
@@ -170,29 +173,31 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       let eventReceived = false;
 
       socket.on("connect", () => {
-        socket.on("donation_event", () => {
-          eventReceived = true;
-        });
-
-        request
-          .post("/api/donations")
-          .send({
-            projectId: "nonexistent-project",
-            donorAddress,
-            amountXLM: "10",
-            transactionHash,
-          })
-          .end((err, res) => {
-            socket.disconnect();
-            if (err) return done(err);
-            try {
-              expect(res.status).toBe(404);
-              expect(eventReceived).toBe(false);
-              done();
-            } catch (assertionError) {
-              done(assertionError);
-            }
+        socket.emit("join_project", "nonexistent-project", () => {
+          socket.on("donation_event", () => {
+            eventReceived = true;
           });
+
+          request
+            .post("/api/donations")
+            .send({
+              projectId: "nonexistent-project",
+              donorAddress,
+              amountXLM: "10",
+              transactionHash,
+            })
+            .end((err, res) => {
+              socket.disconnect();
+              if (err) return done(err);
+              try {
+                expect(res.status).toBe(404);
+                expect(eventReceived).toBe(false);
+                done();
+              } catch (assertionError) {
+                done(assertionError);
+              }
+            });
+        });
       });
 
       socket.on("connect_error", (err) => done(err));
@@ -221,11 +226,10 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
         queryResult([{ id: "project-ws-2" }]),
         queryResult([]),
         queryResult(),
+        queryResult([{ total: "0" }]),
         queryResult([donationRow]),
         queryResult([]),
         queryResult(),
-        queryResult([]),
-        queryResult([{ count: "1" }]),
         queryResult(),
       );
 
@@ -240,32 +244,34 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
       }, 500);
 
       socket.on("connect", () => {
-        socket.on("donation_event", (data) => {
-          clearTimeout(deadline);
-          socket.disconnect();
-          try {
-            expect(data.amountXLM).toBe("100");
-            done();
-          } catch (assertionError) {
-            done(assertionError);
-          }
-        });
-
-        request
-          .post("/api/donations")
-          .send({
-            projectId: "project-ws-2",
-            donorAddress,
-            amountXLM: "100",
-            transactionHash,
-          })
-          .end((err) => {
-            if (err) {
-              clearTimeout(deadline);
-              socket.disconnect();
-              done(err);
+        socket.emit("join_project", "project-ws-2", () => {
+          socket.on("donation_event", (data) => {
+            clearTimeout(deadline);
+            socket.disconnect();
+            try {
+              expect(data.amountXLM).toBe("100");
+              done();
+            } catch (assertionError) {
+              done(assertionError);
             }
           });
+
+          request
+            .post("/api/donations")
+            .send({
+              projectId: "project-ws-2",
+              donorAddress,
+              amountXLM: "100",
+              transactionHash,
+            })
+            .end((err) => {
+              if (err) {
+                clearTimeout(deadline);
+                socket.disconnect();
+                done(err);
+              }
+            });
+        });
       });
 
       socket.on("connect_error", (err) => {
@@ -277,7 +283,7 @@ describe("POST /api/donations → donation_event WebSocket broadcast", () => {
   );
 });
 
-describe("POST /api/donations → broadcast hardening", () => {
+describe("POST /api/donations → broadcast hardening & room segmentation", () => {
   let httpServer;
   let ioServer;
   let request;
@@ -291,6 +297,7 @@ describe("POST /api/donations → broadcast hardening", () => {
       cors: { origin: "*" },
       transports: ["websocket"],
     });
+    registerSocketHandlers(ioServer);
     app.set("io", ioServer);
     app.use("/api/donations", require("./donations"));
 
@@ -309,11 +316,19 @@ describe("POST /api/donations → broadcast hardening", () => {
     jest.clearAllMocks();
   });
 
-  // Resolves once the socket is connected so POSTs never race the handshake.
-  function connectClient() {
+  // Resolves once the socket is connected and joined to room so POSTs never race the handshake.
+  function connectClient(room = "all-donations") {
     return new Promise((resolve, reject) => {
       const socket = ioc(baseUrl, { transports: ["websocket"], forceNew: true });
-      socket.once("connect", () => resolve(socket));
+      socket.once("connect", () => {
+        if (room === "all-donations") {
+          socket.emit("join_global_feed", () => resolve(socket));
+        } else if (room.startsWith("project:")) {
+          socket.emit("join_project", room.replace("project:", ""), () => resolve(socket));
+        } else {
+          socket.emit("join_project", room, () => resolve(socket));
+        }
+      });
       socket.once("connect_error", reject);
     });
   }
@@ -324,18 +339,42 @@ describe("POST /api/donations → broadcast hardening", () => {
       queryResult([{ id: donationRow.project_id }]), // SELECT project
       queryResult([]),                                // dedup check (none)
       queryResult(),                                  // BEGIN
+      queryResult([{ total: "0" }]),                  // prevTotalResult
       queryResult([donationRow]),                     // INSERT donation
       queryResult([]),                                // SELECT donation_matches (none)
       queryResult(),                                  // UPDATE projects
-      queryResult([]),                                // SELECT profile (new donor)
-      queryResult([{ count: "1" }]),                  // COUNT(DISTINCT project_id)
-      queryResult(),                                  // INSERT profile
       queryResult(),                                  // COMMIT
     );
   }
 
   test(
-    "fans the donation_event out to every connected client",
+    "joins and leaves project and global rooms correctly",
+    (done) => {
+      const socket = ioc(baseUrl, { transports: ["websocket"], forceNew: true });
+      socket.on("connect", () => {
+        socket.emit("join_project", "test-proj", () => {
+          socket.emit("join_global_feed", () => {
+            const serverSocket = ioServer.sockets.sockets.get(socket.id);
+            expect(serverSocket.rooms.has("project:test-proj")).toBe(true);
+            expect(serverSocket.rooms.has("all-donations")).toBe(true);
+
+            socket.emit("leave_project", "test-proj", () => {
+              socket.emit("leave_global_feed", () => {
+                expect(serverSocket.rooms.has("project:test-proj")).toBe(false);
+                expect(serverSocket.rooms.has("all-donations")).toBe(false);
+                socket.disconnect();
+                done();
+              });
+            });
+          });
+        });
+      });
+    },
+    2000,
+  );
+
+  test(
+    "fans the donation_event out to connected clients across project and global rooms",
     async () => {
       const donorAddress = makePublicKey("F");
       const transactionHash = makeTxHash("a");
@@ -351,7 +390,15 @@ describe("POST /api/donations → broadcast hardening", () => {
         created_at: new Date().toISOString(),
       });
 
-      const clients = await Promise.all([connectClient(), connectClient(), connectClient()]);
+      // Client 1 is on dashboard (all-donations)
+      // Client 2 is on project page (project:project-fan)
+      // Client 3 is subscribed to both
+      const client1 = await connectClient("all-donations");
+      const client2 = await connectClient("project-fan");
+      const client3 = await connectClient("all-donations");
+      await new Promise((resolve) => client3.emit("join_project", "project-fan", resolve));
+
+      const clients = [client1, client2, client3];
       try {
         const received = clients.map(
           (socket) =>
@@ -389,7 +436,7 @@ describe("POST /api/donations → broadcast hardening", () => {
   );
 
   test(
-    "emits exactly one donation_event per recorded donation",
+    "emits exactly one donation_event per recorded donation (deduplicated when in both rooms)",
     async () => {
       const donorAddress = makePublicKey("G");
       const transactionHash = makeTxHash("b");
@@ -405,7 +452,10 @@ describe("POST /api/donations → broadcast hardening", () => {
         created_at: new Date().toISOString(),
       });
 
-      const socket = await connectClient();
+      // Client joined to both project room and all-donations
+      const socket = await connectClient("all-donations");
+      await new Promise((resolve) => socket.emit("join_project", "project-once", resolve));
+
       try {
         let count = 0;
         socket.on("donation_event", () => {
@@ -419,6 +469,109 @@ describe("POST /api/donations → broadcast hardening", () => {
 
         await new Promise((resolve) => setTimeout(resolve, 300));
         expect(count).toBe(1);
+      } finally {
+        socket.disconnect();
+      }
+    },
+    3000,
+  );
+
+  test(
+    "does not broadcast project-specific donation_event to clients in a different project room",
+    async () => {
+      const donorAddress = makePublicKey("Z");
+      const transactionHash = makeTxHash("1");
+      successfulXlmDonation({
+        id: "isolated-1",
+        project_id: "project-target",
+        donor_address: donorAddress,
+        amount_xlm: "30",
+        amount: "30",
+        currency: "XLM",
+        message: null,
+        transaction_hash: transactionHash,
+        created_at: new Date().toISOString(),
+      });
+
+      const clientTarget = await connectClient("project-target");
+      const clientOther = await connectClient("project-other");
+
+      try {
+        let otherReceived = false;
+        clientOther.on("donation_event", () => {
+          otherReceived = true;
+        });
+
+        const targetReceivedPromise = new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("target client did not receive event")), 500);
+          clientTarget.on("donation_event", (data) => {
+            clearTimeout(timer);
+            resolve(data);
+          });
+        });
+
+        await request
+          .post("/api/donations")
+          .send({
+            projectId: "project-target",
+            donorAddress,
+            amountXLM: "30",
+            transactionHash,
+          })
+          .expect(201);
+
+        const data = await targetReceivedPromise;
+        expect(data.projectId).toBe("project-target");
+
+        // Wait to verify the client in project-other didn't receive it
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(otherReceived).toBe(false);
+      } finally {
+        clientTarget.disconnect();
+        clientOther.disconnect();
+      }
+    },
+    3000,
+  );
+
+  test(
+    "stops receiving events after leaving a room",
+    async () => {
+      const donorAddress = makePublicKey("K");
+      const transactionHash = makeTxHash("2");
+      successfulXlmDonation({
+        id: "leave-1",
+        project_id: "project-leave",
+        donor_address: donorAddress,
+        amount_xlm: "20",
+        amount: "20",
+        currency: "XLM",
+        message: null,
+        transaction_hash: transactionHash,
+        created_at: new Date().toISOString(),
+      });
+
+      const socket = await connectClient("project-leave");
+      try {
+        await new Promise((resolve) => socket.emit("leave_project", "project-leave", resolve));
+
+        let received = false;
+        socket.on("donation_event", () => {
+          received = true;
+        });
+
+        await request
+          .post("/api/donations")
+          .send({
+            projectId: "project-leave",
+            donorAddress,
+            amountXLM: "20",
+            transactionHash,
+          })
+          .expect(201);
+
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(received).toBe(false);
       } finally {
         socket.disconnect();
       }
@@ -536,6 +689,7 @@ describe("POST /api/donations → broadcast hardening", () => {
         queryResult([{ id: "project-match" }]),           // SELECT project
         queryResult([]),                                   // dedup check
         queryResult(),                                     // BEGIN
+        queryResult([{ total: "0" }]),                     // prevTotalResult
         queryResult([                                      // INSERT primary donation
           {
             id: "match-primary",
@@ -561,7 +715,7 @@ describe("POST /api/donations → broadcast hardening", () => {
         queryResult(),                                     // COMMIT
       );
 
-      const socket = await connectClient();
+      const socket = await connectClient("project-match");
       try {
         const events = [];
         socket.on("donation_event", (data) => events.push(data));

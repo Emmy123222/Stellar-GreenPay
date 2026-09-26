@@ -27,7 +27,7 @@ export function QRScannerScreen() {
   const [scanned, setScanned] = useState(false);
 
   useEffect(() => {
-    BarCodeScanner.requestPermissionsAsync().then(({ status }) => {
+    BarCodeScanner.requestPermissionsAsync().then(({ status }: { status: string }) => {
       setHasPermission(status === 'granted');
     });
   }, []);

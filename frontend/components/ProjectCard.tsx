@@ -20,6 +20,16 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
     <div className="relative group">
       <Link href={`/projects/${project.id}`}>
         <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
+          {project.imageUrl ? (
+            <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
+              <img
+                src={project.imageUrl}
+                alt={project.name}
+                className="h-40 w-full object-cover"
+              />
+            </div>
+          ) : null}
+
           {/* Category icon + badges */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
@@ -100,22 +110,12 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                   className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
                   aria-label="CO2 offset estimate methodology info"
                 >
-                  <button
-                    type="button"
-                    className="w-3.5 h-3.5 flex items-center justify-center rounded-full bg-forest-100 text-[8px] text-forest-600 border border-forest-200 hover:bg-forest-200 transition-colors focus:outline-none focus:ring-1 focus:ring-forest-400"
-                    aria-label="CO2 offset estimate methodology info"
-                  >
-                    ℹ️
-                  </button>
-                  <span className="tooltip-text" role="tooltip">
-                    Estimated CO₂ offset based on this project&apos;s declared impact
-                    rate per XLM donated. Actual results may vary.
-                  </span>
+                  ?
+                </button>
+                <span className="tooltip-text" role="tooltip">
+                  Estimated based on {(project as any).co2PerXLM || (project as any).co2PerXlm || project.co2_per_xlm || 0} g CO₂ offset per XLM donated to this project
                 </span>
               </span>
-            </div>
-            <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">
-              Donate →
             </span>
           </div>
 	          <span className="text-xs font-semibold text-forest-600 font-body group-hover:text-forest-700">

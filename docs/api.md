@@ -168,3 +168,33 @@ Donations are **deduplicated by transactionHash** — safe to retry.
 | `tree` | ≥ 100 XLM | 🌳 |
 | `forest` | ≥ 500 XLM | 🌲 |
 | `earth` | ≥ 2,000 XLM | 🌍 |
+
+---
+
+## Verification Requests
+
+| Method | Endpoint | Access | Description |
+|--------|----------|--------|-------------|
+| POST | `/api/verification-requests` | Public | Submit a new project verification request |
+| GET | `/api/verification-requests/me` | Public (`?wallet=G...`) | Get submissions for a specific wallet address |
+| GET | `/api/verification-requests/stats` | Admin | Aggregate counts by status for header metrics |
+| GET | `/api/verification-requests/:id` | Public / Admin | Fetch details for a specific request ID |
+| GET | `/api/verification-requests` | Admin | List all verification requests with status pagination |
+| PATCH | `/api/verification-requests/:id/status` | Admin | Update request status and reviewer notes |
+
+### GET /api/verification-requests/stats
+
+Returns aggregate queue metrics grouped by status for admin header display:
+
+```json
+{
+  "success": true,
+  "data": {
+    "pending": 5,
+    "inReview": 2,
+    "approved": 18,
+    "rejected": 7
+  }
+}
+```
+

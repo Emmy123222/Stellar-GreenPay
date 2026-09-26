@@ -1,7 +1,7 @@
 /**
  * pages/dashboard.tsx — Donor impact dashboard
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import EditProfileForm from "@/components/EditProfileForm";
@@ -29,7 +29,6 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   const [isUnfunded, setIsUnfunded] = useState(false);
   const [friendbotState, setFriendbotState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [friendbotError, setFrienbotError] = useState<string | null>(null);
-  const [dueSubscriptions, setDueSubscriptions] = useState<MonthlySubscription[]>([]);
   const { wishlist } = useWishlist();
   const [showCertificate, setShowCertificate] = useState(false);
   const [pendingRating, setPendingRating] = useState<{ id: string, name: string } | null>(null);
@@ -65,10 +64,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       .finally(() => setLoading(false));
   }, [publicKey, wishlist]);
 
-  useEffect(() => {
-    if (!publicKey) return;
-    setDueSubscriptions(getDueMonthlySubscriptions());
-  }, [publicKey]);
+  // publicKey is always null during SSR/initial hydration (wallet connection
+  // is a client-only interaction), so this is safe to derive directly during
+  // render instead of via an effect + state.
+  const dueSubscriptions = useMemo<MonthlySubscription[]>(
+    () => (publicKey ? getDueMonthlySubscriptions() : []),
+    [publicKey]
+  );
 
   const streak = calculateStreak(donations);
   

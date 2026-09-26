@@ -66,6 +66,8 @@ export interface ClimateProject {
   // passed to the fetch; defaults to false when omitted.
   followCount?: number;
   isFollowing?: boolean;
+  webhookUrl?: string | null;
+  webhookSecret?: string | null;
 }
 
 /**
@@ -91,6 +93,7 @@ export interface ProjectCampaign {
   description: string;
   goalXLM: string;
   raisedXLM: string;
+  raisedUSDC: string;
   deadline: string;
   progressPercent: number;
   completed: boolean;
@@ -179,6 +182,7 @@ export interface LeaderboardEntry {
   publicKey: string;
   displayName?: string;
   totalDonatedXLM: string;
+  totalCO2OffsetKg: string;
   projectsSupported: number;
   topBadge?: BadgeTier;
 }
@@ -249,4 +253,44 @@ export interface MonthlySubscription {
   status: "active" | "completed";
   createdAt: string;
   history: MonthlyDonationHistoryItem[];
+}
+
+/**
+ * A merged pull request displayed on the /contributors timeline.
+ */
+export interface ContributorPR {
+  id: number;
+  number: number;
+  title: string;
+  htmlUrl: string;
+  mergedAt: string;
+  feature: string;
+  author: {
+    login: string;
+    avatarUrl: string;
+    htmlUrl: string;
+  };
+}
+
+export interface VerificationRequest {
+  id: string;
+  organizationName: string;
+  organizationWebsite: string | null;
+  organizationCountry: string | null;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription: string | null;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2: string | null;
+  supportingDocuments: any[];
+  storageBackend: string;
+  notes: string | null;
+  status: "pending" | "in_review" | "approved" | "rejected";
+  reviewerNotes: string | null;
+  reviewedBy: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
 }

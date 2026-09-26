@@ -32,8 +32,12 @@ const envSchema = z.object({
   AWS_SECRET_ACCESS_KEY: z.string().optional().default(""),
   S3_BUCKET: z.string().optional().default(""),
   S3_PUBLIC_URL: z.string().optional().default(""),
+  // Presigned PUT URL TTL in seconds (default: 300)
+  PRESIGN_EXPIRY_SECONDS: z.string().optional().default("300"),
   IPFS_API_URL: z.string().optional().default(""),
   IPFS_GATEWAY_URL: z.string().optional().default(""),
+  // Optional Pinata JWT used to pin CIDs after IPFS upload (prevents GC).
+  PINATA_JWT: z.string().optional().default(""),
 });
 
 function validateEnv() {

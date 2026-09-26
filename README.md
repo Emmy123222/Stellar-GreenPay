@@ -141,6 +141,17 @@ Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT
 
 Every push and every pull request to `main` runs Gitleaks with the repo-local `.gitleaks.toml` config. Any detected secret fails CI, so keep real credentials out of source control; use `.env` files locally and GitHub encrypted secrets for CI/deployment values. The allowlist only covers generated archives, env templates, and deterministic test fixtures.
 
+### GitHub Actions Secrets
+
+See [`docs/github-actions-secrets.md`](docs/github-actions-secrets.md) for a
+complete reference of all encrypted secrets required by the project's CI/CD
+pipelines, including:
+
+- Database backup credentials (AWS S3 / Google Cloud Storage)
+- Mobile EAS build tokens (Expo)
+- Database connection secrets
+- Quick setup guide and rotation policy
+
 ## 🗺 Roadmap
 
 See [ROADMAP.md](ROADMAP.md) for planned features.

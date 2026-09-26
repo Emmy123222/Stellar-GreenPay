@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`ImpactCertificate matches snapshot 1`] = `
 <div>
@@ -43,7 +43,7 @@ exports[`ImpactCertificate matches snapshot 1`] = `
         class="text-center mb-8"
       >
         <p
-          class="text-sm text-[#5a7a5a] font-body"
+          class="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body"
         >
           Presented to
         </p>
@@ -53,7 +53,7 @@ exports[`ImpactCertificate matches snapshot 1`] = `
           Jane Doe
         </p>
         <p
-          class="text-xs text-[#8aaa8a] mt-2 font-body"
+          class="text-xs text-[#8aaa8a] dark:text-forest-300 mt-2 font-body"
         >
           Donor Address: 
           GABCDEFGHI...KLMNOPQRST
@@ -76,7 +76,7 @@ exports[`ImpactCertificate matches snapshot 1`] = `
             1,500 XLM
           </p>
           <p
-            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+            class="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60"
           >
             Total Donated
           </p>
@@ -95,7 +95,7 @@ exports[`ImpactCertificate matches snapshot 1`] = `
             2.4k kg CO₂
           </p>
           <p
-            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+            class="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60"
           >
             CO₂ Offset
           </p>
@@ -114,7 +114,7 @@ exports[`ImpactCertificate matches snapshot 1`] = `
             Forest
           </p>
           <p
-            class="text-xs text-[#8aaa8a] mt-1 font-body uppercase tracking-wider font-bold opacity-60"
+            class="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60"
           >
             Badge Tier
           </p>
@@ -165,13 +165,13 @@ exports[`ImpactCertificate matches snapshot 1`] = `
         class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-8 pt-6 border-t border-forest-100"
       >
         <p
-          class="text-xs text-[#8aaa8a] font-body"
+          class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
         >
           Issued on 
           Jan 15, 2026
         </p>
         <p
-          class="text-xs text-[#8aaa8a] font-body"
+          class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
         >
           Verified by on-chain donation history
         </p>

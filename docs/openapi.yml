@@ -102,6 +102,8 @@ components:
           type: string
         raisedXLM:
           type: string
+        raisedUSDC:
+          type: string
         deadline:
           type: string
           format: date-time
@@ -272,6 +274,18 @@ components:
         updatedAt:
           type: string
           format: date-time
+
+    JobStats:
+      type: object
+      properties:
+        totalJobsInEscrow:
+          type: integer
+        totalJobsCompleted:
+          type: integer
+        totalEscrowXLM:
+          type: string
+        totalReleasedXLM:
+          type: string
 
     Rating:
       type: object
@@ -1219,7 +1233,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [all, month, year]
+            enum: [all, week, month, year]
             default: all
       responses:
         '200':
@@ -1521,6 +1535,20 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/Job'
+
+  /api/jobs/stats:
+    get:
+      tags: [Jobs]
+      summary: Get escrow marketplace aggregate metrics
+      operationId: getJobStats
+      description: Returns total jobs in escrow, completed jobs, and aggregate XLM amounts. Cached for 60 seconds.
+      responses:
+        '200':
+          description: Aggregate job statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStats'
 
   /api/jobs/{id}:
     get:

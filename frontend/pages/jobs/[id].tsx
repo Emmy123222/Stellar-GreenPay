@@ -37,30 +37,37 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
 
   const [job, setJob] = useState<EscrowJob | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [step, setStep] = useState<Step>("idle");
   const [actionError, setActionError] = useState<string | null>(null);
   const [releaseHash, setReleaseHash] = useState<string | null>(null);
   const [syncWarning, setSyncWarning] = useState<string | null>(null);
+  // `loading` is derived by comparing the job the page was loaded for to the
+  // current jobId, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const loading = !jobId || loadedForKey !== jobId;
 
   const load = useCallback(async () => {
     if (!jobId) return;
-    setLoading(true);
-    setLoadError(null);
     try {
       const j = await fetchJob(jobId);
       setJob(j);
+      setLoadError(null);
     } catch {
       setLoadError("Could not load this job. Check the link or try again later.");
       setJob(null);
     } finally {
-      setLoading(false);
+      setLoadedForKey(jobId);
     }
   }, [jobId]);
 
   useEffect(() => {
     if (!router.isReady || !jobId) return;
-    load();
+    // Deferred via a microtask (rather than called synchronously) so this
+    // effect doesn't itself perform a synchronous setState.
+    queueMicrotask(() => {
+      load();
+    });
   }, [router.isReady, jobId, load]);
 
   const isClient =

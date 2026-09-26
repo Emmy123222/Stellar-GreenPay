@@ -14,6 +14,7 @@ jest.mock("../services/redis", () => ({
 jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn(),
   getProjectDonationEvents: jest.fn(),
+  getRegisteredProjectIdFromTransaction: jest.fn(),
   CONTRACT_ID: "test-contract",
   server: { getTransaction: jest.fn() },
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
@@ -23,6 +24,20 @@ jest.mock("../services/summaryQueue", () => ({
   enqueueAISummary: jest.fn(),
 }));
 
+jest.mock("dns", () => ({
+  promises: {
+    resolve4: jest.fn(),
+    resolve6: jest.fn(),
+  },
+}));
+
+// Real QR code generation takes ~500ms-3s; mocked so the impact-certificate
+// tests don't risk the suite's 5000ms timeout under load.
+jest.mock("qrcode", () => ({
+  toDataURL: jest.fn().mockResolvedValue("data:image/png;base64,mock-qr-code"),
+}));
+
+const dns = require("dns");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { server } = require("../services/stellar");
@@ -118,7 +133,7 @@ describe("GET /api/projects", () => {
     await request(app).get("/api/projects?search=amazon").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("ILIKE");
+    expect(query).toContain("websearch_to_tsquery");
   });
 
   test("rejects invalid cursor", async () => {
@@ -223,19 +238,65 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 7, is_following: false }],
+    }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
     expect(res.body.success).toBe(true);
     expect(res.body.data.name).toBe("Test Project");
-    expect(res.body.data.subscriberCount).toBe(5);
+    expect(res.body.data.followCount).toBe(7);
+    expect(res.body.data.isFollowing).toBe(false);
+  });
+
+  test("returns followCount zero when project has no followers", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ follow_count: 0, is_following: false }],
+    }); // follow stats
+
+    const res = await request(app).get("/api/projects/proj-1").expect(200);
+
+    expect(res.body.data.followCount).toBe(0);
   });
 
   test("returns 404 for non-existent project", async () => {
     pool.query.mockResolvedValue({ rows: [] });
 
     await request(app).get("/api/projects/nonexistent").expect(404);
+  });
+});
+
+describe("PATCH /api/projects/:id", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  test("updates the project image when the owner requests it", async () => {
+    const updatedImageUrl = "https://example.com/banner.png";
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1", wallet_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" }] })
+      .mockResolvedValueOnce({ rows: [{ ...MOCK_PROJECT_ROW, image_url: updatedImageUrl }] });
+
+    const res = await request(app)
+      .patch("/api/projects/proj-1")
+      .send({ imageUrl: updatedImageUrl, adminAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.imageUrl).toBe(updatedImageUrl);
+    expect(pool.query).toHaveBeenCalled();
   });
 });
 
@@ -427,6 +488,132 @@ describe("mapCampaignRow", () => {
     expect(mapped.progressPercent).toBe(0);
     expect(mapped.completed).toBe(true);
   });
+
+  test("exposes raisedUSDC and uses converted raised_xlm for progress (issue #352)", () => {
+    const row = getBaseRow();
+    // SQL returns raised_xlm already converted (100 XLM + 150 USDC * 2 = 400)
+    row.raised_xlm = "400";
+    row.raised_usdc = "150";
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedXLM).toBe("400.0000000");
+    expect(mapped.raisedUSDC).toBe("150.0000000");
+    expect(mapped.progressPercent).toBe(40);
+    expect(mapped.completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0", () => {
+    const row = getBaseRow();
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedUSDC).toBe("0.0000000");
+  });
+});
+
+describe("getUsdcToXlmRate (issue #352)", () => {
+  const getRate = projectsRouter.getUsdcToXlmRate;
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  test("falls back to the documented default (3) when unset/invalid", () => {
+    delete process.env.USDC_TO_XLM_RATE;
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "not-a-number";
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "0";
+    expect(getRate()).toBe(3);
+  });
+
+  test("uses the configured env rate when valid", () => {
+    process.env.USDC_TO_XLM_RATE = "2.5";
+    expect(getRate()).toBe(2.5);
+  });
+});
+
+describe("GET /api/projects/:id/campaigns — USDC-aware progress (issue #352)", () => {
+  let app;
+  const rate = 2; // deterministic rate for these tests
+
+  beforeEach(() => {
+    process.env.USDC_TO_XLM_RATE = String(rate);
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  // Helper: the route issues `SELECT id FROM projects WHERE id=$1` then the
+  // campaign aggregation query. We mock both; the second result carries the
+  // values the SQL would have produced (XLM-equivalent total + raw USDC total).
+  async function getCampaigns(campaignRows) {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: "proj-1" }] });
+    pool.query.mockResolvedValueOnce({ rows: campaignRows });
+    return request(app).get("/api/projects/proj-1/campaigns").expect(200);
+  }
+
+  const baseCampaign = (overrides = {}) => ({
+    id: "camp-1",
+    project_id: "proj-1",
+    title: "Campaign",
+    description: null,
+    goal_xlm: "1000",
+    deadline: new Date("2099-01-01T00:00:00.000Z").toISOString(),
+    created_at: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+    ...overrides,
+  });
+
+  test("only XLM donations → raisedXLM = XLM total, raisedUSDC = 0", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "0" }),
+    ]);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("only USDC donations → raisedXLM converted at rate, raisedUSDC raw", async () => {
+    // 250 USDC * rate(2) = 500 XLM-equivalent
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "500", raised_usdc: "250" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("500.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("250.0000000");
+    expect(res.body.data[0].progressPercent).toBe(50);
+  });
+
+  test("mix of XLM and USDC → raisedXLM = XLM + USDC*rate, raisedUSDC raw USDC", async () => {
+    // 100 XLM + (150 USDC * 2) = 400 XLM-equivalent; raisedUSDC = 150
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "150" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("150.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+  });
+
+  test("zero donations → both totals 0, not completed", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "0", raised_usdc: "0" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("0.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(0);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0 (backwards compatible)", async () => {
+    const res = await getCampaigns([baseCampaign({ raised_xlm: "123" })]);
+    expect(res.body.data[0].raisedXLM).toBe("123.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+  });
 });
 
 // ── GET /api/projects/:id/impact-certificate ──────────────────────────────────
@@ -460,6 +647,7 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     app = buildApp();
     jest.resetAllMocks();
     redis.get.mockResolvedValue(null);
+    require("qrcode").toDataURL.mockResolvedValue("data:image/png;base64,mock-qr-code");
   });
 
   test("returns 200 with all required certificate fields for a valid donor", async () => {
@@ -725,18 +913,118 @@ describe("GET /api/projects/:id/impact-certificate", () => {
   });
 });
 
-describe("POST /api/projects/admin/confirm", () => {
+describe("POST /api/projects/:id/webhook", () => {
   let app;
-  const transactionHash = "a".repeat(64);
-  const projectId = "proj-1";
+  const OWNER_ADDRESS = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
   beforeEach(() => {
     app = buildApp();
     jest.clearAllMocks();
   });
 
-  test("sets on_chain_verified and verified in DB when transaction succeeds", async () => {
+  test("rejects webhook_url pointing at localhost", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "http://localhost:8080/internal", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    // No UPDATE was issued once SSRF validation rejected the URL.
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+    expect(dns.promises.resolve4).not.toHaveBeenCalled();
+  });
+
+  test("rejects webhook_url pointing at the cloud metadata IP", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "http://169.254.169.254/metadata", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("accepts a legitimate external webhook_url", async () => {
+    dns.promises.resolve4.mockResolvedValue(["104.21.0.1"]);
+    dns.promises.resolve6.mockRejectedValue(new Error("ENODATA"));
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // UPDATE
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.webhookUrl).toBe("https://webhook.site/xyz");
+    expect(res.body.data.webhookSecret).toEqual(expect.any(String));
+
+    const updateCall = pool.query.mock.calls.find(
+      ([sql]) => typeof sql === "string" && sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeDefined();
+    expect(updateCall[1][0]).toBe("https://webhook.site/xyz");
+  });
+
+  test("returns 400 when webhookUrl is missing", async () => {
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(400);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("returns 404 when the project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .post("/api/projects/missing/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: OWNER_ADDRESS });
+
+    expect(res.status).toBe(404);
+  });
+
+  test("returns 403 when adminAddress does not match the project owner", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [{ id: "proj-1", wallet_address: OWNER_ADDRESS, webhook_secret: null }],
+    });
+
+    const res = await request(app)
+      .post("/api/projects/proj-1/webhook")
+      .send({ webhookUrl: "https://webhook.site/xyz", adminAddress: "GDIFFERENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" });
+
+    expect(res.status).toBe(403);
+  });
+});describe("POST /api/projects/admin/confirm", () => {
+  let app;
+  let stellarService;
+  const transactionHash = "a".repeat(64);
+  const projectId = "proj-1";
+
+  beforeEach(() => {
+    app = buildApp();
+    stellarService = require("../services/stellar");
+    jest.clearAllMocks();
+  });
+
+  test("sets on_chain_verified and verified in DB when transaction registers the project", async () => {
     server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(projectId);
 
     const updatedRow = {
       ...MOCK_PROJECT_ROW,
@@ -747,10 +1035,14 @@ describe("POST /api/projects/admin/confirm", () => {
 
     const res = await request(app)
       .post("/api/projects/admin/confirm")
+      // adminRequired (see ../middleware/auth.js) accepts a raw admin key only via
+      // the X-Admin-Key header; Authorization: Bearer is reserved for JWTs.
+      .set("X-Admin-Key", "test-admin-key")
       .send({ transactionHash, projectId })
       .expect(200);
 
     expect(server.getTransaction).toHaveBeenCalledWith(transactionHash);
+    expect(stellarService.getRegisteredProjectIdFromTransaction).toHaveBeenCalled();
 
     const updateCall = pool.query.mock.calls.find(([sql]) =>
       sql.includes("UPDATE projects"),
@@ -764,4 +1056,164 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.data.verified).toBe(true);
     expect(res.body.data.onChainVerified).toBe(true);
   });
+
+  test("rejects when the transaction registered a different project", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(
+      "some-other-project",
+    );
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction is not a project registration", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(null);
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction failed on-chain", async () => {
+    server.getTransaction.mockResolvedValue({ successful: false });
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(500);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/transaction failed/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 400 when transactionHash or projectId is missing", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash })
+      .expect(400);
+    expect(res.body.error).toMatch(/projectId is required/i);
+
+    const res2 = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ projectId })
+      .expect(400);
+    expect(res2.body.error).toMatch(/transactionHash is required/i);
+
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 401 without a valid admin key", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .send({ transactionHash, projectId })
+      .expect(401);
+
+    expect(res.body.error).toMatch(/X-Admin-Key|authorization/i);
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+
 });
+
+describe("GET /api/projects/:id/summary-status", () => {
+  let app;
+  const projectId = "proj-1";
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns 404 if project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+  });
+
+  test("returns queued status when ai_summary is null", async () => {
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: null,
+          ai_summary_generated_at: null,
+          ai_summary_model: null,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "queued",
+      aiSummary: null,
+      aiSummaryGeneratedAt: null,
+      aiSummaryModel: null,
+    });
+  });
+
+  test("returns ready status with summary details when ai_summary is present", async () => {
+    const generatedAt = new Date().toISOString();
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          ai_summary: "This is an AI summary.",
+          ai_summary_generated_at: generatedAt,
+          ai_summary_model: "claude-haiku-4-5",
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${projectId}/summary-status`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      status: "ready",
+      aiSummary: "This is an AI summary.",
+      aiSummaryGeneratedAt: new Date(generatedAt).toISOString(),
+      aiSummaryModel: "claude-haiku-4-5",
+    });
+  });
+});
+

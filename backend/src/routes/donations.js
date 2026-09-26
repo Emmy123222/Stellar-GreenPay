@@ -5,27 +5,23 @@
 const express = require("express");
 const router  = express.Router();
 const { v4: uuid } = require("uuid");
+const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
-const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const donationEvents = require("../services/donationEvents");
+const { enqueueProfileUpdate } = require("../services/profileQueue");
+const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
 
-const donationSchema = z.object({
-  projectId: z.string().min(1, "projectId is required"),
-  donorAddress: z.string().min(1, "donorAddress is required"),
-  amountXLM: z.union([z.string(), z.number()]).transform((value) => String(value)),
-  amount: z.union([z.string(), z.number()]).optional(),
-  currency: z.string().optional(),
-  message: sanitizedStringField({ required: false, maxLength: 100, message: "must not contain HTML" }).optional(),
-  transactionHash: z.string().min(1, "transactionHash is required"),
-}).transform((data) => ({
-  ...data,
-  message: data.message ?? null,
-}));
+function resolveDonorCountry(ip) {
+  if (!ip || typeof ip !== "string") return null;
+  const normalizedIp = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  const geo = geoip.lookup(normalizedIp);
+  return geo?.country || null;
+}
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid Stellar public key"); e.status = 400; throw e; }
@@ -51,13 +47,16 @@ async function recordDonation(req, res, next) {
 
   try {
     const { projectId, donorAddress, amountXLM, amount, currency = "XLM", message, transactionHash } = req.body;
+    const donorCountry = resolveDonorCountry(req.ip);
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
     client = await pool.connect();
 
-    const projectResult = await client.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await client.query("SELECT id, co2_per_xlm, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
+    const project = projectResult.rows[0] || {};
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
@@ -68,7 +67,10 @@ async function recordDonation(req, res, next) {
       "SELECT * FROM donations WHERE transaction_hash = $1",
       [transactionHash],
     );
-    if (existingResult.rows[0]) return res.json({ success: true, data: mapDonationRow(existingResult.rows[0]) });
+    if (existingResult.rows[0]) {
+      const existingRow = { ...existingResult.rows[0], co2_per_xlm: projectCo2PerXlm };
+      return res.json({ success: true, data: mapDonationRow(existingRow) });
+    }
 
     // Verify the transaction is confirmed on-chain before recording it.
     // Prevents a caller from inflating raised_xlm with a fake or unconfirmed tx hash.
@@ -85,11 +87,22 @@ async function recordDonation(req, res, next) {
     await client.query("BEGIN");
     inTransaction = true;
 
+    // Calculate previous donated total so we can detect badge tier changes
+    const prevTotalResult = await client.query(
+      `SELECT COALESCE(SUM(amount_xlm), 0)::numeric AS total
+       FROM donations
+       WHERE donor_address = $1
+         AND amount_xlm IS NOT NULL`,
+      [donorAddress],
+    );
+    const prevTotalDonated = parseFloat(prevTotalResult.rows[0]?.total || "0");
+    const newTotalDonated = prevTotalDonated + (currency === "XLM" ? parsedAmount : 0);
+
     const donationResult = await client.query(
       `INSERT INTO donations (
-        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
       RETURNING *`,
       [
         uuid(),
@@ -100,6 +113,7 @@ async function recordDonation(req, res, next) {
         currency,
         message?.trim().slice(0, 100) || null,
         transactionHash,
+        donorCountry,
       ],
     );
 
@@ -134,9 +148,9 @@ async function recordDonation(req, res, next) {
 
           await client.query(
             `INSERT INTO donations (
-              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, created_at
+              id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())`,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
             [
               uuid(),
               projectId,
@@ -146,6 +160,7 @@ async function recordDonation(req, res, next) {
               "XLM",
               `Matching donation for donation from ${donorAddress}`,
               `match-${transactionHash}-${match.id}`,
+              donorCountry,
             ],
           );
 
@@ -174,6 +189,8 @@ async function recordDonation(req, res, next) {
     await client.query("COMMIT");
     inTransaction = false;
 
+    await redis.deletePattern("projects:list:*");
+
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
@@ -187,23 +204,66 @@ async function recordDonation(req, res, next) {
       txHash: transactionHash,
     }, "Donation recorded");
 
+    const donationRow = donationResult?.rows?.[0] || {};
     const io = req.app?.get("io");
-    if (io && typeof io.emit === "function") {
-      io.emit("donation_event", {
+
+    // Badge tier reflects the donor's cumulative total after this donation.
+    const newBadges = computeBadges(newTotalDonated);
+    const newTier = newBadges[0]?.tier || null;
+    const donorBadge = newTier ? newTier.charAt(0).toUpperCase() + newTier.slice(1) : "";
+
+    const projectName = (projectResult.rows[0] && projectResult.rows[0].name) || "GreenPay Project";
+
+    if (io) {
+      const donationPayload = {
         projectId,
+        projectName,
         donorAddress,
-        amountXLM: recordedDonation.amount_xlm,
+        amountXLM: donationRow.amount_xlm ?? parsedAmount,
         transactionHash,
         timestamp: new Date().toISOString(),
-      });
+        activeCampaignProgressPercent: null,
+        campaignGoalXLM: null,
+        campaignRaisedXLM: null,
+        donorBadge,
+      };
+      if (typeof io.to === "function") {
+        io.to([`project:${projectId}`, "all-donations"]).emit("donation_event", donationPayload);
+      } else if (typeof io.emit === "function") {
+        io.emit("donation_event", donationPayload);
+      }
     }
 
-    const mappedDonation = mapDonationRow(donationResult.rows[0]);
-    donationEvents.emit("new_donation", mappedDonation);
+    // Detect badge tier upgrades caused by this donation and emit badge_earned
+    try {
+      const prevTier = computeBadges(prevTotalDonated)[0]?.tier || null;
+      if (newTier && prevTier !== newTier && io) {
+        const badgePayload = {
+          donorAddress,
+          badge: newTier,
+          projectId,
+        };
+        if (typeof io.to === "function") {
+          io.to(`project:${projectId}`).emit("badge_earned", badgePayload);
+        } else if (typeof io.emit === "function") {
+          io.emit("badge_earned", badgePayload);
+        }
+      }
+    } catch (err) {
+      // Do not let badge emit failures break donation flow
+      logger.error({ event: "badge_emit_failed", err, donorAddress, projectId }, "Failed to emit badge_earned");
+    }
 
-    res.status(201).json({ success: true, data: mappedDonation });
+    donationEvents.emit("new_donation", {
+      projectName,
+      amountXLM: String(donationRow.amount_xlm ?? parsedAmount),
+      donorBadge,
+    });
+
+    res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
     if (inTransaction && client) await client.query("ROLLBACK");
+    console.error(e);
     next(e);
   } finally {
     if (client) client.release();
@@ -227,21 +287,45 @@ router.get("/stream", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.flushHeaders();
-
-  const keepAlive = setInterval(() => {
-    res.write(":\\n\\n");
-  }, 15000);
+  res.setHeader("X-Accel-Buffering", "no");
+  res.write("retry: 1000\n\n");
 
   const onNewDonation = (donation) => {
-    res.write(`data: ${JSON.stringify(donation)}\\n\\n`);
+    res.write(`data: ${JSON.stringify(donation)}\n\n`);
   };
-
   donationEvents.on("new_donation", onNewDonation);
 
-  req.on("close", () => {
-    clearInterval(keepAlive);
-    donationEvents.off("new_donation", onNewDonation);
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(": keepalive\n\n");
+    }
+  }, 15000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    donationEvents.removeListener("new_donation", onNewDonation);
+  };
+
+  req.on("close", cleanup);
+  req.on("end", cleanup);
+  req.on("aborted", cleanup);
+
+  // Best-effort initial snapshot of recent donations; a failure here must
+  // not tear down the already-open SSE connection or its listener.
+  Promise.resolve(pool.query(
+    `SELECT d.*, p.name AS project_name
+     FROM donations d
+     JOIN projects p ON p.id = d.project_id
+     ORDER BY d.created_at DESC
+     LIMIT 10`,
+  )).then((result) => {
+    if (res.writableEnded) return;
+    res.write(`event: initial\ndata: ${JSON.stringify({ donations: result.rows.map((row) => ({
+      ...mapDonationRow(row),
+      projectName: row.project_name || null,
+    })) })}\n\n`);
+  }).catch(() => {
+    // Non-fatal: the live stream still works without the initial snapshot.
   });
 });
 
@@ -250,12 +334,13 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
     const result = await pool.query(
-      `SELECT *
-       FROM donations
-       WHERE project_id = $1
-         AND message IS NOT NULL
-         AND length(trim(message)) > 0
-       ORDER BY amount DESC, created_at DESC
+      `SELECT d.*, p.co2_per_xlm
+       FROM donations d
+       JOIN projects p ON d.project_id = p.id
+       WHERE d.project_id = $1
+         AND d.message IS NOT NULL
+         AND length(trim(d.message)) > 0
+       ORDER BY d.amount DESC, d.created_at DESC
        LIMIT $2`,
       [req.params.projectId, limit],
     );
@@ -284,14 +369,18 @@ router.get("/project/:projectId", async (req, res, next) => {
       : [req.params.projectId, limit + 1];
 
     const query = hasCursor
-      ? `SELECT * FROM donations
-         WHERE project_id = $1
-           AND created_at < $2::timestamptz
-         ORDER BY created_at DESC
+      ? `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.project_id = $1
+           AND d.created_at < $2::timestamptz
+         ORDER BY d.created_at DESC
          LIMIT $3`
-      : `SELECT * FROM donations
-         WHERE project_id = $1
-         ORDER BY created_at DESC
+      : `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.project_id = $1
+         ORDER BY d.created_at DESC
          LIMIT $2`;
 
     const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
@@ -318,13 +407,55 @@ router.get("/project/:projectId", async (req, res, next) => {
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
-    const result = await pool.query(
-      `SELECT * FROM donations
-       WHERE donor_address = $1
-       ORDER BY created_at DESC`,
-      [req.params.publicKey],
-    );
-    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+    const values = [req.params.publicKey];
+
+    if (hasCursor) {
+      try {
+        const cursorData = JSON.parse(
+          Buffer.from(req.query.cursor, "base64").toString("utf8"),
+        );
+        const cursorCreatedAt = cursorData.created_at;
+        const cursorId = cursorData.id;
+        if (!cursorCreatedAt || !cursorId) {
+          return res.status(400).json({ error: "Invalid cursor" });
+        }
+        values.push(cursorCreatedAt, cursorId);
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+    }
+
+    values.push(limit + 1);
+    const query = hasCursor
+      ? `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+           AND (d.created_at < $2::timestamptz OR (d.created_at = $2::timestamptz AND d.id < $3))
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $4`
+      : `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $2`;
+
+    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore
+      ? Buffer.from(
+        JSON.stringify({
+          created_at: result[result.length - 1].createdAt,
+          id: result[result.length - 1].id,
+        }),
+      ).toString("base64")
+      : null;
+
+    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor });
   } catch (e) { next(e); }
 });
 
@@ -343,11 +474,8 @@ router.get("/:id", async (req, res, next) => {
       SELECT 
         d.*,
         p.name AS project_name,
-        pr.display_name AS donor_display_name,
-        CASE
-          WHEN p.raised_xlm > 0 THEN (d.amount_xlm * (p.co2_offset_kg::numeric / p.raised_xlm))
-          ELSE 0
-        END AS co2_offset_kg
+        p.co2_per_xlm,
+        pr.display_name AS donor_display_name
       FROM donations d
       JOIN projects p ON d.project_id = p.id
       LEFT JOIN profiles pr ON d.donor_address = pr.public_key
@@ -365,7 +493,6 @@ router.get("/:id", async (req, res, next) => {
     const donationData = mapDonationRow(row);
     donationData.projectName = row.project_name;
     donationData.donorDisplayName = row.donor_display_name || null;
-    donationData.co2OffsetKg = Math.round(Number.parseFloat(row.co2_offset_kg || "0"));
 
     res.json({ success: true, data: donationData });
   } catch (e) {
@@ -375,4 +502,3 @@ router.get("/:id", async (req, res, next) => {
 
 module.exports = router;
 module.exports.recordDonation = recordDonation;
-
