@@ -1,0 +1,19 @@
+name: Donation Load Test
+
+on:
+  schedule:
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  donations:
+    name: 100 VU donation load test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - name: Run donation load test
+        env:
+          BASE_URL: ${{ secrets.LOAD_TEST_BASE_URL || 'https://staging.greenpay.app' }}
+          DONATION_PAYLOAD: ${{ secrets.LOAD_TEST_DONATION_PAYLOAD }}
+        run: k6 run load-tests/donations.js
