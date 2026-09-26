@@ -254,6 +254,43 @@ describe("POST /api/donations", () => {
     expect(pool.connect).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+    ["NaN", NaN],
+    ["null", null],
+    ["infinite", "1e999"],
+  ])("returns 400 for a %s amount without touching the database", async (_label, amountXLM) => {
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("E"),
+      amountXLM,
+      transactionHash: makeTxHash("e"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Donation amount must be a positive number");
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  test("accepts a valid positive amount", async () => {
+    const client = createMockClient(queryResult([]));
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("F"),
+      amountXLM: "25.5",
+      transactionHash: makeTxHash("f"),
+    });
+
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe("Project not found");
+  });
+
   test("deduplicates duplicate transaction hashes and returns the existing record", async () => {
     const donorAddress = makePublicKey("D");
     const transactionHash = makeTxHash("d");

@@ -2997,4 +2997,60 @@ mod tests {
         assert_eq!(client.get_project(&pid).total_raised, amount);
         assert_eq!(client.get_donation_count(), 1);
     }
+
+    // ─── Non-positive amount guard (issue #1058) ─────────────────────────────
+
+    /// amount == 0 must be rejected before any project lookup or state change.
+    #[test]
+    #[should_panic(expected = "Donation amount must be positive")]
+    fn test_donate_zero_amount_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate(&token, &donor, &pid, &0i128, &0u32);
+    }
+
+    /// Negative amounts must be rejected too.
+    #[test]
+    #[should_panic(expected = "Donation amount must be positive")]
+    fn test_donate_negative_amount_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate(&token, &donor, &pid, &-1i128, &0u32);
+    }
+
+    /// A rejected zero donation must leave no trace: no funds moved, no accounting.
+    #[test]
+    fn test_donate_zero_amount_leaves_state_untouched() {
+        let (env, client, token, pid, donor, wallet) = setup_min_donation();
+
+        let attempted = client.try_donate(&token, &donor, &pid, &0i128, &0u32);
+        assert!(attempted.is_err());
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, 0);
+        assert_eq!(client.get_donation_count(), 0);
+        assert_eq!(client.get_global_total(), 0);
+
+        let token_client = token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&wallet), 0);
+        assert_eq!(token_client.balance(&donor), 100 * STROOP);
+    }
+
+    /// donate_usdc mirrors the same guard, checked before token/oracle lookups.
+    #[test]
+    #[should_panic(expected = "Donation amount must be positive")]
+    fn test_donate_usdc_zero_amount_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate_usdc(&token, &donor, &pid, &0i128, &0u32);
+    }
+
+    /// Negative USDC amounts are rejected the same way.
+    #[test]
+    #[should_panic(expected = "Donation amount must be positive")]
+    fn test_donate_usdc_negative_amount_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate_usdc(&token, &donor, &pid, &-1i128, &0u32);
+    }
 }
