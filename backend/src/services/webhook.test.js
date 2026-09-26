@@ -837,8 +837,13 @@ describe("Webhook delivery integration (testcontainers)", () => {
   let testPool;
   let serverContainerReady = false;
 
+  beforeEach(() => {
+    assertPublicHttpUrl.mockImplementation(() => Promise.resolve(undefined));
+  });
+
   beforeAll(async () => {
     jest.restoreAllMocks();
+    assertPublicHttpUrl.mockImplementation(() => Promise.resolve(undefined));
     if (process.env.SKIP_INTEGRATION === "1") {
       console.warn("Skipping integration tests (SKIP_INTEGRATION=1)");
       return;
