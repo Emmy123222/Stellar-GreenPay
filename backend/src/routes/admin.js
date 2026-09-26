@@ -5,6 +5,7 @@ const pool = require("../db/pool");
 const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
+const { mapDonationRow } = require("../services/store");
 
 const loginLimiter = createRateLimiter(10, 15, "admin-login");
 
@@ -247,4 +248,71 @@ router.post("/digest/preview", adminRequired, async (req, res, next) => {
   }
 });
 
+/**
+ * List donations with full unmasked wallet addresses for administrators.
+ *
+ * @route GET /api/admin/donations
+ */
+router.get("/donations", adminRequired, async (req, res, next) => {
+  try {
+    const { projectId, project_id, page = "1", pageSize = "50" } = req.query;
+    const targetProject = projectId || project_id;
+    const limit = Math.min(Number.parseInt(pageSize, 10) || 50, 200);
+    const offset = (Math.max(Number.parseInt(page, 10) || 1, 1) - 1) * limit;
+    let result;
+    let countResult;
+
+    if (targetProject && typeof targetProject === "string") {
+      result = await pool.query(
+        `SELECT d.*, p.name AS project_name, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
+         ORDER BY d.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [targetProject, limit, offset],
+      );
+      countResult = await pool.query(
+        `SELECT COUNT(*) AS total
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)`,
+        [targetProject],
+      );
+    } else {
+      result = await pool.query(
+        `SELECT d.*, p.name AS project_name, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         ORDER BY d.created_at DESC
+         LIMIT $1 OFFSET $2`,
+        [limit, offset],
+      );
+      countResult = await pool.query(
+        `SELECT COUNT(*) AS total
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id`,
+      );
+    }
+
+    const donations = result.rows.map((row) => ({
+      ...mapDonationRow(row),
+      donor_wallet: row.donor_address,
+      donorAddress: row.donor_address,
+      projectName: row.project_name,
+    }));
+
+    res.json({
+      success: true,
+      data: donations,
+      total: parseInt(countResult.rows[0]?.total || "0", 10),
+      page: parseInt(page, 10),
+      pageSize: limit,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;
+
