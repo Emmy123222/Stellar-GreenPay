@@ -1,8 +1,8 @@
 /**
  * src/routes/stats.js
- * GET /api/stats/global      — landing-page aggregate platform totals.
- * GET /api/stats/categories  — project count per category.
- * GET /api/stats/trends      — week-over-week donation growth rate.
+ * GET /api/stats/global    — landing-page aggregate platform totals.
+ * GET /api/stats/categories — project count per category.
+ * GET /api/stats/trends    — week-over-week donation growth rate.
  */
 "use strict";
 const express = require("express");
@@ -14,7 +14,7 @@ const GLOBAL_STATS_CACHE_KEY = "stats:global";
 const GLOBAL_STATS_CACHE_TTL_SECONDS = 60;
 
 const TRENDS_CACHE_KEY = "stats:trends";
-const TRENDS_CACHE_TTL_SECONDS = 60;
+const TRENDS_CACHE_TTL_SECONDS = 300; // 5 minutes
 
 function mapGlobalStatsRow(row = {}) {
   return {
@@ -90,44 +90,20 @@ router.get("/categories", async (req, res, next) => {
 });
 
 /**
- * Compute week-over-week growth percent.
- * Returns 0 when both weeks are zero, or Infinity-safe value when last week
- * was zero but this week has donations.
+ * GET /api/stats/trends
  *
- * @param {number} thisWeek
- * @param {number} lastWeek
- * @returns {number}
- */
-function computeGrowthPercent(thisWeek, lastWeek) {
-  if (lastWeek === 0) {
-    return thisWeek === 0 ? 0 : 100;
-  }
-  return parseFloat((((thisWeek - lastWeek) / lastWeek) * 100).toFixed(2));
-}
-
-/**
- * Map the raw DB rows for this week and last week into the trends response shape.
+ * Returns week-over-week donation growth comparing the 7 days ending at
+ * midnight UTC today ("this week") against the prior 7 days ("last week").
  *
- * @param {{ total_xlm: string, total_donations: string } | undefined} thisWeekRow
- * @param {{ total_xlm: string, total_donations: string } | undefined} lastWeekRow
- * @returns {object}
+ * Response shape:
+ * {
+ *   "thisWeekXLM":        "1250.0000000",
+ *   "lastWeekXLM":        "980.0000000",
+ *   "growthPercent":      27.55,           // null when lastWeek is 0
+ *   "thisWeekDonations":  42,
+ *   "lastWeekDonations":  35
+ * }
  */
-function mapTrendsRows(thisWeekRow = {}, lastWeekRow = {}) {
-  const thisWeekXLM = parseFloat(thisWeekRow.total_xlm || "0");
-  const lastWeekXLM = parseFloat(lastWeekRow.total_xlm || "0");
-  const thisWeekDonations = parseInt(thisWeekRow.total_donations || "0", 10);
-  const lastWeekDonations = parseInt(lastWeekRow.total_donations || "0", 10);
-
-  return {
-    thisWeekXLM: thisWeekXLM.toFixed(1),
-    lastWeekXLM: lastWeekXLM.toFixed(1),
-    growthPercent: computeGrowthPercent(thisWeekXLM, lastWeekXLM),
-    thisWeekDonations,
-    lastWeekDonations,
-  };
-}
-
-// GET /api/stats/trends — week-over-week donation growth rate
 router.get("/trends", async (req, res, next) => {
   try {
     const cached = await redis.get(TRENDS_CACHE_KEY);
@@ -136,25 +112,61 @@ router.get("/trends", async (req, res, next) => {
     }
 
     const result = await pool.query(`
+      WITH bounds AS (
+        SELECT
+          date_trunc('day', NOW() AT TIME ZONE 'UTC')                    AS week_end,
+          date_trunc('day', NOW() AT TIME ZONE 'UTC') - INTERVAL '7 days'  AS week_start,
+          date_trunc('day', NOW() AT TIME ZONE 'UTC') - INTERVAL '7 days'  AS prev_end,
+          date_trunc('day', NOW() AT TIME ZONE 'UTC') - INTERVAL '14 days' AS prev_start
+      ),
+      this_week AS (
+        SELECT
+          COALESCE(SUM(COALESCE(amount_xlm, amount)), 0) AS total_xlm,
+          COUNT(*)::int                                   AS total_count
+        FROM donations, bounds
+        WHERE created_at >= bounds.week_start
+          AND created_at <  bounds.week_end
+      ),
+      last_week AS (
+        SELECT
+          COALESCE(SUM(COALESCE(amount_xlm, amount)), 0) AS total_xlm,
+          COUNT(*)::int                                   AS total_count
+        FROM donations, bounds
+        WHERE created_at >= bounds.prev_start
+          AND created_at <  bounds.prev_end
+      )
       SELECT
-        CASE
-          WHEN created_at >= date_trunc('week', NOW()) THEN 'this_week'
-          ELSE 'last_week'
-        END AS week,
-        COALESCE(SUM(amount_xlm), 0)::text  AS total_xlm,
-        COUNT(*)::text                       AS total_donations
-      FROM donations
-      WHERE created_at >= date_trunc('week', NOW()) - INTERVAL '7 days'
-      GROUP BY week
+        tw.total_xlm   AS "thisWeekXLM",
+        lw.total_xlm   AS "lastWeekXLM",
+        tw.total_count AS "thisWeekDonations",
+        lw.total_count AS "lastWeekDonations"
+      FROM this_week tw
+      CROSS JOIN last_week lw
     `);
 
-    const thisWeekRow = result.rows.find((r) => r.week === "this_week");
-    const lastWeekRow = result.rows.find((r) => r.week === "last_week");
+    const row = result.rows[0] || {};
 
-    const trends = mapTrendsRows(thisWeekRow, lastWeekRow);
-    await redis.set(TRENDS_CACHE_KEY, trends, TRENDS_CACHE_TTL_SECONDS);
+    const thisWeekXLM = parseFloat(row.thisWeekXLM || "0");
+    const lastWeekXLM = parseFloat(row.lastWeekXLM || "0");
 
-    res.json(trends);
+    let growthPercent = null;
+    if (lastWeekXLM > 0) {
+      growthPercent = parseFloat(
+        (((thisWeekXLM - lastWeekXLM) / lastWeekXLM) * 100).toFixed(2)
+      );
+    }
+
+    const payload = {
+      thisWeekXLM:       thisWeekXLM.toFixed(7),
+      lastWeekXLM:       lastWeekXLM.toFixed(7),
+      growthPercent,
+      thisWeekDonations: Number.parseInt(row.thisWeekDonations, 10) || 0,
+      lastWeekDonations: Number.parseInt(row.lastWeekDonations, 10) || 0,
+    };
+
+    await redis.set(TRENDS_CACHE_KEY, payload, TRENDS_CACHE_TTL_SECONDS);
+
+    res.json(payload);
   } catch (e) {
     next(e);
   }
@@ -163,8 +175,6 @@ router.get("/trends", async (req, res, next) => {
 module.exports = router;
 module.exports.GLOBAL_STATS_CACHE_KEY = GLOBAL_STATS_CACHE_KEY;
 module.exports.GLOBAL_STATS_CACHE_TTL_SECONDS = GLOBAL_STATS_CACHE_TTL_SECONDS;
-module.exports.mapGlobalStatsRow = mapGlobalStatsRow;
 module.exports.TRENDS_CACHE_KEY = TRENDS_CACHE_KEY;
 module.exports.TRENDS_CACHE_TTL_SECONDS = TRENDS_CACHE_TTL_SECONDS;
-module.exports.mapTrendsRows = mapTrendsRows;
-module.exports.computeGrowthPercent = computeGrowthPercent;
+module.exports.mapGlobalStatsRow = mapGlobalStatsRow;

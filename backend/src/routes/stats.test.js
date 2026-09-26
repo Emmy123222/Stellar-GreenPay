@@ -82,31 +82,35 @@ describe("GET /api/stats/trends", () => {
     jest.clearAllMocks();
   });
 
-  test("returns week-over-week growth data and caches in Redis for 60 seconds", async () => {
+  test("returns week-over-week growth data and caches in Redis for 300 seconds", async () => {
     redis.get.mockResolvedValue(null);
     pool.query.mockResolvedValue({
       rows: [
-        { week: "this_week", total_xlm: "1250.0", total_donations: "42" },
-        { week: "last_week", total_xlm: "980.0",  total_donations: "35" },
+        {
+          thisWeekXLM: "1250.0",
+          lastWeekXLM: "980.0",
+          thisWeekDonations: 42,
+          lastWeekDonations: 35,
+        },
       ],
     });
 
     const res = await request(app).get("/api/stats/trends").expect(200);
 
     expect(res.body).toEqual({
-      thisWeekXLM: "1250.0",
-      lastWeekXLM: "980.0",
+      thisWeekXLM: "1250.0000000",
+      lastWeekXLM: "980.0000000",
       growthPercent: 27.55,
       thisWeekDonations: 42,
       lastWeekDonations: 35,
     });
-    expect(redis.set).toHaveBeenCalledWith("stats:trends", res.body, 60);
+    expect(redis.set).toHaveBeenCalledWith("stats:trends", res.body, 300);
   });
 
   test("serves cached trends without querying Postgres", async () => {
     const cached = {
-      thisWeekXLM: "1250.0",
-      lastWeekXLM: "980.0",
+      thisWeekXLM: "1250.0000000",
+      lastWeekXLM: "980.0000000",
       growthPercent: 27.55,
       thisWeekDonations: 42,
       lastWeekDonations: 35,
@@ -120,48 +124,81 @@ describe("GET /api/stats/trends", () => {
     expect(redis.set).not.toHaveBeenCalled();
   });
 
-  test("returns zero growth when both weeks have no donations", async () => {
-    redis.get.mockResolvedValue(null);
-    pool.query.mockResolvedValue({ rows: [] });
-
-    const res = await request(app).get("/api/stats/trends").expect(200);
-
-    expect(res.body).toEqual({
-      thisWeekXLM: "0.0",
-      lastWeekXLM: "0.0",
-      growthPercent: 0,
-      thisWeekDonations: 0,
-      lastWeekDonations: 0,
-    });
-  });
-
-  test("returns 100% growth when last week was zero but this week has donations", async () => {
+  test("returns growthPercent null when last week had zero donations", async () => {
     redis.get.mockResolvedValue(null);
     pool.query.mockResolvedValue({
       rows: [
-        { week: "this_week", total_xlm: "500.0", total_donations: "10" },
+        {
+          thisWeekXLM: "500.0",
+          lastWeekXLM: "0",
+          thisWeekDonations: 10,
+          lastWeekDonations: 0,
+        },
       ],
     });
 
     const res = await request(app).get("/api/stats/trends").expect(200);
 
-    expect(res.body.growthPercent).toBe(100);
+    expect(res.body.growthPercent).toBeNull();
     expect(res.body.thisWeekDonations).toBe(10);
     expect(res.body.lastWeekDonations).toBe(0);
+  });
+
+  test("returns growthPercent null and zero counts when no donations exist", async () => {
+    redis.get.mockResolvedValue(null);
+    pool.query.mockResolvedValue({
+      rows: [
+        {
+          thisWeekXLM: "0",
+          lastWeekXLM: "0",
+          thisWeekDonations: 0,
+          lastWeekDonations: 0,
+        },
+      ],
+    });
+
+    const res = await request(app).get("/api/stats/trends").expect(200);
+
+    expect(res.body).toEqual({
+      thisWeekXLM: "0.0000000",
+      lastWeekXLM: "0.0000000",
+      growthPercent: null,
+      thisWeekDonations: 0,
+      lastWeekDonations: 0,
+    });
   });
 
   test("returns negative growth when this week is lower than last week", async () => {
     redis.get.mockResolvedValue(null);
     pool.query.mockResolvedValue({
       rows: [
-        { week: "this_week", total_xlm: "500.0",  total_donations: "20" },
-        { week: "last_week", total_xlm: "1000.0", total_donations: "40" },
+        {
+          thisWeekXLM: "500.0",
+          lastWeekXLM: "1000.0",
+          thisWeekDonations: 20,
+          lastWeekDonations: 40,
+        },
       ],
     });
 
     const res = await request(app).get("/api/stats/trends").expect(200);
 
     expect(res.body.growthPercent).toBe(-50);
+  });
+
+  test("handles empty rows result gracefully", async () => {
+    redis.get.mockResolvedValue(null);
+    pool.query.mockResolvedValue({ rows: [] });
+
+    const res = await request(app).get("/api/stats/trends").expect(200);
+
+    expect(res.body).toEqual({
+      thisWeekXLM: "0.0000000",
+      lastWeekXLM: "0.0000000",
+      growthPercent: null,
+      thisWeekDonations: 0,
+      lastWeekDonations: 0,
+    });
   });
 
   test("returns 500 when pool.query throws", async () => {
@@ -171,25 +208,5 @@ describe("GET /api/stats/trends", () => {
     const res = await request(app).get("/api/stats/trends").expect(500);
 
     expect(res.body.error).toBe("DB connection failed");
-  });
-});
-
-describe("computeGrowthPercent", () => {
-  const { computeGrowthPercent } = require("./stats");
-
-  test("returns 0 when both values are zero", () => {
-    expect(computeGrowthPercent(0, 0)).toBe(0);
-  });
-
-  test("returns 100 when last week is zero but this week is positive", () => {
-    expect(computeGrowthPercent(500, 0)).toBe(100);
-  });
-
-  test("calculates positive growth correctly", () => {
-    expect(computeGrowthPercent(1250, 980)).toBeCloseTo(27.55, 1);
-  });
-
-  test("calculates negative growth correctly", () => {
-    expect(computeGrowthPercent(500, 1000)).toBe(-50);
   });
 });
