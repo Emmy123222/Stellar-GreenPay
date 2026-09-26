@@ -21,6 +21,8 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       LEADERBOARD_MAX_LIMIT
     );
     const cursor = req.query.cursor;
+    const afterRank = req.query.after_rank;
+    const afterWallet = req.query.after_wallet;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
     const onlyVerified = req.query.onlyVerified === "true";
@@ -52,6 +54,17 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }
 
     // Cursor-based pagination on (sortBy, public_key), mirroring /api/projects.
+    // The explicit after_rank/after_wallet form is kept for API consumers that
+    // cannot persist opaque cursors. The wallet is the stable tie-break key.
+    if (afterRank !== undefined || afterWallet !== undefined) {
+      const parsedRank = Number.parseInt(afterRank, 10);
+      if (!Number.isInteger(parsedRank) || parsedRank < 1 || typeof afterWallet !== "string" || !afterWallet) {
+        return res.status(400).json({ error: "after_rank and after_wallet are required and valid" });
+      }
+      params.push(afterWallet);
+      conditions.push(`p.public_key > $${params.length}`);
+    }
+
     if (cursor) {
       let cursorData;
       try {
@@ -68,7 +81,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       const sortIdx = params.length - 1;
       const keyIdx = params.length;
       conditions.push(
-        `(${sortBy} < $${sortIdx} OR (${sortBy} = $${sortIdx} AND p.public_key < $${keyIdx}))`,
+        `(${sortBy} < $${sortIdx} OR (${sortBy} = $${sortIdx} AND p.public_key > $${keyIdx}))`,
       );
     }
 
@@ -112,7 +125,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       LEFT JOIN projects pr ON pr.id = d.project_id
       ${whereClause}
       GROUP BY p.public_key, p.display_name, p.badges
-      ORDER BY ${sortBy} DESC, p.public_key DESC
+      ORDER BY ${sortBy} DESC, p.public_key ASC
       LIMIT $${limitIdx}
     `;
 
@@ -134,8 +147,10 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }));
 
     let nextCursor = null;
+    let nextAfter = null;
     if (hasMore) {
       const last = pageRows[pageRows.length - 1];
+      nextAfter = { after_rank: pageRows.length, after_wallet: last.public_key };
       nextCursor = Buffer.from(
         JSON.stringify({ [sortBy]: last[sortBy], publicKey: last.public_key }),
       ).toString("base64");
@@ -146,6 +161,8 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       data: entries,
       has_more: hasMore,
       next_cursor: nextCursor,
+      next_after_rank: nextAfter?.after_rank ?? null,
+      next_after_wallet: nextAfter?.after_wallet ?? null,
     });
   } catch (e) {
     next(e);

@@ -78,6 +78,20 @@ GET /api/projects?limit=20&status=active&cursor=eyJjcmVhdGVkX2F0Ij...
 When `has_more` is `false` (or `next_cursor` is `null`), you have reached the last page.
 Cursors are stable: inserting new projects does not shift pages already in flight.
 
+### GET /api/leaderboard — stable pagination
+
+Leaderboard pages use the same keyset principle and order rows by
+`total_donated DESC, wallet ASC`. Clients that do not persist the opaque cursor
+may request the next page with the explicit form returned in the response:
+
+```
+GET /api/leaderboard?limit=20&after_rank=20&after_wallet=GABC...XYZ
+```
+
+`after_wallet` is the stable tie-break key. The server returns
+`next_after_rank` and `next_after_wallet` alongside `next_cursor`; do not use
+`OFFSET`, because new donations can otherwise move a donor between pages.
+
 ### Project object
 ```json
 {
@@ -197,4 +211,3 @@ Returns aggregate queue metrics grouped by status for admin header display:
   }
 }
 ```
-
