@@ -231,6 +231,8 @@ pub enum DataKey {
     // Contract-wide emergency pause status
     Paused,
     PendingAdmin,
+    // Configurable staleness bound for oracle price quotes (issue #1146)
+    MaxPriceAgeSecs,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -240,6 +242,11 @@ const STROOP: i128 = 10_000_000;
 const USDC_SCALE: i128 = 1_000_000;
 /// Reject quotes older than three oracle update intervals.
 const ORACLE_MAX_AGE_MULTIPLIER: u64 = 3;
+/// Default ceiling on oracle price age, in seconds, used unless the admin
+/// has configured a different value via `set_max_price_age`. A stale price
+/// (older than this, or than `ORACLE_MAX_AGE_MULTIPLIER` update intervals,
+/// whichever is stricter) is rejected in `donate_usdc`.
+const DEFAULT_MAX_PRICE_AGE_SECS: u64 = 3600;
 
 // 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers — used as the
 // default when `create_proposal` is called without an explicit duration.
@@ -895,14 +902,16 @@ impl GreenPayContract {
             .get(&DataKey::DonorDonations(donor))
             .unwrap_or(Vec::new(&env));
         let total_count = donation_ids.len();
+        let bounded_offset = offset.min(total_count);
 
-        if offset >= total_count || limit == 0 {
+        if bounded_offset >= total_count || limit == 0 {
             return Vec::new(&env);
         }
 
-        let end = core::cmp::min(offset.saturating_add(limit), total_count);
+        let bounded_limit = limit.min(total_count - bounded_offset);
+        let end = bounded_offset + bounded_limit;
         let mut result = Vec::new(&env);
-        let mut index = offset;
+        let mut index = bounded_offset;
         while index < end {
             if let Some(donation_id) = donation_ids.get(index) {
                 if let Some(record) = env
@@ -959,7 +968,7 @@ impl GreenPayContract {
         let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
             total_count
         } else {
-            offset + limit
+            (offset + limit).min(total_count)
         };
 
         // Collect projects from the slice
@@ -1397,11 +1406,16 @@ impl GreenPayContract {
             panic!("Oracle returned invalid resolution");
         }
         let now = env.ledger().timestamp();
-        let max_age = u64::from(resolution)
+        let resolution_max_age = u64::from(resolution)
             .checked_mul(ORACLE_MAX_AGE_MULTIPLIER)
             .expect("Oracle max age overflow");
+        let configured_max_age = Self::get_max_price_age(env.clone());
+        // Enforce whichever bound is stricter: a fast-updating oracle still
+        // can't be trusted past MAX_PRICE_AGE_SECS, and a slow-updating one
+        // is still held to its own resolution-derived window.
+        let max_age = resolution_max_age.min(configured_max_age);
         if quote.timestamp > now || now - quote.timestamp > max_age {
-            panic!("Oracle price is stale");
+            panic!("StalePriceData: oracle price is older than the maximum allowed age");
         }
         let price_scale = 10i128
             .checked_pow(oracle.decimals())
@@ -1713,6 +1727,38 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::OracleAddress)
     }
 
+    /// Admin-only: configure the maximum age, in seconds, an oracle price
+    /// quote may have before `donate_usdc` rejects it as stale (issue #1146).
+    /// Defaults to `DEFAULT_MAX_PRICE_AGE_SECS` (3600) until set.
+    pub fn set_max_price_age(env: Env, admin: Address, max_age_secs: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set max price age");
+        }
+        if max_age_secs == 0 {
+            panic!("Max price age must be positive");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPriceAgeSecs, &max_age_secs);
+        env.events()
+            .publish((symbol_short!("maxage"),), max_age_secs);
+    }
+
+    /// Get the configured maximum oracle price age in seconds, falling back
+    /// to `DEFAULT_MAX_PRICE_AGE_SECS` when unset.
+    pub fn get_max_price_age(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPriceAgeSecs)
+            .unwrap_or(DEFAULT_MAX_PRICE_AGE_SECS)
+    }
+
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
@@ -1790,6 +1836,29 @@ mod tests {
             Some(OraclePriceData {
                 price: 2_500_000,
                 timestamp: env.ledger().timestamp(),
+            })
+        }
+
+        fn resolution(_env: Env) -> u32 {
+            300
+        }
+    }
+
+    /// Returns a quote with a fixed timestamp so tests can advance the
+    /// ledger clock to simulate a stale or fresh price (issue #1146).
+    #[contract]
+    struct TimestampedMockOracle;
+
+    #[contractimpl]
+    impl OracleInterface for TimestampedMockOracle {
+        fn decimals(_env: Env) -> u32 {
+            6
+        }
+
+        fn lastprice(_env: Env, _asset: OracleAsset) -> Option<OraclePriceData> {
+            Some(OraclePriceData {
+                price: 8_000_000,
+                timestamp: 1_000,
             })
         }
 
@@ -1919,6 +1988,67 @@ mod tests {
         assert_eq!(client.get_global_total(), 10 * STROOP);
     }
 
+    // ─── Issue #1146: oracle price staleness ─────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "StalePriceData")]
+    fn test_donate_usdc_rejects_stale_oracle_price() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let oracle = env.register_contract(None, TimestampedMockOracle);
+        client.set_usdc_token(&admin, &token, &oracle);
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 4_000_000i128;
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+
+        // The mock quote's timestamp is fixed at 1_000. Advance the ledger
+        // clock 2 hours past it — older than DEFAULT_MAX_PRICE_AGE_SECS
+        // (3600s) and the resolution-derived window alike.
+        env.ledger().set_timestamp(1_000 + 7_200);
+
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+    }
+
+    #[test]
+    fn test_donate_usdc_accepts_fresh_oracle_price() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let oracle = env.register_contract(None, TimestampedMockOracle);
+        client.set_usdc_token(&admin, &token, &oracle);
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 4_000_000i128;
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+
+        // Advance the clock by only 60s past the quote's fixed timestamp -
+        // well within both the default and resolution-derived windows.
+        env.ledger().set_timestamp(1_000 + 60);
+
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+
+        assert_eq!(client.get_donation_count(), 1);
+    }
+
+    #[test]
+    fn test_set_max_price_age_is_admin_gated_and_persists() {
+        let (env, _cid, client, admin, _pid) = setup();
+        assert_eq!(client.get_max_price_age(), DEFAULT_MAX_PRICE_AGE_SECS);
+
+        client.set_max_price_age(&admin, &600u64);
+        assert_eq!(client.get_max_price_age(), 600u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can set max price age")]
+    fn test_set_max_price_age_rejects_non_admin() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        let attacker = Address::generate(&env);
+        client.set_max_price_age(&attacker, &600u64);
+    }
+
     #[test]
     fn test_get_donor_history() {
         let (env, cid, client, admin, pid) = setup();
@@ -1929,9 +2059,8 @@ mod tests {
         let token_client = StellarAssetClient::new(&env, &token);
         token_client.mint(&donor, &i128::MAX);
 
-        // No donations yet — empty result.
-        let history = client.get_donor_history(&donor, &0, &10);
-        assert_eq!(history.len(), 0);
+        let empty_history = client.get_donor_history(&donor, &0, &10);
+        assert_eq!(empty_history.len(), 0);
 
         // Donate XLM three times.
         for i in 1..=3 {
@@ -1944,15 +2073,18 @@ mod tests {
         assert_eq!(history.get(1).unwrap().amount, 200 * STROOP);
         assert_eq!(history.get(2).unwrap().amount, 300 * STROOP);
 
-        // Pagination: offset=1, limit=2 → gets second and third donation.
         let page = client.get_donor_history(&donor, &1, &2);
         assert_eq!(page.len(), 2);
         assert_eq!(page.get(0).unwrap().amount, 200 * STROOP);
         assert_eq!(page.get(1).unwrap().amount, 300 * STROOP);
 
-        // Pagination: offset=5 → empty.
-        let empty = client.get_donor_history(&donor, &5, &10);
-        assert_eq!(empty.len(), 0);
+        let offset_and_limit_beyond_end = client.get_donor_history(&donor, &1, &u32::MAX);
+        assert_eq!(offset_and_limit_beyond_end.len(), 2);
+        assert_eq!(offset_and_limit_beyond_end.get(0).unwrap().amount, 200 * STROOP);
+        assert_eq!(offset_and_limit_beyond_end.get(1).unwrap().amount, 300 * STROOP);
+
+        let offset_beyond_end = client.get_donor_history(&donor, &u32::MAX, &u32::MAX);
+        assert_eq!(offset_beyond_end.len(), 0);
     }
 
     #[test]
@@ -2755,5 +2887,114 @@ mod tests {
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
         client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
+    }
+
+    // ─── Minimum donation enforcement (#1043) ─────────────────────────────────
+
+    /// Minimum used by the guard tests below: 10 XLM, expressed in stroops.
+    const TEST_MIN_DONATION: i128 = 10 * STROOP;
+
+    /// Fresh contract holding one project with a 10 XLM minimum donation, and a
+    /// donor funded with 100 XLM of the donation token.
+    fn setup_min_donation() -> (
+        Env,
+        GreenPayContractClient<'static>,
+        Address,
+        String,
+        Address,
+        Address,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &cid);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let pid = String::from_str(&env, "proj-min-donation");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin,
+            &pid,
+            &String::from_str(&env, "Minimum Guard Project"),
+            &wallet,
+            &100u32,
+            &TEST_MIN_DONATION,
+        );
+
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let donor = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&donor, &(100 * STROOP));
+
+        (env, client, token, pid, donor, wallet)
+    }
+
+    /// The exact scenario from #1043: a single stroop sent to a project that
+    /// configured a 10 XLM minimum must not be accepted.
+    #[test]
+    #[should_panic(expected = "Donation below minimum")]
+    fn test_donate_one_stroop_below_ten_xlm_minimum_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate(&token, &donor, &pid, &1i128, &0u32);
+    }
+
+    /// Boundary case: one stroop under the minimum is still under the minimum.
+    #[test]
+    #[should_panic(expected = "Donation below minimum")]
+    fn test_donate_just_below_minimum_is_rejected() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        client.donate(&token, &donor, &pid, &(TEST_MIN_DONATION - 1), &0u32);
+    }
+
+    /// A rejected donation must leave no trace: no funds moved, no accounting.
+    #[test]
+    fn test_donate_below_minimum_leaves_state_untouched() {
+        let (env, client, token, pid, donor, wallet) = setup_min_donation();
+
+        let attempted = client.try_donate(&token, &donor, &pid, &1i128, &0u32);
+        assert!(attempted.is_err());
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, 0);
+        assert_eq!(client.get_donation_count(), 0);
+        assert_eq!(client.get_global_total(), 0);
+
+        let token_client = token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&wallet), 0);
+        assert_eq!(token_client.balance(&donor), 100 * STROOP);
+    }
+
+    /// Donating exactly the minimum is allowed — the guard is `<`, not `<=`.
+    #[test]
+    fn test_donate_at_exact_minimum_succeeds() {
+        let (env, client, token, pid, donor, wallet) = setup_min_donation();
+
+        client.donate(&token, &donor, &pid, &TEST_MIN_DONATION, &0u32);
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, TEST_MIN_DONATION);
+        assert_eq!(client.get_donation_count(), 1);
+
+        let token_client = token::Client::new(&env, &token);
+        assert_eq!(token_client.balance(&wallet), TEST_MIN_DONATION);
+        assert_eq!(
+            token_client.balance(&donor),
+            100 * STROOP - TEST_MIN_DONATION,
+        );
+    }
+
+    /// Comfortably above the minimum still succeeds.
+    #[test]
+    fn test_donate_above_minimum_succeeds() {
+        let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
+
+        let amount = TEST_MIN_DONATION * 2;
+        client.donate(&token, &donor, &pid, &amount, &0u32);
+
+        assert_eq!(client.get_project(&pid).total_raised, amount);
+        assert_eq!(client.get_donation_count(), 1);
     }
 }

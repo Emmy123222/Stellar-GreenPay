@@ -56,7 +56,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
 
@@ -72,6 +72,15 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
           REDIS_URL: redis://localhost:6379
 
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-report
+          path: backend/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
@@ -79,3 +88,4 @@ jobs:
           files: backend/coverage/lcov.info
           flags: backend
           fail_ci_if_error: false
+

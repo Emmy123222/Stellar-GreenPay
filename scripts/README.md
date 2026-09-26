@@ -14,6 +14,7 @@ bash scripts/mainnet-preflight.sh
 ```
 
 **Exit Codes:**
+
 - `0` = All checks passed → Safe to deploy ✅
 - `1` = One or more checks failed → DO NOT deploy ❌
 
@@ -23,18 +24,18 @@ bash scripts/mainnet-preflight.sh
 
 ### Core Scripts
 
-| File | Purpose | Usage |
-|------|---------|-------|
-| **`mainnet-preflight.sh`** | Pre-deployment validation script | `bash scripts/mainnet-preflight.sh` |
-| **`test-mainnet-preflight.sh`** | Test suite for preflight checks | `bash scripts/test-mainnet-preflight.sh` |
+| File                            | Purpose                          | Usage                                    |
+| ------------------------------- | -------------------------------- | ---------------------------------------- |
+| **`mainnet-preflight.sh`**      | Pre-deployment validation script | `bash scripts/mainnet-preflight.sh`      |
+| **`test-mainnet-preflight.sh`** | Test suite for preflight checks  | `bash scripts/test-mainnet-preflight.sh` |
 
 ### Documentation
 
-| File | Description |
-|------|-------------|
-| **`QUICK-REFERENCE.md`** | One-page cheat sheet for quick access |
-| **`PREFLIGHT-README.md`** | Complete preflight check documentation |
-| **`IMPLEMENTATION-SUMMARY.md`** | Technical implementation details |
+| File                                                                 | Description                            |
+| -------------------------------------------------------------------- | -------------------------------------- |
+| **[`quick-reference.md`](../docs/quick-reference.md)**               | One-page cheat sheet for quick access  |
+| **[`preflight.md`](../docs/preflight.md)**                           | Complete preflight check documentation |
+| **[`implementation-summary.md`](../docs/implementation-summary.md)** | Technical implementation details       |
 
 ---
 
@@ -113,10 +114,11 @@ CMD ["sh", "-c", "bash scripts/mainnet-preflight.sh && npm start"]
 ## 📖 Documentation
 
 ### Quick Access
-- **Need help fast?** → [`QUICK-REFERENCE.md`](QUICK-REFERENCE.md)
-- **Full documentation?** → [`PREFLIGHT-README.md`](PREFLIGHT-README.md)
-- **Deployment guide?** → [`../MAINNET-DEPLOYMENT.md`](../MAINNET-DEPLOYMENT.md)
-- **Technical details?** → [`IMPLEMENTATION-SUMMARY.md`](IMPLEMENTATION-SUMMARY.md)
+
+- **Need help fast?** → [`quick-reference.md`](../docs/quick-reference.md)
+- **Full documentation?** → [`preflight.md`](../docs/preflight.md)
+- **Deployment guide?** → [`deployment-mainnet.md`](../docs/deployment-mainnet.md)
+- **Technical details?** → [`implementation-summary.md`](../docs/implementation-summary.md)
 
 ---
 
@@ -129,6 +131,7 @@ bash scripts/test-mainnet-preflight.sh
 ```
 
 Tests include:
+
 - Missing environment variables
 - Wrong network configuration
 - Insecure HTTP webhooks
@@ -149,24 +152,26 @@ Tests include:
 
 The script works without these but provides enhanced validation if installed:
 
-| Tool | Purpose | Install |
-|------|---------|---------|
-| `stellar` | Contract verification | `cargo install stellar-cli` |
-| `psql` | Database migration checks | `apt-get install postgresql-client` |
-| `redis-cli` | Redis PING tests | `apt-get install redis-tools` |
-| `nc` | TCP connectivity fallback | Built into most systems |
+| Tool        | Purpose                   | Install                             |
+| ----------- | ------------------------- | ----------------------------------- |
+| `stellar`   | Contract verification     | `cargo install stellar-cli`         |
+| `psql`      | Database migration checks | `apt-get install postgresql-client` |
+| `redis-cli` | Redis PING tests          | `apt-get install redis-tools`       |
+| `nc`        | TCP connectivity fallback | Built into most systems             |
 
 ---
 
 ## 🐛 Troubleshooting
 
 ### Script Won't Execute
+
 ```bash
 # Make script executable
 chmod +x scripts/mainnet-preflight.sh
 ```
 
 ### "Command not found"
+
 ```bash
 # Use bash explicitly
 bash scripts/mainnet-preflight.sh
@@ -175,8 +180,9 @@ bash scripts/mainnet-preflight.sh
 ### Checks Failing
 
 See detailed troubleshooting in:
-- [`PREFLIGHT-README.md`](PREFLIGHT-README.md#troubleshooting)
-- [`../MAINNET-DEPLOYMENT.md`](../MAINNET-DEPLOYMENT.md#troubleshooting)
+
+- [`preflight.md#troubleshooting`](../docs/preflight.md#troubleshooting)
+- [`deployment-mainnet.md#troubleshooting`](../docs/deployment-mainnet.md#troubleshooting)
 
 ---
 
@@ -209,6 +215,7 @@ See detailed troubleshooting in:
 ## 🚦 Best Practices
 
 1. **Always run before deployment**
+
    ```bash
    bash scripts/mainnet-preflight.sh && deploy.sh
    ```
@@ -230,9 +237,9 @@ See detailed troubleshooting in:
 ## 🆘 Getting Help
 
 1. Check error messages in script output
-2. Review [`PREFLIGHT-README.md`](PREFLIGHT-README.md)
-3. Consult [`QUICK-REFERENCE.md`](QUICK-REFERENCE.md)
-4. Read [`../MAINNET-DEPLOYMENT.md`](../MAINNET-DEPLOYMENT.md)
+2. Review [`preflight.md`](../docs/preflight.md)
+3. Consult [`quick-reference.md`](../docs/quick-reference.md)
+4. Read [`deployment-mainnet.md`](../docs/deployment-mainnet.md)
 5. Contact DevOps team
 
 ---
@@ -240,6 +247,7 @@ See detailed troubleshooting in:
 ## 📝 Other Scripts
 
 This directory may contain additional scripts for:
+
 - Database migrations
 - Backup operations
 - Monitoring tasks

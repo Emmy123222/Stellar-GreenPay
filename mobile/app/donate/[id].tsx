@@ -14,16 +14,20 @@
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import * as Linking from 'expo-linking';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { authenticate } from '../../hooks/useBiometricAuth';
+import { useBiometricAuth } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+import NetInfo from '@react-native-community/netinfo';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const HORIZON_URL =
   process.env.EXPO_PUBLIC_HORIZON_URL || 'https://horizon-testnet.stellar.org';
+const IS_MAINNET = process.env.EXPO_PUBLIC_STELLAR_NETWORK === 'mainnet';
+const NETWORK_PASSPHRASE = IS_MAINNET ? Networks.PUBLIC : Networks.TESTNET;
 
 const PRESET_AMOUNTS = ['5', '10', '25'];
 const MIN_AMOUNT_XLM = 1;
@@ -53,6 +57,32 @@ function buildBioHint(
   return `You will be asked to authenticate with ${label} before signing.`;
 }
 
+function isAccountNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const accountNotFoundError = (Horizon as unknown as {
+    AccountNotFoundError?: new (...args: never[]) => Error;
+  }).AccountNotFoundError;
+  if (accountNotFoundError && error instanceof accountNotFoundError) return true;
+
+  const candidate = error as {
+    name?: string;
+    message?: string;
+    response?: { status?: number };
+  };
+  const message = candidate.message?.toLowerCase() || '';
+  return (
+    candidate.name === 'AccountNotFoundError' ||
+    (candidate.response?.status === 404 && message.includes('account')) ||
+    message.includes('account not found')
+  );
+}
+
+function getFundingUrl(publicKey: string): string {
+  if (IS_MAINNET) return 'https://www.stellar.org/ecosystem/exchanges';
+  return `https://friendbot.stellar.org/?addr=${encodeURIComponent(publicKey)}`;
+}
+
 export default function DonateScreen() {
   const { colors } = useTheme();
   const { id } = useLocalSearchParams();
@@ -78,6 +108,14 @@ export default function DonateScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusType, setStatusType] = useState<StatusKind>(null);
+  const [showFundingGuide, setShowFundingGuide] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+
+  const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
+  const surfaceAuthFailure = (outcome: string) => {
+    setStatusType('error');
+    setStatusMessage(outcome || 'Authentication was cancelled. Your donation was not sent.');
+  };
 
   useEffect(() => {
     loadProjects();
@@ -106,6 +144,14 @@ export default function DonateScreen() {
   const handleDonate = async () => {
     setStatusMessage(null);
     setStatusType(null);
+    setShowFundingGuide(false);
+    setIsOffline(false);
+
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      setIsOffline(true);
+      return;
+    }
 
     if (!selectedProject) {
       Alert.alert('Error', 'Please choose a project to donate to.');
@@ -176,7 +222,7 @@ export default function DonateScreen() {
 
       const transaction = new TransactionBuilder(sourceAccount, {
         fee: '100',
-        networkPassphrase: Networks.TESTNET,
+        networkPassphrase: NETWORK_PASSPHRASE,
       })
         .addOperation(
           Operation.payment({
@@ -211,11 +257,20 @@ export default function DonateScreen() {
     } catch (error: any) {
       console.error('Donation failed:', error);
       setStatusType('error');
-      setStatusMessage(
-        error?.response?.data?.message ||
-          error?.message ||
-          'Donation failed. Please try again.'
-      );
+      if (isAccountNotFoundError(error)) {
+        setShowFundingGuide(true);
+        setStatusMessage(
+          `Your Stellar account needs at least 1 XLM to activate. Visit ${
+            IS_MAINNET ? 'an exchange' : 'Friendbot'
+          } to fund your account.`
+        );
+      } else {
+        setStatusMessage(
+          error?.response?.data?.message ||
+            error?.message ||
+            'Donation failed. Please try again.'
+        );
+      }
     } finally {
       setSubmitting(false);
     }
@@ -481,6 +536,33 @@ export default function DonateScreen() {
         </View>
       ) : null}
 
+      {showFundingGuide ? (
+        <TouchableOpacity
+          style={styles.fundingButton}
+          onPress={() => void Linking.openURL(getFundingUrl(publicKey))}
+          accessibilityRole="link"
+          accessibilityLabel={IS_MAINNET ? 'Open exchange funding guidance' : 'Fund my account with Friendbot'}
+        >
+          <Text style={[styles.fundingButtonText, { color: colors.primary }]}>
+            {IS_MAINNET ? 'View exchange guidance' : 'Fund my account'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {isOffline ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            You're offline. Connect to the internet to donate.
+          </Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={handleDonate}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       <TouchableOpacity
         style={[styles.donateButton, submitting && styles.donateButtonDisabled]}
         onPress={handleDonate}
@@ -653,6 +735,18 @@ const styles = StyleSheet.create({
     borderColor: '#60a5fa',
     borderWidth: 1,
   },
+  fundingButton: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#227239',
+    borderRadius: 8,
+  },
+  fundingButtonText: {
+    fontWeight: '700',
+  },
   statusText: {
     color: '#0f172a',
   },
@@ -662,8 +756,36 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
   },
+  donateButtonDisabled: {
+    opacity: 0.6,
+  },
   donateButtonText: {
     fontSize: 18,
+    fontWeight: 'bold',
+  },
+  offlineBanner: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    backgroundColor: '#fff3cd',
+    borderColor: '#ffeeba',
+    borderWidth: 1,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  offlineBannerText: {
+    color: '#856404',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  retryButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#ffc107',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#212529',
     fontWeight: 'bold',
   },
 });

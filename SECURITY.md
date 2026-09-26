@@ -30,3 +30,9 @@ At this time, we do not have an active, paid bug bounty program. However, we dee
 
 
 
+## Implemented Security Controls
+
+This document covers how to **report** a vulnerability. For a reference on the
+security controls already implemented in the codebase — file-upload validation,
+allowed types, rate limits and security log events — see
+[docs/security.md](docs/security.md).

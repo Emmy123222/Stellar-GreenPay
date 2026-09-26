@@ -33,6 +33,11 @@ const {
   generateSignature,
   isGracePeriodActive,
   timingSafeEqualHex,
+  recordAttemptOutcome,
+  processDueRetries,
+  retryDelaySeconds,
+  MAX_ATTEMPTS,
+  RETRY_DELAYS_SECONDS,
 } = require("./webhook");
 
 beforeEach(() => {
@@ -391,34 +396,39 @@ describe("recordAndDeliver", () => {
     expect(insertParams[4]).toBe("milestone.reached");
 
     const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
-    expect(updateSql).toMatch(/UPDATE webhook_deliveries/);
-    const [id, status, responseStatus, delivered, lastError] = updateParams;
+    expect(updateSql).toMatch(/status = 'delivered'/);
+    expect(updateSql).toMatch(/next_attempt_at = NULL/);
+    const [id, attemptCount, responseStatus] = updateParams;
     expect(id).toBe(insertParams[0]);
-    expect(status).toBe("delivered");
+    expect(attemptCount).toBe(1);
     expect(responseStatus).toBe(200);
-    expect(delivered).toBe(true);
-    expect(lastError).toBeNull();
   });
 
-  test("marks the row failed (without throwing) when the endpoint responds with a non-2xx status", async () => {
+  // ── Acceptance criterion: first attempt fails → retry scheduled at 1 min ──
+  test("schedules a retry 60s out when the first attempt returns a non-2xx status", async () => {
     httpsReqSpy = mockRequestSuccess(https, 500);
 
-    await recordAndDeliver({
+    const outcome = await recordAndDeliver({
       projectId: "proj-1",
       url: "https://example.com/webhook",
       secret: "s".repeat(32),
       payload: { event: "milestone.reached", projectId: "proj-1" },
     });
 
-    const [, updateParams] = poolQuerySpy.mock.calls[1];
-    const [, status, responseStatus, delivered, lastError] = updateParams;
-    expect(status).toBe("failed");
+    expect(outcome).toEqual({ status: "pending", nextAttemptInSeconds: 60 });
+
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'pending'/);
+    expect(updateSql).toMatch(/next_attempt_at = NOW\(\) \+ \(\$5 \* INTERVAL '1 second'\)/);
+
+    const [, attemptCount, responseStatus, lastError, delaySeconds] = updateParams;
+    expect(attemptCount).toBe(1);
     expect(responseStatus).toBe(500);
-    expect(delivered).toBe(false);
     expect(lastError).toBe("Webhook responded with HTTP 500");
+    expect(delaySeconds).toBe(60);
   });
 
-  test("marks the row failed and rethrows when the delivery request errors", async () => {
+  test("schedules a retry 60s out when the first attempt errors at the transport level", async () => {
     const err = new Error("ECONNREFUSED");
     httpsReqSpy = mockRequestNetworkError(https, err);
 
@@ -433,11 +443,13 @@ describe("recordAndDeliver", () => {
 
     expect(poolQuerySpy).toHaveBeenCalledTimes(2);
     const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
-    expect(updateSql).toMatch(/status = 'failed'/);
-    expect(updateParams[1]).toBe("ECONNREFUSED");
+    expect(updateSql).toMatch(/status = 'pending'/);
+    expect(updateParams[1]).toBe(1);
+    expect(updateParams[3]).toBe("ECONNREFUSED");
+    expect(updateParams[4]).toBe(60);
   });
 
-  test("marks the row failed and rethrows when assertPublicHttpUrl rejects the URL", async () => {
+  test("marks an SSRF-rejected URL failed immediately without burning retry budget", async () => {
     const ssrfError = new Error("Blocked private/reserved IP: 127.0.0.1");
     assertPublicHttpUrl.mockRejectedValueOnce(ssrfError);
 
@@ -450,8 +462,10 @@ describe("recordAndDeliver", () => {
       }),
     ).rejects.toThrow("Blocked private/reserved IP");
 
-    const [, updateParams] = poolQuerySpy.mock.calls[1];
-    expect(updateParams[1]).toBe(ssrfError.message);
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'failed'/);
+    expect(updateSql).toMatch(/next_attempt_at = NULL/);
+    expect(updateParams[3]).toBe(ssrfError.message);
   });
 
   test("passes previousSecret/previousSecretExpiresAt through to deliverPayload's dual-signature signing", async () => {
@@ -473,6 +487,261 @@ describe("recordAndDeliver", () => {
 
     const [options] = httpsReqSpy.mock.calls[0];
     expect(options.headers["X-Webhook-Signature-Previous"]).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Retry scheduling (issue #1178)
+// ---------------------------------------------------------------------------
+describe("retryDelaySeconds", () => {
+  test("follows the documented 1m / 5m / 30m / 2h backoff", () => {
+    expect(retryDelaySeconds(1)).toBe(60);
+    expect(retryDelaySeconds(2)).toBe(300);
+    expect(retryDelaySeconds(3)).toBe(1800);
+    expect(retryDelaySeconds(4)).toBe(7200);
+  });
+
+  test("returns null once MAX_ATTEMPTS attempts have been made", () => {
+    expect(retryDelaySeconds(MAX_ATTEMPTS)).toBeNull();
+    expect(retryDelaySeconds(MAX_ATTEMPTS + 1)).toBeNull();
+  });
+
+  test("schedules exactly one delay per retry below the attempt ceiling", () => {
+    const scheduled = [];
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const delay = retryDelaySeconds(attempt);
+      if (delay !== null) scheduled.push(delay);
+    }
+    expect(scheduled).toEqual(RETRY_DELAYS_SECONDS);
+  });
+});
+
+describe("recordAttemptOutcome", () => {
+  let poolQuerySpy;
+
+  beforeEach(() => {
+    poolQuerySpy = jest.spyOn(pool, "query").mockResolvedValue({ rows: [] });
+  });
+
+  afterEach(() => poolQuerySpy.mockRestore());
+
+  test.each([
+    [1, 60],
+    [2, 300],
+    [3, 1800],
+    [4, 7200],
+  ])("failure %i schedules the next attempt %is out", async (attemptNumber, expectedDelay) => {
+    const outcome = await recordAttemptOutcome({
+      id: "del-1",
+      attemptNumber,
+      delivered: false,
+      statusCode: 503,
+      error: "Webhook responded with HTTP 503",
+    });
+
+    expect(outcome).toEqual({ status: "pending", nextAttemptInSeconds: expectedDelay });
+    const [sql, params] = poolQuerySpy.mock.calls[0];
+    expect(sql).toMatch(/status = 'pending'/);
+    expect(params[4]).toBe(expectedDelay);
+  });
+
+  // ── Acceptance criterion: 5 consecutive failures → failed, no more retries ──
+  test("marks the delivery failed on the fifth consecutive failure", async () => {
+    const outcome = await recordAttemptOutcome({
+      id: "del-1",
+      attemptNumber: MAX_ATTEMPTS,
+      delivered: false,
+      statusCode: 503,
+      error: "Webhook responded with HTTP 503",
+    });
+
+    expect(outcome).toEqual({ status: "failed", nextAttemptInSeconds: null });
+    const [sql] = poolQuerySpy.mock.calls[0];
+    expect(sql).toMatch(/status = 'failed'/);
+    expect(sql).toMatch(/next_attempt_at = NULL/);
+  });
+
+  // ── Acceptance criterion: successful retry → delivered, no further retries ──
+  test("marks the delivery delivered and clears next_attempt_at on success", async () => {
+    const outcome = await recordAttemptOutcome({
+      id: "del-1",
+      attemptNumber: 3,
+      delivered: true,
+      statusCode: 200,
+    });
+
+    expect(outcome).toEqual({ status: "delivered", nextAttemptInSeconds: null });
+    const [sql, params] = poolQuerySpy.mock.calls[0];
+    expect(sql).toMatch(/status = 'delivered'/);
+    expect(sql).toMatch(/next_attempt_at = NULL/);
+    expect(sql).toMatch(/last_error = NULL/);
+    expect(params[1]).toBe(3);
+  });
+
+  test("a permanent failure is terminal even with retry budget remaining", async () => {
+    const outcome = await recordAttemptOutcome({
+      id: "del-1",
+      attemptNumber: 1,
+      delivered: false,
+      error: "Blocked private/reserved IP",
+      permanent: true,
+    });
+
+    expect(outcome).toEqual({ status: "failed", nextAttemptInSeconds: null });
+    expect(poolQuerySpy.mock.calls[0][0]).toMatch(/status = 'failed'/);
+  });
+});
+
+describe("processDueRetries", () => {
+  let poolQuerySpy;
+  let httpsReqSpy;
+
+  const dueRow = (overrides = {}) => ({
+    id: "del-1",
+    url: "https://example.com/webhook",
+    payload: { event: "milestone.reached", projectId: "proj-1" },
+    attempt_count: 1,
+    webhook_secret: "s".repeat(32),
+    previous_webhook_secret: null,
+    previous_webhook_secret_expires_at: null,
+    ...overrides,
+  });
+
+  afterEach(() => {
+    poolQuerySpy.mockRestore();
+    if (httpsReqSpy) httpsReqSpy.mockRestore();
+    httpsReqSpy = undefined;
+  });
+
+  test("only selects pending deliveries whose next_attempt_at is due", async () => {
+    poolQuerySpy = jest.spyOn(pool, "query").mockResolvedValue({ rows: [] });
+
+    await processDueRetries();
+
+    const [sql, params] = poolQuerySpy.mock.calls[0];
+    expect(sql).toMatch(/d\.status = 'pending'/);
+    expect(sql).toMatch(/d\.next_attempt_at IS NOT NULL/);
+    expect(sql).toMatch(/d\.next_attempt_at <= NOW\(\)/);
+    expect(params).toEqual([50]);
+  });
+
+  // ── Acceptance criterion: successful retry → delivered, no further retries ──
+  test("a retry that succeeds marks the delivery delivered", async () => {
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow()] })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestSuccess(https, 200);
+
+    const results = await processDueRetries();
+
+    expect(results).toEqual([{ id: "del-1", status: "delivered" }]);
+
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'delivered'/);
+    expect(updateSql).toMatch(/next_attempt_at = NULL/);
+    // Row had 1 prior attempt, so this retry is attempt 2.
+    expect(updateParams[1]).toBe(2);
+  });
+
+  test("a retry that fails with budget left schedules the next attempt", async () => {
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow({ attempt_count: 2 })] })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestSuccess(https, 500);
+
+    const results = await processDueRetries();
+
+    expect(results).toEqual([{ id: "del-1", status: "pending" }]);
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'pending'/);
+    // Attempt 3 failed, so the next delay is the third backoff step.
+    expect(updateParams[1]).toBe(3);
+    expect(updateParams[4]).toBe(1800);
+  });
+
+  // ── Acceptance criterion: 5 consecutive failures → failed, no more retries ──
+  test("the fifth failure marks the delivery failed and clears next_attempt_at", async () => {
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow({ attempt_count: MAX_ATTEMPTS - 1 })] })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestSuccess(https, 500);
+
+    const results = await processDueRetries();
+
+    expect(results).toEqual([{ id: "del-1", status: "failed" }]);
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'failed'/);
+    expect(updateSql).toMatch(/next_attempt_at = NULL/);
+    expect(updateParams[1]).toBe(MAX_ATTEMPTS);
+
+    // Nothing is left for a later pass to pick up.
+    expect(updateSql).not.toMatch(/INTERVAL/);
+  });
+
+  test("signs the retry with the project's current secret, not one stored on the row", async () => {
+    const rotatedSecret = "rotated-secret-32-chars-long!!!!";
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow({ webhook_secret: rotatedSecret })] })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestSuccess(https, 200);
+
+    await processDueRetries();
+
+    const body = JSON.stringify(dueRow().payload);
+    const [options] = httpsReqSpy.mock.calls[0];
+    expect(options.headers["X-Webhook-Signature"]).toBe(
+      generateSignature(rotatedSecret, body),
+    );
+  });
+
+  test("parses a payload that comes back from the driver as a JSON string", async () => {
+    const payload = { event: "milestone.reached", projectId: "proj-1" };
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow({ payload: JSON.stringify(payload) })] })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestSuccess(https, 200);
+
+    await processDueRetries();
+
+    const [options] = httpsReqSpy.mock.calls[0];
+    expect(options.headers["Content-Length"]).toBe(
+      Buffer.byteLength(JSON.stringify(payload)),
+    );
+  });
+
+  test("fails a delivery permanently when the project has no webhook secret", async () => {
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({ rows: [dueRow({ webhook_secret: null })] })
+      .mockResolvedValue({ rows: [] });
+
+    const results = await processDueRetries();
+
+    expect(results).toEqual([{ id: "del-1", status: "failed" }]);
+    const [updateSql, updateParams] = poolQuerySpy.mock.calls[1];
+    expect(updateSql).toMatch(/status = 'failed'/);
+    expect(updateParams[3]).toBe("Project has no webhook secret configured");
+  });
+
+  test("keeps draining the batch when one delivery throws", async () => {
+    poolQuerySpy = jest
+      .spyOn(pool, "query")
+      .mockResolvedValueOnce({
+        rows: [dueRow({ id: "del-1" }), dueRow({ id: "del-2" })],
+      })
+      .mockResolvedValue({ rows: [] });
+    httpsReqSpy = mockRequestNetworkError(https, new Error("ECONNREFUSED"));
+
+    const results = await processDueRetries();
+
+    expect(results).toHaveLength(2);
+    expect(results.map((r) => r.id)).toEqual(["del-1", "del-2"]);
+    expect(results.every((r) => r.status === "error")).toBe(true);
   });
 });
 
