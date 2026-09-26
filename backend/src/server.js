@@ -17,6 +17,9 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
+const { isStellarTimeoutError } = require("./services/stellar");
+const { metricsHandler } = require("./services/metrics");
+const { adminKeyRequired } = require("./middleware/auth");
 const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
@@ -114,6 +117,12 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
+// ── Prometheus scrape endpoint ───────────────────────────────────────
+// Gated behind the admin key like the other privileged surfaces: the exposition
+// reveals request mix and cache behaviour, so it is not public. A scraper must
+// send `X-Admin-Key` (see ADMIN_KEYS / admin key config in middleware/auth.js).
+app.get("/metrics", adminKeyRequired, metricsHandler);
+
 app.use("/api/impact", require("./routes/impact"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
@@ -122,6 +131,13 @@ app.use(sentryErrorMiddleware());
 app.use((err, req, res, next) => {
   void next;
   console.error("[Error]", err.message);
+  // A timed-out Horizon/Soroban call means an upstream chain service stopped
+  // answering — that is a 503 the caller can retry, not a 500 in this API
+  // (issue #1097). Caught centrally so every call site benefits, including the
+  // routes that use the SDK server directly.
+  if (isStellarTimeoutError(err)) {
+    return res.status(503).json({ error: "Stellar network did not respond in time, please retry" });
+  }
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 
