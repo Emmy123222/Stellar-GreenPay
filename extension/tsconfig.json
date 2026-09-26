@@ -8,7 +8,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["chrome", "jest"]
+    "types": ["chrome", "jest", "node"]
   },
   "include": ["src/**/*"]
 }
+
