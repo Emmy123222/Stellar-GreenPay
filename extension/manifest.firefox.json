@@ -11,7 +11,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "background": {
     "scripts": ["dist-firefox/background.js"]

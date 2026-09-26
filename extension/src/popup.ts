@@ -5,17 +5,37 @@ import {
   Networks,
   Operation,
   TransactionBuilder,
+} from '@stellar/stellar-sdk';
+import { loadSettings, type ExtensionSettings } from './settings';
+import {
+  addPendingDonation,
+  checkPendingDonations,
+  getPendingDonations,
+  horizonUrlForNetwork,
+  PENDING_STORAGE_KEY,
+  stellarExpertTxUrl,
+  syncBadge,
+  type PendingDonation,
+} from './pendingTransactions';
+
 } from "@stellar/stellar-sdk";
 import { loadSettings, type ExtensionSettings } from "./settings";
 
 // Module-level vars
 let API_BASE = "https://api.stellar-greenpay.app";
 let NETWORK_PASSPHRASE: string = Networks.TESTNET;
+let currentNetwork: 'testnet' | 'mainnet' = 'testnet';
+let horizonUrl = 'https://horizon-testnet.stellar.org';
 let horizonUrl = "https://horizon-testnet.stellar.org";
 let server = new Horizon.Server(horizonUrl);
 
 function applySettings(settings: ExtensionSettings) {
   API_BASE = settings.backendUrl;
+  currentNetwork = settings.network === 'mainnet' ? 'mainnet' : 'testnet';
+  if (settings.network === 'mainnet') {
+    NETWORK_PASSPHRASE = Networks.PUBLIC;
+  } else {
+    NETWORK_PASSPHRASE = Networks.TESTNET;
   if (settings.network === "mainnet") {
     NETWORK_PASSPHRASE = Networks.PUBLIC;
     horizonUrl = "https://horizon.stellar.org";
@@ -23,6 +43,7 @@ function applySettings(settings: ExtensionSettings) {
     NETWORK_PASSPHRASE = Networks.TESTNET;
     horizonUrl = "https://horizon-testnet.stellar.org";
   }
+  horizonUrl = horizonUrlForNetwork(currentNetwork);
   server = new Horizon.Server(horizonUrl);
 }
 
@@ -273,10 +294,80 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
   });
 }
 
+// ==================== PENDING TRANSACTIONS ====================
+
+async function renderPendingFromStorage() {
+  renderPendingDonations(await getPendingDonations());
+}
+
+async function refreshPendingSection() {
+  renderPendingDonations(await checkPendingDonations());
+}
+
+function truncateAddress(address: string): string {
+  return address.length > 12 ? `${address.slice(0, 6)}…${address.slice(-4)}` : address;
+}
+
+function formatAge(createdAt: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function renderPendingDonations(donations: PendingDonation[]) {
+  const section = document.getElementById('pending-section');
+  const list = document.getElementById('pending-list') as HTMLUListElement | null;
+  const count = document.getElementById('pending-count');
+  if (!section || !list || !count) return;
+
+  list.innerHTML = '';
+  count.textContent = String(donations.length);
+  section.classList.toggle('hidden', donations.length === 0);
+
+  donations.forEach((donation) => {
+    const info = document.createElement('div');
+    info.className = 'pending-info';
+
+    const amount = document.createElement('div');
+    amount.className = 'pending-amount';
+    amount.textContent = `${donation.amount} XLM pending`;
+
+    const recipient = document.createElement('div');
+    recipient.className = 'pending-dest';
+    recipient.textContent = `to ${truncateAddress(donation.destination)} · ${formatAge(donation.createdAt)}`;
+
+    info.append(amount, recipient);
+
+    const link = document.createElement('a');
+    link.className = 'pending-link';
+    link.href = stellarExpertTxUrl(donation.hash, currentNetwork);
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'Stellar Expert';
+
+    const item = document.createElement('li');
+    item.className = 'glass-panel pending-item';
+    item.append(info, link);
+    list.appendChild(item);
+  });
+}
+
+function initPendingSection() {
+  void refreshPendingSection();
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes[PENDING_STORAGE_KEY]) void renderPendingFromStorage();
+  });
+
+  window.setInterval(() => void refreshPendingSection(), 15000);
+}
+
 async function saveTotalDonated(total: number) {
   return new Promise<void>((resolve) => {
-    chrome.storage.local.set({ totalDonatedXLM: Math.max(0, total) }, () => {
-      updateDonationBadge(total);
+    // syncBadge gives the pending red dot precedence while a donation is in
+    // flight, and restores the donation total once everything has settled.
+    chrome.storage.local.set({ totalDonatedXLM: Math.max(0, total) }, async () => {
+      await syncBadge();
       resolve();
     });
   });
@@ -475,6 +566,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initProjectSearch();
   initProjectListKeyNav();
+  initPendingSection();
 
   // Check for pending context-menu donation
   chrome.storage.local.get(
@@ -571,9 +663,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       setStatus("Submitting transaction…");
       const hash = await submitTransaction(signedXdr);
 
+      // Horizon accepts the transaction before the ledger has applied it, so it
+      // is tracked as pending until the background poller sees it land.
+      await addPendingDonation({ hash, amount, destination });
       await updateTotalAfterDonation(parseFloat(amount));
 
-      setStatus(`✅ Transaction submitted! Hash: ${hash.slice(0, 16)}…`);
+      setStatus(`⏳ Transaction submitted! Awaiting confirmation. Hash: ${hash.slice(0, 16)}…`);
     } catch (err: any) {
       console.error("Donation error:", err);
       setStatus(
