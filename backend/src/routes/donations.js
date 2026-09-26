@@ -14,7 +14,101 @@ const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
+const { verifyToken, isValidAdminKey } = require("../middleware/auth");
 const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
+
+/**
+ * Truncate a Stellar wallet address to first 8 and last 4 characters.
+ * E.g. "GABC1234...WXYZ". Addresses shorter than 12 characters are returned unchanged.
+ *
+ * @param {string} address
+ * @returns {string}
+ */
+function maskWalletAddress(address) {
+  if (!address || typeof address !== "string") return address;
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 8)}...${address.slice(-4)}`;
+}
+
+/**
+ * Resolve requester identity: admin status and/or authenticated wallet address.
+ *
+ * @param {import('express').Request} req
+ * @returns {{ isAdmin: boolean, authenticatedWallet: string | null }}
+ */
+function resolveRequesterAuth(req) {
+  let isAdmin = false;
+  let authenticatedWallet = null;
+
+  // 1. Check X-Admin-Key header
+  const adminKey = req.get ? req.get("X-Admin-Key") : req.headers?.["x-admin-key"];
+  if (adminKey && isValidAdminKey(adminKey)) {
+    isAdmin = true;
+  }
+
+  // 2. Check req.admin
+  if (req.admin && req.admin.role === "admin") {
+    isAdmin = true;
+  }
+
+  // 3. Check Authorization header
+  const authHeader = req.headers?.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    try {
+      const decoded = verifyToken(authHeader.slice(7));
+      if (decoded.role === "admin") {
+        isAdmin = true;
+      }
+      const wallet = decoded.publicKey || decoded.walletAddress || decoded.address || decoded.sub;
+      if (wallet && typeof wallet === "string" && /^G[A-Z0-9]{55}$/.test(wallet)) {
+        authenticatedWallet = wallet;
+      }
+    } catch {
+      // Ignore invalid token
+    }
+  }
+
+  // 4. Check explicit wallet header
+  const walletHeader =
+    (req.get ? req.get("X-Wallet-Address") : req.headers?.["x-wallet-address"]) ||
+    (req.get ? req.get("X-Donor-Address") : req.headers?.["x-donor-address"]) ||
+    (req.get ? req.get("X-Public-Key") : req.headers?.["x-public-key"]);
+  if (walletHeader && typeof walletHeader === "string" && /^G[A-Z0-9]{55}$/.test(walletHeader)) {
+    authenticatedWallet = walletHeader;
+  }
+
+  return { isAdmin, authenticatedWallet };
+}
+
+/**
+ * Format a donation response, masking donor wallet address unless the caller is admin
+ * or the authenticated wallet owner.
+ *
+ * @param {object} donation - Donation data mapped from DB.
+ * @param {object} auth
+ * @param {boolean} auth.isAdmin
+ * @param {string|null} auth.authenticatedWallet
+ * @returns {object}
+ */
+function sanitizeDonation(donation, { isAdmin, authenticatedWallet }) {
+  if (!donation) return donation;
+
+  const rawAddress = donation.donorAddress || donation.donor_address || donation.donor_wallet || "";
+  const isOwner = Boolean(
+    authenticatedWallet &&
+    rawAddress &&
+    authenticatedWallet.toUpperCase() === rawAddress.toUpperCase()
+  );
+
+  const canViewFull = isAdmin || isOwner;
+  const displayAddress = canViewFull ? rawAddress : maskWalletAddress(rawAddress);
+
+  return {
+    ...donation,
+    donorAddress: displayAddress,
+    donor_wallet: displayAddress,
+  };
+}
 
 function resolveDonorCountry(ip) {
   if (!ip || typeof ip !== "string") return null;
@@ -282,6 +376,77 @@ async function recordDonation(req, res, next) {
  */
 router.post("/", donationLimiter, recordDonation);
 
+/**
+ * List donations with optional project filtering and cursor pagination.
+ * By default, donor wallet addresses are truncated to first 8 + last 4 characters.
+ * Authenticated wallet owners and admins receive full addresses.
+ *
+ * @route GET /api/donations
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.get("/", async (req, res, next) => {
+  try {
+    const projectId = req.query.project_id || req.query.projectId;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+
+    let query;
+    let values;
+
+    if (projectId) {
+      if (hasCursor) {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
+                   AND d.created_at < $2::timestamptz
+                 ORDER BY d.created_at DESC
+                 LIMIT $3`;
+        values = [projectId, req.query.cursor, limit + 1];
+      } else {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
+                 ORDER BY d.created_at DESC
+                 LIMIT $2`;
+        values = [projectId, limit + 1];
+      }
+    } else {
+      if (hasCursor) {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE d.created_at < $1::timestamptz
+                 ORDER BY d.created_at DESC
+                 LIMIT $2`;
+        values = [req.query.cursor, limit + 1];
+      } else {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 ORDER BY d.created_at DESC
+                 LIMIT $1`;
+        values = [limit + 1];
+      }
+    }
+
+    const auth = resolveRequesterAuth(req);
+    const donations = (await pool.query(query, values)).rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore ? result[result.length - 1].createdAt : null;
+
+    res.json({ success: true, data: result, nextCursor });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/donations/stream
 router.get("/stream", (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
@@ -320,8 +485,9 @@ router.get("/stream", (req, res) => {
      LIMIT 10`,
   )).then((result) => {
     if (res.writableEnded) return;
+    const auth = resolveRequesterAuth(req);
     res.write(`event: initial\ndata: ${JSON.stringify({ donations: result.rows.map((row) => ({
-      ...mapDonationRow(row),
+      ...sanitizeDonation(mapDonationRow(row), auth),
       projectName: row.project_name || null,
     })) })}\n\n`);
   }).catch(() => {
@@ -344,7 +510,11 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
        LIMIT $2`,
       [req.params.projectId, limit],
     );
-    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+    const auth = resolveRequesterAuth(req);
+    res.json({
+      success: true,
+      data: result.rows.map(mapDonationRow).map((d) => sanitizeDonation(d, auth)),
+    });
   } catch (e) {
     next(e);
   }
@@ -372,18 +542,21 @@ router.get("/project/:projectId", async (req, res, next) => {
       ? `SELECT d.*, p.co2_per_xlm
          FROM donations d
          JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = $1
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
            AND d.created_at < $2::timestamptz
          ORDER BY d.created_at DESC
          LIMIT $3`
       : `SELECT d.*, p.co2_per_xlm
          FROM donations d
          JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = $1
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
          ORDER BY d.created_at DESC
          LIMIT $2`;
 
-    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const auth = resolveRequesterAuth(req);
+    const donations = (await pool.query(query, values)).rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore ? result[result.length - 1].createdAt : null;
@@ -443,7 +616,10 @@ router.get("/donor/:publicKey", async (req, res, next) => {
          ORDER BY d.created_at DESC, d.id DESC
          LIMIT $2`;
 
-    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const auth = resolveRequesterAuth(req);
+    const donations = (await pool.query(query, values)).rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore
@@ -494,7 +670,10 @@ router.get("/:id", async (req, res, next) => {
     donationData.projectName = row.project_name;
     donationData.donorDisplayName = row.donor_display_name || null;
 
-    res.json({ success: true, data: donationData });
+    const auth = resolveRequesterAuth(req);
+    const sanitized = sanitizeDonation(donationData, auth);
+
+    res.json({ success: true, data: sanitized });
   } catch (e) {
     next(e);
   }
@@ -502,3 +681,7 @@ router.get("/:id", async (req, res, next) => {
 
 module.exports = router;
 module.exports.recordDonation = recordDonation;
+module.exports.maskWalletAddress = maskWalletAddress;
+module.exports.resolveRequesterAuth = resolveRequesterAuth;
+module.exports.sanitizeDonation = sanitizeDonation;
+

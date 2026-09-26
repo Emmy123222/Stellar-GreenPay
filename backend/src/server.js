@@ -85,10 +85,16 @@ app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
+const donationsRouter = require("./routes/donations");
+const adminRouter = require("./routes/admin");
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
+app.use("/api/donations", donationsRouter);
+app.use("/api/admin", adminRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+app.use("/api/v1/donations", donationsRouter);
+app.use("/api/v1/admin", adminRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
