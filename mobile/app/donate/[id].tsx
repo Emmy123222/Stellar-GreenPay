@@ -19,6 +19,12 @@ import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
+import {
+  getAddressNetworkWarning,
+  isValidStellarAddress,
+  markTestnetAddress,
+  persistKnownTestnetAddresses,
+} from '../../utils/stellarValidation';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
 
 
@@ -82,6 +88,31 @@ function getFundingUrl(publicKey: string): string {
   return `https://friendbot.stellar.org/?addr=${encodeURIComponent(publicKey)}`;
 }
 
+/**
+ * Promise wrapper around the platform confirm dialog. Resolves `true` only
+ * when the user taps the affirmative button — dismissing the sheet resolves
+ * `false` so a caller awaiting confirmation can never hang or proceed by
+ * accident.
+ */
+function confirmAlert(
+  title: string,
+  message: string,
+  confirmLabel: string,
+  cancelLabel: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      title,
+      message,
+      [
+        { text: cancelLabel, style: 'cancel', onPress: () => resolve(false) },
+        { text: confirmLabel, style: 'destructive', onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) }
+    );
+  });
+}
+
 export default function DonateScreen() {
   const { colors } = useTheme();
   const { id } = useLocalSearchParams();
@@ -113,6 +144,36 @@ export default function DonateScreen() {
   const surfaceAuthFailure = (outcome: string) => {
     setStatusType('error');
     setStatusMessage(outcome || 'Authentication was cancelled. Your donation was not sent.');
+  };
+
+  /**
+   * Issue #1126: a valid address is not automatically a *mainnet* address.
+   * If we know this key only exists on testnet (e.g. the app funded it via
+   * Friendbot) we show a soft warning and require an explicit confirmation
+   * — we never silently proceed and we never hard-block the payment.
+   */
+  const confirmAddressNetworkSafety = async (role: string, address: string): Promise<boolean> => {
+    const warning = getAddressNetworkWarning(address);
+    if (!warning) return true;
+
+    return confirmAlert(
+      warning.title,
+      `${role}\n\n${warning.message}`,
+      warning.confirmLabel,
+      warning.cancelLabel
+    );
+  };
+
+  /**
+   * Opening the testnet funding link is our signal that this account is
+   * about to become a Friendbot-funded testnet account. Record it so a
+   * later mainnet build can warn before the user sends real XLM to it.
+   */
+  const openFundingGuide = async () => {
+    if (!IS_MAINNET && publicKey && markTestnetAddress(publicKey, 'friendbot')) {
+      await persistKnownTestnetAddresses();
+    }
+    await Linking.openURL(getFundingUrl(publicKey));
   };
 
   useEffect(() => {
@@ -169,6 +230,26 @@ export default function DonateScreen() {
         'Please enter your Stellar secret key to sign the transaction.'
       );
       return;
+    }
+
+    // Issue #1126: last gate before real funds move. Known testnet-only
+    // addresses (Friendbot-funded, placeholder keys, …) get a soft warning
+    // the user must confirm — the donation is never silently re-routed and
+    // a valid address is never hard-blocked.
+    const flaggedAddresses: Array<[string, string]> = [
+      ['Donation recipient', selectedProject.walletAddress],
+      ['Your connected wallet', publicKey],
+    ];
+    for (const [role, address] of flaggedAddresses) {
+      const confirmed = await confirmAddressNetworkSafety(role, address);
+      if (!isMountedRef.current) return;
+      if (!confirmed) {
+        setStatusType('info');
+        setStatusMessage(
+          'Donation cancelled — confirm the address is a mainnet account before sending.'
+        );
+        return;
+      }
     }
 
     let keypair;
@@ -276,12 +357,28 @@ export default function DonateScreen() {
         {
           text: 'OK',
           onPress: (input: any) => {
-            const trimmed = String(input || '').trim();
-            if (/^G[A-Z0-9]{55}$/.test(trimmed)) {
-              setPublicKey(trimmed);
-            } else {
+            // Format check stays exactly as strict as before (trimmed,
+            // upper-case G-address); the warning below is purely additive.
+            const trimmed = String(input ?? '').trim();
+            if (!isValidStellarAddress(trimmed)) {
               Alert.alert('Invalid Key', 'Please enter a valid Stellar public key');
+              return;
             }
+            // Issue #1126: soft mainnet/testnet warning — the user has to
+            // confirm before we accept a key we know is testnet-only.
+            const warning = getAddressNetworkWarning(trimmed);
+            if (warning) {
+              void confirmAlert(
+                warning.title,
+                `Your connected wallet\n\n${warning.message}`,
+                warning.confirmLabel,
+                warning.cancelLabel
+              ).then((confirmed) => {
+                if (confirmed) setPublicKey(trimmed);
+              });
+              return;
+            }
+            setPublicKey(trimmed);
           },
         },
       ],
@@ -530,7 +627,7 @@ export default function DonateScreen() {
       {showFundingGuide ? (
         <TouchableOpacity
           style={styles.fundingButton}
-          onPress={() => void Linking.openURL(getFundingUrl(publicKey))}
+          onPress={() => void openFundingGuide()}
           accessibilityRole="link"
           accessibilityLabel={IS_MAINNET ? 'Open exchange funding guidance' : 'Fund my account with Friendbot'}
         >
