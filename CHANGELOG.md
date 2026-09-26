@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Untracked test coverage reports, added full coverage ignore rules in `.gitignore`, and configured CI to upload coverage reports as GitHub Actions workflow artifacts (#1046).
 - Dead-letter handling for stats refresh background queue (`statsRefreshQueue.js`), including Sentry failure logging, `dead_letter` database table persistence, pg-boss archiving, and Prometheus `stats_refresh_failures_total` failure metric tracking (#1089).
 
+### Fixed
+
+- Removed duplicate `defaults` key in backend CI workflow (`backend.yml`) and updated `moduleResolution` to `node` in backend `tsconfig.json`.
+
 
 ## [1.0.0] - 2025-01-01
 
