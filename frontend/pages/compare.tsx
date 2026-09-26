@@ -119,6 +119,35 @@ export default function ComparePage() {
           name="description"
           content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
         />
+        <meta
+          property="og:title"
+          content={`Compare ${projects.map((p) => p.name).join(" vs ")} — Stellar GreenPay`}
+        />
+        <meta
+          property="og:description"
+          content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
+        />
+        <meta
+          property="og:url"
+          content={typeof window !== 'undefined' ? window.location.href : ''}
+        />
+        <meta
+          property="og:image"
+          content={projects[0]?.imageUrl || '/api/og/default'}
+        />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta
+          name="twitter:title"
+          content={`Compare ${projects.map((p) => p.name).join(" vs ")} — Stellar GreenPay`}
+        />
+        <meta
+          name="twitter:description"
+          content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
+        />
+        <meta
+          name="twitter:image"
+          content={projects[0]?.imageUrl || '/api/og/default'}
+        />
       </Head>
 
       <Link
