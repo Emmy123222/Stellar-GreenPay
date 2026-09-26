@@ -3,7 +3,7 @@
   "name": "GreenPay Companion",
   "version": "1.0.0",
   "description": "Support your favorite sustainable projects with a single click.",
-  "browser_action": {
+  "action": {
     "default_popup": "popup.html",
     "default_title": "GreenPay Companion"
   },
