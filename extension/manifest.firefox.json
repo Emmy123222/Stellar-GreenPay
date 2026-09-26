@@ -11,14 +11,16 @@
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "background": {
     "scripts": ["dist-firefox/background.js"]
   },
   "host_permissions": [
-    "https://greenpay.app/*",
-    "https://staging.greenpay.app/*"
+    "https://api.stellar-greenpay.app/*",
+    "https://horizon.stellar.org/*",
+    "https://horizon-testnet.stellar.org/*"
   ],
   "content_scripts": [
     {
