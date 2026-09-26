@@ -31,6 +31,9 @@ For automated CI/CD deployments and Sentry release management (`.github/workflow
 * **`SENTRY_ORG`**: Sentry organization slug.
 * **`SENTRY_PROJECT`**: Sentry project name.
 * **`SENTRY_AUTH_TOKEN`**: Sentry authentication token for `@sentry/cli` release tracking.
+* **`KUBE_CONFIG`**: base64-encoded kubeconfig used by the deploy job to run `helm upgrade`/`helm rollback`. When absent, the workflow skips the cluster steps instead of failing.
+* **`DEPLOY_HEALTHCHECK_URL`** (optional): full URL polled after deploy. Defaults to `https://greenpay.app/api/readiness` for production and `https://staging.greenpay.app/api/readiness` for staging.
+* **`SLACK_DEPLOY_WEBHOOK`** (optional): incoming-webhook URL used to notify `#deployments` when a deployment is rolled back.
 
 After deployment completes, the workflow automatically creates and finalizes the release in Sentry:
 ```bash
@@ -117,6 +120,32 @@ stellar contract deploy \
 ```
 
 Once deployed, update your application configuration (via Secrets or ConfigMaps) with the new mainnet Contract ID.
+
+## Deployment health gate and automatic rollback
+
+A deploy is not considered successful just because `helm upgrade` exited 0 — the
+new revision must actually serve traffic. After the Helm upgrade,
+`.github/workflows/deploy.yml` polls the readiness endpoint:
+
+- URL: `${DEPLOY_HEALTHCHECK_URL}` when set, otherwise
+  `<production|staging base URL>/api/readiness`.
+- It polls every 5 seconds for up to **120 seconds** and expects HTTP 200
+  (`/api/readiness` returns 503 while the database or Redis is unreachable).
+
+If the poll never succeeds, the workflow automatically rolls the release back:
+
+```bash
+helm rollback greenpay --wait --timeout 5m
+```
+
+The rollback only runs when an existing release is present (`helm history`
+check), and it posts a notification to the Slack **`#deployments`** channel via
+`SLACK_DEPLOY_WEBHOOK`:
+
+> :warning: GreenPay deployment `<version>` (`<sha>`) failed its readiness check on `<ref>`. Rolled back automatically: `true`.
+
+The job still ends red, so the failed deploy is visible in the Actions UI even
+after the rollback restores service.
 
 ## Operations
 

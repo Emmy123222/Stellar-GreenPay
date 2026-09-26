@@ -30,6 +30,11 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.4"
+
       - name: Set Release Version
         id: version
         run: |
@@ -61,14 +66,81 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      - name: Deploy Application
+      - name: Deploy application (Helm)
+        id: deploy
         env:
-          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
-          SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
         run: |
           echo "Deploying GreenPay services..."
+          if [ -n "${KUBE_CONFIG}" ]; then
+            echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+            export KUBECONFIG=/tmp/kubeconfig
+            # No --wait here: the readiness gate below is the source of truth for
+            # whether the rollout is healthy, and a failing rollout must reach it
+            # so the automatic rollback can fire.
+            helm upgrade --install greenpay helm/greenpay/ \
+              --namespace greenpay --create-namespace
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::KUBE_CONFIG secret is not configured; skipping cluster deployment."
+          fi
           echo "Deployment successful."
+
+      - name: Verify deployment readiness (poll /api/readiness for up to 120s)
+        id: readiness
+        if: steps.deploy.outputs.deployed == 'true'
+        env:
+          DEPLOY_ENV: ${{ github.event.inputs.environment || 'production' }}
+          DEPLOY_HEALTHCHECK_URL: ${{ secrets.DEPLOY_HEALTHCHECK_URL }}
+        run: |
+          if [ "${DEPLOY_ENV}" = "production" ]; then
+            BASE_URL="https://greenpay.app"
+          else
+            BASE_URL="https://staging.greenpay.app"
+          fi
+          READINESS_URL="${DEPLOY_HEALTHCHECK_URL:-${BASE_URL}/api/readiness}"
+          echo "Polling ${READINESS_URL} for up to 120s..."
+          deadline=$((SECONDS + 120))
+          until curl -fsS --max-time 5 "${READINESS_URL}" > /dev/null; do
+            if [ "${SECONDS}" -ge "${deadline}" ]; then
+              echo "::error::Readiness check failed after 120s: ${READINESS_URL} did not return HTTP 200"
+              exit 1
+            fi
+            echo "Not ready yet (${SECONDS}s elapsed); retrying in 5s..."
+            sleep 5
+          done
+          echo "Readiness check passed: ${READINESS_URL} returned HTTP 200"
+
+      - name: Roll back on failed readiness
+        if: failure() && (steps.readiness.outcome == 'failure' || steps.deploy.outcome == 'failure')
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          SLACK_DEPLOY_WEBHOOK: ${{ secrets.SLACK_DEPLOY_WEBHOOK }}
+        run: |
+          echo "::warning::Deployment failed its readiness gate — rolling back 'greenpay'"
+          ROLLED_BACK="false"
+          if [ -z "${KUBE_CONFIG}" ]; then
+            echo "KUBE_CONFIG secret is not configured; cannot run helm rollback"
+          else
+            echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+            export KUBECONFIG=/tmp/kubeconfig
+            if helm history greenpay > /dev/null 2>&1; then
+              helm rollback greenpay --wait --timeout 5m
+              ROLLED_BACK="true"
+            else
+              echo "No existing Helm release 'greenpay' to roll back"
+            fi
+          fi
+          if [ -n "${SLACK_DEPLOY_WEBHOOK}" ]; then
+            ROLLBACK_TEXT=":warning: GreenPay deployment ${VERSION} (${GITHUB_SHA::7}) failed its readiness check on ${GITHUB_REF_NAME}. Rolled back automatically: ${ROLLED_BACK}."
+            curl -fsS -X POST -H 'Content-type: application/json' \
+              --data "$(printf '{"channel":"#deployments","text":"%s"}' "${ROLLBACK_TEXT}")" \
+              "${SLACK_DEPLOY_WEBHOOK}"
+            echo "Posted rollback notification to Slack #deployments"
+          else
+            echo "SLACK_DEPLOY_WEBHOOK secret is not configured; skipping Slack notification"
+          fi
 
       - name: Create Sentry Release
         env:
