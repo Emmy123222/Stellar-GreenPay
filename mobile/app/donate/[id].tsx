@@ -20,6 +20,13 @@ import axios from 'axios';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
 import { useTheme } from '../theme';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
+import {
+  dismissNotificationRationale,
+  getPushToken,
+  registerDeviceToken,
+  requestNotificationPermissions,
+  shouldShowNotificationRationale,
+} from '../../utils/notifications';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -245,6 +252,39 @@ export default function DonateScreen() {
       setAmount('1');
       setMessage('');
       setSecretKey('');
+
+      try {
+        if (await shouldShowNotificationRationale()) {
+          Alert.alert(
+            'Stay updated',
+            'Get notified when your donations are confirmed and when supported projects share updates.',
+            [
+              {
+                text: 'Not now',
+                style: 'cancel',
+                onPress: () => { void dismissNotificationRationale(); },
+              },
+              {
+                text: 'Enable notifications',
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      const permissionStatus = await requestNotificationPermissions();
+                      if (!permissionStatus) return;
+                      const token = await getPushToken();
+                      if (token) await registerDeviceToken(token, publicKey);
+                    } catch (error) {
+                      console.error('Unable to enable notifications:', error);
+                    }
+                  })();
+                },
+              },
+            ]
+          );
+        }
+      } catch (error) {
+        console.error('Unable to prepare notification permission prompt:', error);
+      }
     } catch (error: any) {
       console.error('Donation failed:', error);
       setStatusType('error');
