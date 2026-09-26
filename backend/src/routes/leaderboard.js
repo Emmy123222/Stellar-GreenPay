@@ -5,6 +5,8 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
+const redis = require("../services/redis");
+const { leaderboardQueryDuration } = require("../services/metrics");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 
 // 30 requests per minute per IP — prevents enumeration / data scraping (issue #695)
@@ -13,6 +15,34 @@ const leaderboardLimiter = createRateLimiter(30, 1, "leaderboard");
 // Cursor-based pagination constants (matching /api/projects conventions).
 const LEADERBOARD_DEFAULT_LIMIT = 50;
 const LEADERBOARD_MAX_LIMIT = 200;
+
+// The ranking query aggregates every donation per profile, so it is far too
+// expensive to run per request (issue #1093). 60 seconds is short enough that a
+// freshly recorded donation surfaces almost immediately and long enough to
+// absorb a burst of reads.
+const LEADERBOARD_CACHE_TTL = 60; // seconds
+const LEADERBOARD_CACHE_PREFIX = "leaderboard:";
+
+/**
+ * Cache key for one leaderboard page.
+ *
+ * Every parameter that changes the result set is part of the key — including
+ * the pagination ones, so a cached page can never be served for a different
+ * page or ordering.
+ *
+ * @param {{ pageSize: number, cursor?: string, period: string, sortBy: string, onlyVerified: boolean }} params
+ * @returns {string}
+ */
+function getLeaderboardCacheKey({ pageSize, cursor, period, sortBy, onlyVerified }) {
+  return [
+    LEADERBOARD_CACHE_PREFIX,
+    sortBy,
+    period,
+    onlyVerified ? "verified" : "all",
+    pageSize,
+    cursor || "first",
+  ].join(":");
+}
 
 router.get("/", leaderboardLimiter, async (req, res, next) => {
   try {
@@ -76,6 +106,14 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     params.push(pageSize + 1);
     const limitIdx = params.length;
 
+    const cacheKey = getLeaderboardCacheKey({ pageSize, cursor, period, sortBy, onlyVerified });
+    // A Redis outage makes get() resolve to null, so the endpoint degrades to
+    // hitting Postgres rather than failing.
+    const cached = await redis.get(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const whereClause = conditions.length > 0
       ? `WHERE ${conditions.join("\n  AND ")}`
       : "";
@@ -117,7 +155,15 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     `;
 
     // eslint-disable-next-line sql-injection/no-sql-injection
-    const result = await pool.query(query, params);
+    const observeQueryDuration = leaderboardQueryDuration.startTimer({ period, sort_by: sortBy });
+    let result;
+    try {
+      result = await pool.query(query, params);
+    } finally {
+      // Recorded even when the query throws, otherwise the failures that matter
+      // most would be missing from the histogram.
+      observeQueryDuration();
+    }
     const rows = result.rows;
     const hasMore = rows.length > pageSize;
     const pageRows = rows.slice(0, pageSize);
@@ -141,12 +187,19 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       ).toString("base64");
     }
 
-    res.json({
+    const payload = {
       success: true,
       data: entries,
       has_more: hasMore,
       next_cursor: nextCursor,
-    });
+    };
+
+    // Cache the fully-shaped response: `rank` is positional and derived from
+    // `impact_score`/`total_donated_xlm` ordering, so caching the rows alone
+    // would mean recomputing — and re-reading — the same page twice.
+    await redis.set(cacheKey, payload, LEADERBOARD_CACHE_TTL);
+
+    res.json(payload);
   } catch (e) {
     next(e);
   }
