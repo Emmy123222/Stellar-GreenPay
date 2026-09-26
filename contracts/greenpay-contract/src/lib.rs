@@ -25,7 +25,7 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype,
+    contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
@@ -54,6 +54,13 @@ pub trait OracleInterface {
 }
 
 // ─── Badge tiers (on-chain) ───────────────────────────────────────────────────
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    Reentrant = 1,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -231,6 +238,7 @@ pub enum DataKey {
     // Contract-wide emergency pause status
     Paused,
     PendingAdmin,
+    IsProcessing,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -569,6 +577,11 @@ impl GreenPayContract {
         amount: i128,
         msg_hash: u32,
     ) {
+        if env.storage().temporary().has(&DataKey::IsProcessing) {
+            panic_with_error!(&env, ContractError::Reentrant);
+        }
+        env.storage().temporary().set(&DataKey::IsProcessing, &true);
+
         donor.require_auth();
         if Self::is_paused(env.clone()) {
             panic!("Contract is paused");
@@ -726,6 +739,7 @@ impl GreenPayContract {
             (amount, donor_stats.badge.clone(), msg_hash),
         );
         env.storage().instance().extend_ttl(VOTING_WINDOW_LEDGERS * 4, VOTING_WINDOW_LEDGERS * 4);
+        env.storage().temporary().remove(&DataKey::IsProcessing);
     }
 
     // ─── Getters ─────────────────────────────────────────────────────────────
@@ -1370,6 +1384,11 @@ impl GreenPayContract {
         usdc_amount: i128,
         msg_hash: u32,
     ) {
+        if env.storage().temporary().has(&DataKey::IsProcessing) {
+            panic_with_error!(&env, ContractError::Reentrant);
+        }
+        env.storage().temporary().set(&DataKey::IsProcessing, &true);
+
         donor.require_auth();
         if Self::is_paused(env.clone()) {
             panic!("Contract is paused");
@@ -1568,6 +1587,7 @@ impl GreenPayContract {
             (symbol_short!("donated"), donor.clone(), project_id),
             (usdc_amount, symbol_short!("USDC"), msg_hash),
         );
+        env.storage().temporary().remove(&DataKey::IsProcessing);
     }
 
     // ─── Admin: refund a disputed or fraudulent donation ────────────────────
