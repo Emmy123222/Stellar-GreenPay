@@ -2,7 +2,9 @@
  * utils/format.ts
  * Formatting helpers and small UI-friendly utilities shared across the frontend.
  */
-import { formatDistanceToNow, format } from "date-fns";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+dayjs.extend(relativeTime);
 import type { ProjectStatus, BadgeTier } from "./types";
 
 /**
@@ -85,7 +87,7 @@ export function progressPercent(raised: string, goal: string): number {
  * @throws {Error} Never throws.
  */
 export function timeAgo(d: string): string {
-  try { return formatDistanceToNow(new Date(d), { addSuffix: true }); }
+  try { return dayjs(d).fromNow(); }
   catch { return d; }
 }
 
@@ -97,7 +99,7 @@ export function timeAgo(d: string): string {
  * @throws {Error} Never throws.
  */
 export function formatDate(d: string): string {
-  try { return format(new Date(d), "MMM d, yyyy"); }
+  try { return dayjs(d).format("MMM D, YYYY"); }
   catch { return d; }
 }
 
