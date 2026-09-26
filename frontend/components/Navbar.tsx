@@ -67,6 +67,12 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
     { href: "/apply",       label: t("nav.apply") },
   ];
 
+  // A link is "current" when it targets the current route exactly, or when the
+  // current route is nested underneath it (`/projects/p1` → `/projects`).
+  // "/" is excluded from the prefix match so it doesn't swallow every route.
+  const isActive = (href: string) =>
+    router.pathname === href || (href !== "/" && router.pathname.startsWith(href + "/"));
+
   return (
     <nav className="sticky top-0 z-50 bg-white/90 dark:bg-[#0e1f13]/95 backdrop-blur-xl border-b border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)] shadow-sm dark:shadow-none">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -85,17 +91,21 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         </div>
 
         <div className="hidden md:flex items-center gap-1">
-          {links.map((l) => (
-            <Link key={l.href} href={l.href}
-              className={clsx(
-                "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 font-body",
-                router.pathname === l.href || (router.pathname.startsWith(l.href + "/") && l.href !== "/")
-                  ? "bg-forest-100 dark:bg-[#1c3928] text-forest-700 dark:text-[#81c784]"
-                  : "text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-forest-700 dark:hover:text-[#81c784] hover:bg-forest-50 dark:hover:bg-[rgba(96,208,123,0.10)]"
-              )}>
-              {l.label}
-            </Link>
-          ))}
+          {links.map((l) => {
+            const active = isActive(l.href);
+            return (
+              <Link key={l.href} href={l.href}
+                aria-current={active ? "page" : undefined}
+                className={clsx(
+                  "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 font-body",
+                  active
+                    ? "bg-forest-100 dark:bg-[#1c3928] text-forest-700 dark:text-[#81c784]"
+                    : "text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-forest-700 dark:hover:text-[#81c784] hover:bg-forest-50 dark:hover:bg-[rgba(96,208,123,0.10)]"
+                )}>
+                {l.label}
+              </Link>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-2">
