@@ -44,6 +44,7 @@
     "pino-http": "^11.0.0",
     "qrcode": "^1.5.4",
     "rate-limit-redis": "^5.0.0",
+    "sharp": "^0.33.5",
     "socket.io": "^4.8.3",
     "swagger-jsdoc": "6.3.0",
     "swagger-ui-express": "5.0.1",
