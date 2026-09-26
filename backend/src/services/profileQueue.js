@@ -98,30 +98,79 @@ function getS3PublicUrl() {
   return process.env.S3_PUBLIC_URL;
 }
 
+const LOCAL_UPLOAD_PREFIX = "/api/uploads/";
+
+// avatarUrl is user-supplied, so a value like "/api/uploads/../../etc/passwd"
+// must never resolve outside UPLOAD_DIR (we read AND unlink this path).
+function resolveLocalUploadPath(imageUrl, uploadDir = require("./storage").UPLOAD_DIR) {
+  if (typeof imageUrl !== "string" || !imageUrl.startsWith(LOCAL_UPLOAD_PREFIX)) return null;
+  let key;
+  try {
+    key = decodeURIComponent(imageUrl.slice(LOCAL_UPLOAD_PREFIX.length).split(/[?#]/)[0]);
+  } catch {
+    return null;
+  }
+  if (!key || key.includes("\0")) return null;
+  const root = path.resolve(uploadDir);
+  const filePath = path.resolve(root, key);
+  if (!filePath.startsWith(root + path.sep)) return null;
+  return filePath;
+}
+
+// Only objects in our own bucket can be fetched. Returns the S3 key, or null
+// for third-party URLs (those are left untouched rather than retried forever).
+function resolveOwnS3Key(imageUrl) {
+  let url;
+  try {
+    url = new URL(imageUrl);
+  } catch {
+    return null;
+  }
+  const bucket = getS3Bucket();
+  const allowedPrefixes = [];
+  if (getS3PublicUrl()) allowedPrefixes.push(getS3PublicUrl().replace(/\/$/, "") + "/");
+  if (bucket && process.env.AWS_REGION) {
+    allowedPrefixes.push(`https://${bucket}.s3.${process.env.AWS_REGION}.amazonaws.com/`);
+  }
+  const base = `${url.origin}${url.pathname}`;
+  const prefix = allowedPrefixes.find((p) => base.startsWith(p));
+  if (!prefix) return null;
+  const key = decodeURIComponent(base.slice(prefix.length));
+  return key || null;
+}
+
+// Avatars we already produced are skipped so re-saving a profile doesn't
+// re-encode (and re-upload) an image that is already 256px WebP.
+function isProcessedAvatarKey(key) {
+  return /^avatars\/[0-9a-f]{24}-[A-Za-z0-9_]+\.webp$/.test(key);
+}
+
 async function downloadImageFromUrl(imageUrl) {
   if (!imageUrl) {
     throw new Error("No image URL provided");
   }
 
-  if (imageUrl.startsWith("/api/uploads/")) {
-    const key = imageUrl.replace("/api/uploads/", "");
-    const { UPLOAD_DIR } = require("./storage");
-    const filePath = path.join(UPLOAD_DIR, key);
+  if (imageUrl.startsWith(LOCAL_UPLOAD_PREFIX)) {
+    const filePath = resolveLocalUploadPath(imageUrl);
+    if (!filePath) {
+      throw new Error("Invalid local upload path");
+    }
     if (!fs.existsSync(filePath)) {
       throw new Error(`Local file not found: ${filePath}`);
     }
     return fs.promises.readFile(filePath);
   }
 
-  if (imageUrl.startsWith("http")) {
+  if (/^https?:\/\//i.test(imageUrl)) {
     const s3Client = getS3Client();
     if (!s3Client) {
       throw new Error("S3 not configured for downloading remote image");
     }
-    const bucket = getS3Bucket();
-    const url = new URL(imageUrl);
-    const key = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
-    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const key = resolveOwnS3Key(imageUrl);
+    if (!key) {
+      throw new Error("Remote avatar is not hosted in the configured S3 bucket");
+    }
+    const command = new GetObjectCommand({ Bucket: getS3Bucket(), Key: key });
     const response = await s3Client.send(command);
     const chunks = [];
     for await (const chunk of response.Body) {
@@ -186,10 +235,8 @@ async function uploadAvatarToS3(buffer, key) {
 }
 
 async function deleteLocalAvatar(imageUrl) {
-  if (imageUrl.startsWith("/api/uploads/")) {
-    const key = imageUrl.replace("/api/uploads/", "");
-    const { UPLOAD_DIR } = require("./storage");
-    const filePath = path.join(UPLOAD_DIR, key);
+  const filePath = resolveLocalUploadPath(imageUrl);
+  if (filePath) {
     try {
       await fs.promises.unlink(filePath);
       logger.info({ event: "avatar_local_cleanup", filePath }, "Deleted local avatar file");
@@ -200,6 +247,16 @@ async function deleteLocalAvatar(imageUrl) {
 }
 
 async function processAvatar(donorAddress, avatarUrl) {
+  const isLocal = typeof avatarUrl === "string" && avatarUrl.startsWith(LOCAL_UPLOAD_PREFIX);
+  const ownS3Key = isLocal ? null : resolveOwnS3Key(avatarUrl);
+  const eligible = isLocal
+    ? resolveLocalUploadPath(avatarUrl) !== null
+    : ownS3Key !== null && !isProcessedAvatarKey(ownS3Key);
+  if (!eligible) {
+    logger.info({ event: "avatar_processing_skipped", donorAddress, avatarUrl }, "Avatar not eligible for processing");
+    return { newAvatarUrl: null, skipped: true };
+  }
+
   logger.info({ event: "avatar_processing_start", donorAddress, avatarUrl }, "Starting avatar processing");
 
   const originalBuffer = await downloadImageFromUrl(avatarUrl);
@@ -207,16 +264,28 @@ async function processAvatar(donorAddress, avatarUrl) {
   const key = buildAvatarKey(donorAddress);
   const newAvatarUrl = await uploadAvatarToS3(processedBuffer, key);
 
-  await pool.query(
-    "UPDATE profiles SET avatar_url = $1, updated_at = NOW() WHERE public_key = $2",
-    [newAvatarUrl, donorAddress]
+  // Guard on the original URL: if the user changed their avatar while this
+  // job ran, don't clobber the newer value with this stale result.
+  const updated = await pool.query(
+    "UPDATE profiles SET avatar_url = $1, updated_at = NOW() WHERE public_key = $2 AND avatar_url = $3",
+    [newAvatarUrl, donorAddress, avatarUrl]
   );
 
   await deleteLocalAvatar(avatarUrl);
 
-  logger.info({ event: "avatar_processing_complete", donorAddress, newAvatarUrl }, "Avatar processing complete");
+  logger.info(
+    {
+      event: "avatar_processing_complete",
+      donorAddress,
+      newAvatarUrl,
+      originalBytes: originalBuffer.length,
+      processedBytes: processedBuffer.length,
+      profileUpdated: updated.rowCount > 0,
+    },
+    "Avatar processing complete"
+  );
 
-  return { newAvatarUrl };
+  return { newAvatarUrl, skipped: false };
 }
 
 async function start(io) {
@@ -259,4 +328,15 @@ async function enqueueAvatarProcessing(donorAddress, avatarUrl) {
   return boss.send(AVATAR_QUEUE, { donorAddress, avatarUrl }, { retryLimit: 3, retryDelay: 10 });
 }
 
-module.exports = { start, enqueueProfileUpdate, processProfileUpdate, enqueueAvatarProcessing, processAvatar };
+module.exports = {
+  start,
+  enqueueProfileUpdate,
+  processProfileUpdate,
+  enqueueAvatarProcessing,
+  processAvatar,
+  processAvatarImage,
+  resolveLocalUploadPath,
+  resolveOwnS3Key,
+  isProcessedAvatarKey,
+  MAX_AVATAR_DIMENSION,
+};
