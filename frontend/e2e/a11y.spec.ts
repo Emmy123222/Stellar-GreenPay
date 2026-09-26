@@ -121,3 +121,61 @@ test.describe("Accessibility (axe)", () => {
     await assertNoCriticalViolations(page);
   });
 });
+
+// ── Navbar active-link state ─────────────────────────────────────────────────
+
+test.describe("Navbar aria-current", () => {
+  test.beforeEach(async ({ page }) => {
+    await mockApi(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+  });
+
+  // aria-current="page" is what a screen reader announces as the current
+  // page, so it has to survive hydration and client-side navigation — both
+  // are real risks once a link is wrapped in a framework <Link>.
+  test("marks the current route's link on direct load", async ({ page }) => {
+    await page.goto("/projects");
+
+    await expect(page.getByRole("link", { name: "Projects", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+  });
+
+  test("marks only one link at a time", async ({ page }) => {
+    await page.goto("/projects");
+
+    const current = page.locator('nav a[aria-current="page"]');
+    await expect(current).toHaveCount(1);
+  });
+
+  test("moves the marker on client-side navigation", async ({ page }) => {
+    await page.goto("/projects");
+    await expect(page.getByRole("link", { name: "Projects", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+
+    // Navigates via "Leaderboard" rather than "Map" because nav.map is
+    // missing from the locale files, so that link renders the raw key.
+    await page.getByRole("link", { name: "Leaderboard", exact: true }).click();
+
+    await expect(page.getByRole("link", { name: "Leaderboard", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    await expect(page.getByRole("link", { name: "Projects", exact: true })).not.toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+  });
+
+  test("keeps the parent marker on a nested route", async ({ page }) => {
+    await page.goto(`/projects/${MOCK_PROJECT_ID}`);
+
+    await expect(page.getByRole("link", { name: "Projects", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+  });
+});
