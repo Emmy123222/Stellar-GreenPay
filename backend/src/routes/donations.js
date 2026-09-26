@@ -14,6 +14,7 @@ const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
+const { countDonation } = require("../services/metrics");
 const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
 
 function resolveDonorCountry(ip) {
@@ -190,6 +191,9 @@ async function recordDonation(req, res, next) {
     inTransaction = false;
 
     await redis.deletePattern("projects:list:*");
+
+    const xlmForMetrics = currency === "XLM" ? parsedAmount : 0;
+    countDonation(currency, xlmForMetrics);
 
     enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
