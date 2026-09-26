@@ -17,7 +17,7 @@
     "style-loader": "^3.3.3",
     "ts-loader": "^9.5.1",
     "typescript": "~6.0.3",
-    "webpack": "^5.109.2",
+    "webpack": "^5.111.1",
     "webpack-cli": "^7.2.2"
   }
 }
