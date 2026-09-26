@@ -16,6 +16,8 @@
     "axios": "^1.7.0",
     "expo": "~51.0.0",
     "expo-camera": "~15.0.0",
+    "expo-image-manipulator": "~12.0.5",
+    "expo-image-picker": "~15.0.7",
     "expo-linking": "~6.3.0",
     "expo-local-authentication": "~14.0.0",
     "expo-notifications": "~0.28.0",
