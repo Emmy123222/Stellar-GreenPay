@@ -71,8 +71,10 @@ afterAll(() => {
 /** Credentials present → moderation is "configured" (would really scan). */
 function setAwsEnv() {
   process.env.AWS_REGION = "us-east-1";
-  process.env.AWS_ACCESS_KEY_ID = "AKIAIOSFODNN7EXAMPLE";
-  process.env.AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
+  // Non-secret placeholders: only their presence matters, and the documented
+  // AWS example pair trips the repo's Gitleaks scan.
+  process.env.AWS_ACCESS_KEY_ID = "test-access-key-id";
+  process.env.AWS_SECRET_ACCESS_KEY = "test-secret-access-key";
   process.env.S3_BUCKET = "greenpay-uploads";
   delete process.env.S3_PUBLIC_URL;
 }
