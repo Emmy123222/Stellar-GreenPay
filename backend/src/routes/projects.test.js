@@ -127,6 +127,28 @@ describe("GET /api/projects", () => {
     expect(query).toContain("status =");
   });
 
+  test("defaults to active projects only", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app).get("/api/projects").expect(200);
+
+    const [query, values] = pool.query.mock.calls[0];
+    expect(query).toContain("status = 'active'");
+    expect(values).toEqual(expect.arrayContaining([]));
+  });
+
+  test("includes inactive projects for admin requests with include_inactive=true", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app)
+      .get("/api/projects?include_inactive=true")
+      .set("X-Admin-Key", "test-admin-key")
+      .expect(200);
+
+    const [query] = pool.query.mock.calls[0];
+    expect(query).not.toContain("status = 'active'");
+  });
+
   test("handles search query", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
 
