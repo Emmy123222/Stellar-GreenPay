@@ -25,7 +25,7 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype,
+    contract, contractclient, contracterror, contractimpl, contracttype,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
 
@@ -231,6 +231,13 @@ pub enum DataKey {
     // Contract-wide emergency pause status
     Paused,
     PendingAdmin,
+}
+
+#[contracterror]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    PendingAdminExists = 1,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -992,7 +999,11 @@ impl GreenPayContract {
 
     /// Propose a new admin. The current admin keeps control until the
     /// proposed address explicitly accepts the role.
-    pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) {
+    pub fn propose_new_admin(
+        env: Env,
+        admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
         let stored_admin: Address = env
             .storage()
@@ -1005,10 +1016,30 @@ impl GreenPayContract {
         if new_admin == stored_admin {
             panic!("New admin must differ from current admin");
         }
+        if env.storage().instance().has(&DataKey::PendingAdmin) {
+            return Err(ContractError::PendingAdminExists);
+        }
 
         env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
         env.events()
             .publish((symbol_short!("adm_prop"), admin), new_admin);
+        Ok(())
+    }
+
+    /// Cancel a pending admin proposal without changing the current admin.
+    pub fn cancel_admin_proposal(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can cancel admin proposal");
+        }
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.events()
+            .publish((symbol_short!("adm_cncl"), admin), ());
     }
 
     /// Accept a pending admin proposal and finalize the admin rotation.
@@ -1834,6 +1865,55 @@ mod tests {
 
         assert_eq!(client.get_admin(), new_admin);
         assert_eq!(client.get_pending_admin(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #1)")]
+    fn test_second_admin_proposal_fails_when_one_is_pending() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let first_new_admin = Address::generate(&env);
+        let second_new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &first_new_admin);
+        client.propose_new_admin(&admin, &second_new_admin);
+        assert_eq!(client.get_pending_admin(), Some(first_new_admin));
+    }
+
+    #[test]
+    fn test_admin_can_cancel_pending_admin_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+        client.cancel_admin_proposal(&admin);
+
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can cancel admin proposal")]
+    fn test_only_current_admin_can_cancel_admin_proposal() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+        client.cancel_admin_proposal(&attacker);
     }
 
     #[test]
