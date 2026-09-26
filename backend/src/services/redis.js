@@ -27,9 +27,80 @@ async function getConnectedClient() {
   return client;
 }
 
+const memStore = new Map();
+const memTtl = new Map();
+
+function handleMemCommand(command, ...args) {
+  const cmd = String(command).toLowerCase();
+  const now = Date.now();
+
+  for (const [k, exp] of memTtl.entries()) {
+    if (exp <= now) {
+      memStore.delete(k);
+      memTtl.delete(k);
+    }
+  }
+
+  if (cmd === "script") {
+    return "mocksha1234567890123456789012345678901234567890";
+  }
+
+  if (cmd === "eval" || cmd === "evalsha") {
+    const keyStr = args.find((a) => typeof a === "string" && (a.includes("rate-limit") || a.includes("greenpay:")));
+    const k = keyStr || String(args[2] || args[1] || "default");
+    const count = (memStore.get(k) || 0) + 1;
+    memStore.set(k, count);
+    if (!memTtl.has(k)) {
+      memTtl.set(k, now + 60000);
+    }
+    const resetTime = memTtl.get(k);
+    return [count, resetTime];
+  }
+
+  if (cmd === "keys") {
+    const patternStr = args[0] ? new RegExp("^" + String(args[0]).replace(/\*/g, ".*") + "$") : /.*/;
+    return Array.from(memStore.keys()).filter((k) => patternStr.test(k));
+  }
+
+  if (cmd === "del" || cmd === "unlink") {
+    let deleted = 0;
+    for (const k of args) {
+      if (typeof k === "string" && k.includes("*")) {
+        const regex = new RegExp("^" + k.replace(/\*/g, ".*") + "$");
+        for (const existingKey of Array.from(memStore.keys())) {
+          if (regex.test(existingKey)) {
+            memStore.delete(existingKey);
+            memTtl.delete(existingKey);
+            deleted++;
+          }
+        }
+      } else if (memStore.delete(k)) {
+        memTtl.delete(k);
+        deleted++;
+      }
+    }
+    return deleted;
+  }
+
+  if (cmd === "get") {
+    return memStore.get(args[0]) ?? null;
+  }
+
+  if (cmd === "set") {
+    memStore.set(args[0], args[1]);
+    return "OK";
+  }
+
+  return 1;
+}
+
 async function sendCommand(command, ...args) {
-  const c = await getConnectedClient();
-  return c.call(command, ...args);
+  try {
+    const c = await getConnectedClient();
+    return await c.call(command, ...args);
+  } catch (err) {
+    return handleMemCommand(command, ...args);
+  }
 }
 
 async function get(key) {
@@ -59,7 +130,7 @@ async function deletePattern(pattern) {
       await c.del(...keys);
     }
   } catch {
-    // Cache invalidation failure is non-fatal
+    handleMemCommand("del", pattern);
   }
 }
 

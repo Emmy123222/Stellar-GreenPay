@@ -359,3 +359,155 @@ describe("POST /api/donations → SSE emission", () => {
     2000,
   );
 });
+
+describe("GET /api/donations/stream Last-Event-ID pagination catch-up (#1172)", () => {
+  let httpServer;
+  let baseUrl;
+
+  beforeAll((done) => {
+    const app = express();
+    app.use(express.json());
+    httpServer = http.createServer(app);
+    app.use("/api/donations", require("./donations"));
+    httpServer.listen(0, () => {
+      baseUrl = `http://localhost:${httpServer.address().port}`;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    donationEvents.removeAllListeners();
+    httpServer.close(done);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    donationEvents.removeAllListeners();
+    if (typeof donationEvents.resetEvents === "function") {
+      donationEvents.resetEvents();
+    }
+  });
+
+  test("emit events 1–5, client reconnects with Last-Event-ID: 3 → receives events 4–5", (done) => {
+    // Emit events 1–5
+    for (let i = 1; i <= 5; i++) {
+      donationEvents.emit("new_donation", {
+        eventId: i,
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const options = {
+      headers: {
+        "Last-Event-ID": "3",
+      },
+    };
+
+    const chunks = [];
+    const req = http.get(`${baseUrl}/api/donations/stream`, options, (res) => {
+      res.on("data", (chunk) => {
+        chunks.push(chunk.toString());
+        const fullText = chunks.join("");
+        const events = [...fullText.matchAll(/id: (\d+)\ndata: ({.*})\n\n/g)];
+        if (events.length >= 2) {
+          try {
+            const receivedIds = events.map((m) => parseInt(m[1], 10));
+            const receivedData = events.map((m) => JSON.parse(m[2]));
+
+            expect(receivedIds).toEqual([4, 5]);
+            expect(receivedData[0].projectName).toBe("Project 4");
+            expect(receivedData[1].projectName).toBe("Project 5");
+            res.destroy();
+            done();
+          } catch (err) {
+            res.destroy();
+            done(err);
+          }
+        }
+      });
+    });
+
+    req.on("error", done);
+  });
+
+  test("reconnect with invalid ID → all events since last reset returned", (done) => {
+    for (let i = 1; i <= 5; i++) {
+      donationEvents.emit("new_donation", {
+        eventId: i,
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const options = {
+      headers: {
+        "Last-Event-ID": "invalid-id-xyz",
+      },
+    };
+
+    const chunks = [];
+    const req = http.get(`${baseUrl}/api/donations/stream`, options, (res) => {
+      res.on("data", (chunk) => {
+        chunks.push(chunk.toString());
+        const fullText = chunks.join("");
+        const events = [...fullText.matchAll(/id: (\d+)\ndata: ({.*})\n\n/g)];
+        if (events.length >= 5) {
+          try {
+            const receivedIds = events.map((m) => parseInt(m[1], 10));
+            expect(receivedIds).toEqual([1, 2, 3, 4, 5]);
+            res.destroy();
+            done();
+          } catch (err) {
+            res.destroy();
+            done(err);
+          }
+        }
+      });
+    });
+
+    req.on("error", done);
+  });
+
+  test("reconnect with future ID → empty catch-up list", (done) => {
+    for (let i = 1; i <= 5; i++) {
+      donationEvents.emit("new_donation", {
+        eventId: i,
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const options = {
+      headers: {
+        "Last-Event-ID": "999",
+      },
+    };
+
+    const chunks = [];
+    const req = http.get(`${baseUrl}/api/donations/stream`, options, (res) => {
+      res.on("data", (chunk) => {
+        chunks.push(chunk.toString());
+      });
+
+      // After 150ms, verify no catch-up events were sent
+      setTimeout(() => {
+        try {
+          const fullText = chunks.join("");
+          const events = [...fullText.matchAll(/id: (\d+)\ndata: ({.*})\n\n/g)];
+          expect(events.length).toBe(0);
+          res.destroy();
+          done();
+        } catch (err) {
+          res.destroy();
+          done(err);
+        }
+      }, 150);
+    });
+
+    req.on("error", done);
+  });
+});

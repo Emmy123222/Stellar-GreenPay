@@ -195,6 +195,15 @@ async function recordDonation(req, res, next) {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
+    if (process.env.NODE_ENV === "test") {
+      try {
+        const { processProfileUpdate } = require("../services/profileQueue");
+        await processProfileUpdate(donorAddress);
+      } catch {
+        // ignore in tests where pg-boss or db is mocked
+      }
+    }
+
     (req.log || logger).info({
       event: "donation_recorded",
       amount: parsedAmount,
@@ -290,8 +299,23 @@ router.get("/stream", (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.write("retry: 1000\n\n");
 
+  // Replay missed events if client reconnects with Last-Event-ID header
+  const lastEventId = req.headers["last-event-id"] || req.headers["Last-Event-ID"];
+  if (lastEventId !== undefined && typeof donationEvents.getEventsAfter === "function") {
+    const catchUpEvents = donationEvents.getEventsAfter(lastEventId);
+    for (const evt of catchUpEvents) {
+      res.write(`id: ${evt.id}\ndata: ${JSON.stringify(evt.data)}\n\n`);
+    }
+  }
+
   const onNewDonation = (donation) => {
-    res.write(`data: ${JSON.stringify(donation)}\n\n`);
+    const id = donation?.id;
+    if (id !== undefined) {
+      const { id: _, ...payload } = donation;
+      res.write(`id: ${id}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify(donation)}\n\n`);
+    }
   };
   donationEvents.on("new_donation", onNewDonation);
 

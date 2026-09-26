@@ -6,7 +6,7 @@ description = "Stellar GreenPay — Soroban smart contract for transparent clima
 license = "MIT"
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "27.0.3"

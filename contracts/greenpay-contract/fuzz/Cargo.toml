@@ -1,0 +1,26 @@
+[package]
+name = "greenpay-contract-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+soroban-sdk = { version = "27.0.3", features = ["testutils"] }
+greenpay-contract = { path = "..", features = ["testutils"] }
+
+# Prevent this fuzz crate from being included in the parent workspace by default
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_donate"
+path = "fuzz_targets/fuzz_donate.rs"
+test = false
+doc = false
+
+[profile.release]
+panic = "unwind"

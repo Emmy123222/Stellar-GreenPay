@@ -17,7 +17,9 @@ name: Contracts CI
 
 on:
   pull_request:
-    paths: [contracts/**]
+    paths:
+      - "contracts/**"
+      - ".github/workflows/contracts.yml"
 
 jobs:
   test:
@@ -34,3 +36,19 @@ jobs:
       - run: cargo test --workspace
       - run: cargo clippy --workspace -- -D warnings || true
       - run: cargo build --workspace --target wasm32v1-none --release
+
+  fuzz:
+    name: Contracts Fuzz Testing (cargo-fuzz)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts/greenpay-contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Set nightly default
+        run: rustup default nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked || cargo install cargo-fuzz
+      - name: Run donate() fuzz test (60 seconds)
+        run: cargo +nightly fuzz run fuzz_donate -- -max_total_time=60

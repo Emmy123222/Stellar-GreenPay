@@ -1,0 +1,167 @@
+/**
+ * e2e/donor-journey.spec.ts
+ *
+ * Full donor journey E2E test covering:
+ * visit /projects → select a project → connect mock wallet → donate 10 XLM → verify badge updated to Seedling.
+ *
+ * Addresses Issue #1170.
+ */
+import { test, expect, type Page, type Route } from "@playwright/test";
+
+const MOCK_PROJECT_ID = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
+const MOCK_WALLET = "GAWVFP2KNZF36QPT6EURB2UGCDN6ESGFU5DAT5RYYWILQWLNXBF42T2P";
+const MOCK_PUBLIC_KEY = "GDOKZLIK5VGBVF4ZYD4CB5JOU4E7REZLITVFKCJFZDMYABFFE5XDYLR4";
+
+const MOCK_PROJECT = {
+  id: MOCK_PROJECT_ID,
+  name: "Amazon Reforestation Initiative",
+  description: "Planting 1 million native trees in the Brazilian Amazon.",
+  category: "Reforestation",
+  location: "Brazil, South America",
+  walletAddress: MOCK_WALLET,
+  goalXLM: "50000",
+  raisedXLM: "18420",
+  donorCount: 147,
+  co2OffsetKg: 245000,
+  co2_per_xlm: 100,
+  status: "active",
+  verified: true,
+  onChainVerified: true,
+  tags: ["reforestation", "amazon"],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const ok = (data: unknown) => ({ json: { success: true, data } });
+
+async function mockApiAndHorizon(page: Page) {
+  // Catch-all for API
+  await page.route("**/api/**", (r: Route) => r.fulfill(ok([])));
+
+  // Horizon endpoints
+  await page.route("**/horizon-testnet.stellar.org/**", (r) => {
+    if (r.request().url().includes("/transactions")) {
+      return r.fulfill({
+        json: {
+          successful: true,
+          hash: "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef",
+          ledger: 123456,
+        },
+      });
+    }
+    return r.fulfill({
+      json: {
+        id: MOCK_PUBLIC_KEY,
+        account_id: MOCK_PUBLIC_KEY,
+        sequence: "123456789",
+        balances: [{ asset_type: "native", balance: "500.0000000" }],
+        subentry_count: 0,
+        thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
+        flags: { auth_required: false, auth_revocable: false },
+        signers: [],
+        _embedded: { records: [] },
+      },
+    });
+  });
+
+  // CSRF token
+  await page.route("**/api/**/csrf-token", (r) =>
+    r.fulfill({ json: { success: true, csrfToken: "mock-csrf-token-12345" } }),
+  );
+
+  // Projects endpoints
+  await page.route("**/api/**/projects?**", (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects", (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`, (r) => r.fulfill(ok([])));
+  await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) =>
+    r.fulfill(ok(MOCK_PROJECT)),
+  );
+  await page.route("**/api/**/updates/**", (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions/**", (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/impact/**", (r) => r.fulfill(ok({})));
+
+  // Profile endpoint
+  await page.route("**/api/**/profiles/**", (r) =>
+    r.fulfill(
+      ok({
+        publicKey: MOCK_PUBLIC_KEY,
+        totalDonatedXLM: "10",
+        projectsSupported: 1,
+        badges: [{ tier: "Seedling", name: "Seedling" }],
+      }),
+    ),
+  );
+
+  // Donations recording endpoint
+  await page.route("**/api/**/donations", (r) =>
+    r.fulfill(
+      ok({
+        id: "mock-donation-1",
+        projectId: MOCK_PROJECT_ID,
+        donorAddress: MOCK_PUBLIC_KEY,
+        amountXLM: "10",
+        donorBadge: "Seedling",
+        transactionHash: "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef",
+      }),
+    ),
+  );
+  await page.route("**/api/**/donations/**", (r) => r.fulfill(ok([])));
+}
+
+/**
+ * Deterministically mock the Freighter wallet extension.
+ */
+async function mockFreighterWallet(page: Page, publicKey = MOCK_PUBLIC_KEY) {
+  await page.addInitScript((pk) => {
+    (window as unknown as Record<string, unknown>).__test_publicKey__ = pk;
+    (window as unknown as Record<string, unknown>).freighter = {
+      isConnected: () => Promise.resolve({ isConnected: true }),
+      isAllowed: () => Promise.resolve({ isAllowed: true }),
+      getAddress: () => Promise.resolve({ address: pk, publicKey: pk }),
+      signTransaction: (xdr: string) => Promise.resolve({ signedTransaction: xdr }),
+    };
+  }, publicKey);
+}
+
+test.describe("Full Donor Journey E2E (#1170)", () => {
+  test("visit /projects → select project → connect wallet → donate 10 XLM → verify badge updated to Seedling", async ({
+    page,
+  }) => {
+    await mockFreighterWallet(page);
+    await mockApiAndHorizon(page);
+
+    // 1. Visit /projects
+    await page.goto("/projects");
+    await expect(page.getByText(MOCK_PROJECT.name)).toBeVisible();
+
+    // 2. Select a project (navigate to project detail)
+    await page.getByText(MOCK_PROJECT.name).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${MOCK_PROJECT_ID}`));
+
+    // 3. Connect mock wallet if prompted / verify donation form is ready
+    const connectBtn = page.getByRole("button", { name: /connect freighter wallet/i });
+    if (await connectBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await connectBtn.click();
+    }
+
+    const form = page.locator(".card", { hasText: /make a donation/i });
+    await expect(form.getByRole("heading", { name: /make a donation/i })).toBeVisible({ timeout: 15000 });
+
+    // 4. Donate 10 XLM
+    const preset10 = form.getByRole("button", { name: /^10 XLM$/i });
+    if (await preset10.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await preset10.click();
+    } else {
+      const amountInput = form.getByPlaceholder(/or enter custom amount/i);
+      await amountInput.fill("10");
+    }
+
+    const donateButton = form.getByRole("button", { name: /Donate/i });
+    await expect(donateButton).toBeEnabled({ timeout: 5000 });
+    await donateButton.click();
+
+    // 5. Verify badge updated to Seedling
+    await expect(page.getByText(/Seedling/i).first()).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(/Thank you!/i)).toBeVisible({ timeout: 15000 });
+  });
+});
