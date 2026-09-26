@@ -880,11 +880,21 @@ describe("Webhook delivery integration (testcontainers)", () => {
       `);
 
       process.env.DATABASE_URL = connectionString;
-      delete require.cache[require.resolve("../db/pool")];
-      delete require.cache[require.resolve("./webhook")];
+
+      // `delete require.cache[...]` is a no-op under Jest's module registry,
+      // and this file imports `../db/pool` and `./webhook` at the top level for
+      // the unit tests above. Reset the registry so the integration tests'
+      // `require("./webhook")` resolves to a fresh webhook bound to a pool that
+      // points at the testcontainer (with a fresh SSRF mock).
+      jest.resetModules();
 
       const appPool = require("../db/pool");
       await appPool.query("SELECT 1");
+
+      // Re-apply the `../utils/ssrf` mock to the freshly-registered instance
+      // so the loopback capture server is allowed through.
+      const ssrf = require("../utils/ssrf");
+      ssrf.assertPublicHttpUrl.mockResolvedValue(undefined);
 
       serverContainerReady = true;
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);

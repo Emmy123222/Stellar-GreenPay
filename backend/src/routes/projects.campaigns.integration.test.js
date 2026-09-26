@@ -16,6 +16,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const workerThreads = require("worker_threads");
 if (typeof workerThreads.markAsUncloneable !== "function") {
@@ -108,14 +109,14 @@ describe("Campaign progress aggregation integration (testcontainers)", () => {
       await testPool.query(
         `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
          VALUES ($1, $2, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', $3, $3, 'XLM', $4, NOW())`,
-        [`d-${n++}`, PROJECT_ID, xlmAmount, `x${n}`.padEnd(64, "a")],
+        [crypto.randomUUID(), PROJECT_ID, xlmAmount, `x${n++}`.padEnd(64, "a")],
       );
     }
     if (usdcAmount !== null) {
       await testPool.query(
         `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
          VALUES ($1, $2, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', NULL, $3, 'USDC', $4, NOW())`,
-        [`d-${n++}`, PROJECT_ID, usdcAmount, `u${n}`.padEnd(64, "a")],
+        [crypto.randomUUID(), PROJECT_ID, usdcAmount, `u${n++}`.padEnd(64, "a")],
       );
     }
   }
