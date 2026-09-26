@@ -37,8 +37,14 @@ router.get("/", async (req, res) => {
       if (failedJobs > maxFailedJobs) {
         pgbossStatus = "alert";
       }
-    } catch {
-      pgbossStatus = "unreachable";
+    } catch (err) {
+      // If pgboss.job table doesn't exist yet (e.g., during migrations), 
+      // treat it as "ok" rather than "unreachable" to avoid blocking startup
+      if (err.code === '42P01' || err.message.includes('does not exist')) {
+        pgbossStatus = "ok";
+      } else {
+        pgbossStatus = "unreachable";
+      }
     }
   } else {
     pgbossStatus = "unreachable";

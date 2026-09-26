@@ -102,7 +102,7 @@ test.describe("ProjectComparison modal", () => {
     await expect(modal.getByText(MOCK_PROJECTS[0].name)).toBeVisible();
     await expect(modal.getByText(MOCK_PROJECTS[1].name)).toBeVisible();
     await expect(modal.getByText(/co.*per.*xlm/i)).toBeVisible();
-    await expect(modal.getByText(/goal reached/i)).toBeVisible();
+    await expect(modal.getByText(/progress %/i)).toBeVisible();
     await expect(modal.getByText(/donor count/i)).toBeVisible();
   });
 

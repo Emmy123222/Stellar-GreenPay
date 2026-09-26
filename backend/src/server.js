@@ -119,7 +119,10 @@ app.use((err, req, res, next) => {
 });
 
 async function startServer() {
-  await runMigrations();
+  // Skip migrations if SKIP_MIGRATIONS is set (e.g., in CI where migrations are run separately)
+  if (!process.env.SKIP_MIGRATIONS) {
+    await runMigrations();
+  }
 
   await startSummaryQueue(io);
   await startProfileQueue(io);
