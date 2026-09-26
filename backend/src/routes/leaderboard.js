@@ -28,7 +28,9 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     const conditions = [];
     const params = [];
 
-    if (period === "month") {
+    if (period === "week") {
+      conditions.push("d.created_at >= NOW() - INTERVAL '7 days'");
+    } else if (period === "month") {
       conditions.push("d.created_at >= NOW() - INTERVAL '30 days'");
     } else if (period === "year") {
       conditions.push("d.created_at >= NOW() - INTERVAL '1 year'");

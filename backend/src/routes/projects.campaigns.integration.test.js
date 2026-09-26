@@ -24,6 +24,7 @@ if (typeof workerThreads.markAsUncloneable !== "function") {
 
 const { GenericContainer, Wait } = require("testcontainers");
 const { Pool } = require("pg");
+const { v4: uuid } = require("uuid");
 
 let container;
 let testPool;
@@ -108,14 +109,14 @@ describe("Campaign progress aggregation integration (testcontainers)", () => {
       await testPool.query(
         `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
          VALUES ($1, $2, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', $3, $3, 'XLM', $4, NOW())`,
-        [`d-${n++}`, PROJECT_ID, xlmAmount, `x${n}`.padEnd(64, "a")],
+        [uuid(), PROJECT_ID, xlmAmount, `x${n++}`.padEnd(64, "a")],
       );
     }
     if (usdcAmount !== null) {
       await testPool.query(
         `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
          VALUES ($1, $2, 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF', NULL, $3, 'USDC', $4, NOW())`,
-        [`d-${n++}`, PROJECT_ID, usdcAmount, `u${n}`.padEnd(64, "a")],
+        [uuid(), PROJECT_ID, usdcAmount, `u${n++}`.padEnd(64, "a")],
       );
     }
   }

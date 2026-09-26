@@ -2,6 +2,7 @@
 
 jest.mock("../db/pool", () => ({
   connect: jest.fn(),
+  query: jest.fn().mockResolvedValue({ rows: [] }),
 }));
 
 jest.mock("../middleware/rateLimiter", () => ({
@@ -18,6 +19,10 @@ jest.mock("geoip-lite", () => ({
 
 jest.mock("../services/profileQueue", () => ({
   enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock("../services/webhook", () => ({
+  checkAndDeliverMilestones: jest.fn().mockResolvedValue(undefined),
 }));
 
 const { server } = require("../services/stellar");

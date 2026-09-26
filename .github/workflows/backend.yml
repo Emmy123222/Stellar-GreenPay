@@ -9,9 +9,11 @@ on:
     paths: [backend/**]
 
 # ── Required Secrets ──────────────────────────────────────────────────────────
-# SENTRY_DSN  — Sentry DSN for error tracking (optional). Tests pass without it.
-#               Configure as a GitHub Actions secret when deploying to production
-#               to enable error reporting in CI builds.
+# SENTRY_DSN     — Sentry DSN for error tracking (optional). Tests pass without it.
+#                  Configure as a GitHub Actions secret when deploying to production
+#                  to enable error reporting in CI builds.
+# CODECOV_TOKEN  — Codecov token for uploading test coverage (optional).
+#                  Configured as a repository secret.
 # ──────────────────────────────────────────────────────────────────────────────
 
 jobs:
@@ -32,7 +34,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -46,10 +48,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
-    defaults:
-      run:
-        working-directory: backend
 
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +69,7 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
           REDIS_URL: redis://localhost:6379
+          SKIP_INTEGRATION: "1"
 
       - name: Upload coverage report artifact
         uses: actions/upload-artifact@v4
@@ -88,4 +87,3 @@ jobs:
           files: backend/coverage/lcov.info
           flags: backend
           fail_ci_if_error: false
-

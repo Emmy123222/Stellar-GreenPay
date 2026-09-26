@@ -499,9 +499,9 @@ async function checkAndDeliverMilestones(projectId) {
 
     const goal = Number.parseFloat(project.goal_xlm);
     const raised = Number.parseFloat(project.raised_xlm);
-    if (goal <= 0) return;
+    if (goal <= 0 || Number.isNaN(goal) || Number.isNaN(raised)) return;
 
-    const progressPercent = Math.min(Math.round((raised / goal) * 100), 100);
+    const progressPercent = (raised / goal) * 100;
 
     const milestoneResult = await pool.query(
       `SELECT id, percentage, title

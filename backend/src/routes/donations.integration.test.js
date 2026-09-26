@@ -22,11 +22,13 @@ try {
   console.warn("Could not load testcontainers:", err.message);
 }
 const { Pool } = require("pg");
+const stellarModule = require("../services/stellar");
 
 let container;
 let pool;
 let testPool;
 let serverContainerReady = false;
+let originalGetTransaction;
 
 // Helper to build a valid Stellar public key
 function makePublicKey(char = "A") {
@@ -79,6 +81,8 @@ describe("Donation flow integration (testcontainers)", () => {
       delete require.cache[require.resolve("../db/pool")];
       delete require.cache[require.resolve("./donations")];
       delete require.cache[require.resolve("../services/store")];
+      delete require.cache[require.resolve("../services/profileQueue")];
+      delete require.cache[require.resolve("../services/webhook")];
 
       // Require after env is set
       pool = require("../db/pool");
@@ -86,6 +90,11 @@ describe("Donation flow integration (testcontainers)", () => {
       await pool.query("SELECT 1");
 
       serverContainerReady = true;
+      originalGetTransaction = stellarModule.server.getTransaction;
+      stellarModule.server.getTransaction = jest.fn(async (txHash) => ({
+        id: txHash,
+        successful: true,
+      }));
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
     } catch (err) {
       console.warn("Testcontainers startup failed – integration tests will be skipped:", err.message);
@@ -103,6 +112,9 @@ describe("Donation flow integration (testcontainers)", () => {
   });
 
   afterAll(async () => {
+    if (originalGetTransaction) {
+      stellarModule.server.getTransaction = originalGetTransaction;
+    }
     try {
       if (pool) await pool.end();
     } catch { /* ignore */ }
@@ -117,6 +129,16 @@ describe("Donation flow integration (testcontainers)", () => {
   async function cleanDb() {
     if (!testPool) return;
     await testPool.query("TRUNCATE donations, profiles, projects RESTART IDENTITY CASCADE");
+  }
+
+  async function waitForQuery(sql, params, predicate, maxAttempts = 20, delayMs = 100) {
+    let res;
+    for (let i = 0; i < maxAttempts; i++) {
+      res = await testPool.query(sql, params);
+      if (predicate(res)) return res;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    return res;
   }
 
   test("complete donation flow updates all aggregates correctly", async () => {
@@ -191,7 +213,11 @@ describe("Donation flow integration (testcontainers)", () => {
     expect(donationCheck.rows[0].donor_address).toBe(donorAddress);
     expect(parseFloat(donationCheck.rows[0].amount_xlm)).toBeCloseTo(10, 5);
 
-    const profile1 = await testPool.query("SELECT * FROM profiles WHERE public_key = $1", [donorAddress]);
+    const profile1 = await waitForQuery(
+      "SELECT * FROM profiles WHERE public_key = $1",
+      [donorAddress],
+      (r) => r.rows.length > 0,
+    );
     expect(profile1.rows).toHaveLength(1);
     expect(parseFloat(profile1.rows[0].total_donated_xlm)).toBeCloseTo(10, 5);
     expect(profile1.rows[0].projects_supported).toBe(1);
@@ -215,7 +241,11 @@ describe("Donation flow integration (testcontainers)", () => {
     });
     expect(res2.statusCode).toBe(201);
 
-    const profile2 = await testPool.query("SELECT total_donated_xlm, badges FROM profiles WHERE public_key = $1", [donorAddress]);
+    const profile2 = await waitForQuery(
+      "SELECT total_donated_xlm, badges FROM profiles WHERE public_key = $1",
+      [donorAddress],
+      (r) => r.rows.length > 0 && r.rows[0].badges?.[0]?.tier === "tree",
+    );
     expect(parseFloat(profile2.rows[0].total_donated_xlm)).toBeCloseTo(100, 5);
     expect(profile2.rows[0].badges[0].tier).toBe("tree");
 
@@ -240,7 +270,11 @@ describe("Donation flow integration (testcontainers)", () => {
     expect(parseFloat(project3.rows[0].raised_xlm)).toBeCloseTo(125, 5);
     expect(project3.rows[0].donor_count).toBe(2);
 
-    const profileDonor2 = await testPool.query("SELECT total_donated_xlm FROM profiles WHERE public_key = $1", [donor2]);
+    const profileDonor2 = await waitForQuery(
+      "SELECT total_donated_xlm FROM profiles WHERE public_key = $1",
+      [donor2],
+      (r) => r.rows.length > 0,
+    );
     expect(parseFloat(profileDonor2.rows[0].total_donated_xlm)).toBeCloseTo(25, 5);
 
     // Verify donations table count

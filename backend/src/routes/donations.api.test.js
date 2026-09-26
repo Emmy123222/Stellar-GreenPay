@@ -36,6 +36,10 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("../services/webhook", () => ({
+  checkAndDeliverMilestones: jest.fn().mockResolvedValue(undefined),
+}));
+
 const pool = require("../db/pool");
 const express = require("express");
 const http = require("http");

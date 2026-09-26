@@ -1,11 +1,17 @@
 "use strict";
 
-jest.mock("../db/pool", () => ({ connect: jest.fn() }));
+jest.mock("../db/pool", () => ({
+  connect: jest.fn(),
+  query: jest.fn().mockResolvedValue({ rows: [] }),
+}));
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
+jest.mock("../services/webhook", () => ({
+  checkAndDeliverMilestones: jest.fn().mockResolvedValue(undefined),
 }));
 
 const http = require("http");
