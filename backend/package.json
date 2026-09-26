@@ -6,6 +6,7 @@
     "dev": "nodemon src/server.js",
     "dev:docker": "nodemon --legacy-watch --watch src src/server.js",
     "start": "node src/server.js",
+    "migrate": "node src/db/migrate.js",
     "db:migrate": "node src/db/migrate.js",
     "db:rollback": "node src/db/migrate.js --rollback",
     "db:rollback:n": "node src/db/migrate.js --rollback",

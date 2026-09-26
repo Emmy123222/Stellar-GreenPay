@@ -1,5 +1,12 @@
 "use strict";
 
+// recordDonation verifies the transaction on-chain before persisting it. This
+// integration test seeds rows directly and does not hit Stellar testnet, so
+// stub the confirmation lookup the same way the unit tests do.
+jest.mock("../services/stellar", () => ({
+  server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+}));
+
 /**
  * Integration test for donation flow using testcontainers-node
  * with a real PostgreSQL instance.
@@ -184,6 +191,11 @@ describe("Donation flow integration (testcontainers)", () => {
     expect(res1.body.success).toBe(true);
     expect(res1.body.data.amountXLM).toBe("10.0000000");
 
+    // Profile aggregates are recomputed out-of-band by the profile-update
+    // queue worker (see profileQueue), so run it before asserting on profiles.
+    const { processProfileUpdate } = require("../services/profileQueue");
+    await processProfileUpdate(donorAddress);
+
     // Verify DB state after first donation
     const donationCheck = await testPool.query("SELECT * FROM donations WHERE transaction_hash = $1", [txHash1]);
     expect(donationCheck.rows).toHaveLength(1);
@@ -215,6 +227,8 @@ describe("Donation flow integration (testcontainers)", () => {
     });
     expect(res2.statusCode).toBe(201);
 
+    await processProfileUpdate(donorAddress);
+
     const profile2 = await testPool.query("SELECT total_donated_xlm, badges FROM profiles WHERE public_key = $1", [donorAddress]);
     expect(parseFloat(profile2.rows[0].total_donated_xlm)).toBeCloseTo(100, 5);
     expect(profile2.rows[0].badges[0].tier).toBe("tree");
@@ -236,6 +250,8 @@ describe("Donation flow integration (testcontainers)", () => {
     });
     expect(res3.statusCode).toBe(201);
 
+    await processProfileUpdate(donor2);
+
     const project3 = await testPool.query("SELECT raised_xlm, donor_count FROM projects WHERE id = $1", [projectId]);
     expect(parseFloat(project3.rows[0].raised_xlm)).toBeCloseTo(125, 5);
     expect(project3.rows[0].donor_count).toBe(2);
@@ -256,6 +272,7 @@ describe("Donation flow integration (testcontainers)", () => {
 
     await cleanDb();
     const { recordDonation } = require("./donations");
+    const { processProfileUpdate } = require("../services/profileQueue");
 
     const projectId = "22222222-2222-2222-2222-222222222222";
     await testPool.query(
@@ -286,6 +303,8 @@ describe("Donation flow integration (testcontainers)", () => {
     // dedup returns 200 with existing record
     expect(second.statusCode).toBe(200);
     expect(second.body.success).toBe(true);
+
+    await processProfileUpdate(donor);
 
     const project = await testPool.query("SELECT raised_xlm, donor_count FROM projects WHERE id=$1", [projectId]);
     // should only count once

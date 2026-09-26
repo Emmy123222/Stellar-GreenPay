@@ -61,6 +61,24 @@ jobs:
         working-directory: backend
         run: npm ci
 
+      - name: Run database migrations (pre-deploy)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          MIGRATION_LOCK_TIMEOUT_SECONDS: "120"
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "::warning::DATABASE_URL secret is not configured; skipping pre-deploy migrations."
+            exit 0
+          fi
+          # Run `npm run migrate` inside the backend container so the migration
+          # always uses the exact image being deployed. The migration lock makes
+          # this safe even if several replicas or jobs start at once.
+          docker build --tag greenpay-backend:migrate ./backend
+          docker run --rm \
+            --env DATABASE_URL="${DATABASE_URL}" \
+            --env MIGRATION_LOCK_TIMEOUT_SECONDS="${MIGRATION_LOCK_TIMEOUT_SECONDS}" \
+            greenpay-backend:migrate npm run migrate
+
       - name: Deploy Application
         env:
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
