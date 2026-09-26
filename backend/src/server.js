@@ -23,6 +23,7 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const donationsRouter = require("./routes/donations");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -87,8 +88,10 @@ app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
+app.use("/api/donations", donationsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+app.use("/api/v1/donations", donationsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));

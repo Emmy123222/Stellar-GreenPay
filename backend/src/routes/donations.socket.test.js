@@ -651,7 +651,7 @@ describe("POST /api/donations → broadcast hardening & room segmentation", () =
   test(
     "rejects a non-positive amount with 400 and emits nothing",
     async () => {
-      createMockClient(queryResult([{ id: "project-amt" }])); // project lookup, then amount check fails
+      createMockClient(queryResult([{ id: "project-amt" }])); // amount check fails before any DB query
 
       const socket = await connectClient();
       try {

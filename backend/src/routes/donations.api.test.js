@@ -163,6 +163,25 @@ describe("POST /api/donations", () => {
     expect(res.body.data.projectId).toBe("proj-1");
     expect(res.body.data.donorAddress).toBe(donorAddress);
   });
+
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+  ])("returns 400 with a friendly error for a %s amount", async (_label, amountXLM) => {
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey("A"),
+        amountXLM,
+        currency: "XLM",
+        transactionHash: makeTxHash("a"),
+      })
+      .expect(400);
+
+    expect(res.body).toEqual({ error: "Donation amount must be a positive number" });
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/projects/:id", () => {
