@@ -2104,6 +2104,20 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Project already registered")]
+    fn test_register_project_duplicate_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let wallet = Address::generate(&env);
+        client.initialize(&admin);
+        client.register_project(&String::from_str(&env, "proj-dup"), &String::from_str(&env, "First"), &wallet, &100, &1);
+        client.register_project(&String::from_str(&env, "proj-dup"), &String::from_str(&env, "Second"), &wallet, &100, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Project already registered")]
     fn test_batch_register_projects_duplicate_fails() {
         let env    = Env::default();
         env.mock_all_auths();
