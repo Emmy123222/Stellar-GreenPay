@@ -2,9 +2,10 @@
  * app/projects/index.tsx
  * Projects browse screen — with offline cache support (#482)
  */
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { FlatList, View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import type { ListRenderItemInfo } from 'react-native';
 import axios from 'axios';
 import { useTheme } from '../theme';
 import { getCachedData, setCachedData } from '../../utils/cache';
@@ -12,6 +13,7 @@ import { getCachedData, setCachedData } from '../../utils/cache';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 const CACHE_KEY_PROJECTS = 'projects:list';
+const PROJECT_CARD_HEIGHT = 206;
 
 interface ClimateProject {
   id: string;
@@ -24,6 +26,19 @@ interface ClimateProject {
   donorCount: number;
   status: string;
 }
+
+const getProjectItemLayout = (_: ArrayLike<ClimateProject> | null | undefined, index: number) => ({
+  length: PROJECT_CARD_HEIGHT,
+  offset: PROJECT_CARD_HEIGHT * index,
+  index,
+});
+
+const progressPercent = (raised: string, goal: string) => {
+  const raisedAmount = parseFloat(raised);
+  const goalAmount = parseFloat(goal);
+  if (!goalAmount || isNaN(raisedAmount) || isNaN(goalAmount)) return 0;
+  return Math.min(100, Math.round((raisedAmount / goalAmount) * 100));
+};
 
 export default function ProjectsScreen() {
   const router = useRouter();
@@ -73,12 +88,40 @@ export default function ProjectsScreen() {
     }
   };
 
-  const progressPercent = (raised: string, goal: string) => {
-    const r = parseFloat(raised);
-    const g = parseFloat(goal);
-    if (!g || isNaN(r) || isNaN(g)) return 0;
-    return Math.min(100, Math.round((r / g) * 100));
-  };
+  const renderProject = useCallback(({ item: project }: ListRenderItemInfo<ClimateProject>) => (
+    <TouchableOpacity
+      style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}
+      onPress={() => router.push(`/projects/${project.id}`)}
+      accessibilityLabel={`View ${project.name} project`}
+      accessibilityRole="button"
+    >
+      <View style={styles.cardHeader}>
+        <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
+        <Text style={[styles.status, { color: colors.secondaryText }]}>{project.status}</Text>
+      </View>
+      <Text style={[styles.name, { color: colors.primaryText }]}>{project.name}</Text>
+      <Text style={[styles.description, { color: colors.secondaryText }]} numberOfLines={2}>
+        {project.description}
+      </Text>
+      <View style={styles.progressContainer}>
+        <View
+          style={[styles.progressBar, { backgroundColor: colors.border }]}
+        >
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${progressPercent(project.raisedXLM, project.goalXLM)}%`, backgroundColor: colors.primary }
+            ]}
+          />
+        </View>
+        <Text style={[styles.progressText, { color: colors.secondaryText }]}
+        >
+          {parseFloat(project.raisedXLM).toFixed(2)} / {parseFloat(project.goalXLM).toFixed(2)} XLM
+        </Text>
+      </View>
+      <Text style={[styles.donorCount, { color: colors.muted }]}>{project.donorCount} donors</Text>
+    </TouchableOpacity>
+  ), [colors, router]);
 
   if (loading) {
     return (
@@ -105,40 +148,13 @@ export default function ProjectsScreen() {
         accessibilityLabel="Search projects"
         accessibilityRole="search"
       />
-      <ScrollView style={[styles.scroll, { borderColor: colors.background }]}>
-        {filteredProjects.map(project => (
-          <TouchableOpacity
-            key={project.id}
-            style={[styles.card, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}
-            onPress={() => router.push(`/projects/${project.id}`)}
-            accessibilityLabel={`View ${project.name} project`}
-            accessibilityRole="button"
-          >
-            <View style={styles.cardHeader}>
-              <Text style={[styles.category, { color: colors.primary }]}>{project.category}</Text>
-              <Text style={[styles.status, { color: colors.secondaryText }]}>{project.status}</Text>
-            </View>
-            <Text style={[styles.name, { color: colors.primaryText }]}>{project.name}</Text>
-            <Text style={[styles.description, { color: colors.secondaryText }]} numberOfLines={2}>
-              {project.description}
-            </Text>
-            <View style={styles.progressContainer}>
-              <View style={[styles.progressBar, { backgroundColor: colors.border }]}> 
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: `${progressPercent(project.raisedXLM, project.goalXLM)}%`, backgroundColor: colors.primary }
-                  ]}
-                />
-              </View>
-              <Text style={[styles.progressText, { color: colors.secondaryText }]}> 
-                {parseFloat(project.raisedXLM).toFixed(2)} / {parseFloat(project.goalXLM).toFixed(2)} XLM
-              </Text>
-            </View>
-            <Text style={[styles.donorCount, { color: colors.muted }]}>{project.donorCount} donors</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <FlatList
+        style={[styles.scroll, { borderColor: colors.background }]}
+        data={filteredProjects}
+        renderItem={renderProject}
+        keyExtractor={(item) => item.id}
+        getItemLayout={getProjectItemLayout}
+      />
     </View>
   );
 }
@@ -166,7 +182,7 @@ const styles = StyleSheet.create({
   card: {
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
+    height: PROJECT_CARD_HEIGHT,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,

@@ -2,12 +2,17 @@
  * backend/src/services/webhook.js
  * Webhook delivery service for project milestone notifications.
  *
- * Deliveries are persisted in `webhook_deliveries` and processed via pg-boss
- * with exponential backoff: retry at 1m, 5m, 30m, 2h. Marked failed after 5 attempts.
+ * Deliveries are persisted in `webhook_deliveries`. The first attempt runs
+ * inline via recordAndDeliver(); failures leave the row `pending` with
+ * `next_attempt_at` set, and a pg-boss worker (start()) drains due retries
+ * with exponential backoff at 1m, 5m, 30m, 2h. A delivery is marked `failed`
+ * once MAX_ATTEMPTS attempts have been made, or immediately when the failure
+ * is permanent (for example an SSRF-rejected URL).
  */
 "use strict";
 
 const crypto = require("crypto");
+const PgBoss = require("pg-boss");
 const https = require("https");
 const http = require("http");
 const pool = require("../db/pool");
@@ -19,6 +24,8 @@ const MAX_ATTEMPTS = 5;
 /** Delay (seconds) before the next attempt after failures 1–4. */
 const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200]; // 1m, 5m, 30m, 2h
 const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
+/** Retry worker tick. Must be at least as frequent as the shortest backoff. */
+const DEFAULT_RETRY_CRON = "* * * * *";
 
 let boss = null;
 
@@ -168,10 +175,156 @@ async function deliverPayload(url, secret, payload, options = {}) {
 }
 
 /**
- * Persist a delivery row, attempt the HTTP POST, then update status/history fields.
+ * Seconds to wait before the next attempt, given how many attempts have
+ * already failed. Returns null once the budget is exhausted.
+ *
+ * @param {number} failedAttempts - Number of attempts made so far (1-based).
+ * @returns {number|null} Delay in seconds, or null when no retry is left.
+ */
+function retryDelaySeconds(failedAttempts) {
+  if (failedAttempts >= MAX_ATTEMPTS) return null;
+  return RETRY_DELAYS_SECONDS[failedAttempts - 1] ?? null;
+}
+
+/**
+ * Write the outcome of a single delivery attempt to the delivery row.
+ *
+ * A failure that still has retry budget leaves the row `pending` with
+ * `next_attempt_at` set, which is what `processDueRetries` picks up. A failure
+ * with no budget left — or a permanent one, such as an SSRF-rejected URL that
+ * will never become deliverable — is terminal and marked `failed`.
+ *
+ * @param {object} outcome
+ * @param {string} outcome.id - Delivery row id.
+ * @param {number} outcome.attemptNumber - The attempt that just completed (1-based).
+ * @param {boolean} outcome.delivered - Whether the endpoint accepted the payload.
+ * @param {number|null} [outcome.statusCode] - HTTP status, when there was a response.
+ * @param {string|null} [outcome.error] - Failure message to persist.
+ * @param {boolean} [outcome.permanent] - Skip remaining retries.
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
+ */
+async function recordAttemptOutcome({
+  id,
+  attemptNumber,
+  delivered,
+  statusCode = null,
+  error = null,
+  permanent = false,
+}) {
+  if (delivered) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'delivered',
+           attempt_count = $2,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           delivered_at = NOW(),
+           last_error = NULL,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, attemptNumber, statusCode],
+    );
+    return { status: "delivered", nextAttemptInSeconds: null };
+  }
+
+  const delaySeconds = permanent ? null : retryDelaySeconds(attemptNumber);
+
+  if (delaySeconds === null) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'failed',
+           attempt_count = $2,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           last_error = $4,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, attemptNumber, statusCode, error],
+    );
+    logger.warn(
+      { event: "webhook_delivery_exhausted", deliveryId: id, attempts: attemptNumber, permanent },
+      "Webhook delivery failed permanently — no further retries",
+    );
+    return { status: "failed", nextAttemptInSeconds: null };
+  }
+
+  await pool.query(
+    `UPDATE webhook_deliveries
+     SET status = 'pending',
+         attempt_count = $2,
+         last_attempt_at = NOW(),
+         response_status = $3,
+         last_error = $4,
+         next_attempt_at = NOW() + ($5 * INTERVAL '1 second')
+     WHERE id = $1`,
+    [id, attemptNumber, statusCode, error, delaySeconds],
+  );
+  logger.info(
+    { event: "webhook_retry_scheduled", deliveryId: id, attempt: attemptNumber, delaySeconds },
+    `Webhook attempt ${attemptNumber} failed — retrying in ${delaySeconds}s`,
+  );
+  return { status: "pending", nextAttemptInSeconds: delaySeconds };
+}
+
+/**
+ * Run one delivery attempt against an existing delivery row and persist the
+ * outcome. Rethrows transport-level errors so callers can log them; status is
+ * already recorded by the time the error propagates.
+ *
+ * @param {object} attempt
+ * @param {string} attempt.id - Delivery row id.
+ * @param {string} attempt.url - Destination URL.
+ * @param {string} attempt.secret - Current signing secret.
+ * @param {object} attempt.payload - Webhook body.
+ * @param {number} attempt.previousAttempts - Attempts already recorded on the row.
+ * @param {object} [attempt.options] - Passed through to deliverPayload.
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
+ */
+async function attemptDelivery({ id, url, secret, payload, previousAttempts, options = {} }) {
+  const attemptNumber = previousAttempts + 1;
+
+  // A URL that fails SSRF validation is never going to become deliverable, so
+  // it burns no retry budget.
+  try {
+    await assertPublicHttpUrl(url);
+  } catch (err) {
+    await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered: false,
+      error: err.message,
+      permanent: true,
+    });
+    throw err;
+  }
+
+  try {
+    const { statusCode } = await deliverPayload(url, secret, payload, options);
+    const delivered = statusCode >= 200 && statusCode < 300;
+    return await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered,
+      statusCode,
+      error: delivered ? null : `Webhook responded with HTTP ${statusCode}`,
+    });
+  } catch (err) {
+    await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered: false,
+      error: err.message,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Persist a delivery row and make the first attempt. Subsequent attempts are
+ * driven by `processDueRetries`.
  *
  * @param {{ projectId: string, url: string, secret: string, payload: object, options?: object }} opts
- * @returns {Promise<void>}
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
  */
 async function recordAndDeliver({ projectId, url, secret, payload, options = {} }) {
   const id = crypto.randomUUID();
@@ -186,40 +339,77 @@ async function recordAndDeliver({ projectId, url, secret, payload, options = {} 
     [id, projectId, url, body, event, payloadHash],
   );
 
-  try {
-    const { statusCode } = await deliverPayload(url, secret, payload, options);
-    const delivered = statusCode >= 200 && statusCode < 300;
-    await pool.query(
-      `UPDATE webhook_deliveries
-       SET status = $2,
-           attempt_count = 1,
-           last_attempt_at = NOW(),
-           response_status = $3,
-           delivered_at = CASE WHEN $4 THEN NOW() ELSE NULL END,
-           last_error = CASE WHEN $4 THEN NULL ELSE $5 END,
-           next_attempt_at = NULL
-       WHERE id = $1`,
-      [
-        id,
-        delivered ? "delivered" : "failed",
-        statusCode,
-        delivered,
-        delivered ? null : `Webhook responded with HTTP ${statusCode}`,
-      ],
-    );
-  } catch (err) {
-    await pool.query(
-      `UPDATE webhook_deliveries
-       SET status = 'failed',
-           attempt_count = 1,
-           last_attempt_at = NOW(),
-           last_error = $2,
-           next_attempt_at = NULL
-       WHERE id = $1`,
-      [id, err.message],
-    );
-    throw err;
+  return attemptDelivery({ id, url, secret, payload, previousAttempts: 0, options });
+}
+
+/**
+ * Re-attempt every delivery whose `next_attempt_at` has come due.
+ *
+ * The signing secret is read from the project at retry time rather than stored
+ * on the delivery row, so a rotated secret is picked up by pending retries.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.limit=50] - Maximum deliveries to process in one pass.
+ * @returns {Promise<Array<{id: string, status: string}>>}
+ */
+async function processDueRetries({ limit = 50 } = {}) {
+  const { rows } = await pool.query(
+    `SELECT d.id, d.url, d.payload, d.attempt_count,
+            p.webhook_secret,
+            p.previous_webhook_secret,
+            p.previous_webhook_secret_expires_at
+     FROM webhook_deliveries d
+     JOIN projects p ON p.id = d.project_id
+     WHERE d.status = 'pending'
+       AND d.next_attempt_at IS NOT NULL
+       AND d.next_attempt_at <= NOW()
+     ORDER BY d.next_attempt_at ASC
+     LIMIT $1`,
+    [limit],
+  );
+
+  const results = [];
+
+  for (const row of rows) {
+    if (!row.webhook_secret) {
+      await recordAttemptOutcome({
+        id: row.id,
+        attemptNumber: row.attempt_count,
+        delivered: false,
+        error: "Project has no webhook secret configured",
+        permanent: true,
+      });
+      results.push({ id: row.id, status: "failed" });
+      continue;
+    }
+
+    const payload =
+      typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+
+    try {
+      const outcome = await attemptDelivery({
+        id: row.id,
+        url: row.url,
+        secret: row.webhook_secret,
+        payload,
+        previousAttempts: row.attempt_count,
+        options: {
+          previousSecret: row.previous_webhook_secret,
+          previousSecretExpiresAt: row.previous_webhook_secret_expires_at,
+        },
+      });
+      results.push({ id: row.id, status: outcome.status });
+    } catch (err) {
+      // Outcome is already persisted by attemptDelivery; keep draining the batch.
+      logger.error(
+        { event: "webhook_retry_error", deliveryId: row.id, err: err.message },
+        "Webhook retry attempt failed",
+      );
+      results.push({ id: row.id, status: "error" });
+    }
   }
+
+  return results;
 }
 
 /**
@@ -391,12 +581,48 @@ async function checkAndDeliverMilestones(projectId) {
 }
 
 /**
- * No-op queue start — delivery history is recorded inline.
- * Kept so server.js can await start() without a separate pg-boss worker.
+ * Start the webhook retry worker.
+ *
+ * Registers a pg-boss cron job that drains due retries. Schedule is every
+ * minute by default — the shortest backoff step is 1 minute, so a coarser
+ * tick would delay the first retry. Override with WEBHOOK_RETRY_CRON, or set
+ * it to "disabled" to turn retries off entirely.
+ *
+ * Safe to call more than once; guards on the module-level `boss`.
+ *
  * @returns {Promise<void>}
  */
 async function start() {
-  return;
+  const cronOverride = process.env.WEBHOOK_RETRY_CRON;
+  if (cronOverride === "disabled") {
+    logger.info(
+      { event: "webhook_retry_disabled" },
+      "[webhook] Retry worker disabled via WEBHOOK_RETRY_CRON",
+    );
+    return;
+  }
+
+  if (boss) return;
+
+  const cronSchedule = cronOverride || DEFAULT_RETRY_CRON;
+  const connectionString =
+    process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
+
+  boss = new PgBoss(connectionString);
+  boss.on("error", (err) =>
+    logger.error({ event: "webhook_retry_pgboss_error", err }, err.message),
+  );
+
+  await boss.start();
+  await boss.schedule(QUEUE, cronSchedule, {}, { tz: "UTC" });
+  await boss.work(QUEUE, { teamSize: 1, teamConcurrency: 1 }, async () => {
+    await processDueRetries();
+  });
+
+  logger.info(
+    { event: "webhook_retry_scheduled_worker", cron: cronSchedule },
+    `[webhook] Retry worker scheduled: ${cronSchedule}`,
+  );
 }
 
 module.exports = {
@@ -404,6 +630,10 @@ module.exports = {
   deliverPayload,
   start,
   recordAndDeliver,
+  attemptDelivery,
+  recordAttemptOutcome,
+  processDueRetries,
+  retryDelaySeconds,
   generateSignature,
   isGracePeriodActive,
   verifyWebhookSignature,
@@ -413,5 +643,6 @@ module.exports = {
   QUEUE,
   MAX_ATTEMPTS,
   RETRY_DELAYS_SECONDS,
+  DEFAULT_RETRY_CRON,
   boss,
 };

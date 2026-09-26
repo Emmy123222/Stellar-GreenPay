@@ -172,6 +172,10 @@ export default function ProjectDetail({
         const base = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
         socket = io(base, { path: "/socket.io", transports: ["websocket"] });
 
+        socket.on("connect", () => {
+          socket.emit("join_project", project.id);
+        });
+
         socket.on("badge_earned", (payload: { donorAddress: string; badge: string; projectId: string }) => {
           if (!mounted) return;
           if (payload.projectId !== project.id) return;
@@ -193,7 +197,10 @@ export default function ProjectDetail({
     return () => {
       mounted = false;
       try {
-        if (socket && typeof socket.disconnect === "function") socket.disconnect();
+        if (socket) {
+          socket.emit("leave_project", project.id);
+          if (typeof socket.disconnect === "function") socket.disconnect();
+        }
       } catch (e) {
         // ignore
       }

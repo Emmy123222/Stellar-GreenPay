@@ -174,9 +174,10 @@ If delivery fails (network error, timeout, or non-success response), GreenPay re
 | 3 | 5 minutes |
 | 4 | 30 minutes |
 | 5 | 2 hours |
-| 6 | 24 hours |
 
-After the final attempt, the delivery is abandoned. Make your endpoint **idempotent**: the same `milestone.reached` event may be delivered more than once.
+After the fifth attempt the delivery is marked `failed` and abandoned. A URL
+that fails SSRF validation is rejected permanently on the first attempt and is
+not retried, since it will never become deliverable. Make your endpoint **idempotent**: the same `milestone.reached` event may be delivered more than once.
 
 ---
 

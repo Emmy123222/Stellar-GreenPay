@@ -10,6 +10,12 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+// Clear scheduled work when the extension is suspended or removed so a stale
+// recurring donation check cannot run against an invalid extension context.
+chrome.runtime.onSuspend.addListener(() => {
+  chrome.alarms.clearAll();
+});
+
 chrome.runtime.onMessage.addListener((message, sender) => {
   if (message.action === 'setProjectContext' && sender.tab?.id) {
     if (message.projectId) {

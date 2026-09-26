@@ -1,39 +1,30 @@
 "use strict";
 const Redis = require("ioredis");
 
-let client = null;
-let connectionPromise = null;
+const url = process.env.REDIS_URL || "redis://localhost:6379";
 
-function getClient() {
-  if (client) return client;
+const client = new Redis(url, {
+  lazyConnect: true,
+  enableOfflineQueue: false,
+  maxRetriesPerRequest: 0,
+});
 
-  const url = process.env.REDIS_URL || "redis://localhost:6379";
-  client = new Redis(url, {
-    lazyConnect: true,
-    enableOfflineQueue: false,
-    maxRetriesPerRequest: 0,
-  });
+client.on("error", () => {
+  // Redis connection errors are non-fatal; cache is bypassed on failure
+});
 
-  client.on("error", () => {
-    // Redis connection errors are non-fatal; cache is bypassed on failure
-  });
-
-  connectionPromise = client.connect().catch(() => {
-    // Non-fatal: server runs without cache if Redis is unavailable
-  });
-
-  return client;
-}
+const connectionPromise = client.connect().catch(() => {
+  // Non-fatal: server runs without cache if Redis is unavailable
+});
 
 async function getConnectedClient() {
-  const c = getClient();
-  if (c.status !== "ready" && connectionPromise) {
+  if (client.status !== "ready" && connectionPromise) {
     await connectionPromise;
   }
-  if (c.status !== "ready") {
+  if (client.status !== "ready") {
     throw new Error("Redis unavailable");
   }
-  return c;
+  return client;
 }
 
 async function sendCommand(command, ...args) {
@@ -81,4 +72,10 @@ async function ping() {
   return result;
 }
 
-module.exports = { get, set, deletePattern, ping, sendCommand };
+async function quit() {
+  if (client.status === "ready") {
+    await client.quit();
+  }
+}
+
+module.exports = { client, get, set, deletePattern, ping, sendCommand, quit };
