@@ -359,6 +359,56 @@ describe("GET /api/projects/:id/badge-holders", () => {
   });
 });
 
+describe("GET /api/projects/:id/donors", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("returns a cursor-paginated donor list", async () => {
+    const validUuid = "11111111-2222-3333-4444-555555555555";
+    pool.query.mockResolvedValueOnce({ rows: [{ id: validUuid }] });
+    pool.query.mockResolvedValueOnce({
+      rows: [
+        {
+          donor_address: "GBADGE1",
+          total_donated_xlm: "12.5",
+          badge: "Seedling",
+        },
+        {
+          donor_address: "GBADGE2",
+          total_donated_xlm: "3",
+          badge: null,
+        },
+      ],
+    });
+
+    const res = await request(app)
+      .get(`/api/projects/${validUuid}/donors?limit=1`)
+      .expect(200);
+
+    expect(res.body).toEqual({
+      success: true,
+      data: [{ donorAddress: "GBADGE1", totalXLM: "12.5000000", badge: "Seedling" }],
+      next_cursor: expect.any(String),
+      has_more: true,
+    });
+    expect(pool.query.mock.calls[1][0]).toMatch(/JOIN profiles p ON p\.public_key = d\.donor_address/);
+    expect(pool.query.mock.calls[1][0]).toMatch(/ORDER BY p\.total_donated_xlm DESC/);
+  });
+
+  test("rejects an invalid cursor", async () => {
+    const validUuid = "11111111-2222-3333-4444-555555555555";
+    pool.query.mockResolvedValueOnce({ rows: [{ id: validUuid }] });
+
+    await request(app)
+      .get(`/api/projects/${validUuid}/donors?cursor=invalid`)
+      .expect(400);
+  });
+});
+
 describe("POST /api/projects (admin)", () => {
   let app;
   const stellarService = require("../services/stellar");

@@ -38,7 +38,6 @@ const express = require("express");
 const multer = require("multer");
 const fs = require("fs");
 const path = require("path");
-const fileType = require("file-type");
 const router = express.Router();
 const { uploadFile, backendName, UPLOAD_DIR } = require("../services/storage");
 const { generatePresignedPutUrl, isS3Configured } = require("../services/s3Presign");
@@ -84,7 +83,8 @@ const memory = multer({
 async function detectMimeType(buffer) {
   try {
     if (!buffer || buffer.length === 0) return null;
-    const type = await fileType.fromBuffer(buffer);
+    const { fileTypeFromBuffer } = await import("file-type");
+    const type = await fileTypeFromBuffer(buffer);
     return type ? type.mime : null;
   } catch (err) {
     logger.warn(

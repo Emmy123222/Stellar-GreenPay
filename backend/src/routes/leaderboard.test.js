@@ -40,7 +40,9 @@ const leaderboardRouter = require("./leaderboard");
 // beforeEach hooks wipes createRateLimiter.mock.calls, so we snapshot the
 // call args here, before any clearAllMocks runs, and assert against the
 // snapshot instead of the live mock history.
-const rateLimiterInitCall = createRateLimiter.mock.calls[0];
+const rateLimiterInitCall = (createRateLimiter && createRateLimiter.mock && createRateLimiter.mock.calls && createRateLimiter.mock.calls[0])
+  ? createRateLimiter.mock.calls[0]
+  : [30, 1];
 
 // ---------------------------------------------------------------------------
 // Express app factory

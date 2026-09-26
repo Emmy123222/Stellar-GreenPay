@@ -39,7 +39,6 @@ async function getAppliedVersions(client) {
 async function runMigrations() {
   const client = await pool.connect();
   try {
-    await client.query("BEGIN");
     await ensureMigrationsTable(client);
 
     const applied = await getAppliedVersions(client);
@@ -50,7 +49,15 @@ async function runMigrations() {
       if (applied.includes(version)) continue;
       const migration = require(file);
       console.log(`[DB] Applying migration: ${version}`);
-      await migration.up(client);
+
+      if (migration.autocommit) {
+        await migration.up(client);
+      } else {
+        await client.query("BEGIN");
+        await migration.up(client);
+        await client.query("COMMIT");
+      }
+
       await client.query(
         "INSERT INTO schema_migrations (version, name) VALUES ($1, $2)",
         [version, migration.name ?? version]
@@ -62,9 +69,8 @@ async function runMigrations() {
       console.log("[DB] No pending migrations");
     }
 
-    await client.query("COMMIT");
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
@@ -107,17 +113,22 @@ async function rollbackMigrations(steps = 1) {
         throw new Error(`Migration ${row.version} does not export a down() function`);
       }
       console.log(`[DB] Rolling back migration: ${row.version}`);
-      await migration.down(client);
+      if (migration.autocommit) {
+        await migration.down(client);
+      } else {
+        await client.query("BEGIN");
+        await migration.down(client);
+        await client.query("COMMIT");
+      }
       await client.query(
         "DELETE FROM schema_migrations WHERE version = $1",
         [row.version]
       );
     }
 
-    await client.query("COMMIT");
     console.log(`[DB] Rolled back ${result.rows.length} migration(s)`);
   } catch (err) {
-    await client.query("ROLLBACK");
+    await client.query("ROLLBACK").catch(() => {});
     throw err;
   } finally {
     client.release();
