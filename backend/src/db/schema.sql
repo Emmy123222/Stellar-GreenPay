@@ -89,6 +89,52 @@ CREATE TABLE IF NOT EXISTS project_updates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- update_images: content-moderation audit log + admin review queue for images
+-- attached to project updates (issue #1101, migration
+-- 008_update_images_moderation.js). One row per AWS Rekognition
+-- DetectModerationLabels verdict. update_id/project_id are nullable because an
+-- image is scanned when it reaches storage, i.e. before any update references
+-- it. max_confidence is a percentage (0–100), matching Rekognition's units.
+-- moderation_labels holds the normalised label summary as JSONB.
+CREATE TABLE IF NOT EXISTS update_images (
+  id UUID PRIMARY KEY,
+  update_id UUID REFERENCES project_updates(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  storage_key TEXT,
+  image_url TEXT NOT NULL,
+  storage_backend TEXT NOT NULL DEFAULT 's3',
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  flagged_for_review BOOLEAN NOT NULL DEFAULT FALSE,
+  provider TEXT NOT NULL DEFAULT 'aws_rekognition',
+  max_confidence NUMERIC(5, 2),
+  moderation_labels JSONB NOT NULL DEFAULT '[]'::JSONB,
+  reason TEXT,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT update_images_status_check
+    CHECK (status IN ('approved', 'rejected', 'pending_review')),
+  CONSTRAINT update_images_max_confidence_range
+    CHECK (
+      max_confidence IS NULL
+      OR (max_confidence >= 0 AND max_confidence <= 100)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_update_images_storage_key
+  ON update_images (storage_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_update_images_image_url
+  ON update_images (image_url, created_at DESC);
+-- Admin review queue: unreviewed rows, newest first.
+CREATE INDEX IF NOT EXISTS idx_update_images_pending_review
+  ON update_images (created_at DESC)
+  WHERE status = 'pending_review';
+CREATE INDEX IF NOT EXISTS idx_update_images_update_id
+  ON update_images (update_id);
+CREATE INDEX IF NOT EXISTS idx_update_images_project_created
+  ON update_images (project_id, created_at DESC);
+
 -- project_subscriptions: email-based subscriptions to project updates.
 -- UNIQUE(project_id, email) prevents duplicate sign-ups.
 CREATE TABLE IF NOT EXISTS project_subscriptions (

@@ -7,8 +7,8 @@
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useState, useCallback } from "react";
-import { fetchProfile, fetchDonorHistory } from "@/lib/api";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { fetchProfile, fetchDonorHistoryPage } from "@/lib/api";
 import { connectWallet, signTransactionWithWallet, getConnectedPublicKey } from "@/lib/wallet";
 import { CONTRACT_ID, buildMintImpactNftTransaction, submitSorobanTransaction, explorerUrl } from "@/lib/stellar";
 import type { DonorProfile, Donation, BadgeTier } from "@/utils/types";
@@ -445,6 +445,9 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+/** Rows per request; the donor history endpoint is keyset-paginated (#1080). */
+const HISTORY_PAGE_SIZE = 20;
+
 export default function DonorProfilePage() {
   const router = useRouter();
   const { publicKey } = router.query as { publicKey?: string };
@@ -452,28 +455,41 @@ export default function DonorProfilePage() {
   const [profile, setProfile] = useState<DonorProfile | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [totalDonations, setTotalDonations] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMoreDonations, setHasMoreDonations] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   // `loading` is derived by comparing the wallet the profile was loaded for
   // to the current one, rather than toggled synchronously inside the effect
   // (which triggers a cascading render).
   const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
   const loading = !publicKey || loadedForKey !== publicKey;
 
+  // Pages are appended asynchronously, so each response is checked against the
+  // key that was active when the list was loaded — navigating to another donor
+  // mid-request must not splice the old donor's rows into the new list.
+  const listKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!publicKey) return;
 
     let cancelled = false;
+    listKeyRef.current = publicKey;
 
     // Deferred via a microtask (rather than invoked synchronously) so this
     // effect doesn't itself perform a synchronous setState.
     queueMicrotask(async () => {
       try {
-        const [prof, hist] = await Promise.all([
+        const [prof, page] = await Promise.all([
           fetchProfile(publicKey),
-          fetchDonorHistory(publicKey),
+          fetchDonorHistoryPage(publicKey, { limit: HISTORY_PAGE_SIZE }),
         ]);
         if (!cancelled) {
           setProfile(prof);
-          setDonations(hist.slice(0, 10));
+          setDonations(page.donations);
+          setTotalDonations(page.total);
+          setNextCursor(page.nextCursor);
+          setHasMoreDonations(page.hasMore);
           setNotFound(false);
         }
       } catch {
@@ -490,6 +506,33 @@ export default function DonorProfilePage() {
       cancelled = true;
     };
   }, [publicKey]);
+
+  /**
+   * Fetch the next page of this donor's history and append it to the list.
+   *
+   * On failure the list is left as-is and the button stays enabled so the
+   * donor can retry without reloading the page.
+   */
+  const loadMoreDonations = useCallback(async () => {
+    if (!publicKey || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchDonorHistoryPage(publicKey, {
+        limit: HISTORY_PAGE_SIZE,
+        cursor: nextCursor,
+      });
+      if (listKeyRef.current === publicKey) {
+        setDonations((prev) => [...prev, ...page.donations]);
+        setTotalDonations(page.total);
+        setNextCursor(page.nextCursor);
+        setHasMoreDonations(page.hasMore);
+      }
+    } catch {
+      // Nothing to undo — the first page is still rendered.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [publicKey, nextCursor, loadingMore]);
 
   // ── Derived values ───────────────────────────────────────────────────────
 
@@ -590,7 +633,14 @@ export default function DonorProfilePage() {
 
           {/* ── Donation history ────────────────────────────────────────── */}
           <div className="card">
-            <h2 className="label mb-1">Recent Donations</h2>
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <h2 className="label">Recent Donations</h2>
+              {totalDonations > 0 && (
+                <span className="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]">
+                  Showing {donations.length} of {totalDonations} donations
+                </span>
+              )}
+            </div>
             {donations.length === 0 ? (
               <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] py-4 text-center font-body">
                 No donations recorded yet.
@@ -600,6 +650,19 @@ export default function DonorProfilePage() {
                 {donations.map((d) => (
                   <DonationRow key={d.id} donation={d} />
                 ))}
+                {hasMoreDonations && (
+                  <button
+                    type="button"
+                    onClick={loadMoreDonations}
+                    disabled={loadingMore}
+                    aria-busy={loadingMore}
+                    className="btn-ghost w-full text-sm mt-2 disabled:opacity-60"
+                  >
+                    {loadingMore
+                      ? "Loading…"
+                      : `Load ${Math.min(HISTORY_PAGE_SIZE, totalDonations - donations.length)} more`}
+                  </button>
+                )}
               </div>
             )}
           </div>
