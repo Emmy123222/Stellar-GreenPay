@@ -6,32 +6,6 @@ export const LIGHT_ICONS = {
   48: 'icons/icon-48.png',
   128: 'icons/icon-128.png'
 };
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'donate-project',
-    title: 'Donate to this GreenPay project',
-    contexts: ['all'],
-    visible: false,
-    documentUrlPatterns: ['*://*/*']
-  });
-});
-
-// Clear scheduled work when the extension is suspended or removed so a stale
-// recurring donation check cannot run against an invalid extension context.
-chrome.runtime.onSuspend.addListener(() => {
-  chrome.alarms.clearAll();
-});
-
-chrome.runtime.onMessage.addListener((message, sender) => {
-  if (message.action === 'setProjectContext' && sender.tab?.id) {
-    if (message.projectId) {
-      tabProjects.set(sender.tab.id, message.projectId);
-      updateContextMenu(sender.tab.id);
-    } else {
-      tabProjects.delete(sender.tab.id);
-      updateContextMenu(sender.tab.id);
-    }
-  }
 
 export const DARK_ICONS = {
   16: 'icons/icon-dark-16.png',
@@ -71,60 +45,84 @@ export function initDarkModeIconListener() {
 initDarkModeIconListener();
 
 if (typeof chrome !== 'undefined') {
-  chrome.runtime.onInstalled.addListener(() => {
-    chrome.contextMenus.create({
-      id: 'donate-project',
-      title: 'Donate to this GreenPay project',
-      contexts: ['all'],
-      visible: false,
-      documentUrlPatterns: ['*://*/*']
-    });
-  });
-
-  chrome.runtime.onMessage.addListener((message, sender) => {
-    if (message.action === 'setProjectContext' && sender.tab?.id) {
-      if (message.projectId) {
-        tabProjects.set(sender.tab.id, message.projectId);
-        updateContextMenu(sender.tab.id);
-      } else {
-        tabProjects.delete(sender.tab.id);
-        updateContextMenu(sender.tab.id);
+  // Clear scheduled work when the extension is suspended or removed so a stale
+  // recurring donation check cannot run against an invalid extension context.
+  if (chrome.runtime?.onSuspend) {
+    chrome.runtime.onSuspend.addListener(() => {
+      if (chrome.alarms?.clearAll) {
+        chrome.alarms.clearAll();
       }
-    }
+    });
+  }
 
-    // Handle the click action on a Stellar address from the content script
-    if (message.action === 'openDonatePopup' && message.address) {
-      chrome.storage.local.set({ pendingDonationAddress: message.address }, () => {
-        openPopup();
-      });
-    }
-  });
+  if (chrome.runtime?.onInstalled) {
+    chrome.runtime.onInstalled.addListener(() => {
+      if (chrome.contextMenus?.create) {
+        chrome.contextMenus.create({
+          id: 'donate-project',
+          title: 'Donate to this GreenPay project',
+          contexts: ['all'],
+          visible: false,
+          documentUrlPatterns: ['*://*/*']
+        });
+      }
+    });
+  }
 
-  chrome.tabs.onActivated.addListener(({ tabId }) => {
-    updateContextMenu(tabId);
-  });
+  if (chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender) => {
+      if (message.action === 'setProjectContext' && sender.tab?.id) {
+        if (message.projectId) {
+          tabProjects.set(sender.tab.id, message.projectId);
+          updateContextMenu(sender.tab.id);
+        } else {
+          tabProjects.delete(sender.tab.id);
+          updateContextMenu(sender.tab.id);
+        }
+      }
 
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-    if (changeInfo.status === 'complete' || changeInfo.url) {
-      // The content script will re-evaluate and send 'setProjectContext',
-      // but we can ensure it's hidden during navigation if desired.
-    }
-  });
-
-  chrome.tabs.onRemoved.addListener((tabId) => {
-    tabProjects.delete(tabId);
-  });
-
-  chrome.contextMenus.onClicked.addListener((info, tab) => {
-    if (info.menuItemId === 'donate-project' && tab?.id) {
-      const projectId = tabProjects.get(tab.id);
-      if (projectId) {
-        chrome.storage.local.set({ pendingDonationProjectId: projectId }, () => {
+      // Handle the click action on a Stellar address from the content script
+      if (message.action === 'openDonatePopup' && message.address) {
+        chrome.storage.local.set({ pendingDonationAddress: message.address }, () => {
           openPopup();
         });
       }
-    }
-  });
+    });
+  }
+
+  if (chrome.tabs?.onActivated) {
+    chrome.tabs.onActivated.addListener(({ tabId }) => {
+      updateContextMenu(tabId);
+    });
+  }
+
+  if (chrome.tabs?.onUpdated) {
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+      if (changeInfo.status === 'complete' || changeInfo.url) {
+        // The content script will re-evaluate and send 'setProjectContext',
+        // but we can ensure it's hidden during navigation if desired.
+      }
+    });
+  }
+
+  if (chrome.tabs?.onRemoved) {
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      tabProjects.delete(tabId);
+    });
+  }
+
+  if (chrome.contextMenus?.onClicked) {
+    chrome.contextMenus.onClicked.addListener((info, tab) => {
+      if (info.menuItemId === 'donate-project' && tab?.id) {
+        const projectId = tabProjects.get(tab.id);
+        if (projectId) {
+          chrome.storage.local.set({ pendingDonationProjectId: projectId }, () => {
+            openPopup();
+          });
+        }
+      }
+    });
+  }
 }
 
 function updateContextMenu(tabId: number) {
@@ -149,3 +147,4 @@ function openPopup() {
     console.error('Cannot programmatically open popup in this browser environment.');
   }
 }
+

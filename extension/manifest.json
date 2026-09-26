@@ -25,14 +25,10 @@
       "128": "icons/icon-128.png"
     }
   },
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting",
-    "contextMenus"
-  ],
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
   "background": {
-    "service_worker": "dist/background.js"
+    "service_worker": "dist/background.js",
+    "type": "module"
   },
   "host_permissions": [
     "https://greenpay.app/*",
