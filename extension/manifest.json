@@ -11,7 +11,8 @@
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "background": {
     "service_worker": "dist/background.js"

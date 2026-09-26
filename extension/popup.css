@@ -381,6 +381,62 @@ input[type="number"]:focus {
   pointer-events: none;
 }
 
+/* Pending Transactions */
+.pending-section {
+  margin-top: 20px;
+}
+
+.pending-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--danger-color);
+}
+
+.pending-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pending-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--danger-color);
+}
+
+.pending-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pending-amount {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pending-dest {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.pending-link {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent-color);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.pending-link:hover,
+.pending-link:focus {
+  text-decoration: underline;
+}
+
 /* Utils */
 .hidden {
   display: none !important;

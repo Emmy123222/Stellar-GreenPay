@@ -1,4 +1,12 @@
+import {
+  checkPendingDonations,
+  PENDING_STORAGE_KEY,
+} from './pendingTransactions';
+
 const tabProjects = new Map<number, string>();
+
+const PENDING_ALARM = 'greenpay-check-pending-transactions';
+const PENDING_POLL_MINUTES = 0.5;
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
@@ -8,12 +16,49 @@ chrome.runtime.onInstalled.addListener(() => {
     visible: false,
     documentUrlPatterns: ['*://*/*']
   });
+  resumePendingTransactions();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  resumePendingTransactions();
 });
 
 // Clear scheduled work when the extension is suspended or removed so a stale
 // recurring donation check cannot run against an invalid extension context.
 chrome.runtime.onSuspend.addListener(() => {
   chrome.alarms.clearAll();
+});
+
+// Polling only runs while something is actually in flight, so the badge clears
+// itself once every donation has confirmed or failed.
+function syncPendingAlarm(pendingCount: number) {
+  if (pendingCount === 0) {
+    chrome.alarms.clear(PENDING_ALARM, () => {
+      if (chrome.runtime.lastError) {
+        // Nothing scheduled to clear
+      }
+    });
+    return;
+  }
+  chrome.alarms.create(PENDING_ALARM, { periodInMinutes: PENDING_POLL_MINUTES });
+}
+
+function resumePendingTransactions() {
+  checkPendingDonations()
+    .then((remaining) => syncPendingAlarm(remaining.length))
+    .catch((err) => console.error('Pending transaction check failed:', err));
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PENDING_ALARM) {
+    resumePendingTransactions();
+  }
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !(PENDING_STORAGE_KEY in changes)) return;
+  const pending = changes[PENDING_STORAGE_KEY].newValue;
+  syncPendingAlarm(Array.isArray(pending) ? pending.length : 0);
 });
 
 chrome.runtime.onMessage.addListener((message, sender) => {
