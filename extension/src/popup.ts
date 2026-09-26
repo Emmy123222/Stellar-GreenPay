@@ -6,7 +6,13 @@ import {
   Operation,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { loadSettings, type ExtensionSettings } from './settings';
+import {
+  loadSettings,
+  addSiteToAllowlist,
+  removeSiteFromAllowlist,
+  type ExtensionSettings,
+} from './settings';
+import { getHostnameFromUrl, isUrlAllowed } from './allowlist';
 
 
 // Module-level vars
@@ -386,9 +392,88 @@ async function initProjectSearch() {
   });
 }
 
+async function initSiteOptin() {
+  const panel = document.getElementById('site-optin-panel');
+  const domainEl = document.getElementById('current-site-domain');
+  const toggle = document.getElementById('site-optin-toggle') as HTMLInputElement | null;
+  const statusEl = document.getElementById('site-optin-status');
+
+  if (!panel || !domainEl || !toggle || !statusEl) return;
+  if (typeof chrome === 'undefined' || !chrome.tabs?.query) return;
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    if (!activeTab?.url) return;
+
+    const hostname = getHostnameFromUrl(activeTab.url);
+    if (!hostname) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    panel.classList.remove('hidden');
+    domainEl.textContent = hostname;
+
+    const settings = await loadSettings();
+    const isAllowed = isUrlAllowed(activeTab.url, settings.allowlist);
+    toggle.checked = isAllowed;
+    statusEl.textContent = isAllowed
+      ? 'Widget enabled on this site'
+      : 'Widget disabled on this site';
+    statusEl.classList.toggle('enabled', isAllowed);
+
+    toggle.addEventListener('change', async () => {
+      const checked = toggle.checked;
+      statusEl.textContent = checked ? 'Enabling widget…' : 'Disabling widget…';
+
+      try {
+        if (checked) {
+          await addSiteToAllowlist(`${hostname}/*`);
+          statusEl.textContent = 'Widget enabled on this site';
+          statusEl.classList.add('enabled');
+
+          if (activeTab.id) {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'checkAllowlist' }, (response) => {
+              if (chrome.runtime.lastError || !response) {
+                if (chrome.scripting?.executeScript && activeTab.id) {
+                  chrome.scripting
+                    .executeScript({
+                      target: { tabId: activeTab.id },
+                      files: ['dist/content-script.js'],
+                    })
+                    .catch(() => {});
+                }
+              }
+            });
+          }
+        } else {
+          await removeSiteFromAllowlist(hostname);
+          statusEl.textContent = 'Widget disabled on this site';
+          statusEl.classList.remove('enabled');
+
+          if (activeTab.id) {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'checkAllowlist' }, () => {
+              if (chrome.runtime.lastError) {
+                // Ignore if tab closed or script not active
+              }
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to update site allowlist:', err);
+        statusEl.textContent = 'Failed to update site settings';
+      }
+    });
+  } catch (err) {
+    console.warn('Could not query active tab for site opt-in:', err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   applySettings(settings);
+  initSiteOptin();
 
   // Pre-fill donation amount from saved default
   const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;

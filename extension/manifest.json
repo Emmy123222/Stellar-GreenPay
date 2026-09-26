@@ -17,12 +17,11 @@
     "service_worker": "dist/background.js"
   },
   "host_permissions": [
-    "https://greenpay.app/*",
-    "https://staging.greenpay.app/*"
+    "<all_urls>"
   ],
   "content_scripts": [
     {
-      "matches": ["https://greenpay.app/*", "https://staging.greenpay.app/*"],
+      "matches": ["<all_urls>"],
       "js": ["dist/content-script.js"],
       "run_at": "document_end"
     }
