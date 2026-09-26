@@ -122,7 +122,7 @@ export default function DonationModal({
         <button
           ref={closeButtonRef}
           onClick={onClose}
-          aria-label="Close donation dialog"
+          aria-label="Close donation widget"
           className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-forest-100 text-forest-700 hover:bg-forest-200 transition-colors"
         >
           ✕

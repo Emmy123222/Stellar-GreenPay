@@ -171,13 +171,18 @@ async function handleDonation(projectId, op) {
 
     // 5. Emit WebSocket event
     if (io) {
-      io.emit("newDonation", {
+      const payload = {
         projectId,
         donorAddress,
         amountXLM,
         txHash,
         timestamp: new Date().toISOString()
-      });
+      };
+      if (typeof io.to === "function") {
+        io.to([`project:${projectId}`, "all-donations"]).emit("newDonation", payload);
+      } else if (typeof io.emit === "function") {
+        io.emit("newDonation", payload);
+      }
     }
 
     // 6. Emit SSE event with enriched payload

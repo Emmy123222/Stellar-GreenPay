@@ -37,4 +37,49 @@ describe("ContributorTimeline", () => {
       samplePR.author.avatarUrl
     );
   });
+
+  it("sorts unsorted timeline events chronologically (ascending by timestamp)", () => {
+    const prNewest: ContributorPR = {
+      ...samplePR,
+      id: 3,
+      number: 730,
+      title: "Newest Feature",
+      mergedAt: "2026-09-01T12:00:00Z",
+    };
+    const prOldest: ContributorPR = {
+      ...samplePR,
+      id: 1,
+      number: 700,
+      title: "Oldest Feature",
+      mergedAt: "2026-01-10T12:00:00Z",
+    };
+    const prMiddle: ContributorPR = {
+      ...samplePR,
+      id: 2,
+      number: 715,
+      title: "Middle Feature",
+      mergedAt: "2026-05-15T12:00:00Z",
+    };
+
+    render(
+      <ContributorTimeline pullRequests={[prNewest, prOldest, prMiddle]} />
+    );
+
+    const links = screen.getAllByRole("link", { name: /Feature/ });
+    const titles = links.map((link) => link.textContent);
+
+    expect(titles).toEqual([
+      "Oldest Feature",
+      "Middle Feature",
+      "Newest Feature",
+    ]);
+  });
+
+  it("shows relative time as a tooltip over the absolute date", () => {
+    render(<ContributorTimeline pullRequests={[samplePR]} />);
+
+    const dateSpan = screen.getByTitle(/ago/i);
+    expect(dateSpan).toBeInTheDocument();
+    expect(dateSpan).toHaveTextContent(/Merged/);
+  });
 });

@@ -6,6 +6,32 @@ export const LIGHT_ICONS = {
   48: 'icons/icon-48.png',
   128: 'icons/icon-128.png'
 };
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: 'donate-project',
+    title: 'Donate to this GreenPay project',
+    contexts: ['all'],
+    visible: false,
+    documentUrlPatterns: ['*://*/*']
+  });
+});
+
+// Clear scheduled work when the extension is suspended or removed so a stale
+// recurring donation check cannot run against an invalid extension context.
+chrome.runtime.onSuspend.addListener(() => {
+  chrome.alarms.clearAll();
+});
+
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message.action === 'setProjectContext' && sender.tab?.id) {
+    if (message.projectId) {
+      tabProjects.set(sender.tab.id, message.projectId);
+      updateContextMenu(sender.tab.id);
+    } else {
+      tabProjects.delete(sender.tab.id);
+      updateContextMenu(sender.tab.id);
+    }
+  }
 
 export const DARK_ICONS = {
   16: 'icons/icon-dark-16.png',

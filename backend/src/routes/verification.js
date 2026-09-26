@@ -36,8 +36,17 @@ const { logAdminAction } = require("../services/audit");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
+const { VERIFICATION_EMAIL_DOMAIN_ALLOWLIST } = require("../config/constants");
 
 const submitLimiter = createRateLimiter(10, 15, "verification"); // 10 submissions / 15 min / IP
+
+const VERIFICATION_EMAIL_DOMAIN_ALLOWLIST_SET = new Set(
+  VERIFICATION_EMAIL_DOMAIN_ALLOWLIST.map((domain) => domain.trim().toLowerCase())
+);
+
+function normalizeDomain(domain) {
+  return domain.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+}
 
 const VALID_CATEGORIES = [
   "Reforestation",
@@ -144,30 +153,21 @@ router.post("/", submitLimiter, async (req, res, next) => {
     if (!EMAIL_RE.test(email)) {
       errors.push("contactEmail must be a valid email");
     } else if (website) {
-      // Prevent org email spoofing: the contact email domain must match the
-      // organisation's website hostname. This stops an attacker from claiming
-      // to represent e.g. "greenworldfund.org" while providing a personal
-      // Gmail address. We compare only the registered domain+TLD so that
-      // subdomain email addresses (e.g. team@mail.greenworldfund.org) are
-      // accepted for submissions about https://greenworldfund.org.
-      const emailDomain = email.split("@")[1];
+      const emailDomain = normalizeDomain(email.split("@")[1]);
       let websiteHost;
       try {
-        websiteHost = new URL(website).hostname.toLowerCase();
+        websiteHost = normalizeDomain(new URL(website).hostname);
       } catch {
         websiteHost = null;
       }
-      if (websiteHost && emailDomain) {
-        // Strip "www." prefix for comparison
-        const normalise = (h) => h.replace(/^www\./, "");
-        const normEmail = normalise(emailDomain);
-        const normSite  = normalise(websiteHost);
-        // Accept exact match or subdomain of the website host
-        if (normEmail !== normSite && !normEmail.endsWith("." + normSite)) {
-          errors.push(
-            `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
-          );
-        }
+      if (
+        websiteHost &&
+        emailDomain &&
+        (!VERIFICATION_EMAIL_DOMAIN_ALLOWLIST_SET.has(emailDomain) || emailDomain !== websiteHost)
+      ) {
+        errors.push(
+          `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
+        );
       }
     }
 

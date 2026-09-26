@@ -26,7 +26,7 @@ spec:
                 name: greenpay-secrets
           readinessProbe:
             httpGet:
-              path: /health
+              path: /api/readiness
               port: {{ .Values.backend.port }}
             initialDelaySeconds: 10
             periodSeconds: 10

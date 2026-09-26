@@ -912,14 +912,16 @@ impl GreenPayContract {
             .get(&DataKey::DonorDonations(donor))
             .unwrap_or(Vec::new(&env));
         let total_count = donation_ids.len();
+        let bounded_offset = offset.min(total_count);
 
-        if offset >= total_count || limit == 0 {
+        if bounded_offset >= total_count || limit == 0 {
             return Vec::new(&env);
         }
 
-        let end = core::cmp::min(offset.saturating_add(limit), total_count);
+        let bounded_limit = limit.min(total_count - bounded_offset);
+        let end = bounded_offset + bounded_limit;
         let mut result = Vec::new(&env);
-        let mut index = offset;
+        let mut index = bounded_offset;
         while index < end {
             if let Some(donation_id) = donation_ids.get(index) {
                 if let Some(record) = env
@@ -2090,9 +2092,8 @@ mod tests {
         let token_client = StellarAssetClient::new(&env, &token);
         token_client.mint(&donor, &i128::MAX);
 
-        // No donations yet — empty result.
-        let history = client.get_donor_history(&donor, &0, &10);
-        assert_eq!(history.len(), 0);
+        let empty_history = client.get_donor_history(&donor, &0, &10);
+        assert_eq!(empty_history.len(), 0);
 
         // Donate XLM three times.
         for i in 1..=3 {
@@ -2105,15 +2106,18 @@ mod tests {
         assert_eq!(history.get(1).unwrap().amount, 200 * STROOP);
         assert_eq!(history.get(2).unwrap().amount, 300 * STROOP);
 
-        // Pagination: offset=1, limit=2 → gets second and third donation.
         let page = client.get_donor_history(&donor, &1, &2);
         assert_eq!(page.len(), 2);
         assert_eq!(page.get(0).unwrap().amount, 200 * STROOP);
         assert_eq!(page.get(1).unwrap().amount, 300 * STROOP);
 
-        // Pagination: offset=5 → empty.
-        let empty = client.get_donor_history(&donor, &5, &10);
-        assert_eq!(empty.len(), 0);
+        let offset_and_limit_beyond_end = client.get_donor_history(&donor, &1, &u32::MAX);
+        assert_eq!(offset_and_limit_beyond_end.len(), 2);
+        assert_eq!(offset_and_limit_beyond_end.get(0).unwrap().amount, 200 * STROOP);
+        assert_eq!(offset_and_limit_beyond_end.get(1).unwrap().amount, 300 * STROOP);
+
+        let offset_beyond_end = client.get_donor_history(&donor, &u32::MAX, &u32::MAX);
+        assert_eq!(offset_beyond_end.len(), 0);
     }
 
     #[test]
