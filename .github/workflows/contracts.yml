@@ -31,19 +31,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
+
+      # Build the WASM artifact first. The integration test file embeds it
+      # via include_bytes! which is resolved at compile time, so the .wasm
+      # file must exist before any cargo command that compiles that crate
+      # (including clippy and cargo test --workspace).
+      - name: Build WASM artifacts
+        run: cargo build --workspace --target wasm32v1-none --release
+
+      # Unit tests for the whole workspace (excludes the integration test
+      # target because it requires --features testutils and is declared with
+      # required-features in Cargo.toml — cargo skips it automatically here).
       - run: cargo test --workspace
 
       - run: cargo clippy --workspace -- -D warnings || true
 
-      # Build the WASM artifacts before running integration tests.
-      # The integration test crate embeds the compiled greenpay-contract WASM
-      # via `contractfile!` at compile time, so the artifact must exist first.
-      - name: Build WASM artifacts
-        run: cargo build --workspace --target wasm32v1-none --release
-
       # Integration tests exercise multi-contract interaction, oracle TTL
       # expiry via ledger timestamp manipulation, and the admin upgrade flow.
-      # They require the `testutils` feature and the compiled WASM (built above).
+      # They require the testutils feature and the compiled WASM (built above).
       - name: Run integration tests
         run: >
           cargo test
