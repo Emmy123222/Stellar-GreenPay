@@ -110,9 +110,11 @@ export default function DonateScreen() {
   const [showFundingGuide, setShowFundingGuide] = useState(false);
 
   const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
-  const surfaceAuthFailure = (outcome: string) => {
+  // Surfaces the hook's human-readable failure reason (issue #1050) instead of
+  // the raw outcome enum, so the banner explains *why* nothing was sent.
+  const surfaceAuthFailure = (message: string) => {
     setStatusType('error');
-    setStatusMessage(outcome || 'Authentication was cancelled. Your donation was not sent.');
+    setStatusMessage(message || 'Authentication was cancelled. Your donation was not sent.');
   };
 
   useEffect(() => {
@@ -199,7 +201,7 @@ export default function DonateScreen() {
     if (!isMountedRef.current) return;
 
     if (!authResult.success) {
-      surfaceAuthFailure(authResult.outcome);
+      surfaceAuthFailure(authResult.error);
       return;
     }
 

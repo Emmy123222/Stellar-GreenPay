@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useBiometricAuth } from '../hooks/useBiometricAuth';
 
 const STELLAR_KEY_RE = /^G[A-Z2-7]{55}$/;
 const DEEP_LINK_RE   = /greenpay:\/\/donate\?(.+)/;
@@ -39,6 +40,7 @@ function parseScan(data: string): { wallet: string; projectId?: string } | null 
 
 export default function ScanScreen() {
   const router = useRouter();
+  const bio = useBiometricAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export default function ScanScreen() {
     }
   }, []);
 
-  const handleBarcode = ({ data }: { data: string }) => {
+  const handleBarcode = async ({ data }: { data: string }) => {
     if (cooldown.current || scanned) return;
     cooldown.current = true;
 
@@ -61,6 +63,19 @@ export default function ScanScreen() {
         setError(null);
         cooldown.current = false;
       }, 2000);
+      return;
+    }
+
+    // Issue #1050: require an explicit identity check before handing the
+    // scanned wallet to the donate screen, and surface the hook's failure
+    // reason instead of navigating silently when the prompt is cancelled.
+    const auth = await bio.authenticate('Confirm your identity to continue to donate');
+    if (!auth.success) {
+      setError(auth.error || 'Authentication failed. Scan again to retry.');
+      setTimeout(() => {
+        setError(null);
+        cooldown.current = false;
+      }, 3000);
       return;
     }
 
