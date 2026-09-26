@@ -321,3 +321,15 @@ SELECT
   (SELECT COUNT(*)::int FROM donations) AS total_donations
 FROM projects;
 CREATE UNIQUE INDEX IF NOT EXISTS global_stats_mv_id_uidx ON global_stats_mv (id);
+
+-- dead_letter: failed background jobs that have exhausted all retries
+CREATE TABLE IF NOT EXISTS dead_letter (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  queue_name TEXT NOT NULL,
+  job_id TEXT,
+  payload JSONB,
+  error TEXT,
+  failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_queue_name ON dead_letter (queue_name);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_failed_at ON dead_letter (failed_at DESC);
