@@ -36,13 +36,13 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 -- signed POSTs when donation milestones are reached.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret_rotated_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret_expires_at TIMESTAMPTZ;
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS image_url TEXT;
 
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
-
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
 
 -- donations: immutable donation ledger. Each row is a single
 -- contribution from donor_address to a project. transaction_hash must be

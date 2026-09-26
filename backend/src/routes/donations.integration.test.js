@@ -81,6 +81,8 @@ describe("Donation flow integration (testcontainers)", () => {
       delete require.cache[require.resolve("../db/pool")];
       delete require.cache[require.resolve("./donations")];
       delete require.cache[require.resolve("../services/store")];
+      delete require.cache[require.resolve("../services/profileQueue")];
+      delete require.cache[require.resolve("../services/webhook")];
 
       // Require after env is set
       pool = require("../db/pool");
