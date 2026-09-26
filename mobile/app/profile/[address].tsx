@@ -1,12 +1,23 @@
 /**
  * app/profile/[address].tsx
- * Donor profile screen — shows stats, badge tier, and donation history
- * for any Stellar address.
+ * Donor profile screen — shows stats, badge tier, donation history,
+ * and avatar upload with client-side image compression.
  */
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  ActivityIndicator,
+  TouchableOpacity,
+  Image,
+  Alert,
+} from 'react-native';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
+import { processAvatarImage, uploadAvatar } from '../../utils/avatar';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -15,9 +26,10 @@ interface Badge {
   earnedAt: string;
 }
 
-interface DonorProfile {
+export interface DonorProfile {
   publicKey: string;
   displayName?: string;
+  avatarUrl?: string | null;
   totalDonatedXLM: string;
   projectsSupported: number;
   badges: Badge[];
@@ -49,12 +61,19 @@ function BadgePill({ tier }: { tier: Badge['tier'] }) {
   );
 }
 
-export default function ProfileScreen() {
-  const { address } = useLocalSearchParams<{ address: string }>();
+export default function ProfileScreen({ address: propAddress }: { address?: string } = {}) {
+  const routeParams = useLocalSearchParams<{ address?: string }>();
+  const address = propAddress || routeParams.address;
+
   const [profile, setProfile] = useState<DonorProfile | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Avatar upload state
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!address) return;
@@ -76,9 +95,69 @@ export default function ProfileScreen() {
     }
   };
 
+  const handlePickAndUploadAvatar = async () => {
+    if (!address || isUploading) return;
+
+    try {
+      setUploadError(null);
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        Alert.alert('Permission Denied', 'Permission to access gallery is required to upload an avatar.');
+        return;
+      }
+
+      const pickerResult = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      if (pickerResult.canceled || !pickerResult.assets || pickerResult.assets.length === 0) {
+        return;
+      }
+
+      const asset = pickerResult.assets[0];
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      // Compress and resize image to max 512x512 with JPEG 0.7 quality
+      const processed = await processAvatarImage(asset.uri, {
+        width: asset.width,
+        height: asset.height,
+      });
+
+      // Upload the compressed image with progress reporting
+      const avatarUrl = await uploadAvatar(
+        processed.uri,
+        (progress) => setUploadProgress(progress),
+        API_URL
+      );
+
+      // Save avatarUrl to profile on backend
+      try {
+        await axios.patch(`${API_URL}/api/profiles/${address}`, { avatarUrl });
+      } catch {
+        await axios.post(`${API_URL}/api/profiles`, {
+          publicKey: address,
+          avatarUrl,
+        });
+      }
+
+      // Update state
+      setProfile((prev) => (prev ? { ...prev, avatarUrl } : null));
+    } catch (err: any) {
+      setUploadError(err.message || 'Failed to upload avatar');
+      Alert.alert('Upload Failed', err.message || 'Unable to upload avatar. Please try again.');
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(0);
+    }
+  };
+
   if (loading) {
     return (
-      <View style={styles.centered}>
+      <View style={styles.centered} testID="profile-loading">
         <ActivityIndicator size="large" color="#227239" />
       </View>
     );
@@ -97,11 +176,58 @@ export default function ProfileScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
-        {topBadge && (
-          <Text style={styles.headerBadgeIcon}>
-            {BADGE_CONFIG[topBadge.tier]?.icon ?? '🌱'}
-          </Text>
+        {/* Avatar Container with Upload trigger */}
+        <View style={styles.avatarWrapper}>
+          <TouchableOpacity
+            style={styles.avatarButton}
+            onPress={handlePickAndUploadAvatar}
+            disabled={isUploading}
+            accessibilityLabel="Upload profile avatar"
+            accessibilityRole="button"
+            testID="avatar-upload-button"
+          >
+            {profile?.avatarUrl ? (
+              <Image
+                source={{ uri: profile.avatarUrl }}
+                style={styles.avatarImage}
+                testID="profile-avatar-image"
+              />
+            ) : topBadge ? (
+              <Text style={styles.headerBadgeIcon}>
+                {BADGE_CONFIG[topBadge.tier]?.icon ?? '🌱'}
+              </Text>
+            ) : (
+              <Text style={styles.headerBadgeIcon}>👤</Text>
+            )}
+
+            <View style={styles.avatarEditBadge}>
+              <Text style={styles.avatarEditIcon}>📷</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Progress Bar during Upload */}
+        {isUploading && (
+          <View style={styles.progressContainer} testID="avatar-upload-progress">
+            <Text style={styles.progressText}>
+              Uploading avatar... {Math.round(uploadProgress * 100)}%
+            </Text>
+            <View style={styles.progressBarBackground}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${Math.max(5, Math.round(uploadProgress * 100))}%` },
+                ]}
+                testID="upload-progress-fill"
+              />
+            </View>
+          </View>
         )}
+
+        {uploadError && (
+          <Text style={styles.uploadErrorText}>{uploadError}</Text>
+        )}
+
         <Text style={styles.displayName}>
           {profile?.displayName ?? 'Anonymous Donor'}
         </Text>
@@ -196,9 +322,72 @@ const styles = StyleSheet.create({
     padding: 24,
     alignItems: 'center',
   },
+  avatarWrapper: {
+    marginBottom: 12,
+    position: 'relative',
+  },
+  avatarButton: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#a5d6a7',
+    overflow: 'visible',
+  },
+  avatarImage: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#2e7d32',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  avatarEditIcon: {
+    fontSize: 13,
+  },
   headerBadgeIcon: {
-    fontSize: 48,
-    marginBottom: 8,
+    fontSize: 44,
+  },
+  progressContainer: {
+    width: '80%',
+    marginVertical: 10,
+    alignItems: 'center',
+  },
+  progressText: {
+    color: '#c8e6c9',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  progressBarBackground: {
+    width: '100%',
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#81c784',
+    borderRadius: 4,
+  },
+  uploadErrorText: {
+    color: '#ffcdd2',
+    fontSize: 12,
+    marginTop: 4,
   },
   displayName: {
     fontSize: 22,
@@ -317,3 +506,4 @@ const styles = StyleSheet.create({
     color: '#227239',
   },
 });
+

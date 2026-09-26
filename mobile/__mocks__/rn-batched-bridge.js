@@ -51,7 +51,8 @@ const mockNativeModules = subModuleProxy({
   NativeUnimoduleProxy: subModuleProxy(viewManagerTarget),
 });
 
-module.exports = {
-  __esModule: true,
-  default: mockNativeModules,
-};
+mockNativeModules.__esModule = true;
+mockNativeModules.default = mockNativeModules;
+
+module.exports = mockNativeModules;
+
