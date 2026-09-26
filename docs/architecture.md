@@ -90,3 +90,4 @@ The leaderboard and donation feed create social accountability — donors can se
 | Project wallet spoofing | Admin must register projects on-chain via Soroban |
 | Sybil donors | On-chain stats cannot be faked — all linked to real wallet |
 | Backend downtime | Donations still work — backend is not on the critical path |
+| Reentrancy in cross-contract calls | Guarded by an `is_processing` flag in temporary storage. While Soroban's single-threaded nature reduces risk, malicious tokens/oracles could still re-enter `donate()`. Explicit guards prevent this. |
