@@ -25,9 +25,19 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype,
+    contract, contractclient, contracterror, contractimpl, contracttype,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
+
+// ─── Errors ───────────────────────────────────────────────────────────────────
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    InvalidCo2Rate = 1,
+}
+
 
 // ─── Oracle interface ─────────────────────────────────────────────────────────
 
@@ -254,6 +264,11 @@ const MAX_VOTING_WINDOW_LEDGERS: u32 = 518_400; // 30 days @ 5s/ledger
 // Upper bound on co2_per_xlm at registration — prevents donate-time CO₂ overflow
 // panics and misleading impact figures from misconfigured projects.
 const MAX_CO2_PER_XLM: u32 = 100_000;
+
+// Bounds on CO₂ rate validation (kg CO₂ per XLM)
+pub const MIN_CO2_RATE: u64 = 1;
+pub const MAX_CO2_RATE: u64 = 1_000_000;
+
 
 fn calculate_badge(total_stroops: i128) -> BadgeTier {
     let xlm = total_stroops / STROOP;
@@ -495,6 +510,58 @@ impl GreenPayContract {
         project.active = false;
         env.storage().instance().set(&DataKey::Project(project_id), &project);
     }
+
+    /// Set the CO2 offset rate for a project (in kg CO₂ per XLM).
+    /// Enforces: 1 <= rate <= 1_000_000.
+    pub fn set_co2_rate(
+        env: Env,
+        admin: Address,
+        project_id: String,
+        rate: u64,
+    ) -> Result<(), ContractError> {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can update CO2 rate");
+        }
+
+        if rate < MIN_CO2_RATE || rate > MAX_CO2_RATE {
+            return Err(ContractError::InvalidCo2Rate);
+        }
+
+        let mut project: Project = env
+            .storage()
+            .instance()
+            .get(&DataKey::Project(project_id.clone()))
+            .expect("Project not found");
+
+        project.co2_per_xlm = rate as u32;
+        env.storage()
+            .instance()
+            .set(&DataKey::Project(project_id.clone()), &project);
+
+        env.events().publish(
+            (Symbol::new(&env, "co2_rate_updated"), admin),
+            (project_id, rate),
+        );
+
+        Ok(())
+    }
+
+    /// Retrieve the CO2 offset rate for a project.
+    pub fn get_co2_rate(env: Env, project_id: String) -> u64 {
+        let project: Project = env
+            .storage()
+            .instance()
+            .get(&DataKey::Project(project_id))
+            .expect("Project not found");
+        project.co2_per_xlm as u64
+    }
+
 
     // ─── Project Metadata ───────────────────────────────────────────────────
 
@@ -2528,6 +2595,43 @@ mod tests {
         let projects = Vec::from_array(&env, [project]);
         client.batch_register_projects(&admin, &projects);
     }
+
+    #[test]
+    fn test_set_co2_rate_validation() {
+        let (_env, _cid, client, admin, pid) = setup();
+
+        // rate = 0 -> error (ContractError::InvalidCo2Rate)
+        let err_zero = client.try_set_co2_rate(&admin, &pid, &0);
+        assert_eq!(err_zero, Err(Ok(ContractError::InvalidCo2Rate)));
+
+        // rate = u64::MAX -> error (ContractError::InvalidCo2Rate)
+        let err_max = client.try_set_co2_rate(&admin, &pid, &u64::MAX);
+        assert_eq!(err_max, Err(Ok(ContractError::InvalidCo2Rate)));
+
+        // rate = 1_000_001 (above MAX_CO2_RATE) -> error
+        let err_above = client.try_set_co2_rate(&admin, &pid, &1_000_001);
+        assert_eq!(err_above, Err(Ok(ContractError::InvalidCo2Rate)));
+
+        // valid rate -> stored
+        let valid_rate = 500u64;
+        let res = client.try_set_co2_rate(&admin, &pid, &valid_rate);
+        assert!(res.is_ok());
+
+        let project = client.get_project(&pid);
+        assert_eq!(project.co2_per_xlm, 500);
+        assert_eq!(client.get_co2_rate(&pid), 500);
+
+        // boundary rate: 1 (min) -> stored
+        assert!(client.try_set_co2_rate(&admin, &pid, &1).is_ok());
+        assert_eq!(client.get_project(&pid).co2_per_xlm, 1);
+        assert_eq!(client.get_co2_rate(&pid), 1);
+
+        // boundary rate: 1_000_000 (max) -> stored
+        assert!(client.try_set_co2_rate(&admin, &pid, &1_000_000).is_ok());
+        assert_eq!(client.get_project(&pid).co2_per_xlm, 1_000_000);
+        assert_eq!(client.get_co2_rate(&pid), 1_000_000);
+    }
+
 
     #[test]
     fn test_deactivate_all_projects() {
