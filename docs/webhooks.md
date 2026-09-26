@@ -59,7 +59,7 @@ GreenPay signs the **exact raw HTTP body** (the JSON string that was sent) with 
 3. Encode the digest as **lowercase hex** (no `sha256=` prefix).
 4. Compare it to `X-Webhook-Signature` using a **timing-safe** equality check.
 
-If the signatures do not match, reject the request (e.g. HTTP `401`).
+If `X-Webhook-Signature` is missing, reject the request with HTTP `400`. If it is present but does not match, reject the request with HTTP `401`.
 
 ### Node.js
 

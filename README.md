@@ -16,6 +16,7 @@ Stellar GreenPay is an open-source climate donation platform where donors give X
 - 🔗 **Wallet Connect** — Freighter browser wallet integration
 - 🌍 **Browse Projects** — Verified climate projects with impact metrics
 - 💚 **Donate XLM** — Direct on-chain donations to project wallets
+- 🌉 **Bridge USDC** — Move USDC from Ethereum/Polygon to Stellar via Circle CCTP, no custody ([docs](docs/bridge.md))
 - 📊 **Impact Tracking** — Soroban contract tracks every donation and CO₂ offset
 - 🏆 **Leaderboard** — Top donors ranked by total XLM given
 - 💬 **Project Updates** — Organisations post progress updates to donors
@@ -158,5 +159,4 @@ See [ROADMAP.md](ROADMAP.md) for planned features.
 
 ## 📄 License
 
-MIT — see [LICENSE](LICENSE) 
-fixed
+MIT — see [LICENSE](LICENSE)

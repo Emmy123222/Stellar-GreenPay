@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native-community/netinfo": "^12.0.1",
     "@react-navigation/native": "^6.1.9",
     "@react-navigation/native-stack": "^6.9.17",
     "@stellar/stellar-sdk": "^12.0.0",
@@ -24,6 +25,7 @@
     "expo-status-bar": "~1.12.0",
     "react": "18.2.0",
     "react-native": "0.74.1",
+    "react-native-maps": "1.14.0",
     "react-native-safe-area-context": "4.10.1",
     "react-native-screens": "3.31.1",
     "react-native-view-shot": "^3.8.0"
@@ -37,7 +39,8 @@
     "jest-expo": "~51.0.0",
     "normalize-path": "^3.0.0",
     "react-test-renderer": "18.2.0",
-    "to-regex-range": "^5.0.1"
+    "to-regex-range": "^5.0.1",
+    "typescript": "^5.9.3"
   },
   "jest": {
     "preset": "jest-expo",
@@ -52,6 +55,7 @@
       "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
       "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
       "^expo-modules-core(.*)$": "<rootDir>/__mocks__/expo-modules-core.js",
+      "^react-native-maps$": "<rootDir>/__mocks__/react-native-maps.js",
       "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>/__mocks__/rn-batched-bridge.js",
       "^test-renderer$": "<rootDir>/__mocks__/test-renderer.js"
     },
