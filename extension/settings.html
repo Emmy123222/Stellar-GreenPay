@@ -67,6 +67,24 @@
         </div>
 
         <div class="settings-field">
+          <label class="settings-label" for="new-allowlist-item">Allowed Sites (Allowlist)</label>
+          <p class="settings-hint">Websites where the GreenPay donation widget is enabled.</p>
+          <div class="allowlist-input-group">
+            <input
+              type="text"
+              id="new-allowlist-item"
+              class="settings-input"
+              placeholder="e.g. greenpay.io/* or example.com/*"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" id="add-allowlist-btn" class="btn glow-btn">Add</button>
+          </div>
+          <span id="allowlist-error" class="settings-error hidden">Please enter a valid site pattern.</span>
+          <ul id="allowlist-items" class="allowlist-items-list"></ul>
+        </div>
+
+        <div class="settings-field">
           <label class="settings-label">Connected Wallet</label>
           <p class="settings-hint">Your Freighter wallet connection status.</p>
           <div class="wallet-status-settings">
