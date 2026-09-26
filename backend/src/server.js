@@ -21,6 +21,7 @@ const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
+const { metricsHandler, countRequest, startQueueRefresh } = require("./services/metrics");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
 
@@ -47,6 +48,18 @@ if (process.env.NODE_ENV !== "production") {
   }
 }
 
+app.use((req, res, next) => {
+  const originalEnd = res.end.bind(res);
+  res.end = function promCountEnd(chunk, encoding, cb) {
+    if (!res.__metricsCounted) {
+      res.__metricsCounted = true;
+      countRequest(req, res);
+    }
+    return originalEnd(chunk, encoding, cb);
+  };
+  next();
+});
+
 app.use(helmet());
 app.use((req, res, next) => {
   res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
@@ -72,6 +85,7 @@ app.use((req, res, next) => {
     req.path === "/health" ||
     req.path === "/api/health" ||
     req.path === "/api/v1/health" ||
+    req.path === "/metrics" ||
     req.path === "/api/readiness"
   ) {
     return next();
@@ -81,6 +95,7 @@ app.use((req, res, next) => {
 
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
+app.get("/metrics", metricsHandler);
 app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/v1/health", healthRouter);
@@ -122,7 +137,12 @@ app.use(sentryErrorMiddleware());
 app.use((err, req, res, next) => {
   void next;
   console.error("[Error]", err.message);
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+  const status = err.status || 500;
+  if (!res.__metricsCounted) {
+    res.__metricsCounted = true;
+    countRequest(req, { ...res, statusCode: status });
+  }
+  res.status(status).json({ error: err.message || "Internal server error" });
 });
 
 async function startServer() {
@@ -145,6 +165,8 @@ async function startServer() {
   await startTokenCleanupQueue();
 
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
+
+  startQueueRefresh();
 
   server.listen(PORT, () => {
     logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);
