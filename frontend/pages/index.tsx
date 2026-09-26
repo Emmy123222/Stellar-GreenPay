@@ -12,7 +12,7 @@ import {
   fetchCategoryStats,
 } from "@/lib/api";
 import { formatCO2, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
-import { formatDistanceToNowStrict } from "date-fns";
+
 import type { GlobalStats, CategoryStats } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
 
