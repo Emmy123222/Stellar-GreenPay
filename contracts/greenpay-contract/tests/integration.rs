@@ -44,7 +44,7 @@ use greenpay_contract::{
 // contracts.yml), so the file exists by the time this crate is compiled.
 // include_bytes! embeds the bytes at compile time from the release artifact.
 const WASM: &[u8] = include_bytes!(
-    "../target/wasm32v1-none/release/greenpay_contract.wasm"
+    "../../target/wasm32v1-none/release/greenpay_contract.wasm"
 );
 
 // ─── Constants mirrored from lib.rs ──────────────────────────────────────────
