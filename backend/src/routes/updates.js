@@ -2,6 +2,17 @@
  * src/routes/updates.js
  * GET  /api/updates/:projectId        — list updates for a project (cursor pagination)
  * POST /api/updates                   — create update + notify subscribers (admin)
+ *
+ * SECURITY (issue #1101): POST /api/updates scans `image_url` with AWS
+ * Rekognition via src/services/moderation.js before the update row is created.
+ *   - rejected image (Explicit Nudity / Violence above the configured
+ *     confidence, default 70%)          → 422 { error, code: "image_rejected" }
+ *     and NO update row is inserted.
+ *   - other unsafe labels above the review threshold (default 50%)
+ *     → published, but recorded in `update_images` with flagged_for_review =
+ *       true and echoed as data.moderation so an admin can review it.
+ *   - scanner unavailable               → 503 by default (fail-closed); see
+ *     IMAGE_MODERATION_FAIL_MODE in .env.example to opt into fail-open.
  */
 "use strict";
 const express = require("express");
@@ -11,6 +22,7 @@ const pool = require("../db/pool");
 const { mapProjectUpdateRow, mapProjectRow } = require("../services/store");
 const { sendUpdateNotifications } = require("../services/email");
 const { sendUpdatePushNotifications } = require("../services/push");
+const moderation = require("../services/moderation");
 
 const { adminRequired } = require("../middleware/auth");
 
@@ -118,9 +130,45 @@ router.post("/", adminRequired, async (req, res, next) => {
       return res.status(404).json({ error: "Project not found" });
     const project = mapProjectRow(projResult.rows[0]);
 
-    // Insert update
     const id = uuidv4();
     const imageUrlValue = (image_url && image_url.trim()) ? image_url.trim() : null;
+
+    // ── Issue #1101 — moderate the update image BEFORE anything is persisted ─
+    // This is the enforcement point for images uploaded straight to S3 with a
+    // presigned URL (POST /api/uploads/presign never sees the bytes). A verdict
+    // recorded at upload time is reused instead of paying for a second scan.
+    // moderateImage() never throws: a broken scanner becomes an `unavailable`
+    // verdict handled by the configured fail mode (fail-closed by default).
+    let verdict = null;
+    if (imageUrlValue) {
+      verdict = await moderation.moderateImage({
+        imageUrl: imageUrlValue,
+        storageBackend: "s3",
+      });
+
+      if (verdict.status === moderation.OUTCOME.UNAVAILABLE && verdict.blocked) {
+        return res.status(503).json({
+          error: verdict.reason,
+          code: "image_moderation_unavailable",
+        });
+      }
+
+      if (verdict.blocked) {
+        // 422 (Unprocessable Content) rather than 403: the admin is authorised
+        // and the payload is well-formed — it is the image's *content* that is
+        // unacceptable. The update is NOT created, so the rejected image never
+        // becomes publicly reachable through /api/updates.
+        if (verdict.newDecision) {
+          await moderation.recordModerationDecision({ ...verdict, projectId });
+        }
+        return res.status(422).json({
+          error: verdict.reason || "The image failed content moderation.",
+          code: "image_rejected",
+        });
+      }
+    }
+
+    // Insert update — only reached once the image (if any) has cleared moderation
     const insertResult = await pool.query(
       `INSERT INTO project_updates (id, project_id, title, body, image_url)
        VALUES ($1, $2, $3, $4, $5)
@@ -128,6 +176,18 @@ router.post("/", adminRequired, async (req, res, next) => {
       [id, projectId, title.trim(), body.trim(), imageUrlValue],
     );
     const update = mapProjectUpdateRow(insertResult.rows[0]);
+
+    // Audit trail (issue #1101): link the decision that just cleared this
+    // update to it, or log a fresh one now that an update_id exists.
+    if (verdict && verdict.decisionId) {
+      await moderation.attachDecisionToUpdateImage({
+        decisionId: verdict.decisionId,
+        updateId: id,
+        projectId,
+      });
+    } else if (verdict && verdict.newDecision) {
+      await moderation.recordModerationDecision({ ...verdict, updateId: id, projectId });
+    }
 
     // Fetch subscriber emails and send notifications (non-blocking)
     pool
@@ -153,7 +213,15 @@ router.post("/", adminRequired, async (req, res, next) => {
       );
     });
 
-    res.status(201).json({ success: true, data: update });
+    res.status(201).json({
+      success: true,
+      // Flagged images stay visible to the caller (and the admin queue) so a
+      // pending review can be surfaced in the UI instead of silently published.
+      data:
+        verdict && verdict.flaggedForReview
+          ? { ...update, moderation: moderation.moderationSummary(verdict) }
+          : update,
+    });
   } catch (e) {
     next(e);
   }
