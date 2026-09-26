@@ -24,7 +24,11 @@ mod fuzz {
     /// Chosen so that a single donation is large but a few thousand back-to-back
     /// still fit in an i128 without overflowing.
     const MAX_DONATION: i128 = 1_000_000_000 * 10_000_000; // 10^16
+
+    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
     const FUZZ_STROOP: i128 = 10_000_000;
+
+    /// Fixed donation-message hash used for USDC fuzz donations.
     const MSG_HASH: u32 = 42;
 
     fn test_env() -> Env {
@@ -68,17 +72,9 @@ mod fuzz {
         token_client.mint(donor, &amount);
     }
 
-
-    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
-    const FUZZ_STROOP: i128 = 10_000_000;
-
-    /// Fixed donation-message hash used for USDC fuzz donations.
-    const MSG_HASH: u32 = 42;
-
     /// Mint `amount` of a USDC-like stellar asset to `donor`.
     fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
-        let token_client = StellarAssetClient::new(env, token);
-        token_client.mint(donor, amount);
+        StellarAssetClient::new(env, token).mint(donor, amount);
     }
 
     /// Build an env with the GreenPay contract initialised, one project
@@ -87,9 +83,6 @@ mod fuzz {
     /// When `co2_per_xlm` exceeds the registration-time MAX_CO2_PER_XLM bound
     /// (e.g. `u32::MAX`), it is patched directly into storage so the overflow
     /// guards inside `donate_usdc` can be exercised.
-    fn setup_usdc(co2_per_xlm: u32) -> (Env, GreenPayContractClient<'static>, SorobanString, Address) {
-        let env = Env::default();
-
     fn setup_usdc(
         co2_per_xlm: u32,
     ) -> (
@@ -99,7 +92,6 @@ mod fuzz {
         Address,
     ) {
         let env = test_env();
-
         env.mock_all_auths();
 
         let contract_id = env.register_contract(None, GreenPayContract);
@@ -115,23 +107,8 @@ mod fuzz {
             &project_id,
             &SorobanString::from_str(&env, "USDC Fuzz Project"),
             &wallet,
-
-            &100u32,
-        );
-
-        if co2_per_xlm != 100u32 {
-            env.as_contract(&contract_id, || {
-                let mut project: Project = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::Project(project_id.clone()))
-                    .expect("project should exist");
-                project.co2_per_xlm = co2_per_xlm;
-                env.storage()
-                    .instance()
-                    .set(&DataKey::Project(project_id.clone()), &project);
-
             &co2_per_xlm.min(100_000),
+            &1i128,
         );
 
         // Some overflow tests intentionally need a rate above the public
@@ -146,22 +123,17 @@ mod fuzz {
                     .expect("project should exist");
                 project.co2_per_xlm = co2_per_xlm;
                 env.storage().instance().set(&key, &project);
-
             });
         }
 
         let token_admin = Address::generate(&env);
-
         let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let oracle = env.register_contract(None, MockOracle);
+        client.set_usdc_token(&admin, &usdc_token);
 
-        client.set_usdc_token(&admin, &usdc_token, &oracle);
+        let oracle = env.register_contract(None, MockOracle);
+        client.set_oracle(&admin, &oracle);
 
         (env, client, project_id, usdc_token)
-    }
-
-    fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
-        StellarAssetClient::new(env, token).mint(donor, amount);
     }
 
     #[test]
@@ -289,7 +261,7 @@ mod fuzz {
 
         // ── USDC fuzz cases ────────────────────────────────────────────────────
 
-        /// USDC amount near i128::MAX triggers the `checked_mul(8)` overflow guard
+        /// USDC amount near i128::MAX triggers the `checked_mul(xlm_per_usdc)` overflow guard
         /// inside donate_usdc. Any value above i128::MAX / 8 must panic.
         #[test]
         fn prop_usdc_amount_near_max(usdc_amount in (i128::MAX / 8 + 1)..=i128::MAX) {
@@ -298,7 +270,7 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic when usdc_amount > i128::MAX / 8");
         }
@@ -312,7 +284,7 @@ mod fuzz {
             let wrong_token = Address::generate(&env);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&wrong_token, &donor, &project_id, &amount, &MSG_HASH);
+                client.donate_usdc(&wrong_token, &donor, &project_id, &amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on token mismatch");
         }
@@ -351,7 +323,7 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic when project is inactive");
         }
@@ -372,10 +344,11 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on CO2 overflow");
         }
+
         /// With a platform fee configured, the fee recipient receives exactly
         /// `amount * fee_bps / 10_000`, the project wallet the remainder, and
         /// all accounting counters stay gross regardless of the rate.
