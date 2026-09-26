@@ -7,7 +7,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.2.0"
+    "@stellar/stellar-sdk": "^17.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",
