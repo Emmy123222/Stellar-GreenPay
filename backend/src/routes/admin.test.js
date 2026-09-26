@@ -2,7 +2,7 @@
 const express = require("express");
 const request = require("supertest");
 const pool = require("../db/pool");
-const { signToken, adminRequired, adminKeyRequired } = require("../middleware/auth");
+const { signToken, signAdminToken, adminRequired, adminKeyRequired, adminTokenRequired } = require("../middleware/auth");
 
 jest.mock("../db/pool", () => ({
   query: jest.fn(),
@@ -46,13 +46,15 @@ describe("POST /api/admin/login", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns a token and refreshToken for valid credentials", async () => {
+  it("returns a token, adminToken, and refreshToken for valid credentials", async () => {
     const res = await request(app).post("/api/admin/login").send({ username: "admin", password: "testpass" });
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data.token).toBeDefined();
+    expect(res.body.data.adminToken).toBeDefined();
     expect(res.body.data.refreshToken).toBeDefined();
     expect(res.body.data.expiresIn).toBe(3600);
+    expect(res.body.data.adminTokenExpiresIn).toBe(900);
   });
 
   it("returns 503 when ADMIN_PASSWORD is not configured", async () => {
@@ -182,11 +184,25 @@ describe("adminRequired middleware", () => {
     app.get("/protected", adminRequired, (req, res) => res.json({ ok: true, user: req.admin }));
   });
 
-  it("allows requests with valid token", async () => {
+  it("allows requests with valid admin token", async () => {
     const token = signToken({ role: "admin", sub: "admin" }, "1h");
     const res = await request(app).get("/protected").set("Authorization", `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+  });
+
+  it("rejects requests with non-admin role token", async () => {
+    const token = signToken({ role: "user", sub: "user" }, "1h");
+    const res = await request(app).get("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Insufficient permissions: admin role required");
+  });
+
+  it("rejects requests with token missing role claim", async () => {
+    const token = signToken({ sub: "admin" }, "1h");
+    const res = await request(app).get("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe("Insufficient permissions: admin role required");
   });
 
   it("allows requests with valid X-Admin-Key", async () => {
@@ -234,5 +250,54 @@ describe("adminKeyRequired middleware", () => {
     const res = await request(app).post("/protected").set("X-Admin-Key", "new-key").send({});
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
+  });
+});
+
+describe("adminTokenRequired middleware", () => {
+  let app;
+
+  beforeEach(() => {
+    process.env.ADMIN_API_KEY = "test-admin-key";
+    app = express();
+    app.use(express.json());
+    app.post("/protected", adminTokenRequired, (req, res) => res.json({ ok: true, user: req.admin }));
+  });
+
+  it("allows requests with valid admin token", async () => {
+    const adminToken = signAdminToken({ role: "admin", sub: "admin", type: "admin" });
+    const res = await request(app).post("/protected").set("Authorization", `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  it("rejects requests with standard admin token (missing type: admin)", async () => {
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const res = await request(app).post("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Invalid or expired admin token");
+  });
+
+  it("rejects requests with non-admin role token", async () => {
+    const token = signToken({ role: "user", sub: "user" }, "1h");
+    const res = await request(app).post("/protected").set("Authorization", `Bearer ${token}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Invalid or expired admin token");
+  });
+
+  it("rejects requests with expired admin token", async () => {
+    const expired = signAdminToken({ role: "admin", sub: "admin", type: "admin" });
+    // Manually create an expired token by setting the expiration in the past
+    const jwt = require("jsonwebtoken");
+    const expiredToken = jwt.sign({ role: "admin", sub: "admin", type: "admin" }, process.env.JWT_SECRET || "test-secret-for-jest", { expiresIn: -1 });
+    const res = await request(app).post("/protected").set("Authorization", `Bearer ${expiredToken}`);
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Admin token expired");
+  });
+
+  it("allows requests with valid X-Admin-Key", async () => {
+    const res = await request(app).post("/protected").set("X-Admin-Key", "test-admin-key");
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.user.authMethod).toBe("x-admin-key");
   });
 });
