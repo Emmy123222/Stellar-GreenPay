@@ -12,7 +12,7 @@ const { mapProjectUpdateRow, mapProjectRow } = require("../services/store");
 const { sendUpdateNotifications } = require("../services/email");
 const { sendUpdatePushNotifications } = require("../services/push");
 
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 
 // GET /api/updates/:projectId
 // Cursor pagination by (created_at, id) to support infinite scroll.
@@ -81,7 +81,7 @@ router.get("/:projectId", async (req, res, next) => {
 });
 
 // POST /api/updates  (admin only)
-router.post("/", adminRequired, async (req, res, next) => {
+router.post("/", adminTokenRequired, async (req, res, next) => {
   try {
     const { projectId, title, body, image_url } = req.body;
 

@@ -2,13 +2,14 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
-const { signToken, adminRequired } = require("../middleware/auth");
+const { signToken, signAdminToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
 
 const loginLimiter = createRateLimiter(10, 15, "admin-login");
 
 const TOKEN_EXPIRY = "1h";
+const ADMIN_TOKEN_EXPIRY = "15m";
 const REFRESH_EXPIRY = "24h";
 
 /**
@@ -34,8 +35,9 @@ router.post("/login", loginLimiter, (req, res) => {
   }
 
   const token = signToken({ role: "admin", sub: username }, TOKEN_EXPIRY);
+  const adminToken = signAdminToken({ role: "admin", sub: username, type: "admin" });
   const refreshToken = signToken({ role: "admin", sub: username, type: "refresh" }, REFRESH_EXPIRY);
-  return res.json({ success: true, data: { token, refreshToken, expiresIn: 3600 } });
+  return res.json({ success: true, data: { token, adminToken, refreshToken, expiresIn: 3600, adminTokenExpiresIn: 900 } });
 });
 
 /**
