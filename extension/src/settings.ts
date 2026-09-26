@@ -10,22 +10,99 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   defaultDonationAmount: '5',
 };
 
-export function loadSettings(): Promise<ExtensionSettings> {
+export const SETTINGS_KEYS: (keyof ExtensionSettings)[] = [
+  'backendUrl',
+  'network',
+  'defaultDonationAmount',
+];
+
+/**
+ * Returns true when a `chrome.runtime.lastError` message indicates that the
+ * `chrome.storage.sync` quota has been exceeded (per-item bytes, total bytes,
+ * or write-operation rate limits).
+ */
+export function isQuotaExceededError(message?: string): boolean {
+  if (!message) return false;
+  return /quota|MAX_WRITE_OPERATIONS|MAX_SUSTAINED_WRITE_OPERATIONS/i.test(message);
+}
+
+function readSettingsFromLocal(): Promise<ExtensionSettings> {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(DEFAULT_SETTINGS as unknown as Record<string, unknown>, (items: Record<string, unknown>) => {
-      resolve(items as unknown as ExtensionSettings);
-    });
+    chrome.storage.local.get(
+      DEFAULT_SETTINGS as unknown as Record<string, unknown>,
+      (items: Record<string, unknown>) => {
+        resolve(items as unknown as ExtensionSettings);
+      },
+    );
   });
 }
 
+/**
+ * Reads settings from `chrome.storage.sync` so they follow the user across
+ * signed-in Chrome profiles. If the sync area cannot be read, or if a previous
+ * save fell back to local storage because the sync quota was exceeded, the
+ * local copy is used instead.
+ */
+export function loadSettings(): Promise<ExtensionSettings> {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(
+      DEFAULT_SETTINGS as unknown as Record<string, unknown>,
+      (items: Record<string, unknown>) => {
+        const syncError = chrome.runtime.lastError;
+        if (syncError) {
+          console.warn(
+            `[GreenPay] chrome.storage.sync read failed (${syncError.message}); falling back to local storage.`,
+          );
+          void readSettingsFromLocal().then(resolve);
+          return;
+        }
+
+        // A successful sync write clears the local fallback, so any keys still
+        // present locally are the result of a sync write that hit quota. Prefer
+        // those values so the newest settings win.
+        chrome.storage.local.get(SETTINGS_KEYS, (localItems: Record<string, unknown>) => {
+          resolve({
+            ...(items as unknown as ExtensionSettings),
+            ...(localItems as Partial<ExtensionSettings>),
+          });
+        });
+      },
+    );
+  });
+}
+
+/**
+ * Persists settings to `chrome.storage.sync`. When the sync quota is exceeded
+ * the write falls back to `chrome.storage.local` (with a console warning) so
+ * the user's settings are still saved — they just won't sync across profiles.
+ */
 export function saveSettings(settings: ExtensionSettings): Promise<void> {
   return new Promise((resolve, reject) => {
     chrome.storage.sync.set(settings, () => {
-      if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
-      } else {
-        resolve();
+      const syncError = chrome.runtime.lastError;
+      if (!syncError) {
+        // Sync succeeded — drop any stale local fallback so it can't shadow the
+        // freshly synced values on the next load.
+        chrome.storage.local.remove(SETTINGS_KEYS, () => resolve());
+        return;
       }
+
+      if (isQuotaExceededError(syncError.message)) {
+        console.warn(
+          `[GreenPay] chrome.storage.sync quota exceeded (${syncError.message}); falling back to local storage. Settings will not sync across profiles until the quota frees up.`,
+        );
+        chrome.storage.local.set(settings, () => {
+          const localError = chrome.runtime.lastError;
+          if (localError) {
+            reject(new Error(localError.message));
+          } else {
+            resolve();
+          }
+        });
+        return;
+      }
+
+      reject(new Error(syncError.message));
     });
   });
 }
