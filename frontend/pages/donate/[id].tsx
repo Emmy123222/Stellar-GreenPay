@@ -456,6 +456,8 @@ const DonatePage: NextPage<DonatePageProps> = ({ project: initialProject, preset
               ref={qrRef}
               stellarUri={stellarUri}
               projectName={project.name}
+              projectId={project.id}
+              showActions={false}
               size={256}
             />
           </div>
