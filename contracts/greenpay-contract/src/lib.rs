@@ -488,7 +488,12 @@ impl GreenPayContract {
         project.active = false;
         env.storage()
             .instance()
-            .set(&DataKey::Project(project_id), &project);
+            .set(&DataKey::Project(project_id.clone()), &project);
+
+        env.events().publish(
+            (Symbol::new(&env, "ProjectDeactivated"), admin),
+            project_id,
+        );
     }
 
     pub fn pause_project(env: Env, admin: Address, project_id: String) {
@@ -2679,6 +2684,17 @@ mod tests {
 
         assert!(!client.get_project(&pid1).active);
         assert!(!client.get_project(&pid2).active);
+    }
+
+    #[test]
+    fn test_deactivate_project_emits_event() {
+        let (env, _cid, client, admin, pid) = setup();
+        assert!(client.get_project(&pid).active);
+
+        client.deactivate_project(&admin, &pid);
+        assert!(env.events().all().events().len() > 0);
+
+        assert!(!client.get_project(&pid).active);
     }
 
     /// Test that voting is rejected after the deadline has passed (issue #209).

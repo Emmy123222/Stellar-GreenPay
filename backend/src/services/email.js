@@ -396,4 +396,83 @@ function buildStatusChangeText({ request, newStatus, adminUrl }) {
     .join("\n");
 }
 
-module.exports = { sendUpdateNotifications, sendAdminVerificationNotification, sendVerificationStatusNotification };
+/**
+ * Notify a donor that their recurring donation was cancelled because the project was deactivated.
+ *
+ * @param {object} opts
+ * @param {string} opts.email - Donor's email address.
+ * @param {string} opts.projectName - Name of the deactivated project.
+ * @param {string} [opts.donationId] - ID of the cancelled recurring donation.
+ * @returns {Promise<void>}
+ */
+async function sendRecurringDonationCancelledEmail({ email, projectName, donationId }) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn(
+        "[email] RESEND_API_KEY not set — skipping recurring donation cancellation notification",
+      );
+    }
+    return;
+  }
+  if (!email) return;
+
+  const safeProjectName = sanitizeHeader(projectName || "Project");
+  const subject = `Recurring Donation Cancelled: ${safeProjectName}`;
+  const donationRefHtml = donationId ? `<p style="margin:0 0 16px;font-size:13px;color:#888888;">Pledge ID: ${escHtml(donationId)}</p>` : "";
+  const donationRefText = donationId ? `\nPledge ID: ${donationId}\n` : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f7f0;font-family:sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+        <tr><td style="background:#c0392b;padding:24px 32px;">
+          <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">🌱 Recurring Donation Cancelled</p>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1a3a1a;">${escHtml(safeProjectName)}</h1>
+          ${donationRefHtml}
+          <p style="margin:0 0 16px;font-size:16px;color:#4a6a4a;line-height:1.6;">
+            Your recurring donation to <strong>${escHtml(safeProjectName)}</strong> has been cancelled because the project has been deactivated.
+          </p>
+          <p style="margin:0;font-size:14px;color:#666666;">
+            No further charges or automated donations will be attempted. If you have any questions, please contact our support team.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Recurring Donation Cancelled\n\nYour recurring donation to ${safeProjectName} has been cancelled because the project has been deactivated.${donationRefText}\n\nNo further charges or automated donations will be attempted.`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [email],
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error("[email] Resend error (recurring donation cancellation):", errBody);
+  }
+}
+
+module.exports = {
+  sendUpdateNotifications,
+  sendAdminVerificationNotification,
+  sendVerificationStatusNotification,
+  sendRecurringDonationCancelledEmail,
+};
