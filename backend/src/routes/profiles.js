@@ -9,7 +9,6 @@ const { mapProfileRow } = require("../services/store");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { z } = require("zod");
-const { enqueueAvatarProcessing } = require("../services/profileQueue");
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid public key"); e.status = 400; throw e; }
@@ -93,12 +92,6 @@ router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, re
       [publicKey, trimmedDisplayName, trimmedBio, normalizedAvatarUrl],
     );
 
-    if (normalizedAvatarUrl) {
-      enqueueAvatarProcessing(publicKey, normalizedAvatarUrl).catch((err) => {
-        console.error("[profiles] Failed to enqueue avatar processing:", err.message);
-      });
-    }
-
     res.json({ success: true, data: mapProfileRow(result.rows[0]) });
   } catch (e) { next(e); }
 });
@@ -114,7 +107,6 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
 
     const sets = [];
     const values = [];
-    let newAvatarUrl = null;
 
     if (req.body.displayName !== undefined) {
       values.push(req.body.displayName?.trim().slice(0, 30) || null);
@@ -128,7 +120,6 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
       const avatar = req.body.avatarUrl === "" || req.body.avatarUrl === null
         ? null
         : String(req.body.avatarUrl).trim();
-      newAvatarUrl = avatar;
       values.push(avatar);
       sets.push(`avatar_url = $${values.length}`);
     }
@@ -145,12 +136,6 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
       const e = new Error("Profile not found");
       e.status = 404;
       throw e;
-    }
-
-    if (newAvatarUrl) {
-      enqueueAvatarProcessing(req.params.publicKey, newAvatarUrl).catch((err) => {
-        console.error("[profiles] Failed to enqueue avatar processing:", err.message);
-      });
     }
 
     res.json({ success: true, data: mapProfileRow(result.rows[0]) });

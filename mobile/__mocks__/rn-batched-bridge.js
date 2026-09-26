@@ -2,15 +2,20 @@
  * __mocks__/rn-batched-bridge.js
  *
  * Drop-in replacement for `react-native/Libraries/BatchedBridge/NativeModules`
- * used by `jest-expo@57`'s preset setup. `jest-expo@57` was authored against
- * `@react-native/jest-preset@^0.85.0`+, where that file is published as an
- * ES module with a `.default` export. The Stellar-GreenPay mobile workspace
- * pins `react-native@0.74.1`, where the same path is plain CommonJS
- * (`module.exports = NativeModules`) and `require(...).default` is therefore
- * `undefined`. The first thing jest-expo's setup.js does with the result is
- * `Object.defineProperty(mockNativeModules, 'ImageLoader', ...)` which throws
- * "Object.defineProperty called on non-object" on the undefined value before
- * any test code ever runs.
+ * used by the `jest-expo` preset setup. The Stellar-GreenPay mobile workspace
+ * pins `react-native@0.74.1` + `jest-expo@51`, where that path is plain
+ * CommonJS (`module.exports = NativeModules`). `jest-expo/src/preset/setup.js`
+ * assigns the `require(...)` result straight to a local named
+ * `mockNativeModules` and then calls `Object.defineProperty(mockNativeModules, …)`
+ * on it, so the module has to export the mock object *itself* — not a
+ * `{ default }` wrapper. The previous revision exported `{ __esModule, default }`,
+ * which left `mockNativeModules` as that plain wrapper object: `UIManager` was
+ * never defined on it, so the `ViewManagerAdapter_*` loop at setup.js:120-127
+ * threw `Object.defineProperty called on non-object` and every mobile suite
+ * died before a single test ran.
+ *
+ * We still expose `__esModule` / `default` so the same file keeps working with
+ * `jest-expo@57`+, whose RN copy is a real ES module and reads `.default`.
  *
  * Register this stub via jest `moduleNameMapper` so jest-expo receives a
  * Proxy-backed `mockNativeModules` object that satisfies every defineProperty
@@ -51,7 +56,8 @@ const mockNativeModules = subModuleProxy({
   NativeUnimoduleProxy: subModuleProxy(viewManagerTarget),
 });
 
-module.exports = {
-  __esModule: true,
-  default: mockNativeModules,
-};
+// Export the proxy directly — see the header for why `module.exports` must BE
+// the mock object rather than a `{ default }` wrapper.
+module.exports = mockNativeModules;
+module.exports.__esModule = true;
+module.exports.default = mockNativeModules;
