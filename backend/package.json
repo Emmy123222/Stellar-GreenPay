@@ -26,7 +26,7 @@
     "cors": "^2.8.5",
     "csurf": "^1.11.0",
     "dotenv": "^17.4.2",
-    "expo-server-sdk": "^6.1.0",
+    "expo-server-sdk": "^7.2.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "file-type": "^16.5.4",
