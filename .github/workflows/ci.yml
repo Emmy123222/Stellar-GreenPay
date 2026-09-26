@@ -13,6 +13,14 @@ on:
 # ──────────────────────────────────────────────────────────────────────────────
 
 jobs:
+  docs:
+    name: Documentation invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the canonical OpenAPI specification
+        run: test -f docs/api/openapi.yaml && ! test -f docs/openapi.yml
+
   frontend:
     name: Frontend (Next.js)
     runs-on: ubuntu-latest
