@@ -231,6 +231,8 @@ pub enum DataKey {
     // Contract-wide emergency pause status
     Paused,
     PendingAdmin,
+    // Configurable staleness bound for oracle price quotes (issue #1146)
+    MaxPriceAgeSecs,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -240,6 +242,11 @@ const STROOP: i128 = 10_000_000;
 const USDC_SCALE: i128 = 1_000_000;
 /// Reject quotes older than three oracle update intervals.
 const ORACLE_MAX_AGE_MULTIPLIER: u64 = 3;
+/// Default ceiling on oracle price age, in seconds, used unless the admin
+/// has configured a different value via `set_max_price_age`. A stale price
+/// (older than this, or than `ORACLE_MAX_AGE_MULTIPLIER` update intervals,
+/// whichever is stricter) is rejected in `donate_usdc`.
+const DEFAULT_MAX_PRICE_AGE_SECS: u64 = 3600;
 
 // 7 days × 24 h × 3600 s ÷ 5 s per ledger ≈ 120_960 ledgers — used as the
 // default when `create_proposal` is called without an explicit duration.
@@ -1399,11 +1406,16 @@ impl GreenPayContract {
             panic!("Oracle returned invalid resolution");
         }
         let now = env.ledger().timestamp();
-        let max_age = u64::from(resolution)
+        let resolution_max_age = u64::from(resolution)
             .checked_mul(ORACLE_MAX_AGE_MULTIPLIER)
             .expect("Oracle max age overflow");
+        let configured_max_age = Self::get_max_price_age(env.clone());
+        // Enforce whichever bound is stricter: a fast-updating oracle still
+        // can't be trusted past MAX_PRICE_AGE_SECS, and a slow-updating one
+        // is still held to its own resolution-derived window.
+        let max_age = resolution_max_age.min(configured_max_age);
         if quote.timestamp > now || now - quote.timestamp > max_age {
-            panic!("Oracle price is stale");
+            panic!("StalePriceData: oracle price is older than the maximum allowed age");
         }
         let price_scale = 10i128
             .checked_pow(oracle.decimals())
@@ -1715,6 +1727,38 @@ impl GreenPayContract {
         env.storage().instance().get(&DataKey::OracleAddress)
     }
 
+    /// Admin-only: configure the maximum age, in seconds, an oracle price
+    /// quote may have before `donate_usdc` rejects it as stale (issue #1146).
+    /// Defaults to `DEFAULT_MAX_PRICE_AGE_SECS` (3600) until set.
+    pub fn set_max_price_age(env: Env, admin: Address, max_age_secs: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set max price age");
+        }
+        if max_age_secs == 0 {
+            panic!("Max price age must be positive");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPriceAgeSecs, &max_age_secs);
+        env.events()
+            .publish((symbol_short!("maxage"),), max_age_secs);
+    }
+
+    /// Get the configured maximum oracle price age in seconds, falling back
+    /// to `DEFAULT_MAX_PRICE_AGE_SECS` when unset.
+    pub fn get_max_price_age(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxPriceAgeSecs)
+            .unwrap_or(DEFAULT_MAX_PRICE_AGE_SECS)
+    }
+
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
     pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
@@ -1792,6 +1836,29 @@ mod tests {
             Some(OraclePriceData {
                 price: 2_500_000,
                 timestamp: env.ledger().timestamp(),
+            })
+        }
+
+        fn resolution(_env: Env) -> u32 {
+            300
+        }
+    }
+
+    /// Returns a quote with a fixed timestamp so tests can advance the
+    /// ledger clock to simulate a stale or fresh price (issue #1146).
+    #[contract]
+    struct TimestampedMockOracle;
+
+    #[contractimpl]
+    impl OracleInterface for TimestampedMockOracle {
+        fn decimals(_env: Env) -> u32 {
+            6
+        }
+
+        fn lastprice(_env: Env, _asset: OracleAsset) -> Option<OraclePriceData> {
+            Some(OraclePriceData {
+                price: 8_000_000,
+                timestamp: 1_000,
             })
         }
 
@@ -1919,6 +1986,67 @@ mod tests {
 
         // 4 USDC at 2.5 XLM per USDC = 10 XLM, represented in stroops.
         assert_eq!(client.get_global_total(), 10 * STROOP);
+    }
+
+    // ─── Issue #1146: oracle price staleness ─────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "StalePriceData")]
+    fn test_donate_usdc_rejects_stale_oracle_price() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let oracle = env.register_contract(None, TimestampedMockOracle);
+        client.set_usdc_token(&admin, &token, &oracle);
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 4_000_000i128;
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+
+        // The mock quote's timestamp is fixed at 1_000. Advance the ledger
+        // clock 2 hours past it — older than DEFAULT_MAX_PRICE_AGE_SECS
+        // (3600s) and the resolution-derived window alike.
+        env.ledger().set_timestamp(1_000 + 7_200);
+
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+    }
+
+    #[test]
+    fn test_donate_usdc_accepts_fresh_oracle_price() {
+        let (env, _cid, client, admin, pid) = setup();
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let oracle = env.register_contract(None, TimestampedMockOracle);
+        client.set_usdc_token(&admin, &token, &oracle);
+
+        let donor = Address::generate(&env);
+        let usdc_amount = 4_000_000i128;
+        StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
+
+        // Advance the clock by only 60s past the quote's fixed timestamp -
+        // well within both the default and resolution-derived windows.
+        env.ledger().set_timestamp(1_000 + 60);
+
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+
+        assert_eq!(client.get_donation_count(), 1);
+    }
+
+    #[test]
+    fn test_set_max_price_age_is_admin_gated_and_persists() {
+        let (env, _cid, client, admin, _pid) = setup();
+        assert_eq!(client.get_max_price_age(), DEFAULT_MAX_PRICE_AGE_SECS);
+
+        client.set_max_price_age(&admin, &600u64);
+        assert_eq!(client.get_max_price_age(), 600u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can set max price age")]
+    fn test_set_max_price_age_rejects_non_admin() {
+        let (env, _cid, client, _admin, _pid) = setup();
+        let attacker = Address::generate(&env);
+        client.set_max_price_age(&attacker, &600u64);
     }
 
     #[test]
