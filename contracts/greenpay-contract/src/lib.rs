@@ -104,6 +104,16 @@ pub struct DonationRecord {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DonateEvent {
+    pub donor: Address,
+    pub project_id: String,
+    pub amount: i128,
+    pub co2_offset: i128,
+    pub timestamp: u64,
+}
+
+#[contracttype]
 #[derive(Clone, Debug)]
 pub struct DonorStats {
     pub total_donated: i128,
@@ -724,6 +734,18 @@ impl GreenPayContract {
         env.events().publish(
             (symbol_short!("donated"), donor.clone(), project_id.clone()),
             (amount, donor_stats.badge.clone(), msg_hash),
+        );
+        let timestamp = env.ledger().timestamp();
+        let co2_offset = co2_increment;
+        env.events().publish(
+            ("donate",),
+            &DonateEvent {
+                donor,
+                project_id,
+                amount,
+                co2_offset,
+                timestamp,
+            },
         );
         env.storage().instance().extend_ttl(VOTING_WINDOW_LEDGERS * 4, VOTING_WINDOW_LEDGERS * 4);
     }
