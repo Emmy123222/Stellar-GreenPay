@@ -26,7 +26,6 @@
 #![cfg(feature = "testutils")]
 
 use soroban_sdk::{
-    contractfile,
     testutils::{Address as _, EnvTestConfig, Ledger as _},
     token::StellarAssetClient,
     Address, Env, String as SorobanString,
@@ -40,12 +39,12 @@ use greenpay_contract::{
 };
 
 // ─── WASM artifact reference ─────────────────────────────────────────────────
-// `contractfile!` embeds the release WASM bytes at compile time via the path
-// produced by `cargo build --target wasm32v1-none --release`.
-// CI builds the WASM before running tests (see contracts.yml).
-contractfile!(
-    file = "../target/wasm32v1-none/release/greenpay_contract.wasm",
-    sha256 = []   // empty → skip hash verification during testing
+// The upgrade test needs real WASM bytes to call upload_contract_wasm().
+// CI builds the WASM artifact before running integration tests (see
+// contracts.yml), so the file exists by the time this crate is compiled.
+// include_bytes! embeds the bytes at compile time from the release artifact.
+const WASM: &[u8] = include_bytes!(
+    "../target/wasm32v1-none/release/greenpay_contract.wasm"
 );
 
 // ─── Constants mirrored from lib.rs ──────────────────────────────────────────
@@ -120,12 +119,12 @@ fn setup_with_live_oracle() -> (
     let env = test_env();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, GreenPayContract);
+    let contract_id = env.register(GreenPayContract, ());
     let client = GreenPayContractClient::new(&env, &contract_id);
 
     // MockOracle is a *separate* on-chain contract — this exercises the
     // cross-contract call path inside donate_usdc.
-    let oracle_id = env.register_contract(None, MockOracle);
+    let oracle_id = env.register(MockOracle, ());
 
     let admin = Address::generate(&env);
     client.initialize(&admin);
@@ -166,10 +165,10 @@ fn setup_with_stale_oracle() -> (
     let env = test_env();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, GreenPayContract);
+    let contract_id = env.register(GreenPayContract, ());
     let client = GreenPayContractClient::new(&env, &contract_id);
 
-    let stale_oracle_id = env.register_contract(None, StaleOracle);
+    let stale_oracle_id = env.register(StaleOracle, ());
 
     let admin = Address::generate(&env);
     client.initialize(&admin);
@@ -221,14 +220,14 @@ fn test_donate_usdc_cross_contract_oracle_records_correct_xlm_equivalent() {
     assert_eq!(
         client.get_global_total(),
         expected_xlm,
-        "Cross-contract oracle call must convert 10 USDC → 80 XLM"
+        "Cross-contract oracle call must convert 10 USDC to 80 XLM"
     );
 
-    // CO₂: 80 XLM × 100 g/XLM = 8 000 g.
+    // CO2: 80 XLM × 100 g/XLM = 8 000 g.
     assert_eq!(
         client.get_global_co2(),
         8_000,
-        "CO₂ offset must reflect the XLM-equivalent amount"
+        "CO2 offset must reflect the XLM-equivalent amount"
     );
 
     assert_eq!(client.get_donation_count(), 1);
@@ -289,7 +288,7 @@ fn test_donate_usdc_stale_oracle_price_is_rejected() {
 fn test_donate_usdc_oracle_price_at_exact_max_age_boundary_is_accepted() {
     let (env, client, usdc_token, project_id, donor) = setup_with_stale_oracle();
 
-    // now - 0 == ORACLE_MAX_AGE_SECS — exactly at the boundary, not past it.
+    // now - 0 == ORACLE_MAX_AGE_SECS -- exactly at the boundary, not past it.
     env.ledger().set_timestamp(ORACLE_MAX_AGE_SECS);
 
     client.donate_usdc(
@@ -300,7 +299,7 @@ fn test_donate_usdc_oracle_price_at_exact_max_age_boundary_is_accepted() {
         &0u32,
     );
 
-    // 10 USDC × 8 XLM/USDC = 80 XLM — proves the call went through.
+    // 10 USDC × 8 XLM/USDC = 80 XLM -- proves the call went through.
     assert_eq!(client.get_global_total(), 80 * STROOP);
 }
 
@@ -330,17 +329,20 @@ fn test_donate_usdc_fresh_oracle_price_is_accepted() {
 ///
 /// We upload the same compiled WASM binary as the "new" version (re-using
 /// the current release artifact).  This exercises the full upgrade path:
-///   • admin.require_auth() is satisfied.
-///   • env.deployer().update_current_contract_wasm() is called.
-///   • DataKey::ContractWasmHash is written with the new hash.
-///   • All pre-upgrade on-chain state survives intact.
-///   • The contract remains operational after the upgrade.
+///   - admin.require_auth() is satisfied.
+///   - env.deployer().update_current_contract_wasm() is called.
+///   - DataKey::ContractWasmHash is written with the new hash.
+///   - All pre-upgrade on-chain state survives intact.
+///   - The contract remains operational after the upgrade.
+///
+/// WASM bytes are embedded via include_bytes! from the release build artifact.
+/// CI builds the WASM before running this test (see contracts.yml).
 #[test]
 fn test_admin_upgrade_preserves_state_and_stores_wasm_hash() {
     let env = test_env();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, GreenPayContract);
+    let contract_id = env.register(GreenPayContract, ());
     let client = GreenPayContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
@@ -363,31 +365,27 @@ fn test_admin_upgrade_preserves_state_and_stores_wasm_hash() {
         .register_stellar_asset_contract_v2(token_admin)
         .address();
     let donor = Address::generate(&env);
-    let donation: i128 = 50 * STROOP; // 50 XLM → Seedling tier (≥ 10 XLM)
+    let donation: i128 = 50 * STROOP; // 50 XLM -- Seedling tier (>= 10 XLM)
     StellarAssetClient::new(&env, &token).mint(&donor, &donation);
     client.donate(&token, &donor, &pid, &donation, &0u32);
 
     // Snapshot pre-upgrade state.
-    let total_before = client.get_global_total();     // 50 XLM
-    let co2_before   = client.get_global_co2();       // 50 × 200 = 10 000 g
-    let count_before = client.get_donation_count();   // 1
-    let badge_before = client.get_badge(&donor);      // Seedling (50 XLM < 100)
+    let total_before = client.get_global_total();    // 50 XLM in stroops
+    let co2_before   = client.get_global_co2();      // 50 * 200 = 10 000 g
+    let count_before = client.get_donation_count();  // 1
+    let badge_before = client.get_badge(&donor);     // Seedling (50 XLM < 100)
 
     assert_eq!(total_before, donation);
     assert_eq!(co2_before,   50 * 200);
     assert_eq!(count_before, 1);
     assert_eq!(badge_before, BadgeTier::Seedling);
 
-    // Upload the compiled WASM and obtain its hash.
+    // Upload the compiled WASM bytes embedded at the top of this file.
     // In production this would be a newer artifact; here we reuse the same
     // binary to exercise the upgrade machinery without a second build target.
-    // `WASM` is the byte slice embedded by the `contractfile!` call at the
-    // top of this file.
     let new_wasm_hash = env.deployer().upload_contract_wasm(WASM);
 
     client.upgrade(&admin, &new_wasm_hash);
-
-    // ── Post-upgrade assertions ───────────────────────────────────────────
 
     // 1. The stored WASM hash must match what we passed to upgrade().
     assert_eq!(
@@ -397,13 +395,13 @@ fn test_admin_upgrade_preserves_state_and_stores_wasm_hash() {
     );
 
     // 2. All pre-upgrade state must be intact.
-    assert_eq!(client.get_global_total(),    total_before, "total_raised preserved");
-    assert_eq!(client.get_global_co2(),      co2_before,   "CO₂ offset preserved");
-    assert_eq!(client.get_donation_count(),  count_before, "donation_count preserved");
-    assert_eq!(client.get_badge(&donor),     badge_before, "donor badge preserved");
+    assert_eq!(client.get_global_total(),   total_before, "total_raised preserved");
+    assert_eq!(client.get_global_co2(),     co2_before,   "CO2 offset preserved");
+    assert_eq!(client.get_donation_count(), count_before, "donation_count preserved");
+    assert_eq!(client.get_badge(&donor),    badge_before, "donor badge preserved");
 
     // 3. The contract must remain operational after upgrade.
-    let donor2   = Address::generate(&env);
+    let donor2    = Address::generate(&env);
     let donation2: i128 = 20 * STROOP;
     StellarAssetClient::new(&env, &token).mint(&donor2, &donation2);
     client.donate(&token, &donor2, &pid, &donation2, &1u32);
@@ -422,7 +420,7 @@ fn test_upgrade_rejects_non_admin_caller() {
     let env = test_env();
     env.mock_all_auths();
 
-    let contract_id = env.register_contract(None, GreenPayContract);
+    let contract_id = env.register(GreenPayContract, ());
     let client      = GreenPayContractClient::new(&env, &contract_id);
 
     let admin    = Address::generate(&env);
