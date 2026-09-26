@@ -17,4 +17,10 @@ const customJestConfig = {
   testMatch: ["<rootDir>/**/__tests__/**/*.test.{ts,tsx}"],
 };
 
-module.exports = createJestConfig(customJestConfig);
+module.exports = async () => {
+  const config = await createJestConfig(customJestConfig)();
+  config.transformIgnorePatterns = [
+    "/node_modules/(?!(@react-leaflet|react-leaflet)/)",
+  ];
+  return config;
+};
