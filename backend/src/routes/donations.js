@@ -290,8 +290,20 @@ router.get("/stream", (req, res) => {
   res.setHeader("X-Accel-Buffering", "no");
   res.write("retry: 1000\n\n");
 
-  const onNewDonation = (donation) => {
-    res.write(`data: ${JSON.stringify(donation)}\n\n`);
+  const lastEventId = req.headers["last-event-id"] || req.query.lastEventId;
+  if (lastEventId !== undefined && typeof donationEvents.getCatchUpEvents === "function") {
+    const catchUp = donationEvents.getCatchUpEvents(lastEventId);
+    for (const evt of catchUp) {
+      res.write(`id: ${evt.id}\ndata: ${JSON.stringify(evt.data)}\n\n`);
+    }
+  }
+
+  const onNewDonation = (donation, eventId) => {
+    if (eventId !== undefined) {
+      res.write(`id: ${eventId}\ndata: ${JSON.stringify(donation)}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify(donation)}\n\n`);
+    }
   };
   donationEvents.on("new_donation", onNewDonation);
 

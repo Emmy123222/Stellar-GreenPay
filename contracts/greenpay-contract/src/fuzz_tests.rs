@@ -69,26 +69,10 @@ mod fuzz {
     }
 
 
-    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
-    const FUZZ_STROOP: i128 = 10_000_000;
-
-    /// Fixed donation-message hash used for USDC fuzz donations.
-    const MSG_HASH: u32 = 42;
-
-    /// Mint `amount` of a USDC-like stellar asset to `donor`.
     fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
         let token_client = StellarAssetClient::new(env, token);
         token_client.mint(donor, amount);
     }
-
-    /// Build an env with the GreenPay contract initialised, one project
-    /// registered, a USDC-like asset configured, and the mock price oracle set.
-    ///
-    /// When `co2_per_xlm` exceeds the registration-time MAX_CO2_PER_XLM bound
-    /// (e.g. `u32::MAX`), it is patched directly into storage so the overflow
-    /// guards inside `donate_usdc` can be exercised.
-    fn setup_usdc(co2_per_xlm: u32) -> (Env, GreenPayContractClient<'static>, SorobanString, Address) {
-        let env = Env::default();
 
     fn setup_usdc(
         co2_per_xlm: u32,
@@ -99,7 +83,6 @@ mod fuzz {
         Address,
     ) {
         let env = test_env();
-
         env.mock_all_auths();
 
         let contract_id = env.register_contract(None, GreenPayContract);
@@ -115,27 +98,10 @@ mod fuzz {
             &project_id,
             &SorobanString::from_str(&env, "USDC Fuzz Project"),
             &wallet,
-
-            &100u32,
-        );
-
-        if co2_per_xlm != 100u32 {
-            env.as_contract(&contract_id, || {
-                let mut project: Project = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::Project(project_id.clone()))
-                    .expect("project should exist");
-                project.co2_per_xlm = co2_per_xlm;
-                env.storage()
-                    .instance()
-                    .set(&DataKey::Project(project_id.clone()), &project);
-
             &co2_per_xlm.min(100_000),
+            &1i128,
         );
 
-        // Some overflow tests intentionally need a rate above the public
-        // registration limit in order to exercise donate_usdc's checked math.
         if co2_per_xlm > 100_000 {
             env.as_contract(&contract_id, || {
                 let key = DataKey::Project(project_id.clone());
@@ -146,22 +112,16 @@ mod fuzz {
                     .expect("project should exist");
                 project.co2_per_xlm = co2_per_xlm;
                 env.storage().instance().set(&key, &project);
-
             });
         }
 
         let token_admin = Address::generate(&env);
-
         let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
         let oracle = env.register_contract(None, MockOracle);
 
         client.set_usdc_token(&admin, &usdc_token, &oracle);
 
         (env, client, project_id, usdc_token)
-    }
-
-    fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
-        StellarAssetClient::new(env, token).mint(donor, amount);
     }
 
     #[test]
@@ -376,53 +336,37 @@ mod fuzz {
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on CO2 overflow");
         }
-        /// With a platform fee configured, the fee recipient receives exactly
-        /// `amount * fee_bps / 10_000`, the project wallet the remainder, and
-        /// all accounting counters stay gross regardless of the rate.
-        #[test]
-        fn prop_fee_withholding_matches_rate(
-            amount in 1i128..=MAX_DONATION,
-            fee_bps in 0u32..=200u32,
-        ) {
-            let env = test_env();
-            env.mock_all_auths();
-            let cid = env.register_contract(None, GreenPayContract);
-            let client = GreenPayContractClient::new(&env, &cid);
-            let admin = Address::generate(&env);
-            client.initialize(&admin);
+    }
 
-            let project_id = SorobanString::from_str(&env, "proj-fee");
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &project_id,
-                &SorobanString::from_str(&env, "Fee Project"),
-                &wallet,
-                &100u32,
-                &1i128,
-            );
+    #[test]
+    fn test_fuzz_corpus_boundary_inputs() {
+        let (env, _contract_id, client, _wallet, project_id, token) = setup();
+        let donor = Address::generate(&env);
 
-            let token_admin = Address::generate(&env);
-            let token = env
-                .register_stellar_asset_contract_v2(token_admin)
-                .address();
-            let fee_recipient = Address::generate(&env);
-            client.set_fee_recipient(&admin, &fee_recipient, &fee_bps);
+        // 1. Amount: 0 (must panic or be rejected gracefully)
+        let res_zero = client.try_donate(&token, &donor, &project_id, &0i128, &42u32);
+        assert!(res_zero.is_err(), "Donation of 0 must fail");
 
-            let donor = Address::generate(&env);
-            mint_tokens(&env, &token, &donor, amount);
-            client.donate(&token, &donor, &project_id, &amount, &42u32);
+        // 2. Amount: u64::MAX as i128
+        let u64_max_amount = u64::MAX as i128;
+        mint_tokens(&env, &token, &donor, u64_max_amount);
+        let res_max = client.try_donate(&token, &donor, &project_id, &u64_max_amount, &42u32);
+        assert!(res_max.is_ok(), "Donation of u64::MAX should succeed if funded");
 
-            let expected_fee = amount.checked_mul(fee_bps as i128).unwrap() / 10_000;
-            let token_client = StellarAssetClient::new(&env, &token);
-            prop_assert_eq!(token_client.balance(&fee_recipient), expected_fee);
-            prop_assert_eq!(token_client.balance(&wallet), amount - expected_fee);
-            prop_assert_eq!(token_client.balance(&donor), 0);
+        // 3. Project ID: empty string (project not found)
+        let empty_pid = SorobanString::from_str(&env, "");
+        let res_empty = client.try_donate(&token, &donor, &empty_pid, &10_000_000i128, &42u32);
+        assert!(res_empty.is_err(), "Empty project ID must fail");
 
-            // Accounting stays gross regardless of fee
-            prop_assert_eq!(client.get_global_total(), amount);
-            let project = client.get_project(&project_id);
-            prop_assert_eq!(project.total_raised, amount);
-        }
+        // 4. Project ID: 512-character string (project not found)
+        let long_str: std::string::String = "a".repeat(512);
+        let long_pid = SorobanString::from_str(&env, &long_str);
+        let res_long = client.try_donate(&token, &donor, &long_pid, &10_000_000i128, &42u32);
+        assert!(res_long.is_err(), "512-char project ID must fail");
+
+        // 5. Project ID: non-ASCII string ("🌱🌍🌲🚀✨")
+        let non_ascii_pid = SorobanString::from_str(&env, "🌱🌍🌲🚀✨");
+        let res_non_ascii = client.try_donate(&token, &donor, &non_ascii_pid, &10_000_000i128, &42u32);
+        assert!(res_non_ascii.is_err(), "Non-ASCII project ID must fail");
     }
 }

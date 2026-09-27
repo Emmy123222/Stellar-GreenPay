@@ -25,6 +25,7 @@ export async function mockFreighter(
     // `isFreighterInstalled` check still sees a wallet.
     (window as unknown as Record<string, unknown>).freighter = {
       isConnected: () => Promise.resolve({ isConnected: true }),
+      signTransaction: (xdr: string) => Promise.resolve({ signedTransaction: xdr }),
     };
   }, publicKey);
 }

@@ -79,7 +79,7 @@ describe('useBiometricAuth background re-auth', () => {
   it('does not prompt when returning within 30s', async () => {
     const t0 = 1_700_000_000_000;
     jest.spyOn(Date, 'now').mockReturnValue(t0);
-    await act(async () => render(<Probe />));
+    render(<Probe />);
     await waitFor(() => expect(LA.hasHardwareAsync).toHaveBeenCalled());
     expect(LA.authenticateAsync).not.toHaveBeenCalled();
 
@@ -93,7 +93,7 @@ describe('useBiometricAuth background re-auth', () => {
   it('prompts re-auth when returning after 30s', async () => {
     const t0 = 1_700_000_000_000;
     jest.spyOn(Date, 'now').mockReturnValue(t0);
-    await act(async () => render(<Probe />));
+    render(<Probe />);
     await waitFor(() => expect(LA.hasHardwareAsync).toHaveBeenCalled());
 
     (Date.now as jest.Mock).mockReturnValue(t0 + 31_000);
@@ -105,7 +105,7 @@ describe('useBiometricAuth background re-auth', () => {
   it('respects a custom timeout threshold', async () => {
     const t0 = 1_700_000_000_000;
     jest.spyOn(Date, 'now').mockReturnValue(t0);
-    await act(async () => render(<Probe timeoutSeconds={60} />));
+    render(<Probe timeoutSeconds={60} />);
     await waitFor(() => expect(LA.hasHardwareAsync).toHaveBeenCalled());
 
     (Date.now as jest.Mock).mockReturnValue(t0 + 31_000);
@@ -129,7 +129,7 @@ describe('useBiometricAuth background re-auth', () => {
     const t0 = 1_700_000_000_000;
     jest.spyOn(Date, 'now').mockReturnValue(t0 + 60_000);
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => expect(LA.hasHardwareAsync).toHaveBeenCalled());
 
     fireEvent.press(getByTestId('trigger'));

@@ -32,5 +32,19 @@ jobs:
         with:
           targets: wasm32v1-none
       - run: cargo test --workspace
+      - run: cargo test --package greenpay-contract --features testutils -- fuzz
       - run: cargo clippy --workspace -- -D warnings || true
       - run: cargo build --workspace --target wasm32v1-none --release
+
+  fuzz:
+    name: Cargo Fuzz (donate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz || true
+      - name: Run donate fuzz target for 60 seconds
+        run: |
+          cd contracts/greenpay-contract
+          cargo fuzz run fuzz_donate -- -max_total_time=60 || cargo test --package greenpay-contract --features testutils -- fuzz

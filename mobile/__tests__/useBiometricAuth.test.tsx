@@ -135,7 +135,7 @@ describe('useBiometricAuth (React hook)', () => {
     LA.supportedAuthenticationTypesAsync.mockResolvedValue([
       LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
     ]);
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
 
     await waitFor(() => {
       const status = getByTestId('status').props.children;
@@ -148,7 +148,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('reports absent hardware correctly when no sensor exists', async () => {
     LA.hasHardwareAsync.mockResolvedValue(false);
     LA.isEnrolledAsync.mockResolvedValue(false);
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
 
     await waitFor(() => {
       const status = getByTestId('status').props.children;
@@ -166,7 +166,7 @@ describe('useBiometricAuth (React hook)', () => {
         })
     );
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -194,7 +194,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures cancellation as outcome=cancel', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -214,7 +214,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures system cancel as outcome=cancel', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'system_cancel' });
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -232,7 +232,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures fallback to PIN as outcome=fallback', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_fallback' });
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -250,7 +250,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures any other failure as outcome=error', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'lockout' });
 
-    const { getByTestId } = await act(async () => render(<Probe />));
+    const { getByTestId } = render(<Probe />);
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });

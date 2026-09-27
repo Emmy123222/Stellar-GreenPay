@@ -359,3 +359,164 @@ describe("POST /api/donations → SSE emission", () => {
     2000,
   );
 });
+
+describe("GET /api/donations/stream with Last-Event-ID catch-up (Issue #1172)", () => {
+  let httpServer;
+  let baseUrl;
+
+  beforeAll((done) => {
+    const app = express();
+    app.use(express.json());
+    httpServer = http.createServer(app);
+    app.use("/api/donations", require("./donations"));
+    httpServer.listen(0, () => {
+      baseUrl = `http://localhost:${httpServer.address().port}`;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    donationEvents.removeAllListeners();
+    httpServer.close(done);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    donationEvents.removeAllListeners();
+    if (typeof donationEvents.resetBuffer === "function") {
+      donationEvents.resetBuffer();
+    }
+  });
+
+  test("emit events 1–5, client reconnects with Last-Event-ID: 3 → receives events 4–5", (done) => {
+    // 1. Emit 5 events in sequence
+    for (let i = 1; i <= 5; i++) {
+      donationEvents.emit("new_donation", {
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const receivedEvents = [];
+    const req = http.request(
+      `${baseUrl}/api/donations/stream`,
+      {
+        headers: {
+          "Last-Event-ID": "3",
+        },
+      },
+      (res) => {
+        res.on("data", (chunk) => {
+          const text = chunk.toString();
+          const matches = text.matchAll(/id: (\d+)\ndata: ({.*?})\n\n/g);
+          for (const match of matches) {
+            const eventId = parseInt(match[1], 10);
+            const payload = JSON.parse(match[2]);
+            receivedEvents.push({ id: eventId, data: payload });
+
+            if (receivedEvents.length === 2) {
+              try {
+                expect(receivedEvents[0].id).toBe(4);
+                expect(receivedEvents[0].data.projectName).toBe("Project 4");
+                expect(receivedEvents[1].id).toBe(5);
+                expect(receivedEvents[1].data.projectName).toBe("Project 5");
+                res.destroy();
+                done();
+              } catch (err) {
+                res.destroy();
+                done(err);
+              }
+            }
+          }
+        });
+      },
+    );
+
+    req.on("error", done);
+    req.end();
+  });
+
+  test("reconnect with invalid ID → all events since last reset returned", (done) => {
+    // Emit 3 events
+    for (let i = 1; i <= 3; i++) {
+      donationEvents.emit("new_donation", {
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+      });
+    }
+
+    const receivedEvents = [];
+    const req = http.request(
+      `${baseUrl}/api/donations/stream`,
+      {
+        headers: {
+          "Last-Event-ID": "invalid-non-numeric-id",
+        },
+      },
+      (res) => {
+        res.on("data", (chunk) => {
+          const text = chunk.toString();
+          const matches = text.matchAll(/id: (\d+)\ndata: ({.*?})\n\n/g);
+          for (const match of matches) {
+            const eventId = parseInt(match[1], 10);
+            receivedEvents.push(eventId);
+
+            if (receivedEvents.length === 3) {
+              try {
+                expect(receivedEvents).toEqual([1, 2, 3]);
+                res.destroy();
+                done();
+              } catch (err) {
+                res.destroy();
+                done(err);
+              }
+            }
+          }
+        });
+      },
+    );
+
+    req.on("error", done);
+    req.end();
+  });
+
+  test("reconnect with future ID → empty catch-up list", (done) => {
+    // Emit 3 events
+    for (let i = 1; i <= 3; i++) {
+      donationEvents.emit("new_donation", {
+        projectName: `Project ${i}`,
+        amountXLM: `${i * 10}`,
+      });
+    }
+
+    let initialEventReceived = false;
+    const req = http.request(
+      `${baseUrl}/api/donations/stream`,
+      {
+        headers: {
+          "Last-Event-ID": "9999", // future ID
+        },
+      },
+      (res) => {
+        res.on("data", (chunk) => {
+          const text = chunk.toString();
+          if (text.includes("id:")) {
+            res.destroy();
+            done(new Error(`Unexpected catch-up event received for future Last-Event-ID: ${text}`));
+          }
+        });
+
+        // After 100ms with no replay events, verify it was empty
+        setTimeout(() => {
+          res.destroy();
+          done();
+        }, 150);
+      },
+    );
+
+    req.on("error", done);
+    req.end();
+  });
+});
+
