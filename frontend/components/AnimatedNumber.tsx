@@ -20,12 +20,11 @@ export default function AnimatedNumber({ value, duration = 1500, formatter }: An
   useEffect(() => {
     let animationFrameId: number;
     startTimeRef.current = null;
-    setDisplayValue(0);
 
     const animate = (time: number) => {
       if (startTimeRef.current === null) startTimeRef.current = time;
       const progress = Math.min((time - startTimeRef.current) / duration, 1);
-      
+
       const easedProgress = 1 - Math.pow(1 - progress, 3); // Ease out cubic
       setDisplayValue(easedProgress * numericValue);
 
