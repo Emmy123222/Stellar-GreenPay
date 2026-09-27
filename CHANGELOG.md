@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - On-chain USDC to XLM price conversion through a configured oracle adapter (#345).
 - Untracked test coverage reports, added full coverage ignore rules in `.gitignore`, and configured CI to upload coverage reports as GitHub Actions workflow artifacts (#1046).
 
+### Fixed
+
+- Project cover photos that fail to load now fall back to a branded leaf placeholder (`/project-placeholder.svg`) instead of a broken-image icon, in both `ProjectCard` and the map popup (#1069).
+- The live donation feed detects a dropped Horizon SSE stream, shows a "Reconnecting…" banner, retries with exponential backoff, and merges anything that arrived while disconnected via a REST catch-up (#1071).
+- The selected language persists across sessions under `greenpay:locale` (migrated from the bare `locale` key), falls back to `navigator.language`, and sets `<html lang>` before first paint instead of re-rendering after hydration (#1073).
+
 
 ## [1.0.0] - 2025-01-01
 
