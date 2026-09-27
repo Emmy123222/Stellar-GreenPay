@@ -1,4 +1,5 @@
 # Performance Targets
+<!-- Verified database indexing and viewport geo performance targets -->
 
 ## POST /api/donations
 
