@@ -1913,6 +1913,74 @@ const WEBHOOK_SECRET_MIN_LENGTH = 32;
 const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
 
 /**
+ * PATCH /api/projects/:id/co2-rate (admin only)
+ *
+ * Update the per-XLM CO₂ offset rate for a project. Body accepts any of:
+ *   { co2_per_xlm: number|string } | { co2PerXLM: number|string }
+ *   | { co2_rate: number|string } | { rate: number|string }
+ *
+ * The rate must be a finite, non-negative number (grams of CO₂ per 1 XLM).
+ * Responds with the updated project payload.
+ */
+router.patch("/:id/co2-rate", adminRequired, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const raw =
+      body.co2_per_xlm ?? body.co2PerXLM ?? body.co2_rate ?? body.rate;
+
+    const rate =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim() !== ""
+          ? Number(raw)
+          : NaN;
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return res.status(400).json({
+        error: "co2_per_xlm must be a non-negative number",
+      });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+          SET co2_per_xlm = $1,
+              updated_at  = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [rate.toFixed(7), req.params.id],
+    );
+
+    logAdminAction({
+      actor: (req.admin && req.admin.sub) || "admin",
+      action: "project.co2-rate.updated",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { co2_per_xlm: rate.toFixed(7) },
+      ipAddress: req.ip,
+    });
+
+    if (typeof redis.deletePattern === "function") {
+      await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+      await redis.deletePattern(getProjectDetailCacheKey(req.params.id));
+      await redis.deletePattern(`/api/impact/project/${req.params.id}*`);
+      await redis.deletePattern(`/api/impact/${req.params.id}*`);
+    }
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * PATCH /api/projects/:id/webhook
  * Set or clear the webhook URL and secret for milestone notifications.
  * Requires the project's wallet_address as the Bearer token subject so that
