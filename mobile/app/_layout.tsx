@@ -58,6 +58,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile/[address]" options={{ title: 'Donor Profile' }} />
         <Stack.Screen name="leaderboard" options={{ title: 'Leaderboard' }} />
         <Stack.Screen name="recurring" options={{ title: 'Monthly Giving' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="scan" options={{ title: 'Scan to Donate', headerShown: false }} />
       </Stack>
     </ThemeProvider>
