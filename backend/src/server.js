@@ -115,6 +115,10 @@ app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
 app.use("/api/impact", require("./routes/impact"));
+// Recurring donation schedules are the source of truth for mobile (#1059):
+// the app reads them from here and treats AsyncStorage as an offline cache.
+app.use("/api/recurring-donations", require("./routes/recurringDonations"));
+app.use("/api/v1/recurring-donations", require("./routes/recurringDonations"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
