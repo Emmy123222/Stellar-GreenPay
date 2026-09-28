@@ -66,7 +66,6 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 import { ThemeProvider } from '../app/theme';
 
 import HomeScreen from '../app/index';
-import { ThemeProvider } from '../app/theme';
 
 function wrap(element: React.ReactElement) {
   return <ThemeProvider>{element}</ThemeProvider>;
@@ -151,6 +150,8 @@ describe('HomeScreen', () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
     const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
+  });
 
   it('renders the header chrome while projects are loading', async () => {
     // Make the API never resolve so `loading` stays true and the skeleton
@@ -195,6 +196,8 @@ describe('HomeScreen', () => {
     const { getByLabelText } = render(wrap(<HomeScreen />));
     await waitFor(() =>
       expect(getByLabelText('View Amazon Reforestation Initiative project')).toBeTruthy()
+    );
+  });
 
   it('survives a network failure without rendering project data', async () => {
     (axios.get as jest.Mock).mockRejectedValue(new Error('network error'));
