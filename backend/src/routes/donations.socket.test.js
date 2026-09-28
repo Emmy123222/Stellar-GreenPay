@@ -741,3 +741,207 @@ describe("POST /api/donations → broadcast hardening & room segmentation", () =
     3000,
   );
 });
+
+describe("POST /api/donations → client disconnection mid-donation", () => {
+  let httpServer;
+  let ioServer;
+  let request;
+  let baseUrl;
+
+  beforeAll((done) => {
+    const app = express();
+    app.use(express.json());
+    httpServer = http.createServer(app);
+    ioServer = new SocketServer(httpServer, {
+      cors: { origin: "*" },
+      transports: ["websocket"],
+    });
+    registerSocketHandlers(ioServer);
+    app.set("io", ioServer);
+    app.use("/api/donations", require("./donations"));
+
+    httpServer.listen(0, () => {
+      baseUrl = `http://localhost:${httpServer.address().port}`;
+      request = supertest(httpServer);
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    ioServer.close(done);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function connectClient(room) {
+    return new Promise((resolve, reject) => {
+      const socket = ioc(baseUrl, { transports: ["websocket"], forceNew: true });
+      socket.once("connect", () => {
+        if (room === "all-donations") {
+          socket.emit("join_global_feed", () => resolve(socket));
+        } else {
+          socket.emit("join_project", room, () => resolve(socket));
+        }
+      });
+      socket.once("connect_error", reject);
+    });
+  }
+
+  // Same query pipeline as successfulXlmDonation, but every query resolves
+  // after `delayMs` so a POST stays in-flight while the client drops.
+  function createSlowMockClient(delayMs, donationRow) {
+    const client = { query: jest.fn(), release: jest.fn() };
+    const responses = [
+      queryResult([{ id: donationRow.project_id }]), // SELECT project
+      queryResult([]),                                // dedup check (none)
+      queryResult(),                                  // BEGIN
+      queryResult([{ total: "0" }]),                  // prevTotalResult
+      queryResult([donationRow]),                     // INSERT donation
+      queryResult([]),                                // SELECT donation_matches (none)
+      queryResult(),                                  // UPDATE projects
+      queryResult(),                                  // COMMIT
+    ];
+    responses.forEach((r) => {
+      client.query.mockImplementationOnce(
+        () => new Promise((resolve) => setTimeout(() => resolve(r), delayMs)),
+      );
+    });
+    pool.connect.mockResolvedValue(client);
+    return client;
+  }
+
+  function donationRowFor(projectId, donorAddress, transactionHash, id) {
+    return {
+      id,
+      project_id: projectId,
+      donor_address: donorAddress,
+      amount_xlm: "20",
+      amount: "20",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  test(
+    "client subscribed to donation events that disconnects before confirmation throws no error",
+    async () => {
+      const donorAddress = makePublicKey("D");
+      const transactionHash = makeTxHash("3");
+      createSlowMockClient(30, donationRowFor("project-drop", donorAddress, transactionHash, "drop-1"));
+
+      const serverErrors = [];
+      ioServer.on("error", (err) => serverErrors.push(err));
+      let uncaughtException = null;
+      const onUncaught = (err) => {
+        uncaughtException = err;
+      };
+      process.on("uncaughtException", onUncaught);
+
+      const socket = await connectClient("project-drop");
+      let eventReceived = false;
+      socket.on("donation_event", () => {
+        eventReceived = true;
+      });
+      const clientErrors = [];
+      socket.on("disconnect_error", (err) => clientErrors.push(err));
+
+      try {
+        // Start the donation POST, then drop the socket while it is still in flight
+        // (before the server confirms with donation_event / 201).
+        const postPromise = request
+          .post("/api/donations")
+          .send({ projectId: "project-drop", donorAddress, amountXLM: "20", transactionHash });
+
+        socket.disconnect();
+
+        const res = await postPromise;
+        expect(res.status).toBe(201);
+
+        // Give the server time to attempt the (now-orphaned) broadcast.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        expect(uncaughtException).toBeNull();
+        expect(serverErrors).toHaveLength(0);
+        expect(clientErrors).toHaveLength(0);
+        expect(eventReceived).toBe(false);
+
+        // Server is still healthy after the broadcast to a departed client.
+        const survivor = await connectClient("project-drop");
+        try {
+          expect(survivor.connected).toBe(true);
+        } finally {
+          survivor.disconnect();
+        }
+      } finally {
+        process.off("uncaughtException", onUncaught);
+      }
+    },
+    3000,
+  );
+
+  test(
+    "disconnect event does not affect the in-flight database write",
+    async () => {
+      const donorAddress = makePublicKey("E");
+      const transactionHash = makeTxHash("4");
+      const client = createSlowMockClient(25, donationRowFor("project-inflight", donorAddress, transactionHash, "inflight-1"));
+
+      const socket = await connectClient("project-inflight");
+
+      const postPromise = request
+        .post("/api/donations")
+        .send({ projectId: "project-inflight", donorAddress, amountXLM: "20", transactionHash });
+
+      // Drop the subscriber while the transaction is mid-flight.
+      socket.disconnect();
+
+      const res = await postPromise;
+      expect(res.status).toBe(201);
+
+      // The full recordDonation pipeline ran to completion despite the drop:
+      // SELECT project → dedup → BEGIN → prevTotal → INSERT → matches → UPDATE → COMMIT.
+      expect(client.query).toHaveBeenCalledTimes(8);
+      const insertCall = client.query.mock.calls.find(([sql]) => /INSERT INTO donations/i.test(sql));
+      expect(insertCall).toBeDefined();
+      expect(insertCall[1]).toContain(donorAddress);
+      expect(insertCall[1]).toContain(transactionHash);
+      expect(client.query.mock.calls.some(([sql]) => sql === "COMMIT")).toBe(true);
+      expect(client.release).toHaveBeenCalledTimes(1);
+    },
+    3000,
+  );
+
+  test(
+    "disconnected client is removed from all donation rooms (no memory leak)",
+    async () => {
+      const socket = await connectClient("project-leak");
+      await new Promise((resolve) => socket.emit("join_global_feed", resolve));
+
+      const socketId = socket.id;
+      const roomMembership = (room) => ioServer.sockets.adapter.rooms.get(room);
+      expect(roomMembership("project:project-leak")?.has(socketId)).toBe(true);
+      expect(roomMembership("all-donations")?.has(socketId)).toBe(true);
+
+      const serverSocket = ioServer.sockets.sockets.get(socketId);
+      expect(serverSocket).toBeDefined();
+      const disconnected = new Promise((resolve) => serverSocket.once("disconnect", resolve));
+
+      socket.disconnect();
+      await disconnected;
+
+      // The server-side socket is fully torn down and purged from every room.
+      expect(ioServer.sockets.sockets.has(socketId)).toBe(false);
+      expect(roomMembership("project:project-leak")?.has(socketId) ?? false).toBe(false);
+      expect(roomMembership("all-donations")?.has(socketId) ?? false).toBe(false);
+
+      // Nothing referencing the departed client remains on the server.
+      const remainingIds = (await ioServer.fetchSockets()).map((s) => s.id);
+      expect(remainingIds).not.toContain(socketId);
+    },
+    3000,
+  );
+});
