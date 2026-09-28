@@ -26,10 +26,12 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
+import {
+  loadRecurringDonations,
+  type RecurringDonation,
+} from '../../utils/recurringDonations';
 
 import * as Notifications from 'expo-notifications';
-import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import {
   getPushToken,
@@ -38,10 +40,6 @@ import {
   markNotificationsSeen,
 } from '../../utils/notifications';
 
-import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
-import { useTheme } from '../theme';
-import { markNotificationsSeen } from '../../utils/notifications';
-import * as Notifications from 'expo-notifications';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -216,21 +214,9 @@ export default function ProjectDetailScreen() {
   const [toast, setToast] = useState<ToastState | null>(null);
   const viewShotRef = useRef<View>(null);
 
-  // Share the project as an image via the native share sheet.
-  const handleShare = async () => {
-    try {
-      if (!project) return;
-      const uri = await captureRef(viewShotRef, { format: 'png', quality: 1 });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: `Share ${project.name}`,
-        });
-      }
-    } catch {
-      // Sharing is optional — never block the screen on it.
-    }
-  };
+  const showToast = useCallback((message: string, variant: ToastVariant = 'success') => {
+    setToast({ message, variant });
+  }, []);
 
   const checkRecurringDonation = useCallback(async (projectId: string) => {
     try {
@@ -647,6 +633,7 @@ export default function ProjectDetailScreen() {
             <Text style={styles.unfollowHint}>Tap again to unfollow</Text>
           )}
         </TouchableOpacity>
+      )}
 
         {/* Donate button */}
         <TouchableOpacity

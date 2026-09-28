@@ -2,20 +2,19 @@
  * __mocks__/rn-batched-bridge.js
  *
  * Drop-in replacement for `react-native/Libraries/BatchedBridge/NativeModules`
- * used by `jest-expo@57`'s preset setup. `jest-expo@57` was authored against
- * `@react-native/jest-preset@^0.85.0`+, where that file is published as an
- * ES module with a `.default` export. The Stellar-GreenPay mobile workspace
- * pins `react-native@0.74.1`, where the same path is plain CommonJS
- * (`module.exports = NativeModules`) and `require(...).default` is therefore
- * `undefined`. The first thing jest-expo's setup.js does with the result is
- * `Object.defineProperty(mockNativeModules, 'ImageLoader', ...)` which throws
- * "Object.defineProperty called on non-object" on the undefined value before
- * any test code ever runs.
+ * used by jest-expo's preset setup. Two shapes must be served from one stub:
  *
- * Register this stub via jest `moduleNameMapper` so jest-expo receives a
- * Proxy-backed `mockNativeModules` object that satisfies every defineProperty
- * / get probe. We do not change Expo SDK pins, jest-expo, react-native, or
- * react versions — purely a test-runtime shim.
+ *  - `jest-expo@51` (the preset this workspace actually runs — `expo@~51`)
+ *    does `require(thisPath)` and reads `UIManager` etc. directly off the
+ *    returned object.
+ *  - `jest-expo@57` does `require(thisPath).default`, because on newer
+ *  `@react-native/jest-preset` versions that file is published as an ES
+ *  module with a `.default` export. With `react-native@0.74.1` the real
+ *  path is plain CommonJS, so `.default` would be `undefined` and
+ *  `Object.defineProperty` would throw "called on non-object".
+ *
+ * The export at the bottom therefore exposes the proxy as BOTH the module
+ * root and its own `.default`.
  *
  * Keys covered (matches jest-expo/src/preset/setup.js probes):
  *   - ImageLoader / ImageViewManager (Object.defineProperty on root mock)
@@ -51,7 +50,12 @@ const mockNativeModules = subModuleProxy({
   NativeUnimoduleProxy: subModuleProxy(viewManagerTarget),
 });
 
-module.exports = {
-  __esModule: true,
-  default: mockNativeModules,
-};
+// Dual-compatible export:
+//  - `jest-expo@51` (SDK 51 preset) does `require(thisPath)` and then reads
+//    `NativeModules.UIManager` etc. directly off the returned object, so the
+//    proxy itself must be the export.
+//  - `jest-expo@57` does `require(thisPath).default`, so we also expose the
+//    proxy as its own `.default` plus the `__esModule` flag.
+mockNativeModules.__esModule = true;
+mockNativeModules.default = mockNativeModules;
+module.exports = mockNativeModules;

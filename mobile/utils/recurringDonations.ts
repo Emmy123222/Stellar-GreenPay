@@ -106,6 +106,21 @@ export async function createRecurringDonation(input: {
   return donation;
 }
 
+/**
+ * Cancel a recurring donation. Unknown ids are a no-op and cancelling an
+ * already-cancelled donation is idempotent.
+ */
+export async function cancelRecurringDonation(id: string): Promise<RecurringDonation | null> {
+  const all = await loadRecurringDonations();
+  const target = all.find((d) => d.id === id);
+  if (!target) return null;
+  if (target.status === 'cancelled') return target;
+
+  const updated: RecurringDonation = { ...target, status: 'cancelled' };
+  await saveRecurringDonations(all.map((d) => (d.id === id ? updated : d)));
+  return updated;
+}
+
 export interface PaymentRecord {
   id: string;
   donationId: string;

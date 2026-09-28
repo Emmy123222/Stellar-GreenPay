@@ -25,6 +25,10 @@ const mockUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockRouterPush }),
   useLocalSearchParams: () => mockUseLocalSearchParams(),
+  useFocusEffect: (callback: () => void | (() => void)) => {
+    const { useEffect } = require('react');
+    useEffect(() => callback(), [callback]);
+  },
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -43,6 +47,7 @@ jest.mock('expo-notifications', () => ({
 
 jest.mock('../utils/recurringDonations', () => ({
   loadRecurringDonations: jest.fn(),
+  cancelRecurringDonation: jest.fn(),
 }));
 
 import * as notifUtils from '../utils/notifications';
