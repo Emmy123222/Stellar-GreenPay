@@ -18,6 +18,10 @@ const { z }  = require("zod");
 const pool   = require("../db/pool");
 const logger = require("../logger");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const {
+  scheduleRecurringDonationJob,
+  cancelRecurringDonationJob,
+} = require("../services/recurringDonationQueue");
 
 const recurringLimiter = createRateLimiter(20, 1, "recurring-donations"); // 20 req/min
 
@@ -142,6 +146,20 @@ router.post("/", recurringLimiter, async (req, res, next) => {
 
     const pledge = result.rows[0];
 
+    // Register the per-pledge pg-boss job so it can be cancelled when the
+    // pledge is. Non-fatal: the daily reminder cron still covers reminders.
+    try {
+      await scheduleRecurringDonationJob({
+        pledgeId: pledge.id,
+        nextDueDate: pledge.next_due_date,
+      });
+    } catch (err) {
+      logger.error(
+        { event: "recurring_donation_job_schedule_error", pledgeId: pledge.id, err: err.message },
+        "[recurringDonations] Failed to schedule pledge job"
+      );
+    }
+
     logger.info(
       {
         event: "recurring_donation_created",
@@ -256,6 +274,18 @@ router.delete("/:id", async (req, res, next) => {
         success: false,
         error: `Pledge is already ${existing.rows[0].status}`,
       });
+    }
+
+    // Stop the pledge's pending pg-boss job so it no longer fires for a
+    // cancelled pledge. Non-fatal: cancellation of the DB record already
+    // stops reminder delivery via the active flag.
+    try {
+      await cancelRecurringDonationJob(id);
+    } catch (err) {
+      logger.error(
+        { event: "recurring_donation_job_cancel_error", pledgeId: id, err: err.message },
+        "[recurringDonations] Failed to cancel pledge job"
+      );
     }
 
     logger.info(
