@@ -16,7 +16,9 @@
     --green-light: #4caf70;
     --green-dim: rgba(34, 114, 57, 0.08);
     --text: #1a2e1a;
-    --muted: #5a7a5a;
+    --muted: #486848;
+    --text-secondary: #486848;
+    --text-tertiary: #527252;
     --subtle: #c8dfc8;
   }
 
@@ -32,6 +34,8 @@
     --green-dim: rgba(96, 208, 123, 0.10);
     --text: #e6f5e9;
     --muted: #b2d5b5;
+    --text-secondary: #8aaa8a;
+    --text-tertiary: #8aaa8a;
     --subtle: #24472f;
   }
 
