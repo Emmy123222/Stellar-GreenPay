@@ -4,6 +4,7 @@ const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { buildPdf } = require("../utils/pdf");
 
 const CACHE_TTL_SECONDS = 5 * 60;
 const KG_CO2_PER_TREE = 21.77; // heuristic, used for treesEquivalent
@@ -234,6 +235,59 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         topCategory,
       },
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/impact/certificate/pdf
+//
+// Server-side impact certificate renderer. Used as the fallback for browsers
+// whose client-side canvas rendering is unreliable (notably Safari), where the
+// in-browser html2canvas/jsPDF path produces misaligned output.
+router.post("/certificate/pdf", async (req, res, next) => {
+  try {
+    const {
+      donorAddress,
+      donorName,
+      totalDonatedXLM,
+      totalCO2OffsetKg,
+      badgeTier,
+      projectsSupported,
+    } = req.body || {};
+
+    if (!donorAddress || typeof donorAddress !== "string") {
+      return res.status(400).json({ success: false, error: "donorAddress is required" });
+    }
+
+    const displayName = (donorName && String(donorName).trim()) || donorAddress;
+    const projects = Array.isArray(projectsSupported) ? projectsSupported : [];
+
+    const lines = [
+      { text: "Stellar GreenPay", size: 12 },
+      { text: "Impact Certificate", size: 26, gap: 10 },
+      { text: "This certificate recognizes climate impact achieved", size: 12, gap: 8 },
+      { text: "through on-chain donations.", size: 12 },
+      { text: `Presented to: ${displayName}`, size: 16, gap: 18 },
+      { text: `Donor address: ${donorAddress}`, size: 10 },
+      {
+        text: `Total donated: ${Number.parseFloat(totalDonatedXLM || "0").toFixed(7)} XLM`,
+        size: 12,
+        gap: 14,
+      },
+      { text: `CO2 offset: ${Math.round(Number(totalCO2OffsetKg || 0))} kg` },
+      { text: `Badge tier: ${badgeTier || "Supporter"}` },
+      { text: `Issued on: ${new Date().toISOString().slice(0, 10)}`, size: 10, gap: 14 },
+      { text: `Projects supported (${projects.length}):`, size: 12, gap: 12 },
+      ...projects.slice(0, 12).map((p) => ({ text: `- ${(p && p.name) || "Project"}`, size: 11 })),
+      { text: "Verified by on-chain donation history", size: 10, gap: 18 },
+    ];
+
+    const pdf = buildPdf(lines);
+
+    res.set("Content-Type", "application/pdf");
+    res.set("Content-Disposition", `attachment; filename="greenpay-impact-${donorAddress.slice(0, 8)}.pdf"`);
+    return res.send(pdf);
   } catch (e) {
     next(e);
   }

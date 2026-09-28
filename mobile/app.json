@@ -25,6 +25,7 @@
         "backgroundColor": "#227239"
       },
       "package": "com.stellargreenpay.app",
+      "softwareKeyboardLayoutMode": "resize",
       "intentFilters": [
         {
           "action": "VIEW",

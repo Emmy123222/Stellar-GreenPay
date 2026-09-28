@@ -14,6 +14,7 @@ const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
+const { checkAndDeliverMilestones } = require("../services/webhook");
 const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
 
 function resolveDonorCountry(ip) {
@@ -69,7 +70,7 @@ async function recordDonation(req, res, next) {
     );
     if (existingResult.rows[0]) {
       const existingRow = { ...existingResult.rows[0], co2_per_xlm: projectCo2PerXlm };
-      return res.json({ success: true, data: mapDonationRow(existingRow) });
+      return res.status(200).json({ success: true, data: mapDonationRow(existingRow) });
     }
 
     // Verify the transaction is confirmed on-chain before recording it.
@@ -191,7 +192,7 @@ async function recordDonation(req, res, next) {
 
     await redis.deletePattern("projects:list:*");
 
-    enqueueProfileUpdate(donorAddress).catch((err) => {
+    await enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
@@ -258,6 +259,10 @@ async function recordDonation(req, res, next) {
       projectName,
       amountXLM: String(donationRow.amount_xlm ?? parsedAmount),
       donorBadge,
+    });
+
+    await checkAndDeliverMilestones(projectId).catch((err) => {
+      logger.error({ event: "milestone_webhook_error", projectId, err: err.message }, "Failed to deliver milestone webhooks");
     });
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
