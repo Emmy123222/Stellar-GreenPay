@@ -13,6 +13,7 @@
     "type": "module"
   },
   "host_permissions": [
+    "https://api.stellar-greenpay.app/*",
     "https://greenpay.app/*",
     "https://staging.greenpay.app/*"
   ],

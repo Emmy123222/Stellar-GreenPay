@@ -15,7 +15,12 @@ const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { checkAndDeliverMilestones } = require("../services/webhook");
-const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
+const configuredDonationLimit = Number.parseInt(process.env.DONATIONS_RATE_LIMIT_PER_MINUTE || "10", 10);
+const donationLimiter = createRateLimiter(
+  Number.isFinite(configuredDonationLimit) && configuredDonationLimit > 0 ? configuredDonationLimit : 10,
+  1,
+  "donations",
+);
 
 function resolveDonorCountry(ip) {
   if (!ip || typeof ip !== "string") return null;
