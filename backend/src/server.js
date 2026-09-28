@@ -23,6 +23,7 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const statsRouter = require("./routes/stats");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -72,7 +73,9 @@ app.use((req, res, next) => {
     req.path === "/health" ||
     req.path === "/api/health" ||
     req.path === "/api/v1/health" ||
-    req.path === "/api/readiness"
+    req.path === "/api/readiness" ||
+    req.path === "/metrics" ||
+    req.path === "/api/metrics"
   ) {
     return next();
   }
@@ -81,14 +84,26 @@ app.use((req, res, next) => {
 
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
+const { register: metricsRegister } = require("./services/metrics");
+
+async function metricsHandler(req, res) {
+  res.set("Content-Type", metricsRegister.contentType);
+  res.end(await metricsRegister.metrics());
+}
+
+app.get("/metrics", metricsHandler);
+app.get("/api/metrics", metricsHandler);
 app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
+
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/v1/stats", statsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));

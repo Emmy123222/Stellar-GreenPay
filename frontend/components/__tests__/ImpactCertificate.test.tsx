@@ -41,7 +41,7 @@ describe("ImpactCertificate", () => {
     const { container } = render(<ImpactCertificate {...baseProps} />);
     expect(container).toMatchSnapshot();
   });
-
+ feat/project-share-buttons
   it.each(["seedling", "tree", "forest", "earth"] as const)(
     "renders the %s badge tier",
     (badgeTier) => {
@@ -49,4 +49,14 @@ describe("ImpactCertificate", () => {
       expect(screen.getByText(badgeLabel(badgeTier))).toBeInTheDocument();
     }
   );
+  it.each([
+    ["seedling", "Seedling"],
+    ["tree", "Tree"],
+    ["forest", "Forest"],
+    ["earth", "Earth Guardian"],
+  ] as const)("renders the %s badge tier", (badgeTier, label) => {
+    render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+ main
 });

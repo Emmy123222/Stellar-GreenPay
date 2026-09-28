@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useWallet } from '../hooks/useWallet';
+import { validateStellarAddress } from '../../utils/stellarValidation';
 
 // Lobstr deep-links only support payment requests, not wallet connection.
 // WalletConnect for Stellar (SEP-43) is still in draft and has no stable
@@ -41,7 +42,7 @@ export function WalletConnect() {
     );
   }
 
-  const handleConnect = async () => {
+  const performConnect = async () => {
     setConnecting(true);
     const ok = await connect(inputAddress);
     setConnecting(false);
@@ -49,6 +50,34 @@ export function WalletConnect() {
       setModalVisible(false);
       setInputAddress('');
     }
+  };
+
+  /**
+   * Issue #1126: a pasted address can be a perfectly valid testnet key
+   * (Friendbot creates them for free). On a mainnet build we warn and let
+   * the user confirm — a soft warning, never a hard block. `useWallet`
+   * still owns format validation and the error message.
+   */
+  const handleConnect = async () => {
+    const { warning } = validateStellarAddress(inputAddress);
+    if (!warning) {
+      await performConnect();
+      return;
+    }
+
+    Alert.alert(
+      warning.title,
+      `Wallet you are connecting\n\n${warning.message}`,
+      [
+        { text: warning.cancelLabel, style: 'cancel' },
+        {
+          text: warning.confirmLabel,
+          style: 'destructive',
+          onPress: () => void performConnect(),
+        },
+      ],
+      { cancelable: true }
+    );
   };
 
   return (

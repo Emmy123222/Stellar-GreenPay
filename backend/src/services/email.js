@@ -396,4 +396,63 @@ function buildStatusChangeText({ request, newStatus, adminUrl }) {
     .join("\n");
 }
 
-module.exports = { sendUpdateNotifications, sendAdminVerificationNotification, sendVerificationStatusNotification };
+/**
+ * Alert platform admins that a webhook delivery has been abandoned after all
+ * retries were exhausted, so the dropped event can be investigated and the
+ * project owner can be told to reconcile manually.
+ *
+ * Best-effort: silently skips when Resend is not configured.
+ *
+ * @param {object} opts
+ * @param {string} opts.deliveryId - webhook_deliveries row id.
+ * @param {string} [opts.url] - Destination URL that kept failing.
+ * @param {number} [opts.attempts] - Number of attempts made.
+ * @param {string|null} [opts.lastError] - Final error message recorded.
+ * @returns {Promise<void>}
+ */
+async function sendWebhookFailureNotification({ deliveryId, url, attempts, lastError } = {}) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[email] RESEND_API_KEY not set — skipping webhook failure notification");
+    }
+    return;
+  }
+
+  const subject = `Webhook delivery abandoned after ${attempts} attempts`;
+  const text = [
+    "A webhook delivery permanently failed and has been removed from the retry queue.",
+    "",
+    `Delivery ID: ${deliveryId || "(unknown)"}`,
+    `URL:         ${url || "(unknown)"}`,
+    `Attempts:    ${attempts}`,
+    `Last error:  ${lastError || "(none recorded)"}`,
+    "",
+    "The event was not delivered. Review the webhook endpoint and re-send from the admin dashboard.",
+  ].join("\n");
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [ADMIN_NOTIFICATION_EMAIL],
+      subject,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error("[email] Resend error (webhook failure notification):", errBody);
+  }
+}
+
+module.exports = {
+  sendUpdateNotifications,
+  sendAdminVerificationNotification,
+  sendVerificationStatusNotification,
+  sendWebhookFailureNotification,
+};

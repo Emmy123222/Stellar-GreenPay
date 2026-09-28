@@ -88,7 +88,7 @@ async function start(io) {
 
 async function enqueueProfileUpdate(donorAddress) {
   if (!boss) {
-    throw new Error("profileQueue not started — call start(io) first");
+    return processProfileUpdate(donorAddress);
   }
   return boss.send(QUEUE, { donorAddress }, { retryLimit: 3, retryDelay: 10 });
 }

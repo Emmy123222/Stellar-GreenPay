@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-donation CO₂ offset in donation API responses via `co2OffsetKg` field, computed as `amount_xlm × co2_per_xlm / 1000` across all donation endpoints (#365).
 - On-chain USDC to XLM price conversion through a configured oracle adapter (#345).
 - Untracked test coverage reports, added full coverage ignore rules in `.gitignore`, and configured CI to upload coverage reports as GitHub Actions workflow artifacts (#1046).
+- Dead-letter handling for stats refresh background queue (`statsRefreshQueue.js`), including Sentry failure logging, `dead_letter` database table persistence, pg-boss archiving, and Prometheus `stats_refresh_failures_total` failure metric tracking (#1089).
+
+### Fixed
+
+- Removed duplicate `defaults` key in backend CI workflow (`backend.yml`) and updated `moduleResolution` to `bundler` with `ES2020` in backend `tsconfig.json`.
+- Fixed invalid donation UUID format in `projects.campaigns.integration.test.js` and mocked Stellar Horizon `getTransaction` in `donations.integration.test.js`.
+- Added `week` time period filter to leaderboard query, explicit 200 status on donation deduplication, and accurate milestone percentage calculation with webhook trigger on donation recording.
+- Added synchronous profile update fallback in `profileQueue` when queue worker is not started and added webhook secret rotation columns to `schema.sql`.
+- Awaited profile updates and milestone delivery in `donations.js` to eliminate race conditions, added polling in integration tests, and fixed postgres health check and CI integration skip configuration in `backend.yml`.
 
 
 ## [1.0.0] - 2025-01-01
