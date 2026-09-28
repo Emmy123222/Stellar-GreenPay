@@ -44,8 +44,8 @@ describe("leaderboard query histogram (issue #1093)", () => {
     leaderboardQueryDuration.observe({ period: "month", sort_by: "impact_score" }, 0.25);
 
     const text = await register.metrics();
-    expect(text).toContain('period="month"');
-    expect(text).toContain('sort_by="impact_score"');
+    expect(text).toContain("period=\"month\"");
+    expect(text).toContain("sort_by=\"impact_score\"");
     // Bucket counts only move once an observation lands, so a labelled _count
     // line is the proof the sample was recorded.
     expect(text).toMatch(
