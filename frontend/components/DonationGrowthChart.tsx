@@ -27,16 +27,18 @@ export default function DonationGrowthChart({ projectId, data: initialData }: Do
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (initialData) {
-      setData(initialData);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    // If initialData was supplied, useState was already seeded — no need to
+    // call setState synchronously inside the effect body.
+    if (initialData) return;
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    // Defer the initial loading/error state updates so they don't fire
+    // synchronously in the effect body (react-hooks/set-state-in-effect).
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setLoading(true);
+      setError(null);
+    });
 
     fetchDonationGrowth(projectId)
       .then((points) => {

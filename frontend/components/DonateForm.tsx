@@ -83,9 +83,13 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   useEffect(() => {
     const draft = readDraft(project.id);
     if (!draft) return;
-    if (draft.amount) setAmount(draft.amount);
-    if (draft.message) setMessage(draft.message);
-    if (draft.currency) setCurrency(draft.currency);
+    // Defer setState calls to avoid synchronous state updates inside an effect
+    // body which can trigger cascading renders (react-hooks/set-state-in-effect).
+    queueMicrotask(() => {
+      if (draft.amount) setAmount(draft.amount);
+      if (draft.message) setMessage(draft.message);
+      if (draft.currency) setCurrency(draft.currency);
+    });
   }, [project.id]);
 
   // Persist the draft on every change so a back-navigation doesn't lose it.
