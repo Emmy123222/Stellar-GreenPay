@@ -7,7 +7,6 @@ require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
 const http = require("http");
 const { Server } = require("socket.io");
 const { initSentry, errorHandler: sentryErrorMiddleware } = require("./services/sentry");
@@ -23,6 +22,8 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const mobileRouter = require("./routes/mobile");
+const extensionRouter = require("./routes/extension");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -56,7 +57,8 @@ app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
 
-const csrfProtection = csurf({
+const { createSelectiveCsrf } = require("./middleware/selectiveCsrf");
+app.use(createSelectiveCsrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -64,20 +66,7 @@ const csrfProtection = csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
-});
-app.use((req, res, next) => {
-  if (
-    req.path.startsWith("/api/notifications") ||
-    req.path.startsWith("/api/v1/notifications") ||
-    req.path === "/health" ||
-    req.path === "/api/health" ||
-    req.path === "/api/v1/health" ||
-    req.path === "/api/readiness"
-  ) {
-    return next();
-  }
-  return csrfProtection(req, res, next);
-});
+}));
 
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
@@ -89,6 +78,9 @@ app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+// Non-browser clients: CSRF skipped for these prefixes (see selectiveCsrf.js)
+app.use("/api/mobile", mobileRouter);
+app.use("/api/extension", extensionRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
