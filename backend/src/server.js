@@ -23,6 +23,7 @@ const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPo
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const statsRouter = require("./routes/stats");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -101,6 +102,8 @@ app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/v1/stats", statsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));

@@ -22,6 +22,33 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
+interface DonationDraft {
+  amount?: string;
+  message?: string;
+  currency?: "XLM" | "USDC";
+}
+
+const draftKey = (projectId: string) => `greenpay:donate-draft:${projectId}`;
+
+function readDraft(projectId: string): DonationDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(projectId));
+    return raw ? (JSON.parse(raw) as DonationDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(projectId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(draftKey(projectId));
+  } catch {
+    // sessionStorage may be unavailable (private mode); ignore.
+  }
+}
+
 export default function DonateForm({ project, publicKey, initialAmount, initialMessage, onSuccess }: DonateFormProps) {
   const [amount, setAmount]   = useState(initialAmount || "");
   const [message, setMessage] = useState(initialMessage || "");
@@ -50,6 +77,36 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
     setPrevInitialMessage(initialMessage);
     if (initialMessage) setMessage(initialMessage);
   }
+
+  // Restore any in-progress draft when navigating back to a previously filled
+  // form within the same tab.
+  useEffect(() => {
+    const draft = readDraft(project.id);
+    if (!draft) return;
+    if (draft.amount) setAmount(draft.amount);
+    if (draft.message) setMessage(draft.message);
+    if (draft.currency) setCurrency(draft.currency);
+  }, [project.id]);
+
+  // Persist the draft on every change so a back-navigation doesn't lose it.
+  useEffect(() => {
+    if (step === "success") return;
+    if (typeof window === "undefined") return;
+    // Nothing worth restoring — drop any stale draft instead of persisting an
+    // empty one (this is what an explicit Cancel leaves behind).
+    if (!amount && !message) {
+      clearDraft(project.id);
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(
+        draftKey(project.id),
+        JSON.stringify({ amount, message, currency }),
+      );
+    } catch {
+      // Ignore storage quota / availability errors.
+    }
+  }, [project.id, amount, message, currency, step]);
 
   useEffect(() => {
     let mounted = true;
@@ -104,6 +161,14 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 
   const isProcessing = step === "building" || step === "signing" || step === "submitting" || step === "recording";
 
+  const handleCancel = () => {
+    clearDraft(project.id);
+    setAmount("");
+    setMessage("");
+    setError(null);
+    setStep("idle");
+  };
+
   const handleDonate = async () => {
     if (!isValid || isProcessing || step !== "idle") return;
     setError(null);
@@ -156,6 +221,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           transactionHash: result.hash,
         });
 
+        clearDraft(project.id);
         setStep("success");
         onSuccess?.();
       } else {
@@ -194,6 +260,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           transactionHash: result.hash,
         });
 
+        clearDraft(project.id);
         setStep("success");
         onSuccess?.();
       }
@@ -341,6 +408,16 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           )}
           {step === "error" && "Retry"}
         </button>
+
+        {(amount || message) && !isProcessing && (
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="w-full text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body underline"
+          >
+            Cancel
+          </button>
+        )}
 
         {(step === "building" || step === "signing") && (
           <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
