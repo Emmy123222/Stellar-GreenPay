@@ -62,7 +62,6 @@ async function recordDonation(req, res, next) {
     const projectResult = await client.query("SELECT id, co2_per_xlm, name FROM projects WHERE id = $1", [projectId]);
     if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
     const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
-    const project = projectResult.rows[0] || {};
 
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
@@ -122,18 +121,6 @@ async function recordDonation(req, res, next) {
         donorCountry,
       ],
     );
-
-    const recordedDonation = donationResult.rows[0] || {
-      id: uuid(),
-      project_id: projectId,
-      donor_address: donorAddress,
-      amount_xlm: currency === "XLM" ? parsedAmount : null,
-      amount: parsedAmount,
-      currency,
-      message: message?.trim().slice(0, 100) || null,
-      transaction_hash: transactionHash,
-      created_at: new Date().toISOString(),
-    };
 
     // Check for active matching offers
     if (currency === "XLM") {

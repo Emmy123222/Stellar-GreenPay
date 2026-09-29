@@ -4,7 +4,7 @@ const router = express.Router();
 const pool = require("../db/pool");
 const { signToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
+const { buildDigestHtml } = require("../services/digestQueue");
 const {
   getMaxRecurringAmount,
   setMaxRecurringAmount,
