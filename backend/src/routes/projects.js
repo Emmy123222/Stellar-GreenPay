@@ -316,9 +316,7 @@ router.get("/", async (req, res, next) => {
       values.push(sortValue, id);
       const sortValIdx = values.length - 1;
       const idIdx = values.length;
-      where.push(
-        `(${sortField} < $${sortValIdx} OR (${sortField} = $${sortValIdx} AND id < $${idIdx}))`,
-      );
+      where.push(`(${sortField}, id) < ($${sortValIdx}, $${idIdx})`);
     }
 
     values.push(pageSize + 1);
@@ -450,6 +448,37 @@ router.post("/", async (req, res, next) => {
     res
       .status(201)
       .json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/donors
+ * Returns each donor address once for a project.
+ */
+router.get("/:id/donors", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ success: false, error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT DISTINCT donor_address
+         FROM donations
+        WHERE project_id = $1
+        ORDER BY donor_address ASC`,
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map((row) => row.donor_address),
+    });
   } catch (e) {
     next(e);
   }

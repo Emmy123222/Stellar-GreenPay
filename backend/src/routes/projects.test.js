@@ -223,6 +223,44 @@ describe("GET /api/projects/featured", () => {
   });
 });
 
+describe("GET /api/projects/:id/donors", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+  });
+
+  test("returns unique donor addresses for an existing project", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          { donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
+          { donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
+        ],
+      });
+
+    const res = await request(app).get("/api/projects/proj-1/donors").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    ]);
+    expect(pool.query.mock.calls[1][0]).toMatch(/SELECT DISTINCT donor_address/i);
+  });
+
+  test("returns 404 when the project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).get("/api/projects/missing/donors").expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GET /api/projects/:id", () => {
   let app;
 
