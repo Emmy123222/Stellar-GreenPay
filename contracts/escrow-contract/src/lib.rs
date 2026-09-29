@@ -4,7 +4,7 @@
 //! Client locks funds with `create_job`, then releases them per milestone.
 
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 #[contracttype]
@@ -56,12 +56,6 @@ pub enum DataKey {
 
 pub const RELEASE_AFTER_LEDGERS: u32 = 10;
 
-/// Client interface for the GreenPay contract to check pause status.
-#[contractclient(name = "GreenPayContractClient")]
-pub trait GreenPayContractInterface {
-    fn is_paused(env: Env) -> bool;
-}
-
 #[contract]
 pub struct EscrowContract;
 
@@ -107,8 +101,13 @@ impl EscrowContract {
             .instance()
             .get::<DataKey, Address>(&DataKey::GreenPayContractId)
         {
-            let greenpay_client = GreenPayContractClient::new(env, &greenpay_addr);
-            if greenpay_client.is_paused() {
+            // Call is_paused() on the GreenPay contract using invoke_contract
+            let is_paused: bool = env.invoke_contract(
+                &greenpay_addr,
+                &Symbol::new(env, "is_paused"),
+                Vec::new(env),
+            );
+            if is_paused {
                 panic!("GreenPay contract is paused");
             }
         }
@@ -756,8 +755,13 @@ mod tests {
 
         // Register a mock GreenPay contract that returns is_paused = true
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        let greenpay_client = MockPausedGreenPayContractClient::new(&env, &greenpay_cid);
-        greenpay_client.initialize(&true);
+        
+        // Initialize the mock contract to return paused = true
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            (true,).into_val(&env),
+        );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
 
@@ -805,8 +809,14 @@ mod tests {
 
         // Now set up paused GreenPay contract
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        let greenpay_client = MockPausedGreenPayContractClient::new(&env, &greenpay_cid);
-        greenpay_client.initialize(&true);
+        
+        // Initialize the mock contract to return paused = true
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            (true,).into_val(&env),
+        );
+        
         client.set_greenpay_contract(&admin, &greenpay_cid);
 
         // This should panic with "GreenPay contract is paused"
@@ -821,8 +831,13 @@ mod tests {
 
         // Register a mock GreenPay contract that returns is_paused = false
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        let greenpay_client = MockPausedGreenPayContractClient::new(&env, &greenpay_cid);
-        greenpay_client.initialize(&false);
+        
+        // Initialize the mock contract to return paused = false
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            (false,).into_val(&env),
+        );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
 
