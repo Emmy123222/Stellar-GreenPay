@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(deprecated)]
 #[cfg(all(test, feature = "testutils"))]
 mod fuzz_tests;
 
@@ -393,12 +394,6 @@ impl GreenPayContract {
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
 
-        // Track project ID for listing / bulk operations
-        let mut ids: Vec<String> = env.storage().instance()
-            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-        ids.push_back(project_id.clone());
-        env.storage().instance().set(&DataKey::ProjectIds, &ids);
-
         let count: u32 = env
             .storage()
             .instance()
@@ -457,12 +452,6 @@ impl GreenPayContract {
                 registered_at: env.ledger().sequence(),
             };
             env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
-
-            // Track project ID for listing / bulk operations
-            let mut ids: Vec<String> = env.storage().instance()
-                .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-            ids.push_back(project_id.clone());
-            env.storage().instance().set(&DataKey::ProjectIds, &ids);
 
             let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
@@ -2084,7 +2073,7 @@ mod tests {
 
     #[test]
     fn test_get_donor_history() {
-        let (env, cid, client, admin, pid) = setup();
+        let (env, _cid, client, _admin, pid) = setup();
         env.mock_all_auths();
         let donor = Address::generate(&env);
         let wallet = Address::generate(&env);
@@ -2286,7 +2275,7 @@ mod tests {
         projects.push_back(ProjectInit {
             id:          pid,
             name:        String::from_str(&env, "Duplicate"),
-            wallet:      wallet,
+            wallet,
             co2_per_xlm: 50,
             min_donation_amount: 1,
         });
@@ -2552,7 +2541,7 @@ mod tests {
 
         // Capture events BEFORE any other contract calls — env.events().all()
         // returns events from the most recent call only.
-        let rejection_events = env.events().all().events().len();
+        let _rejection_events = env.events().all().events().len();
 
         let p = client.get_proposal(&pid);
         assert!(p.resolved);

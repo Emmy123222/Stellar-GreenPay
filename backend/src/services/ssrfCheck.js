@@ -72,12 +72,17 @@ async function isUrlSafeFromSsrf(urlString) {
     return false;
   }
 
-  if (net.isIP(hostname)) {
-    return !isPrivateIp(hostname);
+  const cleanHost =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+
+  if (net.isIP(cleanHost)) {
+    return !isPrivateIp(cleanHost);
   }
 
   try {
-    const records = await dns.lookup(hostname, { all: true });
+    const records = await dns.lookup(cleanHost, { all: true });
     if (!records.length) return false;
     return records.every((record) => !isPrivateIp(record.address));
   } catch {
