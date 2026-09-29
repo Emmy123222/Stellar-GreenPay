@@ -17,12 +17,14 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
+const { isStellarTimeoutError } = require("./services/stellar");
 const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const statsRouter = require("./routes/stats");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -72,7 +74,9 @@ app.use((req, res, next) => {
     req.path === "/health" ||
     req.path === "/api/health" ||
     req.path === "/api/v1/health" ||
-    req.path === "/api/readiness"
+    req.path === "/api/readiness" ||
+    req.path === "/metrics" ||
+    req.path === "/api/metrics"
   ) {
     return next();
   }
@@ -81,8 +85,18 @@ app.use((req, res, next) => {
 
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
+const { register: metricsRegister } = require("./services/metrics");
+
+async function metricsHandler(req, res) {
+  res.set("Content-Type", metricsRegister.contentType);
+  res.end(await metricsRegister.metrics());
+}
+
+app.get("/metrics", metricsHandler);
+app.get("/api/metrics", metricsHandler);
 app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
+
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
 const donationsRouter = require("./routes/donations");
@@ -95,6 +109,8 @@ app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
 app.use("/api/v1/donations", donationsRouter);
 app.use("/api/v1/admin", adminRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/v1/stats", statsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -121,6 +137,10 @@ app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
 app.use("/api/impact", require("./routes/impact"));
+// Recurring donation schedules are the source of truth for mobile (#1059):
+// the app reads them from here and treats AsyncStorage as an offline cache.
+app.use("/api/recurring-donations", require("./routes/recurringDonations"));
+app.use("/api/v1/recurring-donations", require("./routes/recurringDonations"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
@@ -128,6 +148,13 @@ app.use(sentryErrorMiddleware());
 app.use((err, req, res, next) => {
   void next;
   console.error("[Error]", err.message);
+  // A timed-out Horizon/Soroban call means an upstream chain service stopped
+  // answering — that is a 503 the caller can retry, not a 500 in this API
+  // (issue #1097). Caught centrally so every call site benefits, including the
+  // routes that use the SDK server directly.
+  if (isStellarTimeoutError(err)) {
+    return res.status(503).json({ error: "Stellar network did not respond in time, please retry" });
+  }
   res.status(err.status || 500).json({ error: err.message || "Internal server error" });
 });
 

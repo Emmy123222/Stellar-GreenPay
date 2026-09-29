@@ -1,6 +1,7 @@
 const axios = {
   get: jest.fn(),
   post: jest.fn(),
+  delete: jest.fn(),
   create: jest.fn(() => axios),
   defaults: { headers: { common: {} } },
   interceptors: {

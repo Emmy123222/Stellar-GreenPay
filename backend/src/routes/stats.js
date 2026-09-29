@@ -8,6 +8,8 @@ const router = express.Router();
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const GLOBAL_STATS_CACHE_KEY = "stats:global";
 const GLOBAL_STATS_CACHE_TTL_SECONDS = 60;
 
@@ -44,6 +46,49 @@ router.get("/global", async (req, res, next) => {
     await redis.set(GLOBAL_STATS_CACHE_KEY, stats, GLOBAL_STATS_CACHE_TTL_SECONDS);
 
     res.json(stats);
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/stats/growth — weekly donation totals (optionally per project)
+//
+// Query params:
+//   projectId  (optional) UUID — restrict the series to a single project.
+// Returns `{ success: true, data: [{ week: "2026-W12", totalXLM: 123.45 }] }`,
+// ordered oldest → newest, which is what the admin dashboard chart consumes.
+router.get("/growth", async (req, res, next) => {
+  try {
+    const { projectId } = req.query;
+
+    if (projectId && !UUID_RE.test(String(projectId))) {
+      return res.status(400).json({ success: false, error: "Invalid projectId" });
+    }
+
+    const params = [];
+    let where = "";
+    if (projectId) {
+      params.push(projectId);
+      where = "WHERE project_id = $1";
+    }
+
+    const result = await pool.query(
+      `SELECT to_char(date_trunc('week', created_at), 'IYYY-"W"IW') AS week,
+              COALESCE(SUM(COALESCE(amount_xlm, amount)), 0) AS total
+         FROM donations
+         ${where}
+        GROUP BY 1
+        ORDER BY 1 ASC`,
+      params,
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map((row) => ({
+        week: row.week,
+        totalXLM: Number(Number.parseFloat(row.total || "0").toFixed(2)),
+      })),
+    });
   } catch (e) {
     next(e);
   }

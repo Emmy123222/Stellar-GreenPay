@@ -296,6 +296,53 @@ export async function fetchProjectDonations(
 }
 
 /**
+ * One page of a donor's history, plus what is needed to fetch the next one.
+ */
+export interface DonorHistoryPage {
+  donations: Donation[];
+  hasMore: boolean;
+  /** Opaque keyset cursor from the API; `null` once the last page is reached. */
+  nextCursor: string | null;
+  /** Donations in total, so the UI can report progress through the history. */
+  total: number;
+}
+
+/**
+ * Fetch one page of a donor's donation history.
+ *
+ * High-volume donors have hundreds of rows, which is far too many to send at
+ * once, so the endpoint is keyset-paginated (issue #1080).
+ *
+ * @param publicKey - Donor Stellar public key.
+ * @param options - Page size and the cursor returned by the previous page.
+ * @returns The page, whether more remain, the next cursor and the total count.
+ * @throws If the request fails.
+ */
+export async function fetchDonorHistoryPage(
+  publicKey: string,
+  { limit = 20, cursor }: { limit?: number; cursor?: string } = {},
+): Promise<DonorHistoryPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+
+  const { data } = await api.get<{
+    success: boolean;
+    data: Donation[];
+    has_more: boolean;
+    next_cursor: string | null;
+    total: number;
+  }>(`/api/donations/donor/${publicKey}`, { params });
+
+  return {
+    donations: data.data ?? [],
+    hasMore: Boolean(data.has_more),
+    nextCursor: data.next_cursor ?? null,
+    // Falls back to the page length so an older API still renders a sane count.
+    total: Number.isFinite(data.total) ? data.total : (data.data?.length ?? 0),
+  };
+}
+
+/**
  * Fetch all donations made by a donor.
  *
  * @param publicKey - Donor Stellar public key.
@@ -519,6 +566,52 @@ export async function fetchGlobalStats(): Promise<GlobalStats> {
   }
 
   return normalizeGlobalStats(data);
+}
+
+/** A single point in the donation growth series. */
+export interface DonationGrowthPoint {
+  week: string;
+  totalXLM: number;
+}
+
+/**
+ * Fetch the weekly donation growth series from the backend.
+ *
+ * @param projectId - Optional project UUID; when omitted the series is global.
+ * @returns Weekly totals ordered oldest → newest.
+ * @throws If the request fails.
+ */
+export async function fetchDonationGrowth(
+  projectId?: string,
+): Promise<DonationGrowthPoint[]> {
+  const { data } = await api.get<{ success: boolean; data: DonationGrowthPoint[] }>(
+    "/api/stats/growth",
+    { params: projectId ? { projectId } : undefined },
+  );
+  return data.data;
+}
+
+/**
+ * Download a server-rendered impact certificate as a PDF.
+ *
+ * Used as the reliable fallback for browsers whose client-side canvas
+ * rendering is inconsistent (notably Safari).
+ *
+ * @returns The PDF file as a Blob.
+ * @throws If the request fails.
+ */
+export async function downloadImpactCertificate(payload: {
+  donorAddress: string;
+  donorName?: string | null;
+  totalDonatedXLM: string;
+  totalCO2OffsetKg: number;
+  badgeTier: string | null;
+  projectsSupported: Array<{ id: string; name: string }>;
+}): Promise<Blob> {
+  const { data } = await api.post("/api/impact/certificate/pdf", payload, {
+    responseType: "blob",
+  });
+  return data as Blob;
 }
 
 // ── Admin: Project Approval ──────────────────────────────────────

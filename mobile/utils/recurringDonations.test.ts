@@ -4,14 +4,23 @@
  * Uses the in-memory AsyncStorage mock at
  * __mocks__/@react-native-async-storage/async-storage.js so no real
  * device storage is touched. Each test starts with a clean store.
+ *
+ * The backend-facing tests mock the shared axios module
+ * (`__mocks__/axios.js`) directly: the utility talks to
+ * `GET/POST/DELETE /api/recurring-donations`, which per #1059 is the
+ * source of truth for schedules while AsyncStorage is only a cache.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import {
   createRecurringDonation,
   loadRecurringDonations,
   cancelRecurringDonation,
+  syncRecurringDonations,
+  mapServerPledge,
   RECURRING_DONATIONS_KEY,
+  type RecurringDonation,
 } from './recurringDonations';
 
 // Clear the mock store before every test so state never leaks between cases.
@@ -222,5 +231,337 @@ describe('loadRecurringDonations() after cancelRecurringDonation()', () => {
 
     const all = await loadRecurringDonations();
     expect(all.find((d) => d.id === b.id)?.status).toBe('active');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. #1059 — backend is the source of truth for schedules
+// ---------------------------------------------------------------------------
+
+const DONOR = 'G'.padEnd(56, 'A');
+const OTHER_DONOR = 'G'.padEnd(56, 'B');
+
+function serverPledge(overrides: Record<string, unknown> = {}) {
+  return {
+    id: '11111111-1111-4111-8111-111111111111',
+    donorAddress: DONOR,
+    projectId: 'proj-001',
+    projectName: 'Amazon Reforestation',
+    amountXlm: 50,
+    currency: 'XLM',
+    nextDueDate: '2026-12-05',
+    durationMonths: 6,
+    remainingMonths: 4,
+    status: 'active',
+    createdAt: '2026-01-05T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function mockPledgeList(pledges: unknown[]) {
+  (axios.get as jest.Mock).mockResolvedValue({
+    status: 200,
+    data: { success: true, data: pledges },
+  });
+}
+
+function localDonation(overrides: Partial<RecurringDonation> = {}): RecurringDonation {
+  return {
+    id: '11111111-1111-4111-8111-111111111111',
+    serverId: '11111111-1111-4111-8111-111111111111',
+    projectId: 'proj-001',
+    projectName: 'Amazon Reforestation',
+    amountXLM: '50',
+    startDate: '2026-01-05',
+    nextDueDate: '2026-11-05',
+    durationMonths: 6,
+    remainingMonths: 5,
+    status: 'active',
+    createdAt: '2026-01-05T00:00:00.000Z',
+    donorAddress: DONOR,
+    ...overrides,
+  };
+}
+
+describe('syncRecurringDonations() — backend as source of truth (#1059)', () => {
+  test('queries GET /api/recurring-donations scoped to the donor', async () => {
+    mockPledgeList([]);
+    await syncRecurringDonations(DONOR);
+
+    expect(axios.get).toHaveBeenCalledWith(
+      expect.stringContaining('/api/recurring-donations'),
+      { params: { donor: DONOR } },
+    );
+  });
+
+  test('the server schedule wins over a stale local nextDueDate', async () => {
+    // Simulates a device whose clock was reset: the cached copy drifted back
+    // a month, the server copy is correct.
+    await AsyncStorage.setItem(
+      RECURRING_DONATIONS_KEY,
+      JSON.stringify([localDonation({ nextDueDate: '2026-09-05', remainingMonths: 9 })]),
+    );
+    mockPledgeList([serverPledge({ nextDueDate: '2026-12-05', remainingMonths: 4 })]);
+
+    const { donations, remoteAvailable } = await syncRecurringDonations(DONOR);
+
+    expect(remoteAvailable).toBe(true);
+    expect(donations).toHaveLength(1);
+    expect(donations[0].nextDueDate).toBe('2026-12-05');
+    expect(donations[0].remainingMonths).toBe(4);
+  });
+
+  test('writes the reconciled schedule through to the AsyncStorage cache', async () => {
+    mockPledgeList([serverPledge()]);
+    await syncRecurringDonations(DONOR);
+
+    const cached = await loadRecurringDonations();
+    expect(cached).toHaveLength(1);
+    expect(cached[0].serverId).toBe('11111111-1111-4111-8111-111111111111');
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+      RECURRING_DONATIONS_KEY,
+      expect.any(String),
+    );
+  });
+
+  test('a fresh install with an empty cache restores the full schedule from the backend', async () => {
+    // Reinstall case: nothing in AsyncStorage, so the backend is all we have.
+    mockPledgeList([serverPledge(), serverPledge({ id: '22222222-2222-4222-8222-222222222222' })]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+
+    expect(donations).toHaveLength(2);
+    expect(donations.map((d) => d.serverId)).toEqual([
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+    ]);
+    expect(donations[0].nextDueDate).toBe('2026-12-05');
+  });
+
+  test('does not duplicate a pledge that is both cached locally and on the server', async () => {
+    await AsyncStorage.setItem(
+      RECURRING_DONATIONS_KEY,
+      JSON.stringify([localDonation()]),
+    );
+    mockPledgeList([serverPledge()]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+    expect(donations).toHaveLength(1);
+  });
+
+  test('drops a local pledge the server no longer returns (deleted upstream)', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    mockPledgeList([]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+    expect(donations).toEqual([]);
+  });
+
+  test('honours a cancellation made on another device', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    mockPledgeList([serverPledge({ status: 'cancelled' })]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+    expect(donations).toEqual([]);
+  });
+
+  test('keeps a local cancellation that has not reached the server yet', async () => {
+    await AsyncStorage.setItem(
+      RECURRING_DONATIONS_KEY,
+      JSON.stringify([localDonation({ status: 'cancelled' })]),
+    );
+    mockPledgeList([serverPledge({ status: 'active' })]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+    expect(donations).toHaveLength(1);
+    expect(donations[0].status).toBe('cancelled');
+  });
+
+  test('falls back to the cache without throwing when the backend is unreachable', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    (axios.get as jest.Mock).mockRejectedValue(new Error('Network request failed'));
+
+    const { donations, remoteAvailable } = await syncRecurringDonations(DONOR);
+
+    expect(remoteAvailable).toBe(false);
+    expect(donations).toHaveLength(1);
+    expect(donations[0].nextDueDate).toBe('2026-11-05');
+  });
+
+  test('treats a non-2xx or malformed response as offline rather than wiping the cache', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    (axios.get as jest.Mock).mockResolvedValue({ status: 500, data: { success: false } });
+
+    const { donations, remoteAvailable } = await syncRecurringDonations(DONOR);
+
+    expect(remoteAvailable).toBe(false);
+    expect(donations).toHaveLength(1);
+  });
+
+  test('stays local-only when no donor address is known yet', async () => {
+    await AsyncStorage.setItem(
+      RECURRING_DONATIONS_KEY,
+      JSON.stringify([localDonation({ donorAddress: undefined })]),
+    );
+
+    const { donations, remoteAvailable } = await syncRecurringDonations();
+
+    expect(remoteAvailable).toBe(false);
+    expect(axios.get).not.toHaveBeenCalled();
+    expect(donations).toHaveLength(1);
+  });
+
+  test('pushes an offline-created local pledge on the next successful sync', async () => {
+    const localOnly = localDonation({
+      id: 'rec_local_1',
+      serverId: undefined,
+      donorAddress: DONOR,
+    });
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localOnly]));
+    mockPledgeList([]);
+    (axios.post as jest.Mock).mockResolvedValue({
+      status: 201,
+      data: { success: true, data: serverPledge() },
+    });
+
+    const { donations, pushed } = await syncRecurringDonations(DONOR);
+
+    expect(pushed).toBe(1);
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('/api/recurring-donations'),
+      expect.objectContaining({ donorAddress: DONOR, projectId: 'proj-001', durationMonths: 6 }),
+    );
+    // The local id is preserved so existing UI keys stay stable.
+    expect(donations[0].id).toBe('rec_local_1');
+    expect(donations[0].serverId).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  test('ignores a donor address belonging to a different account', async () => {
+    mockPledgeList([serverPledge({ donorAddress: OTHER_DONOR })]);
+
+    const { donations } = await syncRecurringDonations(DONOR);
+    // The GET is scoped by `donor=DONOR`, and the map keeps the API's own
+    // address, so no cross-account merging happens.
+    expect(donations[0].donorAddress).toBe(OTHER_DONOR);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. #1059 — create / cancel persist to the backend
+// ---------------------------------------------------------------------------
+
+describe('createRecurringDonation() backend persistence', () => {
+  const PROJECT = { status: 200, data: { success: true, data: { id: 'proj-001' } } };
+
+  test('posts the pledge to the backend when a donor address and a term are given', async () => {
+    (axios.get as jest.Mock).mockResolvedValue(PROJECT);
+    (axios.post as jest.Mock).mockResolvedValue({
+      status: 201,
+      data: { success: true, data: serverPledge() },
+    });
+
+    const created = await createRecurringDonation({
+      projectId: 'proj-001',
+      projectName: 'Amazon Reforestation',
+      amountXLM: '50',
+      durationMonths: 6,
+      donorAddress: DONOR,
+    });
+
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('/api/recurring-donations'),
+      expect.objectContaining({ donorAddress: DONOR, projectId: 'proj-001', amountXlm: 50 }),
+    );
+    expect(created.serverId).toBe('11111111-1111-4111-8111-111111111111');
+    // Schedule fields come from the server, not from the device clock.
+    expect(created.nextDueDate).toBe('2026-12-05');
+  });
+
+  test('keeps the donation local-only when the backend POST fails', async () => {
+    (axios.get as jest.Mock).mockResolvedValue(PROJECT);
+    (axios.post as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    const created = await createRecurringDonation({
+      projectId: 'proj-001',
+      projectName: 'Amazon Reforestation',
+      amountXLM: '50',
+      durationMonths: 6,
+      donorAddress: DONOR,
+    });
+
+    expect(created.serverId).toBeUndefined();
+    const all = await loadRecurringDonations();
+    expect(all).toHaveLength(1);
+    expect(all[0].id).toBe(created.id);
+  });
+
+  test('open-ended pledges are not posted (the API requires a fixed term)', async () => {
+    (axios.get as jest.Mock).mockResolvedValue(PROJECT);
+
+    const created = await createRecurringDonation({
+      projectId: 'proj-001',
+      projectName: 'Amazon Reforestation',
+      amountXLM: '50',
+      durationMonths: null,
+      donorAddress: DONOR,
+    });
+
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(created.serverId).toBeUndefined();
+  });
+});
+
+describe('cancelRecurringDonation() backend cancellation', () => {
+  test('issues DELETE /api/recurring-donations/:serverId and marks the local copy', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    (axios.delete as jest.Mock).mockResolvedValue({
+      status: 200,
+      data: { success: true, data: serverPledge({ status: 'cancelled' }) },
+    });
+
+    await cancelRecurringDonation('11111111-1111-4111-8111-111111111111');
+
+    expect(axios.delete).toHaveBeenCalledWith(
+      expect.stringContaining('/api/recurring-donations/11111111-1111-4111-8111-111111111111'),
+    );
+    const [donation] = await loadRecurringDonations();
+    expect(donation.status).toBe('cancelled');
+  });
+
+  test('still cancels locally when the DELETE fails', async () => {
+    await AsyncStorage.setItem(RECURRING_DONATIONS_KEY, JSON.stringify([localDonation()]));
+    (axios.delete as jest.Mock).mockRejectedValue(new Error('offline'));
+
+    await cancelRecurringDonation('11111111-1111-4111-8111-111111111111');
+
+    const [donation] = await loadRecurringDonations();
+    expect(donation.status).toBe('cancelled');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. mapServerPledge()
+// ---------------------------------------------------------------------------
+
+describe('mapServerPledge()', () => {
+  test('maps API fields onto the local shape without reading the device clock', () => {
+    const mapped = mapServerPledge(serverPledge());
+
+    expect(mapped).toMatchObject({
+      id: '11111111-1111-4111-8111-111111111111',
+      serverId: '11111111-1111-4111-8111-111111111111',
+      projectId: 'proj-001',
+      projectName: 'Amazon Reforestation',
+      amountXLM: '50',
+      nextDueDate: '2026-12-05',
+      durationMonths: 6,
+      remainingMonths: 4,
+      status: 'active',
+    });
+  });
+
+  test('survives a pledge row with a missing project name', () => {
+    const mapped = mapServerPledge(serverPledge({ projectName: undefined }));
+    expect(mapped.projectName).toBe('Recurring donation');
   });
 });

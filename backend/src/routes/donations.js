@@ -15,7 +15,13 @@ const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
 const { verifyToken, isValidAdminKey } = require("../middleware/auth");
-const donationLimiter = createRateLimiter(10, 1, "donations"); // 10 requests per minute
+const { checkAndDeliverMilestones } = require("../services/webhook");
+const configuredDonationLimit = Number.parseInt(process.env.DONATIONS_RATE_LIMIT_PER_MINUTE || "10", 10);
+const donationLimiter = createRateLimiter(
+  Number.isFinite(configuredDonationLimit) && configuredDonationLimit > 0 ? configuredDonationLimit : 10,
+  1,
+  "donations",
+);
 
 /**
  * Truncate a Stellar wallet address to first 8 and last 4 characters.
@@ -163,7 +169,7 @@ async function recordDonation(req, res, next) {
     );
     if (existingResult.rows[0]) {
       const existingRow = { ...existingResult.rows[0], co2_per_xlm: projectCo2PerXlm };
-      return res.json({ success: true, data: mapDonationRow(existingRow) });
+      return res.status(200).json({ success: true, data: mapDonationRow(existingRow) });
     }
 
     // Verify the transaction is confirmed on-chain before recording it.
@@ -284,8 +290,12 @@ async function recordDonation(req, res, next) {
     inTransaction = false;
 
     await redis.deletePattern("projects:list:*");
+    // The leaderboard aggregates the row just inserted, so every cached page is
+    // now stale (issue #1093). Donations recorded out-of-band by the indexer are
+    // not invalidated here; the 60-second TTL bounds how long they stay stale.
+    await redis.deletePattern("leaderboard:*");
 
-    enqueueProfileUpdate(donorAddress).catch((err) => {
+    await enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
@@ -352,6 +362,10 @@ async function recordDonation(req, res, next) {
       projectName,
       amountXLM: String(donationRow.amount_xlm ?? parsedAmount),
       donorBadge,
+    });
+
+    await checkAndDeliverMilestones(projectId).catch((err) => {
+      logger.error({ event: "milestone_webhook_error", projectId, err: err.message }, "Failed to deliver milestone webhooks");
     });
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
@@ -568,13 +582,18 @@ router.get("/project/:projectId", async (req, res, next) => {
 });
 
 /**
- * List donations for a specific donor.
+ * List donations for a specific donor, one keyset-paginated page at a time.
+ *
+ * Query params: `limit` (default 20, max 100) and `cursor` (base64 of
+ * `{ created_at, id }`, echoed back as `next_cursor`). The response carries
+ * `total` — the donor's whole donation count — so a caller can show progress
+ * through the history without fetching all of it (issue #1080).
  *
  * @route GET /api/donations/donor/:publicKey
  * @param {import('express').Request} req - Express request containing the donor public key.
  * @param {import('express').Response} res - Express response object.
  * @param {import('express').NextFunction} next - Express error middleware.
- * @returns {Promise<void>} Sends the donor donation history.
+ * @returns {Promise<void>} Sends one page of the donor's history plus the total count.
  * @throws {Error} If validation or the donation query fails.
  */
 router.get("/donor/:publicKey", async (req, res, next) => {
@@ -616,10 +635,22 @@ router.get("/donor/:publicKey", async (req, res, next) => {
          ORDER BY d.created_at DESC, d.id DESC
          LIMIT $2`;
 
+    // A keyset window can't answer "how many are there in total", which the
+    // donor page needs to show progress through its history (issue #1080).
+    // Counted concurrently with the page, and served by the same
+    // donor_address index the page query uses.
     const auth = resolveRequesterAuth(req);
-    const donations = (await pool.query(query, values)).rows
+    const [pageResult, totalResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(
+        "SELECT COUNT(*)::int AS total FROM donations WHERE donor_address = $1",
+        [req.params.publicKey],
+      ),
+    ]);
+    const donations = pageResult.rows
       .map(mapDonationRow)
       .map((d) => sanitizeDonation(d, auth));
+    const total = Number(totalResult.rows[0]?.total ?? 0);
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore
@@ -631,7 +662,7 @@ router.get("/donor/:publicKey", async (req, res, next) => {
       ).toString("base64")
       : null;
 
-    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor });
+    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor, total });
   } catch (e) { next(e); }
 });
 

@@ -21,7 +21,12 @@ function loadMigrationFiles() {
   if (!fs.existsSync(MIGRATIONS_DIR)) return [];
   return fs
     .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".js"))
+    .filter(
+      (f) =>
+        f.endsWith(".js") &&
+        !f.endsWith(".test.js") &&
+        !f.endsWith(".spec.js")
+    )
     .sort()
     .map((f) => ({
       version: f.replace(".js", ""),

@@ -13,6 +13,12 @@
  *      • Loading spinner text while the request is in-flight
  *  - Errors (network failure, missing push token) surface as a red toast
  *    rather than being silently swallowed.
+ *
+ * Changes for issue #1122:
+ *  - The map section only mounts a `MapView` when BOTH `latitude` and
+ *    `longitude` are non-null. Projects without location data render a
+ *    "Location not available" placeholder with a globe icon instead of
+ *    crashing the screen with "Cannot read properties of null".
  */
 import {
   View,
@@ -28,8 +34,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 
 import * as Notifications from 'expo-notifications';
-import * as Sharing from 'expo-sharing';
-import { captureRef } from 'react-native-view-shot';
+import MapView, { Marker } from 'react-native-maps';
 import { useTheme } from '../theme';
 import {
   getPushToken,
@@ -37,12 +42,24 @@ import {
   unfollowProject,
   markNotificationsSeen,
 } from '../../utils/notifications';
+import {
+  loadRecurringDonations,
+  type RecurringDonation,
+} from '../../utils/recurringDonations';
 
-import { getPushToken, followProject, unfollowProject } from '../../utils/notifications';
-import { useTheme } from '../theme';
-import { markNotificationsSeen } from '../../utils/notifications';
-import * as Notifications from 'expo-notifications';
-
+export function formatNextPaymentDate(isoDate: string): string {
+  try {
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return isoDate;
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return isoDate;
+  }
+}
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -61,6 +78,13 @@ interface ClimateProject {
   co2OffsetKg: number;
   walletAddress: string;
   status: string;
+  /**
+   * Optional map pin. The API leaves both `null` for projects that were created
+   * before we started capturing coordinates, so both fields are nullable and
+   * must never be dereferenced without the guard in the render (issue #1122).
+   */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 type ToastVariant = 'success' | 'error';
@@ -90,9 +114,6 @@ function Toast({
   onHideRef.current = onHide;
 
   useEffect(() => {
-
-    let fadeOutTimer: ReturnType<typeof setTimeout> | null = null;
-
     // Unmount-race hygiene for the toast's animation chain.
     //
     // Three things can race against an unmount:
@@ -105,29 +126,24 @@ function Toast({
     //      `setToast(null)` on the (now unmounted) parent state.
     //
     // We track all three (`anim`, `holdTimer`, `mounted`) and tear them down
-    // in the cleanup return. Stopping the fade-in animation is the
+    // in the single cleanup return. Stopping the fade-in animation is the
     // load-bearing one — without it, the cleanup can run with `holdTimer`
     // still `undefined` and the start callback then queues a timer the
     // cleanup can no longer reach. The `mounted` guard is a belt-and-braces
     // defence for any future async path that updates the closure.
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     let mounted = true;
-    let anim: Animated.CompositeAnimation | undefined;
-
-
-    // Fade in
-    anim = Animated.timing(opacity, {
+    const anim = Animated.timing(opacity, {
       toValue: 1,
       duration: 200,
       useNativeDriver: true,
     });
+
+    // Fade in
     anim.start(() => {
       // Bail if the component unmounted before fade-in finished.
       if (!mounted) return;
       // Hold for 2 s, then fade out
-
-      fadeOutTimer = setTimeout(() => {
-
       holdTimer = setTimeout(() => {
         if (!mounted) return;
 
@@ -139,25 +155,16 @@ function Toast({
       }, 2000);
     });
 
-
-    // Clear the fade-out timer on unmount so a dismissed toast never fires a
-    // stale timer (which could otherwise animate after the component is gone).
-    return () => {
-      if (fadeOutTimer) clearTimeout(fadeOutTimer);
-      opacity.stopAnimation();
-    };
-  }, [opacity]);
-
     return () => {
       mounted = false;
       if (holdTimer !== undefined) clearTimeout(holdTimer);
-      // `anim?.stop()` halts the fade-in mid-flight so its start callback
+      // `anim.stop()` halts the fade-in mid-flight so its start callback
       // never fires after unmount. (React Native's `Animated.CompositeAnimation`
       // exposes `.stop(callback?)`; we don't need a callback here.)
-      anim?.stop();
+      anim.stop();
+      opacity.stopAnimation();
     };
-  }, []);
-
+  }, [opacity]);
 
   const bg = variant === 'success' ? '#227239' : '#b91c1c';
 
@@ -214,23 +221,6 @@ export default function ProjectDetailScreen() {
   const [followLoading, setFollowLoading] = useState(false);
   const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const viewShotRef = useRef<View>(null);
-
-  // Share the project as an image via the native share sheet.
-  const handleShare = async () => {
-    try {
-      if (!project) return;
-      const uri = await captureRef(viewShotRef, { format: 'png', quality: 1 });
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, {
-          mimeType: 'image/png',
-          dialogTitle: `Share ${project.name}`,
-        });
-      }
-    } catch {
-      // Sharing is optional — never block the screen on it.
-    }
-  };
 
   const checkRecurringDonation = useCallback(async (projectId: string) => {
     try {
@@ -275,6 +265,11 @@ export default function ProjectDetailScreen() {
     }
   };
 
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  const showToast = (message: string, variant: ToastVariant = 'success') => {
+    setToast({ message, variant });
+  };
 
   const initializeNotifications = async () => {
     try {
@@ -438,12 +433,28 @@ export default function ProjectDetailScreen() {
 
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
 
+  // ── map availability (#1122) ──────────────────────────────────────────────
+
+  // Single source of truth for "can we drop a pin on a map?", evaluated only
+  // once `project` is known to be non-null by the early returns above.
+  //
+  // `latitude` / `longitude` are optional *and* nullable on the API's project
+  // payload: projects created before coordinates were captured come back with
+  // an explicit `null`, and the fields can also be missing entirely. Both must
+  // be present before MapView is rendered — passing `null` through to the
+  // native map threw "Cannot read properties of null" and took down the whole
+  // screen. When either is missing we render a "Location not available"
+  // placeholder instead.
+  //
+  // `!= null` (loose, not `!`) is deliberate: it rejects `null` *and*
+  // `undefined` in one comparison, while still treating `0` as a legitimate
+  // coordinate — a truthiness check would wrongly hide the map at lat/lng 0.
+  const hasCoordinates = (
+    project.latitude != null && project.longitude != null
+  );
+
   return (
-    <View
-      ref={viewShotRef}
-      collapsable={false}
-      style={[styles.wrapper, { backgroundColor: colors.background }]}
-    >
+    <View style={[styles.wrapper, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.container}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: colors.primary }]}>
@@ -460,21 +471,13 @@ export default function ProjectDetailScreen() {
               </Text>
             </View>
             <TouchableOpacity
-
               style={styles.shareButton}
               onPress={handleShare}
               activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel={`Share ${project.name}`}
-              accessibilityHint="Opens the share sheet"
-
               testID="share-button"
-              style={styles.shareButton}
-              onPress={handleShare}
               accessibilityRole="button"
               accessibilityLabel={`Share ${project.name}`}
               accessibilityHint="Opens the system share sheet so you can send this project to others"
-
             >
               <Text style={styles.shareIcon}>↗</Text>
             </TouchableOpacity>
@@ -604,24 +607,260 @@ export default function ProjectDetailScreen() {
           </Text>
         </View>
 
-      {updates.length > 0 && (
-        <View style={[styles.updatesCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Latest Updates</Text>
-          {updates.map((update) => (
-            <View key={update.id} style={[styles.updateItem, { borderTopColor: colors.border }]}>
-              <Text style={[styles.updateTitle, { color: colors.primaryText }]}>{update.title}</Text>
-              <Text style={[styles.updateDate, { color: colors.muted }]}>
-                {new Date(update.createdAt).toLocaleDateString()}
-              </Text>
-              <Text style={[styles.updateBody, { color: colors.secondaryText }]}>{update.body}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+        {/* Updates — recent project activity derived from existing fields.
+            Real implementation of the "Display: ... updates" line in
+            issue-168 (closes the AC gap that the original ticket flagged but
+            the first pass omitted). */}
+        <View
+          style={[
+            styles.updatesCard,
+            {
+              backgroundColor: colors.surface,
+              shadowColor: colors.cardShadow,
+              borderColor: colors.cardBorder,
+            },
+          ]}
+          accessibilityRole="summary"
+          accessibilityLabel={`Updates for ${project.name}`}
+        >
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+            📰 Updates
+          </Text>
 
-        {/* Follow button — visible whenever we have a push token, OR show a
-            softer prompt when we don't so the user knows the feature exists */}
-      {pushToken && (
+          {project.donorCount > 0 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🎉
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  {project.donorCount}{' '}
+                  {project.donorCount === 1 ? 'donor has' : 'donors have'} contributed
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  The project is actively receiving community support.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {project.co2OffsetKg > 0 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🌱
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  {project.co2OffsetKg.toLocaleString()} kg CO₂ offset
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  Estimated environmental impact to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 25 && pct < 50 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                ⭐
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  25% milestone reached
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 50 && pct < 75 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                ⭐⭐
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  50% milestone reached — halfway!
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 75 && pct < 100 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🔥
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  75% milestone — almost there
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {pct >= 100 && (
+            <View style={styles.updateRow}>
+              <Text style={styles.updateBullet} accessibilityElementsHidden>
+                🏆
+              </Text>
+              <View style={styles.updateText}>
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  Goal fully funded
+                </Text>
+                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                  {project.donorCount}{' '}
+                  {project.donorCount === 1 ? 'donor has' : 'donors have'} hit the{' '}
+                  {parseFloat(project.goalXLM).toFixed(0)} XLM goal.
+                </Text>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.updateRow}>
+            <Text style={styles.updateBullet} accessibilityElementsHidden>
+              {project.status === 'active'
+                ? '✅'
+                : project.status === 'completed'
+                ? '🏁'
+                : '⏸️'}
+            </Text>
+            <View style={styles.updateText}>
+              <Text
+                style={[styles.updateTitle, { color: colors.primaryText }]}
+                accessibilityLabel={`Project status ${project.status}`}
+              >
+                Project {project.status}
+              </Text>
+              <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                Verified {project.category.toLowerCase()} project.
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Map — guarded on both coordinates being present. Projects created
+            before we started capturing coordinates come back from the API with
+            `latitude`/`longitude` set to `null`, and handing those straight to
+            MapView threw "Cannot read properties of null" and took the whole
+            screen down with it. When either value is missing we fall back to a
+            static placeholder instead (issue #1122). */}
+        {hasCoordinates ? (
+          <View
+            style={[
+              styles.mapCard,
+              {
+                backgroundColor: colors.surface,
+                shadowColor: colors.cardShadow,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <MapView
+              testID="project-map"
+              style={styles.map}
+              // `latitude`/`longitude` are non-null here: `hasCoordinates` is
+              // the guard above, and React only re-evaluates the tree when
+              // `project` changes identity.
+              region={{
+                latitude: project.latitude as number,
+                longitude: project.longitude as number,
+                latitudeDelta: 0.05,
+                longitudeDelta: 0.05,
+              }}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+              accessibilityLabel={`Map showing the location of ${project.name}`}
+            >
+              <Marker
+                coordinate={{
+                  latitude: project.latitude as number,
+                  longitude: project.longitude as number,
+                }}
+                title={project.name}
+                description={project.location}
+              />
+            </MapView>
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.mapCard,
+              {
+                backgroundColor: colors.surface,
+                shadowColor: colors.cardShadow,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <View
+              testID="map-unavailable"
+              accessibilityRole="text"
+              accessibilityLabel={`Location not available for ${project.name}`}
+              style={[
+                styles.mapPlaceholder,
+                { backgroundColor: colors.inputBackground, borderColor: colors.border },
+              ]}
+            >
+              <Text style={styles.mapPlaceholderIcon}>🌐</Text>
+              <Text style={[styles.mapPlaceholderText, { color: colors.secondaryText }]}>
+                Location not available
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {updates.length > 0 && (
+          <View
+            style={[
+              styles.updatesCard,
+              {
+                backgroundColor: colors.surface,
+                shadowColor: colors.cardShadow,
+                borderColor: colors.cardBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+              Latest Updates
+            </Text>
+            {updates.map((update) => (
+              <View
+                key={update.id}
+                style={[styles.updateItem, { borderTopColor: colors.border }]}
+              >
+                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                  {update.title}
+                </Text>
+                <Text style={[styles.updateDate, { color: colors.muted }]}>
+                  {new Date(update.createdAt).toLocaleDateString()}
+                </Text>
+                <Text style={[styles.updateBody, { color: colors.secondaryText }]}>
+                  {update.body}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Follow button — always rendered. Without a push token we show a
+            dimmed "soft prompt" so the user knows the feature exists; pressing
+            it then surfaces the "Enable notifications" toast from
+            handleToggleFollow. */}
         <TouchableOpacity
           testID="follow-button"
           style={[
@@ -852,6 +1091,76 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  recurringBanner: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 4,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 2,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  recurringBannerContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  recurringBannerText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  recurringBannerBold: {
+    fontWeight: 'bold',
+  },
+  manageButton: {
+    backgroundColor: '#227239',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+  },
+  manageButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  mapCard: {
+    margin: 16,
+    padding: 20,
+    borderRadius: 12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+  },
+  map: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  mapPlaceholder: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  mapPlaceholderIcon: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  mapPlaceholderText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   updatesCard: {
     margin: 16,
     padding: 20,
@@ -879,6 +1188,23 @@ const styles = StyleSheet.create({
   updateBody: {
     fontSize: 14,
     lineHeight: 20,
+  },
+  updateRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 14,
+  },
+  updateBullet: {
+    fontSize: 16,
+    marginRight: 10,
+  },
+  updateText: {
+    flex: 1,
+  },
+  updateSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 2,
   },
 });
 

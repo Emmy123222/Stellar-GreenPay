@@ -7,16 +7,13 @@
     "default_popup": "popup.html",
     "default_title": "GreenPay Companion"
   },
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting",
-    "contextMenus"
-  ],
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus"],
   "background": {
-    "service_worker": "dist/background.js"
+    "service_worker": "dist/background.js",
+    "type": "module"
   },
   "host_permissions": [
+    "https://api.stellar-greenpay.app/*",
     "https://greenpay.app/*",
     "https://staging.greenpay.app/*"
   ],
