@@ -101,9 +101,26 @@ function renderProjectList(projects: ProjectResult[]) {
 
   if (projects.length === 0) {
     const empty = document.createElement("li");
-    empty.className = "glass-panel project-item";
-    empty.textContent = "No saved projects yet.";
+    empty.className = "glass-panel empty-state";
+    empty.innerHTML = `
+      <div class="empty-state-icon" aria-hidden="true">🌱</div>
+      <div class="empty-state-content">
+        <h4 class="empty-state-title">Start your climate journey</h4>
+        <p class="empty-state-text">You haven't donated to any projects yet. Discover amazing climate initiatives and make your first donation!</p>
+        <button class="btn empty-state-btn" id="find-project-btn">
+          Find a project
+        </button>
+      </div>
+    `;
     list.appendChild(empty);
+    
+    // Add event listener for the "Find a project" button
+    const findProjectBtn = empty.querySelector("#find-project-btn");
+    if (findProjectBtn) {
+      findProjectBtn.addEventListener("click", () => {
+        chrome.tabs.create({ url: "https://stellar-greenpay.app/projects" });
+      });
+    }
     return;
   }
 
@@ -475,6 +492,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   initProjectSearch();
   initProjectListKeyNav();
+
+  // Initialize with empty project list to show empty state
+  renderProjectList([]);
 
   // Check for pending context-menu donation
   chrome.storage.local.get(
