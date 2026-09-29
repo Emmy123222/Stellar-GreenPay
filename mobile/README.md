@@ -71,3 +71,10 @@ See `.env.example` for required variables:
 - `EXPO_PUBLIC_API_URL`: Backend API URL
 - `EXPO_PUBLIC_STELLAR_NETWORK`: testnet or mainnet
 - `EXPO_PUBLIC_HORIZON_URL`: Stellar Horizon URL
+
+`utils/stellarValidation.ts` also reads a plain `STELLAR_NETWORK` (the name
+used by the backend) when `EXPO_PUBLIC_STELLAR_NETWORK` is absent, so a
+single `.env` can drive both apps. When the resolved network is `mainnet`
+the app raises a **soft** warning — the user must confirm — for any address
+it knows is testnet-only, e.g. one funded through Friendbot. Valid
+addresses are never hard-blocked.

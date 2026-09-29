@@ -291,3 +291,61 @@ describe("GET /api/jobs — response shape", () => {
     expect(res.body.data[0].releaseTransactionHash).toBe("a".repeat(64));
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe("POST /api/jobs/trigger — authentication and authorization", () => {
+  let app;
+  const originalAdminKey = process.env.ADMIN_API_KEY;
+
+  beforeEach(() => {
+    process.env.ADMIN_API_KEY = "test-secret-admin-key";
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  afterAll(() => {
+    process.env.ADMIN_API_KEY = originalAdminKey;
+  });
+
+  test("rejects unauthenticated request with 401", async () => {
+    const res = await request(app)
+      .post("/api/jobs/trigger")
+      .send({ jobType: "indexer_sync" })
+      .expect(401);
+
+    expect(res.body.error).toMatch(/Missing or malformed Authorization header/i);
+  });
+
+  test("rejects invalid admin key with 401", async () => {
+    const res = await request(app)
+      .post("/api/jobs/trigger")
+      .set("X-Admin-Key", "wrong-key")
+      .send({ jobType: "indexer_sync" })
+      .expect(401);
+
+    expect(res.body.error).toBeDefined();
+  });
+
+  test("accepts request with valid X-Admin-Key", async () => {
+    const res = await request(app)
+      .post("/api/jobs/trigger")
+      .set("X-Admin-Key", "test-secret-admin-key")
+      .send({ jobType: "indexer_sync", payload: { fullSync: true } })
+      .expect(202);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.jobType).toBe("indexer_sync");
+  });
+
+  test("validates jobType parameter when authenticated", async () => {
+    const res = await request(app)
+      .post("/api/jobs/trigger")
+      .set("X-Admin-Key", "test-secret-admin-key")
+      .send({ jobType: "invalid_unsupported_job" })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/Invalid jobType/i);
+  });
+});
+

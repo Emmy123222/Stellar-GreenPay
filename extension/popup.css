@@ -167,6 +167,34 @@ p.subtitle {
   letter-spacing: -0.02em;
 }
 
+.donor-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--glass-border);
+}
+
+.donor-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.donor-stat-label {
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.donor-tier,
+.donor-total {
+  color: var(--accent-color);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
 /* Sections */
 .section-header {
   display: flex;

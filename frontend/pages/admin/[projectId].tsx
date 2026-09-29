@@ -18,18 +18,6 @@ interface AdminProps {
   onConnect: (pk: string) => void;
 }
 
-function weekKey(dateStr: string): string {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  // ISO week-like key (YYYY-WW) using UTC week start (Mon)
-  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const day = utc.getUTCDay() || 7;
-  utc.setUTCDate(utc.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-}
-
 export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const router = useRouter();
   const { projectId } = router.query;
@@ -186,18 +174,6 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       byDonor.set(donorAddress, curr);
     }
     return Array.from(byDonor.values()).sort((a, b) => b.total - a.total);
-  }, [donations]);
-
-  const weeklyGrowth = useMemo(() => {
-    const byWeek = new Map<string, number>();
-    for (const d of donations) {
-      const key = weekKey(d.createdAt);
-      const amount = parseFloat(d.amountXLM || d.amount || "0");
-      byWeek.set(key, (byWeek.get(key) || 0) + (Number.isFinite(amount) ? amount : 0));
-    }
-    return Array.from(byWeek.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([week, totalXLM]) => ({ week, totalXLM: Number(totalXLM.toFixed(2)) }));
   }, [donations]);
 
   const downloadCsv = () => {
@@ -489,7 +465,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           </button>
         </div>
         <div className="h-64">
-          <DonationGrowthChartNoSSR data={weeklyGrowth} />
+          <DonationGrowthChartNoSSR projectId={typeof projectId === "string" ? projectId : undefined} />
         </div>
         <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-3 font-body">
           Weekly totals based on recent donation history (up to 200 donations loaded).
