@@ -486,7 +486,7 @@ impl EscrowContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env, String, Vec};
 
     fn setup(env: &Env) -> (Address, EscrowContractClient) {
@@ -632,7 +632,7 @@ mod tests {
     fn test_dispute_freezes_release() {
         let env = Env::default();
         env.mock_all_auths();
-        let (admin, client) = setup(&env);
+        let (_admin, client) = setup(&env);
 
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
@@ -760,7 +760,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            soroban_sdk::vec![&env, true],
+            soroban_sdk::vec![&env, true.into()],
         );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
@@ -814,7 +814,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            soroban_sdk::vec![&env, true],
+            soroban_sdk::vec![&env, true.into()],
         );
         
         client.set_greenpay_contract(&admin, &greenpay_cid);
@@ -836,7 +836,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            soroban_sdk::vec![&env, false],
+            soroban_sdk::vec![&env, false.into()],
         );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
