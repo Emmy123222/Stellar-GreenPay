@@ -3,11 +3,15 @@
 jest.mock("../db/pool", () => ({
   query: jest.fn(),
 }));
+jest.mock("../services/webhook", () => ({
+  deliverPayload: jest.fn(),
+}));
 
 const express = require("express");
 const request = require("supertest");
 const { Keypair } = require("@stellar/stellar-sdk");
 const pool = require("../db/pool");
+const { deliverPayload } = require("../services/webhook");
 const webhooksRouter = require("./webhooks");
 
 const OWNER_KEYPAIR = Keypair.random();
@@ -260,5 +264,76 @@ describe("GET /api/webhooks/:projectId/history", () => {
       .expect(401);
 
     expect(res.body.error).toBe("X-Wallet-Address header is required");
+  });
+});
+
+describe("PATCH /api/webhooks/:projectId/test", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.clearAllMocks();
+  });
+
+  test("sends a signed test event for the configured project", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: PROJECT_ID,
+        wallet_address: OWNER_ADDRESS,
+        webhook_url: "https://example.com/hook",
+        webhook_secret: "test-secret",
+      }],
+    });
+    deliverPayload.mockResolvedValue({ statusCode: 202 });
+
+    const res = await request(app)
+      .patch(`/api/webhooks/${PROJECT_ID}/test`)
+      .set("X-Wallet-Address", OWNER_ADDRESS)
+      .expect(200);
+
+    expect(res.body).toEqual({ success: true, responseStatus: 202 });
+    expect(deliverPayload).toHaveBeenCalledWith(
+      "https://example.com/hook",
+      "test-secret",
+      expect.objectContaining({ event: "webhook.test", projectId: PROJECT_ID }),
+    );
+  });
+
+  test("rejects an unconfigured webhook", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: PROJECT_ID,
+        wallet_address: OWNER_ADDRESS,
+        webhook_url: null,
+        webhook_secret: null,
+      }],
+    });
+
+    const res = await request(app)
+      .patch(`/api/webhooks/${PROJECT_ID}/test`)
+      .set("X-Wallet-Address", OWNER_ADDRESS)
+      .expect(400);
+
+    expect(res.body.error).toBe("Webhook is not configured for this project");
+    expect(deliverPayload).not.toHaveBeenCalled();
+  });
+
+  test("returns 502 when the webhook endpoint responds unsuccessfully", async () => {
+    pool.query.mockResolvedValue({
+      rows: [{
+        id: PROJECT_ID,
+        wallet_address: OWNER_ADDRESS,
+        webhook_url: "https://example.com/hook",
+        webhook_secret: "test-secret",
+      }],
+    });
+    deliverPayload.mockResolvedValue({ statusCode: 500 });
+
+    const res = await request(app)
+      .patch(`/api/webhooks/${PROJECT_ID}/test`)
+      .set("X-Wallet-Address", OWNER_ADDRESS)
+      .expect(502);
+
+    expect(res.body.responseStatus).toBe(500);
   });
 });

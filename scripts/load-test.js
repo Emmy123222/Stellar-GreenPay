@@ -13,6 +13,8 @@ const successRate = new Rate('donation_success_rate');
 //
 // Run baseline:     k6 run scripts/load-test.js
 // Run ramp-up:      SCENARIO=ramp-up k6 run scripts/load-test.js
+// Required fixtures: PROJECT_ID=<existing UUID> TX_HASHES=<existing tx hash,...>
+// Run the API under test with DONATIONS_RATE_LIMIT_PER_MINUTE above the test request rate.
 
 const SCENARIO = __ENV.SCENARIO || 'sustained';
 
@@ -45,6 +47,8 @@ export const options = {
 };
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:4000';
+const PROJECT_ID = __ENV.PROJECT_ID;
+const TX_HASHES = (__ENV.TX_HASHES || '').split(',').map((hash) => hash.trim()).filter(Boolean);
 
 // Valid Stellar testnet public keys (G... 56-char base32)
 const SAMPLE_ADDRESSES = [
@@ -55,22 +59,24 @@ const SAMPLE_ADDRESSES = [
   'GDQJUTQYK2MQX2CNYPCAETIQZRDZYOUC5RLAOBOVPPFBQ6TMHKCMB4PT',
 ];
 
-// Deterministically generate unique-ish 64-char hex tx hashes per VU + iteration
-// so the deduplication check in recordDonation doesn't collapse all requests to one.
-function fakeTxHash(vuId, iter) {
-  const base = `${vuId.toString(16).padStart(8, '0')}${iter.toString(16).padStart(8, '0')}`;
-  return (base + '0'.repeat(64)).slice(0, 64);
+export function setup() {
+  if (!PROJECT_ID) {
+    throw new Error('Set PROJECT_ID to an existing project UUID');
+  }
+  if (TX_HASHES.length === 0 || TX_HASHES.some((hash) => !/^[a-fA-F0-9]{64}$/.test(hash))) {
+    throw new Error('Set TX_HASHES to comma-separated hashes of existing donations');
+  }
 }
 
 export function _noop() {}
 
 export default function () {
   const donor    = SAMPLE_ADDRESSES[__VU % SAMPLE_ADDRESSES.length];
-  const txHash   = fakeTxHash(__VU, __ITER);
+  const txHash   = TX_HASHES[__ITER % TX_HASHES.length];
   const amountXLM = (Math.random() * 9 + 1).toFixed(7);
 
   const payload = JSON.stringify({
-    projectId:       `project-${((__VU + __ITER) % 10) + 1}`,
+    projectId:       PROJECT_ID,
     amountXLM,
     donorAddress:    donor,
     transactionHash: txHash,

@@ -28,6 +28,7 @@
  *    case.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 export type BiometricAuthOutcome = 'success' | 'cancel' | 'fallback' | 'error';
@@ -71,6 +72,27 @@ export interface UseBiometricAuthReturn extends BiometricCapabilities {
 
 const DEFAULT_PROMPT = 'Confirm your identity to proceed';
 const PIN_PROMPT = 'Enter your device PIN to proceed';
+
+export const DEFAULT_REAUTH_TIMEOUT_MS = 30_000;
+
+let runtimeReauthTimeoutMs: number | null = null;
+
+export function getBiometricReauthTimeoutMs(): number {
+  return runtimeReauthTimeoutMs ?? DEFAULT_REAUTH_TIMEOUT_MS;
+}
+
+export function setBiometricReauthTimeoutMs(valueMs: number): number {
+  runtimeReauthTimeoutMs = valueMs;
+  return runtimeReauthTimeoutMs;
+}
+
+export function _resetBiometricReauthTimeoutForTests(): void {
+  runtimeReauthTimeoutMs = null;
+}
+
+export interface UseBiometricAuthOptions {
+  timeoutSeconds?: number;
+}
 
 /**
  * Resolve the strongest biometric label available on the device so the
@@ -176,7 +198,9 @@ function mapResult(
  * exposes a memoised `authenticate` action that mirrors the standalone
  * helper.
  */
-export function useBiometricAuth(): UseBiometricAuthReturn {
+export function useBiometricAuth(
+  options: UseBiometricAuthOptions = {}
+): UseBiometricAuthReturn {
   const [available, setAvailable] = useState(false);
   const [enrolled, setEnrolled] = useState(false);
   const [label, setLabel] = useState('Biometrics');
@@ -186,6 +210,20 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
   // Internal mount guard prevents setState-after-unmount warnings when the
   // consumer navigates away while the OS biometric prompt is open.
   const mountedRef = useRef(true);
+  const lastAuthTimestampRef = useRef(Date.now());
+  const isAuthenticatingRef = useRef(false);
+  const timeoutMsRef = useRef(
+    options.timeoutSeconds != null
+      ? options.timeoutSeconds * 1000
+      : getBiometricReauthTimeoutMs()
+  );
+
+  useEffect(() => {
+    timeoutMsRef.current =
+      options.timeoutSeconds != null
+        ? options.timeoutSeconds * 1000
+        : getBiometricReauthTimeoutMs();
+  }, [options.timeoutSeconds]);
 
   const safeSetAvailable = (next: boolean) => {
     if (mountedRef.current) setAvailable(next);
@@ -229,6 +267,7 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
 
   const authenticateFn = useCallback(
     async (prompt: string = DEFAULT_PROMPT): Promise<BiometricAuthResult> => {
+      isAuthenticatingRef.current = true;
       safeSetIsAuthenticating(true);
       try {
         // `runAuthentication` re-probes hardware capabilities on each
@@ -237,8 +276,12 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
         // keeps the security logic in one place and avoids drift.
         const result = await runAuthentication(prompt);
         safeSetLastResult(result);
+        if (result.success) {
+          lastAuthTimestampRef.current = Date.now();
+        }
         return result;
       } finally {
+        isAuthenticatingRef.current = false;
         safeSetIsAuthenticating(false);
       }
     },
@@ -247,6 +290,29 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
     // without re-firing on every render.
     []
   );
+
+  useEffect(() => {
+    const prevStateRef: { current: AppStateStatus } = {
+      current: AppState.currentState,
+    };
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const prevState = prevStateRef.current;
+      prevStateRef.current = nextState;
+      if (
+        (prevState === 'background' || prevState === 'inactive') &&
+        nextState === 'active'
+      ) {
+        if (isAuthenticatingRef.current) return;
+        const elapsed = Date.now() - lastAuthTimestampRef.current;
+        if (elapsed > timeoutMsRef.current) {
+          void authenticateFn();
+        }
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [authenticateFn]);
 
   return {
     available,

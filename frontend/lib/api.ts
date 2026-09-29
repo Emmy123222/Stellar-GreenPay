@@ -521,6 +521,52 @@ export async function fetchGlobalStats(): Promise<GlobalStats> {
   return normalizeGlobalStats(data);
 }
 
+/** A single point in the donation growth series. */
+export interface DonationGrowthPoint {
+  week: string;
+  totalXLM: number;
+}
+
+/**
+ * Fetch the weekly donation growth series from the backend.
+ *
+ * @param projectId - Optional project UUID; when omitted the series is global.
+ * @returns Weekly totals ordered oldest → newest.
+ * @throws If the request fails.
+ */
+export async function fetchDonationGrowth(
+  projectId?: string,
+): Promise<DonationGrowthPoint[]> {
+  const { data } = await api.get<{ success: boolean; data: DonationGrowthPoint[] }>(
+    "/api/stats/growth",
+    { params: projectId ? { projectId } : undefined },
+  );
+  return data.data;
+}
+
+/**
+ * Download a server-rendered impact certificate as a PDF.
+ *
+ * Used as the reliable fallback for browsers whose client-side canvas
+ * rendering is inconsistent (notably Safari).
+ *
+ * @returns The PDF file as a Blob.
+ * @throws If the request fails.
+ */
+export async function downloadImpactCertificate(payload: {
+  donorAddress: string;
+  donorName?: string | null;
+  totalDonatedXLM: string;
+  totalCO2OffsetKg: number;
+  badgeTier: string | null;
+  projectsSupported: Array<{ id: string; name: string }>;
+}): Promise<Blob> {
+  const { data } = await api.post("/api/impact/certificate/pdf", payload, {
+    responseType: "blob",
+  });
+  return data as Blob;
+}
+
 // ── Admin: Project Approval ──────────────────────────────────────
 export async function updateProjectStatus(
   projectId: string,

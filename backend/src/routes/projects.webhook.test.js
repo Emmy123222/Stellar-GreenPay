@@ -44,6 +44,26 @@ const PROJECT_ID = "11111111-1111-1111-1111-111111111111";
 const VALID_SECRET = "a".repeat(32);
 const VALID_URL    = "https://hooks.example.com/greenpay";
 
+function buildSignatureReceiver() {
+  const app = express();
+  app.use(express.json({
+    verify(req, _res, rawBody) {
+      req.rawBody = rawBody;
+    },
+  }));
+  app.post("/webhook", (req, res) => {
+    const signature = req.get("X-Webhook-Signature");
+    if (!signature) return res.sendStatus(400);
+
+    const { verifyWebhookSignature } = require("../services/webhook");
+    if (!verifyWebhookSignature(req.rawBody, signature, VALID_SECRET)) {
+      return res.sendStatus(401);
+    }
+    return res.sendStatus(200);
+  });
+  return app;
+}
+
 function authHeader() {
   // adminRequired (see ../middleware/auth.js) accepts a raw admin key only via
   // the X-Admin-Key header; Authorization: Bearer is reserved for JWTs.
@@ -122,6 +142,46 @@ describe("PATCH /api/projects/:id/webhook (#794)", () => {
       .set(authHeader())
       .send({ webhookUrl: VALID_URL, webhookSecret: VALID_SECRET });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("webhook signature verification contract (#1106)", () => {
+  const app = buildSignatureReceiver();
+  const payload = JSON.stringify({
+    event: "milestone.reached",
+    projectId: PROJECT_ID,
+  });
+
+  test("returns 200 for a valid signature", async () => {
+    const { generateSignature } = require("../services/webhook");
+    const signature = generateSignature(VALID_SECRET, payload);
+
+    const res = await request(app)
+      .post("/webhook")
+      .set("X-Webhook-Signature", signature)
+      .set("Content-Type", "application/json")
+      .send(payload);
+
+    expect(res.status).toBe(200);
+  });
+
+  test("returns 401 for an invalid signature", async () => {
+    const res = await request(app)
+      .post("/webhook")
+      .set("X-Webhook-Signature", "not-a-valid-signature")
+      .set("Content-Type", "application/json")
+      .send(payload);
+
+    expect(res.status).toBe(401);
+  });
+
+  test("returns 400 when the signature header is missing", async () => {
+    const res = await request(app)
+      .post("/webhook")
+      .set("Content-Type", "application/json")
+      .send(payload);
+
+    expect(res.status).toBe(400);
   });
 });
 
