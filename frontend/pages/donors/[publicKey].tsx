@@ -95,7 +95,7 @@ function StatCard({
       <p className="font-display text-2xl font-semibold text-[#227239]">
         {value}
       </p>
-      {sub && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">{sub}</p>}
+      {sub && <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">{sub}</p>}
     </div>
   );
 }
@@ -112,7 +112,7 @@ function DonationRow({ donation }: { donation: Donation }) {
           Project {shortenKey(donation.projectId)}
         </span>
         {donation.message && (
-          <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] italic truncate max-w-[200px] sm:max-w-sm">
+          <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] italic truncate max-w-[200px] sm:max-w-sm">
             &quot;{donation.message}&quot;
           </p>
         )}
@@ -121,7 +121,7 @@ function DonationRow({ donation }: { donation: Donation }) {
         <span className="font-semibold text-[#227239] font-body text-sm">
           {currency === "XLM" ? formatXLM(amount) : `${parseFloat(amount).toFixed(2)} ${currency}`}
         </span>
-        <span className="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]">
+        <span className="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]">
           {formatDate(donation.createdAt)}
         </span>
       </div>
@@ -139,7 +139,7 @@ function ProfileNotFound({ publicKey }: { publicKey: string }) {
         <h1 className="font-display text-2xl font-semibold text-[#1a2e1a] mb-2">
           Profile not set up yet
         </h1>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body max-w-sm mx-auto text-sm leading-relaxed">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body max-w-sm mx-auto text-sm leading-relaxed">
           The donor at{" "}
           <span className="address-tag">{shortenKey(publicKey)}</span> hasn&apos;t
           created a public profile yet.
@@ -370,7 +370,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
             <p className={`font-display text-lg font-semibold ${meta.color}`}>
               {meta.label} Impact NFT
             </p>
-            <p className="text-xs text-[#5a7a5a] font-body">
+            <p className="text-xs text-[var(--text-secondary)] font-body">
               Minted at ledger{" "}
               <span className="font-semibold text-[#227239]">
                 #{minted.ledger.toLocaleString()}
@@ -398,7 +398,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
   return (
     <div className="card">
       <h2 className="label mb-1">Claim your Impact NFT</h2>
-      <p className="text-sm text-[#5a7a5a] font-body mb-4">
+      <p className="text-sm text-[var(--text-secondary)] font-body mb-4">
         Mint an on-chain{" "}
         <span className={`font-semibold ${meta.color}`}>
           {meta.emoji} {meta.label}
@@ -420,7 +420,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
           🔗 Connect Freighter to claim
         </button>
       ) : !isOwner ? (
-        <p className="text-xs text-[#8aaa8a] font-body">
+        <p className="text-xs text-[var(--text-tertiary)] font-body">
           Connect the wallet that owns this profile ({shortenKey(profile.publicKey)})
           to claim its Impact NFT.
         </p>
@@ -551,7 +551,7 @@ export default function DonorProfilePage() {
             </div>
 
             {profile.bio && (
-              <p className="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4">
+              <p className="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4">
                 {profile.bio}
               </p>
             )}
@@ -592,7 +592,7 @@ export default function DonorProfilePage() {
           <div className="card">
             <h2 className="label mb-1">Recent Donations</h2>
             {donations.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] py-4 text-center font-body">
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] py-4 text-center font-body">
                 No donations recorded yet.
               </p>
             ) : (

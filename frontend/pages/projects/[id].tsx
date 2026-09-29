@@ -353,7 +353,7 @@ export default function ProjectDetail({
             
             .header .subtitle {
               font-size: 14px;
-              color: #5a7a5a;
+              color: var(--text-secondary);
               text-transform: uppercase;
               letter-spacing: 2px;
               font-weight: 600;
@@ -375,7 +375,7 @@ export default function ProjectDetail({
               gap: 20px;
               flex-wrap: wrap;
               font-size: 14px;
-              color: #5a7a5a;
+              color: var(--text-secondary);
               margin-bottom: 20px;
             }
             
@@ -469,7 +469,7 @@ export default function ProjectDetail({
             
             .stat-label {
               font-size: 13px;
-              color: #5a7a5a;
+              color: var(--text-secondary);
               text-transform: uppercase;
               letter-spacing: 1px;
               font-weight: 600;
@@ -532,26 +532,26 @@ export default function ProjectDetail({
               margin-bottom: 5px;
             }
             
-            .update-date {
-              font-size: 12px;
-              color: #8aaa8a;
-              margin-bottom: 8px;
-            }
+             .update-date {
+               font-size: 12px;
+               color: var(--text-tertiary);
+               margin-bottom: 8px;
+             }
             
             .update-body {
               font-size: 14px;
-              color: #5a7a5a;
+              color: var(--text-secondary);
               line-height: 1.6;
             }
             
-            .footer {
-              margin-top: 50px;
-              padding-top: 30px;
-              border-top: 2px solid #e8f3e8;
-              text-align: center;
-              font-size: 12px;
-              color: #8aaa8a;
-            }
+             .footer {
+               margin-top: 50px;
+               padding-top: 30px;
+               border-top: 2px solid #e8f3e8;
+               text-align: center;
+               font-size: 12px;
+               color: var(--text-tertiary);
+             }
             
             .footer-logo {
               font-size: 24px;
@@ -667,7 +667,7 @@ export default function ProjectDetail({
           
           <div class="section">
             <h3 class="section-title">Project Wallet</h3>
-            <p style="margin-bottom: 10px; font-size: 14px; color: #5a7a5a;">
+            <p style="margin-bottom: 10px; font-size: 14px; color: var(--text-secondary);">
               All donations are sent directly to this Stellar blockchain address:
             </p>
             <div class="wallet-address">${project.walletAddress}</div>
@@ -830,7 +830,7 @@ export default function ProjectDetail({
 
       <Link
         href="/projects"
-        className="inline-flex items-center gap-1 text-sm text-[#4f6f4f] dark:text-[#8aaa8a] hover:text-forest-700 transition-colors mb-6 font-body"
+        className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] hover:text-forest-700 transition-colors mb-6 font-body"
       >
         ← Back to Projects
       </Link>
@@ -959,7 +959,7 @@ export default function ProjectDetail({
                       ✓ Verified
                     </span>
                   ) : null}
-                  <span className="text-xs text-[#4f6f4f] dark:text-forest-300 bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
+                  <span className="text-xs text-[var(--text-secondary)] dark:text-forest-300 bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
                     {project.category}
                   </span>
                   <button
@@ -994,7 +994,7 @@ export default function ProjectDetail({
                       ${
                         isInWishlist(project.id)
                           ? "bg-red-50 text-red-500 border-red-200"
-                          : "bg-forest-50 text-forest-300 border-forest-200 hover:text-red-400 hover:border-red-200"
+                          : "bg-forest-50 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-200 hover:text-red-400 hover:border-red-200"
                       }`}
                     title={
                       isInWishlist(project.id)
@@ -1020,14 +1020,14 @@ export default function ProjectDetail({
                   {project.name}
                 </h1>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
-                  <p className="text-[#4f6f4f] dark:text-[#8aaa8a] text-sm font-body">
+                  <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm font-body">
                     📍 {project.location}
                   </p>
                   {(project.averageRating || 0) > 0 && (
                     <div className="flex items-center gap-1">
                       <span className="text-amber-400 text-sm">★</span>
                       <span className="text-forest-900 text-sm font-bold">{project.averageRating?.toFixed(1)}</span>
-                      <span className="text-[#4f6f4f] dark:text-forest-300 text-xs">({project.ratingCount} reviews)</span>
+                      <span className="text-[var(--text-secondary)] dark:text-forest-300 text-xs">({project.ratingCount} reviews)</span>
                     </div>
                   )}
                 </div>
@@ -1047,7 +1047,7 @@ export default function ProjectDetail({
                     goalXLM={project.goalXLM}
                     className="w-full"
                   />
-                  <div className="flex items-center justify-between text-sm text-[#4f6f4f] font-body">
+                  <div className="flex items-center justify-between text-sm text-[var(--text-secondary)] font-body">
                     <span>{formatXLM(project.raisedXLM)} raised</span>
                     <span>{Number(project.goalXLM) > 0 ? `towards ${formatXLM(project.goalXLM)} goal` : "No goal set"}</span>
                   </div>
@@ -1102,13 +1102,13 @@ export default function ProjectDetail({
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-[#4f6f4f] dark:text-forest-300 font-body">{s.label}</p>
+                  <p className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body">{s.label}</p>
                 </div>
               ))}
             </div>
 
             {/* Wallet link */}
-            <div className="mt-4 pt-4 border-t border-forest-100 flex items-center gap-2 text-xs text-[#4f6f4f] dark:text-forest-300 font-body">
+            <div className="mt-4 pt-4 border-t border-forest-100 flex items-center gap-2 text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body">
               <span>Project wallet:</span>
               <a
                 href={accountUrl(project.walletAddress)}
@@ -1160,7 +1160,7 @@ export default function ProjectDetail({
                   </span>
                 ) : (
                   <svg
-                    className="w-4 h-4 text-[#4f6f4f] dark:text-forest-300 hover:text-forest-700"
+                    className="w-4 h-4 text-[var(--text-secondary)] dark:text-forest-300 hover:text-forest-700"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -1234,7 +1234,7 @@ export default function ProjectDetail({
                   {project.aiSummary}
                 </p>
               ) : (
-                <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] italic font-body">
+                <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] italic font-body">
                   No AI summary yet. Click &ldquo;Generate summary&rdquo; to create one for donors.
                 </p>
               )}
@@ -1334,7 +1334,7 @@ export default function ProjectDetail({
                         Completed
                       </span>
                     </div>
-                    <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] font-body mb-2">
+                    <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-2">
                       Ended {new Date(campaign.deadline).toLocaleDateString()}
                     </p>
                     <div className="flex justify-between text-xs mb-1 font-body">
@@ -1362,7 +1362,7 @@ export default function ProjectDetail({
             <h2 className="font-display text-lg font-semibold text-forest-900 mb-2">
               Campaign Creator
             </h2>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] font-body mb-4">
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
               Project admins can launch a time-limited campaign with a custom
               goal and deadline.
             </p>
@@ -1446,7 +1446,7 @@ export default function ProjectDetail({
               {t("project.projectUpdates")}
             </h2>
             {updates.length === 0 ? (
-              <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] font-body">{t("project.noUpdatesYet")}</p>
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">{t("project.noUpdatesYet")}</p>
             ) : (
               <div className="space-y-4">
                 {updates.map((u) => {
@@ -1460,12 +1460,12 @@ export default function ProjectDetail({
                         <h3 className="font-semibold text-forest-900 text-sm font-body">
                           {u.title}
                         </h3>
-                        <span className="text-xs text-[#4f6f4f] dark:text-forest-300 font-body">
+                        <span className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body">
                           {timeAgo(u.createdAt)}
                         </span>
                       </div>
                       <div
-                        className="text-[#4f6f4f] dark:text-[#8aaa8a] text-sm leading-relaxed font-body prose prose-sm max-w-none"
+                        className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed font-body prose prose-sm max-w-none"
                         dangerouslySetInnerHTML={{ __html: renderMarkdown(u.body) }}
                       />
                       <div className="flex items-center gap-3 mt-2">
@@ -1475,7 +1475,7 @@ export default function ProjectDetail({
                           className={`flex items-center gap-1.5 text-xs font-body transition-colors ${
                             like?.liked
                               ? "text-red-500 font-semibold"
-                              : "text-[#4f6f4f] dark:text-forest-300 hover:text-red-400"
+                              : "text-[var(--text-secondary)] dark:text-forest-300 hover:text-red-400"
                           } disabled:opacity-50`}
                         >
                           <span>{like?.liked ? "❤️" : "🤍"}</span>
@@ -1522,16 +1522,16 @@ export default function ProjectDetail({
               <h2 className="font-display text-lg font-semibold text-forest-900">
                 Donor Discussion
               </h2>
-              <span className="text-xs text-[#4f6f4f] dark:text-forest-300 font-body">On-chain memos</span>
+              <span className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body">On-chain memos</span>
             </div>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] font-body mb-4">
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
               Discuss by donating — messages are Stellar transaction memos from real donations.
             </p>
 
             {discussionLoading ? (
-              <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] font-body">Loading discussion…</p>
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">Loading discussion…</p>
             ) : discussion.length === 0 ? (
-              <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] font-body">
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
                 No memo messages yet. Be the first to leave a message with your donation.
               </p>
             ) : (
@@ -1542,7 +1542,7 @@ export default function ProjectDetail({
                   return (
                     <div key={m.id} className="p-3 rounded-xl border border-forest-100 bg-white">
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                        <div className="text-xs text-[#4f6f4f] dark:text-forest-300 font-body">
+                        <div className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body">
                           <a
                             href={accountUrl(m.from)}
                             target="_blank"
@@ -1595,7 +1595,7 @@ export default function ProjectDetail({
           {/* Impact Calculator */}
           <div className="card bg-forest-50 border-forest-200">
             <h3 className="font-display font-semibold text-forest-900 mb-2">Impact Calculator</h3>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] mb-3 font-body">See what your donation can achieve before you give.</p>
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] mb-3 font-body">See what your donation can achieve before you give.</p>
             
             <div className="flex flex-wrap gap-2 mb-3">
               {["10", "25", "50", "100", "250"].map(p => (
@@ -1618,7 +1618,7 @@ export default function ProjectDetail({
                 onChange={(e) => setCalcAmount(e.target.value)}
                 placeholder="Custom amount"
                 min="0"
-                className="w-full px-3 py-2 text-sm rounded-lg border border-forest-200 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400 font-body placeholder:text-forest-300"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-forest-200 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400 font-body placeholder-[var(--text-tertiary)]"
               />
             </div>
             
@@ -1669,7 +1669,7 @@ export default function ProjectDetail({
             </div>
           ) : (
             <div>
-              <p className="text-center text-[#4f6f4f] dark:text-[#8aaa8a] text-sm mb-4 font-body">
+              <p className="text-center text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
                 Connect your wallet to donate
               </p>
               <WalletConnect onConnect={onConnect} />
@@ -1679,7 +1679,7 @@ export default function ProjectDetail({
           {/* Share card */}
           <div className="card text-center bg-forest-50 border-forest-200">
             <p className="font-display font-semibold text-forest-900 mb-2">Spread the word 🌍</p>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] mb-3 font-body">Share this project with friends and family to increase its impact.</p>
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] mb-3 font-body">Share this project with friends and family to increase its impact.</p>
             
             <div className="grid grid-cols-3 gap-2 mb-3">
               <button
@@ -1724,7 +1724,7 @@ export default function ProjectDetail({
             <p className="font-display font-semibold text-forest-900 mb-2">
               Impact Report 📊
             </p>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] mb-3 font-body">
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] mb-3 font-body">
               Download a print-friendly summary of this project&apos;s progress and
               impact.
             </p>
@@ -1741,11 +1741,11 @@ export default function ProjectDetail({
             <p className="font-display font-semibold text-forest-900 mb-1">
               Get project updates 🔔
             </p>
-            <p className="text-xs text-[#4f6f4f] dark:text-[#8aaa8a] mb-3 font-body">
+            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] mb-3 font-body">
               Receive an email when this project posts new updates.
             </p>
             {subscriberCount !== null && (
-              <p className="text-xs text-[#4f6f4f] dark:text-forest-300 font-body mb-3">
+              <p className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body mb-3">
                 📬 {subscriberCount.toLocaleString()}{" "}
                 {subscriberCount === 1 ? "subscriber" : "subscribers"}
               </p>
