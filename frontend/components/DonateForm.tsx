@@ -359,9 +359,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)} disabled={isProcessing}
             placeholder="Leave a message of support..." maxLength={100}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
-        </div>
 
-        {/*  Helper text */}
+          {/* Helper text */}
           <p className="text-xs text-muted-foreground mt-1">
             Your message will appear in the public donation feed
           </p>
@@ -413,14 +412,6 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           {step === "error" && "Retry"}
         </button>
 
-        {(step === "building" || step === "signing") && (
-          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
-            Signing with Freighter… Please confirm in your Freighter wallet.
-          </p>
-        )}
-
-        {(step === "submitting" || step === "recording") && (
-          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
         {(amount || message) && !isProcessing && (
           <button
             type="button"
@@ -443,6 +434,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           </p>
         )}
       </div>
+    </div>
   );
 }
 
