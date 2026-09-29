@@ -10,6 +10,13 @@
  *       { success: true, data: { key, url, size, contentType, backend } }
  *   - Errors that map to user-facing 400/413 responses are returned with
  *     a `code` field so the frontend can show specific copy.
+ *   - Issue #1101: images stored on S3 are then scanned for NSFW / violent
+ *     content with AWS Rekognition (src/services/moderation.js). An
+ *     auto-rejected image is deleted from the bucket and answered with
+ *       { error, code: "image_rejected" }  → 422
+ *     a flagged one is returned with an extra
+ *       data.moderation = { status, flaggedForReview, ... }
+ *     and every verdict is logged in the update_images table.
  *
  * POST /api/uploads/presign
  *   - Returns a short-lived presigned S3 PUT URL for direct client-to-S3
@@ -42,12 +49,24 @@ const fileType = require("file-type");
 const router = express.Router();
 const { uploadFile, backendName, UPLOAD_DIR } = require("../services/storage");
 const { generatePresignedPutUrl, isS3Configured } = require("../services/s3Presign");
+const moderation = require("../services/moderation");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const logger = require("../logger");
 
 const uploadRateLimiter = createRateLimiter(20, 15, "uploads"); // 20 uploads per 15 min
 
 const MAX_BYTES = parseInt(process.env.UPLOAD_MAX_BYTES || String(10 * 1024 * 1024), 10);
+
+/**
+ * Issue #1101 — MIME types that are scanned for NSFW / violent content.
+ * Only images can be moderated by Rekognition; documents are untouched.
+ */
+const MODERATED_IMAGE_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+]);
 
 /**
  * Allowed MIME types based on detected file content (magic bytes), not
@@ -162,13 +181,76 @@ router.post("/", uploadRateLimiter, (req, res, next) => {
 
     try {
       const stored = await uploadFile(req.file.buffer, req.file.originalname, detectedMimeType);
-      res.status(201).json({
-        success: true,
-        data: {
-          ...stored,
-          originalName: req.file.originalname,
-        },
-      });
+
+      // ── Issue #1101 — moderate images for NSFW / violent content ──────────
+      // S3 images only: the local backend does not publish files publicly, and
+      // the presign flow (bytes never touch this server) is moderated at
+      // POST /api/updates instead. The buffer is already in memory, so the scan
+      // uses Rekognition's ImageContent form — no S3 read-back round trip.
+      const shouldModerate =
+        stored.backend === "s3" && MODERATED_IMAGE_MIME.has(detectedMimeType);
+      const verdict = shouldModerate
+        ? await moderation.moderateImage({
+          bytes: req.file.buffer,
+          imageUrl: stored.url,
+          key: stored.key,
+          storageBackend: stored.backend,
+        })
+        : null;
+
+      if (verdict) {
+        // Audit trail first: every verdict we actually computed is logged in
+        // update_images (update_id stays NULL until an update references it).
+        if (verdict.newDecision) {
+          await moderation.recordModerationDecision(verdict);
+        }
+
+        // Fail-closed mode: the scanner could not answer. The object is left in
+        // place (a retry, or POST /api/updates, will scan it again) but nothing
+        // is handed back to the caller as usable. 503 rather than 422 because
+        // the content is unknown, not objectionable.
+        if (verdict.status === moderation.OUTCOME.UNAVAILABLE && verdict.blocked) {
+          return res.status(503).json({
+            error: verdict.reason,
+            code: "image_moderation_unavailable",
+            fallback: "Retry the upload shortly; contact an administrator if it persists.",
+          });
+        }
+
+        if (verdict.blocked) {
+          // 422 (Unprocessable Content) rather than 403: the request is
+          // well-formed and the caller is authorised — it is the *content* of
+          // the entity that fails our semantic rules. 403 would wrongly imply
+          // an authorisation problem the client cannot fix by re-uploading a
+          // different image.
+          await moderation.deleteRejectedObject({
+            bucket: verdict.bucket,
+            key: verdict.storageKey,
+          });
+          logger.warn(
+            {
+              event: "image_upload_rejected_by_moderation",
+              key: stored.key,
+              status: verdict.status,
+              max_confidence: verdict.maxConfidence,
+              labels: (verdict.labels || []).map((l) => `${l.name}:${l.confidence}`),
+            },
+            "Rejected uploaded image that failed NSFW moderation",
+          );
+          return res.status(422).json({
+            error:
+              verdict.reason ||
+              "This image was rejected because it failed content moderation.",
+            code: "image_rejected",
+          });
+        }
+      }
+
+      const data = { ...stored, originalName: req.file.originalname };
+      const summary = moderation.moderationSummary(verdict);
+      if (summary) data.moderation = summary;
+
+      res.status(201).json({ success: true, data });
     } catch (uploadErr) {
       next(uploadErr);
     }

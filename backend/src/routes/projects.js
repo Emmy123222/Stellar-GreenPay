@@ -21,7 +21,7 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
@@ -833,7 +833,7 @@ router.get("/admin/pending", async (req, res, next) => {
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", adminRequired, async (req, res) => {
+router.post("/admin/register", adminTokenRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
 
@@ -884,7 +884,7 @@ router.post("/admin/register", adminRequired, async (req, res) => {
  * project as verified by replaying a registration transaction hash that
  * belongs to a different project.
  */
-router.post("/admin/confirm", adminRequired, async (req, res) => {
+router.post("/admin/confirm", adminTokenRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
@@ -1924,7 +1924,7 @@ const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
  *
  * Pass null / omit both to clear the existing webhook configuration.
  */
-router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
+router.patch("/:id/webhook", adminTokenRequired, async (req, res, next) => {
   try {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(req.params.id)) {

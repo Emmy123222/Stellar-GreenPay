@@ -11,13 +11,22 @@
  * the device PIN/passcode prompt. If the user can't or won't authenticate
  * we surface a clear inline status message and abort submission — we
  * never sign a transaction without an explicit user confirmation.
+ *
+ * Keyboard avoidance (issue #1127): on 5-inch Android devices the software
+ * keyboard covered the amount field entirely. The form is now wrapped in a
+ * `KeyboardAvoidingView` — `behavior="padding"` on Android, `"height"` on
+ * iOS — and `useKeyboardAvoidance()` scrolls the focused input above the
+ * keyboard. Every tap target still works on the first tap
+ * (`keyboardShouldPersistTaps="handled"`), so the keyboard never swallows
+ * the Donate press.
  */
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
+import { useKeyboardAvoidance } from '../../hooks/useKeyboardAvoidance';
 import { useTheme } from '../theme';
 import {
   getAddressNetworkWarning,
@@ -38,6 +47,20 @@ const NETWORK_PASSPHRASE = IS_MAINNET ? Networks.PUBLIC : Networks.TESTNET;
 const PRESET_AMOUNTS = ['5', '10', '25'];
 const MIN_AMOUNT_XLM = 1;
 const DONATE_PROMPT = 'Authenticate to send your donation';
+
+/**
+ * Issue #1127: the donate form is rendered inside a native-stack screen
+ * whose header already offsets the layout, so the keyboard has nothing
+ * extra to clear. Exposed as a constant so bumping it later (e.g. if a
+ * sticky footer is added) is a one-line change.
+ */
+const KEYBOARD_VERTICAL_OFFSET = 0;
+
+/** How often `onScroll` reports while tracking the form's scroll offset. */
+const SCROLL_EVENT_THROTTLE = 16;
+
+/** Bottom breathing room (pt) below the Donate button, keyboard closed. */
+const SCROLL_CONTENT_PADDING = 16;
 
 interface ClimateProject {
   id: string;
@@ -119,6 +142,26 @@ export default function DonateScreen() {
   const { id } = useLocalSearchParams();
 
   const bio = useBiometricAuth();
+
+  /**
+   * Issue #1127: the amount field sits well below the fold on a 5-inch
+   * screen, so the software keyboard used to cover it. The hook exposes
+   * the platform-correct `KeyboardAvoidingView` behaviour, tracks the
+   * keyboard height, and scrolls whichever input is focused above it.
+   */
+  const {
+    behavior: keyboardBehavior,
+    dismissMode: keyboardDismissMode,
+    contentPaddingBottom,
+    scrollRef: formScrollRef,
+    onScroll: trackFormScroll,
+    scrollInputIntoView,
+  } = useKeyboardAvoidance();
+
+  const amountInputRef = useRef<TextInput>(null);
+  const secretInputRef = useRef<TextInput>(null);
+  const messageInputRef = useRef<TextInput>(null);
+
   const isMountedRef = useRef(true);
   useEffect(() => {
     isMountedRef.current = true;
@@ -408,7 +451,35 @@ export default function DonateScreen() {
 
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
+    // Issue #1127: the form used to render straight into a bare
+    // ScrollView, so the software keyboard covered the amount field on
+    // 5" screens. `behavior` is `padding` on Android (whose window
+    // resizes for the keyboard — see `softwareKeyboardLayoutMode` in
+    // app.json) and `height` on iOS (whose window does not).
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={keyboardBehavior}
+      keyboardVerticalOffset={KEYBOARD_VERTICAL_OFFSET}
+      testID="donate-keyboard-avoiding-view"
+    >
+    <ScrollView
+      ref={formScrollRef}
+      style={styles.scroll}
+      // Base breathing room so the Donate button is never flush against
+      // the bottom edge; `useKeyboardAvoidance` adds more while the
+      // keyboard is open so the last field can scroll clear of it.
+      contentContainerStyle={{
+        paddingBottom: SCROLL_CONTENT_PADDING + contentPaddingBottom,
+      }}
+      // Issue #1127: `handled` keeps the first tap on the preset chips and
+      // the Donate button working while the keyboard is open, and
+      // drag-to-dismiss gets the viewport (and the focused field) back.
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={keyboardDismissMode}
+      onScroll={trackFormScroll}
+      scrollEventThrottle={SCROLL_EVENT_THROTTLE}
+      testID="donate-form-scroll"
+    >
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.primaryText }]}>
           Donate to {selectedProject?.name || 'a project'}
@@ -528,6 +599,7 @@ export default function DonateScreen() {
           })}
         </View>
         <TextInput
+          ref={amountInputRef}
           style={[
             styles.input,
             {
@@ -540,6 +612,7 @@ export default function DonateScreen() {
           placeholderTextColor={colors.placeholder}
           value={amount}
           onChangeText={setAmount}
+          onFocus={() => scrollInputIntoView(amountInputRef.current)}
           keyboardType="decimal-pad"
           accessibilityLabel="Custom donation amount in XLM"
         />
@@ -571,6 +644,7 @@ export default function DonateScreen() {
 
         <Text style={styles.label}>Secret Key</Text>
         <TextInput
+          ref={secretInputRef}
           style={[
             styles.input,
             {
@@ -583,6 +657,7 @@ export default function DonateScreen() {
           placeholderTextColor={colors.placeholder}
           value={secretKey}
           onChangeText={setSecretKey}
+          onFocus={() => scrollInputIntoView(secretInputRef.current)}
           autoCapitalize="none"
           secureTextEntry
           accessibilityLabel="Stellar secret key for signing"
@@ -592,6 +667,7 @@ export default function DonateScreen() {
           Message (optional)
         </Text>
         <TextInput
+          ref={messageInputRef}
           style={[
             styles.input,
             {
@@ -604,6 +680,7 @@ export default function DonateScreen() {
           placeholderTextColor={colors.placeholder}
           value={message}
           onChangeText={setMessage}
+          onFocus={() => scrollInputIntoView(messageInputRef.current)}
           maxLength={100}
           accessibilityLabel="Optional donation message"
         />
@@ -675,11 +752,15 @@ export default function DonateScreen() {
       </TouchableOpacity>
 
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   loadingText: {

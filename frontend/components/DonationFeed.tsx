@@ -8,6 +8,11 @@ import { formatXLM, timeAgo, shortenAddress } from "@/utils/format";
 import { explorerUrl, streamProjectPayments } from "@/lib/stellar";
 import type { Donation } from "@/utils/types";
 
+// Backoff ladder for re-arming the SSE stream after a drop (#1071). The
+// last entry is the cap, so a long outage retries every 15s instead of
+// hammering Horizon.
+const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 15000];
+
 interface DonationFeedProps {
   projectId: string;
   walletAddress?: string;
@@ -24,6 +29,8 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [newIds, setNewIds] = useState<Set<string>>(new Set());
+  // True while the SSE stream is down and a backoff retry is pending.
+  const [reconnecting, setReconnecting] = useState(false);
   const latestIdRef = useRef<string | null>(null);
 
   const requestKey = `${projectId}:${refreshKey}`;
@@ -82,17 +89,77 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
     latestIdRef.current = payment.id;
   }, [projectId, onNewDonation]);
 
-  // Start SSE stream once initial data is loaded
+  // Anything that landed while the stream was down is pulled from the REST
+  // endpoint on reconnect. The backend feed is authoritative, and `setDonations`
+  // de-dupes by id, so overlap with the SSE replay is harmless.
+  const catchUpFromRest = useCallback(async () => {
+    try {
+      const { donations: fresh } = await fetchProjectDonations(projectId, 10);
+      if (fresh.length > 0) {
+        latestIdRef.current = fresh[0].id;
+      }
+      setDonations((prev) => {
+        const known = new Set(prev.map((d) => d.id));
+        const missed = fresh.filter((d) => !known.has(d.id));
+        return missed.length > 0 ? [...missed, ...prev] : prev;
+      });
+    } catch (error) {
+      console.error("Donation feed catch-up failed:", error);
+    }
+  }, [projectId]);
+
+  // Keep the Horizon SSE stream armed (#1071). Horizon's EventSource
+  // exposes no "reconnect" event, so a drop is detected through `onerror`:
+  // we close the dead stream, retry with backoff, and catch up over REST.
+  // The first event to arrive after a retry is what proves the feed is
+  // live again and clears the banner.
   useEffect(() => {
     if (loading || !walletAddress) return;
 
-    const cursor = latestIdRef.current || undefined;
-    const closeStream = streamProjectPayments(walletAddress, handleNewPayment, cursor);
+    let disposed = false;
+    let attempt = 0;
+    let closeStream: (() => void) | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      if (disposed) return;
+      closeStream?.();
+      closeStream = streamProjectPayments(
+        walletAddress,
+        (payment) => {
+          attempt = 0;
+          setReconnecting(false);
+          handleNewPayment(payment);
+        },
+        latestIdRef.current || undefined,
+        handleStreamError,
+      );
+    };
+
+    function handleStreamError(error: unknown) {
+      if (disposed) return;
+      console.error("Donation feed stream disconnected:", error);
+      setReconnecting(true);
+      closeStream?.();
+      closeStream = null;
+
+      const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+      attempt += 1;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        void catchUpFromRest();
+        connect();
+      }, delay);
+    }
+
+    connect();
 
     return () => {
-      closeStream();
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      closeStream?.();
     };
-  }, [loading, walletAddress, handleNewPayment]);
+  }, [loading, walletAddress, handleNewPayment, catchUpFromRest]);
 
   const handleLoadMore = async () => {
     if (!nextCursor || loadingMore) return;
@@ -106,6 +173,27 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
     } finally {
       setLoadingMore(false);
     }
+  };
+
+  const renderLiveStatus = (label: string, wrapperClass: string) => {
+    if (!walletAddress) return null;
+    if (reconnecting) {
+      return (
+        <div
+          role="status"
+          className={`flex items-center gap-2 ${wrapperClass} text-xs text-amber-700 dark:text-amber-400 font-body`}
+        >
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" aria-hidden="true" />
+          Connection lost — reconnecting…
+        </div>
+      );
+    }
+    return (
+      <div className={`flex items-center gap-2 ${wrapperClass} text-xs text-forest-500 font-body`}>
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+        {label}
+      </div>
+    );
   };
 
   if (loading) return (
@@ -124,24 +212,14 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
 
   if (donations.length === 0) return (
     <div>
-      {walletAddress && (
-        <div className="flex items-center gap-2 mb-3 text-xs text-forest-500 font-body">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          Listening for live donations…
-        </div>
-      )}
+      {renderLiveStatus("Listening for live donations…", "mb-3")}
       <p className="text-center text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm py-6 font-body">No donations yet — be the first! 🌱</p>
     </div>
   );
 
   return (
     <div className="space-y-2">
-      {walletAddress && (
-        <div className="flex items-center gap-2 mb-1 text-xs text-forest-500 font-body">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          Live — new donations appear automatically
-        </div>
-      )}
+      {renderLiveStatus("Live — new donations appear automatically", "mb-1")}
       {donations.map((d) => (
         <div
           key={d.id}

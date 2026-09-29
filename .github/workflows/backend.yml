@@ -52,6 +52,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Guard against regression of #1039: generated coverage artifacts must
+      # never be committed again. They are uploaded as a CI artifact instead.
+      - name: Verify coverage artifacts are not committed
+        working-directory: ${{ github.workspace }}
+        run: |
+          tracked="$(git ls-files -- 'coverage' 'backend/coverage' 'frontend/coverage')"
+          if [ -n "$tracked" ]; then
+            echo "::error::Generated coverage artifacts must not be committed. Run 'git rm -r --cached backend/coverage/' and keep them in .gitignore."
+            echo "$tracked"
+            exit 1
+          fi
+          echo "OK: no coverage artifacts are tracked."
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

@@ -76,8 +76,9 @@ export default function MonthlyGivingSetup({
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="label">Amount (XLM)</label>
+            <label className="label" htmlFor="monthly-giving-amount">Amount (XLM)</label>
             <input
+              id="monthly-giving-amount"
               type="number"
               min="1"
               step="1"

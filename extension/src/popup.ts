@@ -101,9 +101,26 @@ function renderProjectList(projects: ProjectResult[]) {
 
   if (projects.length === 0) {
     const empty = document.createElement("li");
-    empty.className = "glass-panel project-item";
-    empty.textContent = "No saved projects yet.";
+    empty.className = "glass-panel empty-state";
+    empty.innerHTML = `
+      <div class="empty-state-icon" aria-hidden="true">🌱</div>
+      <div class="empty-state-content">
+        <h4 class="empty-state-title">Start your climate journey</h4>
+        <p class="empty-state-text">You haven't donated to any projects yet. Discover amazing climate initiatives and make your first donation!</p>
+        <button class="btn empty-state-btn" id="find-project-btn">
+          Find a project
+        </button>
+      </div>
+    `;
     list.appendChild(empty);
+    
+    // Add event listener for the "Find a project" button
+    const findProjectBtn = empty.querySelector("#find-project-btn");
+    if (findProjectBtn) {
+      findProjectBtn.addEventListener("click", () => {
+        chrome.tabs.create({ url: "https://stellar-greenpay.app/projects" });
+      });
+    }
     return;
   }
 
@@ -287,9 +304,38 @@ async function updateTotalAfterDonation(amount: number) {
     ["totalDonatedXLM"],
     async (result: Record<string, unknown>) => {
       const current = (result.totalDonatedXLM as number) || 0;
-      await saveTotalDonated(current + amount);
+      const total = current + amount;
+      const badgeTier = total >= 2000
+        ? "earth"
+        : total >= 500
+          ? "forest"
+          : total >= 100
+            ? "tree"
+            : total >= 10
+              ? "seedling"
+              : null;
+      await saveTotalDonated(total);
+      renderDonorStats(total, badgeTier);
     },
   );
+}
+
+function renderDonorStats(totalXLM: number, badgeTier: string | null) {
+  const totalElement = document.getElementById("donor-total");
+  const tierElement = document.getElementById("donor-badge-tier");
+  const tierLabels: Record<string, string> = {
+    seedling: "Seedling",
+    tree: "Tree",
+    forest: "Forest",
+    earth: "Earth",
+  };
+
+  if (totalElement) {
+    totalElement.textContent = `${totalXLM.toLocaleString(undefined, { maximumFractionDigits: 7 })} XLM`;
+  }
+  if (tierElement) {
+    tierElement.textContent = badgeTier ? tierLabels[badgeTier] || badgeTier : "No badge";
+  }
 }
 
 // ==================== PROFILE API ====================
@@ -346,12 +392,12 @@ async function connectWallet() {
 
     // Fetch total donated from backend
     const profile = await fetchProfile(publicKey);
-    let total = 0;
-    if (profile?.data?.totalDonatedXLM || profile?.totalDonatedXLM) {
-      total =
-        parseFloat(profile.data?.totalDonatedXLM || profile.totalDonatedXLM) ||
-        0;
-    }
+    const profileData = profile?.data ?? profile;
+    const total = Number.parseFloat(profileData?.totalDonatedXLM || "0") || 0;
+    const badgeTier = Array.isArray(profileData?.badges)
+      ? profileData.badges[0]?.tier || null
+      : null;
+    renderDonorStats(total, badgeTier);
     await saveTotalDonated(total);
   } catch (err: any) {
     console.error("Wallet connect error:", err);
@@ -473,8 +519,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  document.getElementById("connect-btn")?.addEventListener("click", connectWallet);
+
   initProjectSearch();
   initProjectListKeyNav();
+
+  // Initialize with empty project list to show empty state
+  renderProjectList([]);
 
   // Check for pending context-menu donation
   chrome.storage.local.get(

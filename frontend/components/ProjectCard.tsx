@@ -8,6 +8,7 @@ import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
 import ProjectProgressBar from "./ProjectProgressBar";
+import ProjectImage from "./ProjectImage";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
@@ -22,7 +23,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
         <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
           {project.imageUrl ? (
             <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
-              <img
+              <ProjectImage
                 src={project.imageUrl}
                 alt={project.name}
                 className="h-40 w-full object-cover"
