@@ -105,7 +105,7 @@ impl EscrowContract {
             let is_paused: bool = env.invoke_contract(
                 &greenpay_addr,
                 &Symbol::new(env, "is_paused"),
-                Vec::new(env),
+                soroban_sdk::vec![env],
             );
             if is_paused {
                 panic!("GreenPay contract is paused");
@@ -760,7 +760,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            (true,).into_val(&env),
+            soroban_sdk::vec![&env, true],
         );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
@@ -814,7 +814,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            (true,).into_val(&env),
+            soroban_sdk::vec![&env, true],
         );
         
         client.set_greenpay_contract(&admin, &greenpay_cid);
@@ -836,7 +836,7 @@ mod tests {
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
-            (false,).into_val(&env),
+            soroban_sdk::vec![&env, false],
         );
 
         client.set_greenpay_contract(&admin, &greenpay_cid);
