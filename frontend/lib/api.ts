@@ -296,6 +296,53 @@ export async function fetchProjectDonations(
 }
 
 /**
+ * One page of a donor's history, plus what is needed to fetch the next one.
+ */
+export interface DonorHistoryPage {
+  donations: Donation[];
+  hasMore: boolean;
+  /** Opaque keyset cursor from the API; `null` once the last page is reached. */
+  nextCursor: string | null;
+  /** Donations in total, so the UI can report progress through the history. */
+  total: number;
+}
+
+/**
+ * Fetch one page of a donor's donation history.
+ *
+ * High-volume donors have hundreds of rows, which is far too many to send at
+ * once, so the endpoint is keyset-paginated (issue #1080).
+ *
+ * @param publicKey - Donor Stellar public key.
+ * @param options - Page size and the cursor returned by the previous page.
+ * @returns The page, whether more remain, the next cursor and the total count.
+ * @throws If the request fails.
+ */
+export async function fetchDonorHistoryPage(
+  publicKey: string,
+  { limit = 20, cursor }: { limit?: number; cursor?: string } = {},
+): Promise<DonorHistoryPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+
+  const { data } = await api.get<{
+    success: boolean;
+    data: Donation[];
+    has_more: boolean;
+    next_cursor: string | null;
+    total: number;
+  }>(`/api/donations/donor/${publicKey}`, { params });
+
+  return {
+    donations: data.data ?? [],
+    hasMore: Boolean(data.has_more),
+    nextCursor: data.next_cursor ?? null,
+    // Falls back to the page length so an older API still renders a sane count.
+    total: Number.isFinite(data.total) ? data.total : (data.data?.length ?? 0),
+  };
+}
+
+/**
  * Fetch all donations made by a donor.
  *
  * @param publicKey - Donor Stellar public key.

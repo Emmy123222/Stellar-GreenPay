@@ -104,7 +104,7 @@ describe("POST /api/admin/digest/preview", () => {
     const loginRes = await request(app).post("/api/admin/login").send({ username: "admin", password: "testpass" });
     const token = loginRes.body.data.token;
 
-    pool.query.mockImplementation(async (query, params) => {
+    pool.query.mockImplementation(async (query) => {
       if (query.includes("FROM projects")) {
         return { rows: [{ id: "project-123", name: "Solar Haven", co2_offset_kg: 300 }] };
       }
