@@ -46,7 +46,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: EarthGuardian 1
           </button>
         </div>
         <p
-          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+          class="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
         >
           Test bio
         </p>
@@ -132,7 +132,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: EarthGuardian 1
           Claim your Impact NFT
         </h2>
         <p
-          class="text-sm text-[#5a7a5a] font-body mb-4"
+          class="text-sm text-[var(--text-secondary)] font-body mb-4"
         >
           Mint an on-chain
            
@@ -183,7 +183,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: EarthGuardian 1
                 100 XLM
               </span>
               <span
-                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+                class="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]"
               >
                 Jan 1, 2023
               </span>
@@ -252,7 +252,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Forest 1`] = `
           </button>
         </div>
         <p
-          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+          class="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
         >
           Test bio
         </p>
@@ -338,7 +338,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Forest 1`] = `
           Claim your Impact NFT
         </h2>
         <p
-          class="text-sm text-[#5a7a5a] font-body mb-4"
+          class="text-sm text-[var(--text-secondary)] font-body mb-4"
         >
           Mint an on-chain
            
@@ -389,7 +389,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Forest 1`] = `
                 100 XLM
               </span>
               <span
-                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+                class="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]"
               >
                 Jan 1, 2023
               </span>
@@ -458,7 +458,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: None 1`] = `
           </button>
         </div>
         <p
-          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+          class="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
         >
           Test bio
         </p>
@@ -540,7 +540,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: None 1`] = `
                 100 XLM
               </span>
               <span
-                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+                class="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]"
               >
                 Jan 1, 2023
               </span>
@@ -609,7 +609,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Seedling 1`] = 
           </button>
         </div>
         <p
-          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+          class="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
         >
           Test bio
         </p>
@@ -695,7 +695,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Seedling 1`] = 
           Claim your Impact NFT
         </h2>
         <p
-          class="text-sm text-[#5a7a5a] font-body mb-4"
+          class="text-sm text-[var(--text-secondary)] font-body mb-4"
         >
           Mint an on-chain
            
@@ -746,7 +746,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Seedling 1`] = 
                 100 XLM
               </span>
               <span
-                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+                class="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]"
               >
                 Jan 1, 2023
               </span>
@@ -815,7 +815,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Tree 1`] = `
           </button>
         </div>
         <p
-          class="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
+          class="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4"
         >
           Test bio
         </p>
@@ -901,7 +901,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Tree 1`] = `
           Claim your Impact NFT
         </h2>
         <p
-          class="text-sm text-[#5a7a5a] font-body mb-4"
+          class="text-sm text-[var(--text-secondary)] font-body mb-4"
         >
           Mint an on-chain
            
@@ -952,7 +952,7 @@ exports[`DonorProfile Component matches snapshot for badge tier: Tree 1`] = `
                 100 XLM
               </span>
               <span
-                class="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]"
+                class="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]"
               >
                 Jan 1, 2023
               </span>
