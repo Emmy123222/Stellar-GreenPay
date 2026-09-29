@@ -54,8 +54,9 @@ describe("MarkerClusterGroup & Clustering Configuration", () => {
         iconCreateFunction: createClusterIcon,
       });
 
-      expect(clusterGroup.options.disableClusteringAtZoom).toBe(10);
-      expect(clusterGroup.options.zoomToBoundsOnClick).toBe(true);
+      const options = clusterGroup.options as L.MarkerClusterGroupOptions;
+      expect(options.disableClusteringAtZoom).toBe(10);
+      expect(options.zoomToBoundsOnClick).toBe(true);
     });
 
     it("clusters 50+ markers together at low zoom levels and unclusters at zoom 10+", () => {

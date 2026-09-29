@@ -861,25 +861,23 @@ mod tests {
         let job = client.get_job(&job_id).expect("Job should exist");
         assert_eq!(job.status, JobStatus::Escrowed);
     }
-}
 
-// ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
+    // ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
 
-#[contract]
-pub struct MockPausedGreenPayContract;
+    #[contract]
+    pub struct MockPausedGreenPayContract;
 
-#[contractimpl]
-impl MockPausedGreenPayContract {
-    pub fn initialize(env: Env, paused: bool) {
-        env.storage().instance().set(&symbol_short!("paused"), &paused);
+    #[contractimpl]
+    impl MockPausedGreenPayContract {
+        pub fn initialize(env: Env, paused: bool) {
+            env.storage().instance().set(&symbol_short!("paused"), &paused);
+        }
+
+        pub fn is_paused(env: Env) -> bool {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("paused"))
+                .unwrap_or(false)
+        }
     }
-
-    pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&symbol_short!("paused"))
-            .unwrap_or(false)
-    }
 }
-
-
