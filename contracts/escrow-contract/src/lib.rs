@@ -4,7 +4,7 @@
 //! Client locks funds with `create_job`, then releases them per milestone.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Vec,
+    contract, contractclient, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Vec,
 };
 
 #[contracttype]
