@@ -42,6 +42,9 @@ module.exports = {
       },
     ],
   },
+  performance: {
+    hints: false,
+  },
   optimization: {
     minimize: true,
   },

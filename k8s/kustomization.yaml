@@ -1,3 +1,7 @@
+# NOTE: the Deployments reference their images as greenpay/<service>:${GIT_SHA}.
+# That placeholder is resolved to an immutable tag (short git SHA) at deploy time
+# by scripts/render-k8s-manifests.sh. Always deploy via that script (or the CI
+# deployment workflow) so that a mutable `latest` tag is never applied.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

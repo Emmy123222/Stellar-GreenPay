@@ -9,10 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Cross-process database migration lock (`pg_advisory_lock`) so concurrent migration runs cannot interleave, a `npm run migrate` alias, a pre-deploy migration step in `deploy.yml`, and CI checks that migrations are idempotent and reject concurrent runs (#1216).
+- Configurable CPU/memory requests and limits (requests 100m/256Mi, limits 500m/512Mi) and a CPU-based (70%) Horizontal Pod Autoscaler for the GreenPay Helm chart (#1209).
+- Smart Contracts section in `CONTRIBUTING.md` covering Soroban test/build/WASM/deploy workflows and linking the deployment and integration docs (#1281).
+- Authentication section in `docs/api.md` documenting the JWT Bearer scheme, login/refresh flow, `X-Admin-Key` and wallet-signed alternatives, a curl example, and a public-vs-authenticated endpoint table (#1283).
+- Supported-versions table and concrete reporting channels (GitHub Security Advisories + private contact) in `SECURITY.md`, plus a README link to the security policy (#1284).
+- Dynamic Codecov coverage badges (backend + frontend) in `README.md`, a frontend unit-test coverage job in `frontend.yml`, and coverage upload to Codecov on every `main` push (#1286).
 - CHANGELOG.md — project changelog tracking.
 - Per-donation CO₂ offset in donation API responses via `co2OffsetKg` field, computed as `amount_xlm × co2_per_xlm / 1000` across all donation endpoints (#365).
 - On-chain USDC to XLM price conversion through a configured oracle adapter (#345).
+- Untracked test coverage reports, added full coverage ignore rules in `.gitignore`, and configured CI to upload coverage reports as GitHub Actions workflow artifacts (#1046).
+- Dead-letter handling for stats refresh background queue (`statsRefreshQueue.js`), including Sentry failure logging, `dead_letter` database table persistence, pg-boss archiving, and Prometheus `stats_refresh_failures_total` failure metric tracking (#1089).
+- NSFW and violent-content scanning for project-update images via AWS Rekognition `DetectModerationLabels`, with every verdict logged to the new `update_images` table that doubles as the admin review queue (`Explicit Nudity`/`Violence` above 70% → 422, other labels above 50% → published and flagged for review) (#1101).
+- Redis result caching for the donor leaderboard (60s TTL, key per page/cursor/period/sort/verified filter, invalidated when a donation is recorded) and a `GET /metrics` Prometheus endpoint exposing `greenpay_leaderboard_query_duration_seconds` (#1093).
+- `total` donation count on `GET /api/donations/donor/:publicKey`, so the donor profile page can report progress through a long history (#1080).
+
+### Changed
+
+- Donor profile page now pages through donation history 20 rows at a time with a "Load more" control instead of truncating the full list client-side (#1080).
+- New `STELLAR_TIMEOUT_MS` setting (default 15000) bounds Federation, stellar.toml, Horizon and Soroban RPC requests (#1097).
+- New `IMAGE_MODERATION_*` settings for enabling moderation, its confidence thresholds and its fail-open/fail-closed mode (#1101).
+
+### Fixed
+
+- Horizon and Soroban RPC calls had no timeout, so a stalled Stellar node could pin an API worker indefinitely; a chain timeout is now answered with 503 Service Unavailable (#1097).
+- Removed duplicate `defaults` key in backend CI workflow (`backend.yml`) and updated `moduleResolution` to `bundler` with `ES2020` in backend `tsconfig.json`.
+- Fixed invalid donation UUID format in `projects.campaigns.integration.test.js` and mocked Stellar Horizon `getTransaction` in `donations.integration.test.js`.
+- Added `week` time period filter to leaderboard query, explicit 200 status on donation deduplication, and accurate milestone percentage calculation with webhook trigger on donation recording.
+- Added synchronous profile update fallback in `profileQueue` when queue worker is not started and added webhook secret rotation columns to `schema.sql`.
+- Awaited profile updates and milestone delivery in `donations.js` to eliminate race conditions, added polling in integration tests, and fixed postgres health check and CI integration skip configuration in `backend.yml`.
+
+### Fixed
+
+- Project cover photos that fail to load now fall back to a branded leaf placeholder (`/project-placeholder.svg`) instead of a broken-image icon, in both `ProjectCard` and the map popup (#1069).
+- The live donation feed detects a dropped Horizon SSE stream, shows a "Reconnecting…" banner, retries with exponential backoff, and merges anything that arrived while disconnected via a REST catch-up (#1071).
+- The selected language persists across sessions under `greenpay:locale` (migrated from the bare `locale` key), falls back to `navigator.language`, and sets `<html lang>` before first paint instead of re-rendering after hydration (#1073).
+
+
+### Fixed
+
+- Kubernetes manifests now pin container images to immutable git-SHA tags instead of the mutable `latest` tag, with CI injecting the short SHA at deploy time (#1212).
 
 ## [1.0.0] - 2025-01-01
 
@@ -31,3 +66,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mobile app (React Native / Expo).
 - Browser extension.
 - Helm chart for Kubernetes deployment.
+
+### Changed
+
+- Standardized monorepo workspace layout across `backend`, `frontend`, `mobile`, `extension`, and `contracts` packages for initial `v1.0.0` baseline release.
+- Standardized release notes generation via `@semantic-release/changelog` in `.github/workflows/release.yml` to parse Conventional Commits into Keep a Changelog sections (#1290).
+
+### Fixed
+
+- Resolved initial Stellar Horizon testnet transaction confirmation handling and database migration ordering for `v1.0.0`.
+
+### Security
+
+- Enforced environment-variable-only secret configuration for Stellar and PostgreSQL credentials alongside Gitleaks secret scanning in CI.
+
+[Unreleased]: https://github.com/Emmy123222/Stellar-GreenPay/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Emmy123222/Stellar-GreenPay/releases/tag/v1.0.0

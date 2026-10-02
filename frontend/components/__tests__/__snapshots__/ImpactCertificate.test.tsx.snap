@@ -162,19 +162,28 @@ exports[`ImpactCertificate matches snapshot 1`] = `
         </ul>
       </div>
       <div
-        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-8 pt-6 border-t border-forest-100"
+        class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-8 pt-6 border-t border-forest-100"
       >
-        <p
-          class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
+        <div>
+          <p
+            class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
+          >
+            Issued on 
+            Jan 15, 2026
+          </p>
+          <p
+            class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
+          >
+            Verified by on-chain donation history
+          </p>
+        </div>
+        <button
+          class="btn-primary text-sm disabled:opacity-50"
+          data-server-rendered="false"
+          type="button"
         >
-          Issued on 
-          Jan 15, 2026
-        </p>
-        <p
-          class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
-        >
-          Verified by on-chain donation history
-        </p>
+          Download certificate (PDF)
+        </button>
       </div>
     </div>
   </div>

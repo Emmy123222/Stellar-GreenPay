@@ -21,6 +21,8 @@ const {
   getRegisteredProjectIdFromTransaction,
   CONTRACT_ID,
   NETWORK_PASSPHRASE,
+  STELLAR_TIMEOUT_MS,
+  isStellarTimeoutError,
 } = require("./stellar");
 
 const ADMIN = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -196,5 +198,36 @@ describe("getRegisteredProjectIdFromTransaction", () => {
   test("returns null when no XDR is present or the transaction is missing", () => {
     expect(getRegisteredProjectIdFromTransaction({ successful: true })).toBeNull();
     expect(getRegisteredProjectIdFromTransaction(null)).toBeNull();
+  });
+});
+
+describe("Horizon / Soroban request timeout (issue #1097)", () => {
+  test("bounds outbound requests instead of letting them hang", () => {
+    expect(STELLAR_TIMEOUT_MS).toBe(15000);
+    // Config.setTimeout only reaches Federation + stellar.toml, so the two
+    // axios clients that actually serve chain calls must be bounded too.
+    expect(sdk.Config.getTimeout()).toBe(STELLAR_TIMEOUT_MS);
+    expect(sdk.Horizon.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    expect(sdk.rpc.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+  });
+
+  test("recognises the shapes the SDK and axios actually throw", () => {
+    const axiosTimeout = Object.assign(new Error("timeout of 15000ms exceeded"), {
+      code: "ECONNABORTED",
+    });
+    expect(isStellarTimeoutError(axiosTimeout)).toBe(true);
+    expect(isStellarTimeoutError({ code: "ETIMEDOUT" })).toBe(true);
+    expect(isStellarTimeoutError({ name: "TimeoutError" })).toBe(true);
+    expect(isStellarTimeoutError(new Error("Request timed out"))).toBe(true);
+  });
+
+  test("does not misreport other chain failures as timeouts", () => {
+    // A 404 from Horizon must keep surfacing as its own status, not a retryable
+    // 503 from the central error handler.
+    expect(isStellarTimeoutError(new Error("Request failed with status code 404"))).toBe(false);
+    expect(isStellarTimeoutError({ code: "ECONNREFUSED" })).toBe(false);
+    expect(isStellarTimeoutError(new Error("bad network passphrase"))).toBe(false);
+    expect(isStellarTimeoutError(null)).toBe(false);
+    expect(isStellarTimeoutError("ECONNABORTED")).toBe(false);
   });
 });
