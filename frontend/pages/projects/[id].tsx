@@ -15,6 +15,7 @@ import MonthlyGivingSetup from "@/components/MonthlyGivingSetup";
 import DescriptionAccordion from "@/components/DescriptionAccordion";
 import WalletAddressQRCode from "@/components/WalletAddressQRCode";
 import ProjectProgressBar from "@/components/ProjectProgressBar";
+import ShareButtons from "@/components/ShareButtons";
 import {
   fetchProject,
   fetchProjectUpdates,
@@ -314,45 +315,77 @@ export default function ProjectDetail({
 
   const incrementShare = () => setShareCount(prev => prev + 1);
 
+  /** Canonical permalink with UTM params so shares are trackable in analytics. */
+  const canonicalShareUrl = (utmSource: string): string => {
+    const base =
+      process.env.NEXT_PUBLIC_APP_URL || "https://stellar-greenpay.app";
+    const params = new URLSearchParams({
+      utm_source: utmSource,
+      utm_medium: "social",
+      utm_campaign: "project-share",
+    });
+    return `${base}/projects/${project?.id}?${params.toString()}`;
+  };
+
   const handleTwitterShare = () => {
     if (!project) return;
     incrementShare();
-    const text = `I just donated to ${project.name} on Stellar GreenPay!`;
-    window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(window.location.href)}`, '_blank');
+    const url = canonicalShareUrl("twitter");
+    const text = `Support ${project.name} on Stellar GreenPay and help offset CO₂! 🌍`;
+    window.open(
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
+  const handleFacebookShare = () => {
+    if (!project) return;
+    incrementShare();
+    const url = canonicalShareUrl("facebook");
+    window.open(
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   const handleWhatsappShare = () => {
     if (!project) return;
     incrementShare();
-    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(window.location.href)}`, '_blank');
+    const url = canonicalShareUrl("whatsapp");
+    window.open(
+      `https://api.whatsapp.com/send?text=${encodeURIComponent(url)}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   const handleCopyLink = async () => {
     if (!project) return;
     incrementShare();
 
+    const url = canonicalShareUrl("copy-link");
     const shareData = {
-      title: `${project.name} - Stellar GreenPay`,
-      text: `Support ${project.name} on Stellar GreenPay - ${project.description.slice(0, 100)}...`,
-      url: window.location.href,
+      title: `${project.name} — Stellar GreenPay`,
+      text: `Support ${project.name} on Stellar GreenPay — ${project.description.slice(0, 100)}…`,
+      url,
     };
 
-    // Try Web Share API first (mobile)
-    if (
-      navigator.share &&
-      /mobile|android|iphone|ipad/i.test(navigator.userAgent)
-    ) {
+    // Use Web Share API on mobile browsers that support it.
+    if (navigator.share && /mobile|android|iphone|ipad/i.test(navigator.userAgent)) {
       try {
         await navigator.share(shareData);
         return;
       } catch (err) {
-        // User cancelled or share failed, fall back to clipboard
+        // User cancelled — treat as a no-op.
         if ((err as Error).name === "AbortError") return;
+        // Other errors fall through to clipboard.
       }
     }
 
-    // Fallback to clipboard copy
-    const success = await copyToClipboard(window.location.href);
+    // Desktop / Web Share unsupported — copy canonical link to clipboard.
+    const success = await copyToClipboard(url);
     if (success) {
       setShareState("copied");
       setTimeout(() => setShareState("idle"), 2000);
@@ -1025,13 +1058,14 @@ export default function ProjectDetail({
                   <span className="text-xs text-[var(--text-secondary)] dark:text-forest-300 bg-forest-50 px-2.5 py-1 rounded-full border border-forest-100 font-body">
                     {project.category}
                   </span>
-                  <button
-                    onClick={handleCopyLink}
-                    className="btn-secondary text-xs py-1 px-3 ml-auto"
-                    title="Share this project"
-                  >
-                    {shareState === "copied" ? "✓ Link copied!" : "Share 🌍"}
-                  </button>
+                  <span className="ml-auto">
+                    <ShareButtons
+                      onTwitter={handleTwitterShare}
+                      onFacebook={handleFacebookShare}
+                      onCopyLink={handleCopyLink}
+                      copyState={shareState}
+                    />
+                  </span>
                   {/* Follow button — visible to connected wallets only */}
                   {publicKey && (
                     <button
