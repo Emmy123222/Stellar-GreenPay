@@ -1,6 +1,17 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { badgeEmoji, badgeLabel, formatCO2, formatDate, formatXLM, shortenAddress } from "@/utils/format";
+import { downloadImpactCertificate } from "@/lib/api";
 import type { BadgeTier } from "@/utils/types";
+
+/**
+ * Safari's canvas rendering is inconsistent, so it (and any browser we can't
+ * render reliably in) should use the server-side PDF endpoint instead of
+ * client-side generation.
+ */
+export function isSafari(userAgent: string | undefined = typeof navigator !== "undefined" ? navigator.userAgent : ""): boolean {
+  if (!userAgent) return false;
+  return /^((?!chrome|android).)*safari/i.test(userAgent);
+}
 
 export default function ImpactCertificate(props: {
   donorAddress: string;
@@ -20,6 +31,35 @@ export default function ImpactCertificate(props: {
   } = props;
 
   const issuedDate = useMemo(() => formatDate(new Date().toISOString()), []);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      // Safari (and browsers without a trustworthy canvas) take the
+      // server-rendered route; the endpoint is the source of truth for both.
+      const blob = await downloadImpactCertificate({
+        donorAddress,
+        donorName,
+        totalDonatedXLM,
+        totalCO2OffsetKg,
+        badgeTier,
+        projectsSupported,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `greenpay-impact-${shortenAddress(donorAddress, 8)}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadError("Could not generate the certificate. Please try again.");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div
@@ -109,13 +149,30 @@ export default function ImpactCertificate(props: {
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-8 pt-6 border-t border-forest-100">
-          <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
-            Issued on {issuedDate}
+        {downloadError && (
+          <p role="alert" className="mt-6 text-sm text-red-600 font-body">
+            {downloadError}
           </p>
-          <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
-            Verified by on-chain donation history
-          </p>
+        )}
+
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-8 pt-6 border-t border-forest-100">
+          <div>
+            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+              Issued on {issuedDate}
+            </p>
+            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+              Verified by on-chain donation history
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={downloading}
+            className="btn-primary text-sm disabled:opacity-50"
+            data-server-rendered={isSafari() ? "true" : "false"}
+          >
+            {downloading ? "Generating…" : "Download certificate (PDF)"}
+          </button>
         </div>
       </div>
     </div>

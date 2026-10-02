@@ -35,16 +35,38 @@ function avatarInitials(displayName: string | undefined, publicKey: string) {
   return `${first}${second}`.toUpperCase();
 }
 
-function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: string }) {
+function Avatar({
+  publicKey,
+  displayName,
+  avatarUrl,
+}: {
+  publicKey: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const nameOrAddress = displayName || shortenAddress(publicKey);
+
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={nameOrAddress}
+        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+
   const bg = AVATAR_COLORS[hashToIndex(publicKey, AVATAR_COLORS.length)];
   return (
     <div
       className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-display text-sm"
       style={{ backgroundColor: bg, color: "white" }}
       aria-hidden="true"
-      title={displayName || publicKey}
+      title={nameOrAddress}
     >
-      {avatarInitials(displayName, publicKey)}
+      {avatarInitials(displayName || undefined, publicKey)}
     </div>
   );
 }
@@ -103,63 +125,68 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   return (
     <div className="space-y-2">
-      {entries.map((entry) => (
-        <div key={entry.publicKey}
-          className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] transition-all">
+      {entries.map((entry) => {
+        const displayName = entry.displayName || entry.display_name || undefined;
+        const avatarUrl = entry.avatarUrl || entry.avatar_url || undefined;
+        const nameOrAddress = displayName || shortenAddress(entry.publicKey);
 
-          {/* Rank */}
-          <div className="w-8 text-center flex-shrink-0">
-            {entry.rank <= 3
-              ? <span className="text-lg">{medals[entry.rank - 1]}</span>
-              : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>
-            }
-          </div>
-
-          {/* Badge */}
-          {entry.topBadge && (
-            <span className="text-xl flex-shrink-0" title={entry.topBadge}>
-              {badgeEmoji(entry.topBadge)}
-            </span>
-          )}
-
-          {/* Name / address */}
-          <div className="flex-1 min-w-0 flex items-center gap-3">
-            <Avatar publicKey={entry.publicKey} displayName={entry.displayName} />
-            <div className="min-w-0">
-              <Link
-                href={`/donors/${entry.publicKey}`}
-                className="font-semibold text-forest-900 hover:text-forest-600 transition-colors text-sm font-body block truncate"
-              >
-                {entry.displayName || shortenAddress(entry.publicKey)}
-              </Link>
-              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
-                {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
-              </p>
+        return (
+          <Link
+            key={entry.publicKey}
+            href={`/donors/${entry.publicKey}`}
+            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] hover:shadow-sm transition-all cursor-pointer block group"
+          >
+            {/* Rank */}
+            <div className="w-8 text-center flex-shrink-0">
+              {entry.rank <= 3
+                ? <span className="text-lg">{medals[entry.rank - 1]}</span>
+                : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>
+              }
             </div>
-          </div>
 
-          {/* Totals */}
-          <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
-            <div>
-              <p className="font-mono font-semibold text-forest-600 text-sm">
-                {formatXLM(entry.totalDonatedXLM)}
-              </p>
-              {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
-                <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
-                  {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+            {/* Badge */}
+            {entry.topBadge && (
+              <span className="text-xl flex-shrink-0" title={entry.topBadge}>
+                {badgeEmoji(entry.topBadge)}
+              </span>
+            )}
+
+            {/* Name / address */}
+            <div className="flex-1 min-w-0 flex items-center gap-3">
+              <Avatar publicKey={entry.publicKey} displayName={displayName} avatarUrl={avatarUrl} />
+              <div className="min-w-0">
+                <span className="font-semibold text-forest-900 group-hover:text-forest-600 transition-colors text-sm font-body block truncate">
+                  {nameOrAddress}
+                </span>
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
+                  {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
                 </p>
-              )}
-              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
+              </div>
             </div>
-            <div>
-              <p className="font-mono font-semibold text-forest-600 text-sm">
-                {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
-              </p>
-              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
+
+            {/* Totals */}
+            <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
+              <div>
+                <p className="font-mono font-semibold text-forest-600 text-sm">
+                  {formatXLM(entry.totalDonatedXLM)}
+                </p>
+                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+                  <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
+                    {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+                  </p>
+                )}
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
+              </div>
+              <div>
+                <p className="font-mono font-semibold text-forest-600 text-sm">
+                  {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
+                </p>
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
+              </div>
             </div>
-          </div>
-        </div>
-      ))}
+          </Link>
+        );
+      })}
     </div>
   );
 }
