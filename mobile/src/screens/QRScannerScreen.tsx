@@ -3,11 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'reac
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import type { BarcodeType } from 'expo-camera';
 import { useNavigation } from '@react-navigation/native';
-import { createScanGate } from '../../utils/scanThrottle';
-
-// QR codes only — expo-camera equivalent of the old
-// `barCodeTypes: [BarCodeScanner.Constants.BarCodeType.qr]`.
-const QR_BARCODE_SETTINGS = { barcodeTypes: ['qr'] as BarcodeType[] };
+import { useTheme } from '../../app/theme';
 
 // Expected QR URL format: https://greenpay.app/donate?projectId=<id>
 // or the short form:      greenpay://donate/<id>
@@ -39,7 +35,8 @@ function parseManualInput(raw: string): string | null {
 
 export function QRScannerScreen() {
   const navigation = useNavigation<any>();
-  const [permission, requestPermission] = useCameraPermissions();
+  const { colors } = useTheme();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [cameraFailed, setCameraFailed] = useState(false);
   const [manualEntry, setManualEntry] = useState(false);
@@ -118,8 +115,8 @@ export function QRScannerScreen() {
 
   if (permission === null) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>Requesting camera permission…</Text>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.message, { color: colors.text }]}>Requesting camera permission…</Text>
       </View>
     );
   }
@@ -128,28 +125,10 @@ export function QRScannerScreen() {
 
   if (cameraUnavailable && !manualEntry) {
     return (
-      <View style={styles.centered}>
-        <Text style={styles.message}>
-          {permission.granted
-            ? 'Camera could not be started.'
-            : 'Camera access is required to scan QR codes.'}
-        </Text>
-        <TouchableOpacity
-          onPress={goManual}
-          style={styles.manualLink}
-          accessibilityLabel="Type address manually"
-          accessibilityRole="button"
-          testID="manual-entry-link"
-        >
-          <Text style={styles.manualLinkText}>Type address manually</Text>
-        </TouchableOpacity>
-        {!permission.granted && permission.canAskAgain !== false && (
-          <TouchableOpacity onPress={() => requestPermission()} style={styles.backButton} accessibilityLabel="Grant camera permission" accessibilityRole="button">
-            <Text style={styles.backButtonText}>Grant Permission</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} accessibilityLabel="Go back" accessibilityRole="button">
-          <Text style={styles.backButtonText}>Go back</Text>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
+        <Text style={[styles.message, { color: colors.text }]}>Camera access is required to scan QR codes.</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.backButton, { backgroundColor: colors.buttonBackground }]} accessibilityLabel="Go back" accessibilityRole="button">
+          <Text style={[styles.backButtonText, { color: colors.buttonText }]}>Go back</Text>
         </TouchableOpacity>
       </View>
     );
@@ -180,8 +159,9 @@ export function QRScannerScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      <CameraView
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <BarCodeScanner
+        onBarCodeScanned={handleBarCodeScanned}
         style={StyleSheet.absoluteFillObject}
         facing="back"
         onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
@@ -190,15 +170,15 @@ export function QRScannerScreen() {
       />
 
       <View style={styles.overlay}>
-        <Text style={styles.hint}>Point camera at a GreenPay QR code</Text>
-        <View style={styles.frame} />
+        <Text style={[styles.hint, { color: colors.headerText }]}>Point camera at a GreenPay QR code</Text>
+        <View style={[styles.frame, { borderColor: colors.primary }]} />
         {scanned && (
-          <TouchableOpacity style={styles.rescanButton} onPress={() => { processingRef.current = false; gate.reset(); setScanned(false); }} accessibilityLabel="Tap to scan again" accessibilityRole="button">
-            <Text style={styles.rescanText}>Tap to scan again</Text>
+          <TouchableOpacity style={[styles.rescanButton, { backgroundColor: colors.buttonBackground }]} onPress={() => setScanned(false)} accessibilityLabel="Tap to scan again" accessibilityRole="button">
+            <Text style={[styles.rescanText, { color: colors.buttonText }]}>Tap to scan again</Text>
           </TouchableOpacity>
         )}
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelButton} accessibilityLabel="Cancel QR scanning" accessibilityRole="button">
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={[styles.cancelText, { color: colors.headerText }]}>Cancel</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -206,34 +186,21 @@ export function QRScannerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  message: { fontSize: 15, color: '#374151', textAlign: 'center' },
+  message: { fontSize: 15, textAlign: 'center' },
   overlay: { flex: 1, justifyContent: 'space-between', alignItems: 'center', padding: 32 },
-  hint: { color: '#fff', fontSize: 15, marginTop: 20, textAlign: 'center' },
+  hint: { fontSize: 15, marginTop: 20, textAlign: 'center' },
   frame: {
     width: 240,
     height: 240,
     borderWidth: 3,
-    borderColor: '#22c55e',
     borderRadius: 16,
   },
-  rescanButton: { backgroundColor: '#22c55e', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20 },
-  rescanText: { color: '#fff', fontWeight: '600' },
+  rescanButton: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20 },
+  rescanText: { fontWeight: '600' },
   cancelButton: { paddingVertical: 12, paddingHorizontal: 24 },
-  cancelText: { color: '#fff', fontSize: 15 },
-  backButton: { marginTop: 16, backgroundColor: '#22c55e', padding: 12, borderRadius: 8 },
-  backButtonText: { color: '#fff', fontWeight: '600' },
-  manualLink: { marginTop: 16, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#22c55e' },
-  manualLinkText: { color: '#22c55e', fontWeight: '600' },
-  input: {
-    marginTop: 16,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#111827',
-  },
+  cancelText: { fontSize: 15 },
+  backButton: { marginTop: 16, padding: 12, borderRadius: 8 },
+  backButtonText: { fontWeight: '600' },
 });

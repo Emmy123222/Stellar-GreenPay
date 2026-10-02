@@ -2,7 +2,12 @@
 
 const fs = require("fs");
 const path = require("path");
-const { GenericContainer, Wait } = require("testcontainers");
+let GenericContainer, Wait;
+try {
+  ({ GenericContainer, Wait } = require("testcontainers"));
+} catch (err) {
+  console.warn("Could not load testcontainers:", err.message);
+}
 const { Pool } = require("pg");
 const request = require("supertest");
 const express = require("express");
@@ -25,7 +30,7 @@ describe("Leaderboard period integration", () => {
   jest.setTimeout(120000);
 
   beforeAll(async () => {
-    if (process.env.SKIP_INTEGRATION === "1") {
+    if (process.env.SKIP_INTEGRATION === "1" || !GenericContainer) {
       return;
     }
     try {

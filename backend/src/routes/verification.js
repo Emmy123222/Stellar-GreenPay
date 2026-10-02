@@ -31,13 +31,22 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 const { logAdminAction } = require("../services/audit");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sendAdminVerificationNotification, sendVerificationStatusNotification } = require("../services/email");
 const { backendName } = require("../services/storage");
+const { VERIFICATION_EMAIL_DOMAIN_ALLOWLIST } = require("../config/constants");
 
-const submitLimiter = createRateLimiter(10, 15); // 10 submissions / 15 min / IP
+const submitLimiter = createRateLimiter(10, 15, "verification"); // 10 submissions / 15 min / IP
+
+const VERIFICATION_EMAIL_DOMAIN_ALLOWLIST_SET = new Set(
+  VERIFICATION_EMAIL_DOMAIN_ALLOWLIST.map((domain) => domain.trim().toLowerCase())
+);
+
+function normalizeDomain(domain) {
+  return domain.toLowerCase().replace(/^www\./, "").replace(/\.$/, "");
+}
 
 const VALID_CATEGORIES = [
   "Reforestation",
@@ -144,30 +153,21 @@ router.post("/", submitLimiter, async (req, res, next) => {
     if (!EMAIL_RE.test(email)) {
       errors.push("contactEmail must be a valid email");
     } else if (website) {
-      // Prevent org email spoofing: the contact email domain must match the
-      // organisation's website hostname. This stops an attacker from claiming
-      // to represent e.g. "greenworldfund.org" while providing a personal
-      // Gmail address. We compare only the registered domain+TLD so that
-      // subdomain email addresses (e.g. team@mail.greenworldfund.org) are
-      // accepted for submissions about https://greenworldfund.org.
-      const emailDomain = email.split("@")[1];
+      const emailDomain = normalizeDomain(email.split("@")[1]);
       let websiteHost;
       try {
-        websiteHost = new URL(website).hostname.toLowerCase();
+        websiteHost = normalizeDomain(new URL(website).hostname);
       } catch {
         websiteHost = null;
       }
-      if (websiteHost && emailDomain) {
-        // Strip "www." prefix for comparison
-        const normalise = (h) => h.replace(/^www\./, "");
-        const normEmail = normalise(emailDomain);
-        const normSite  = normalise(websiteHost);
-        // Accept exact match or subdomain of the website host
-        if (normEmail !== normSite && !normEmail.endsWith("." + normSite)) {
-          errors.push(
-            `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
-          );
-        }
+      if (
+        websiteHost &&
+        emailDomain &&
+        (!VERIFICATION_EMAIL_DOMAIN_ALLOWLIST_SET.has(emailDomain) || emailDomain !== websiteHost)
+      ) {
+        errors.push(
+          `contactEmail domain (${emailDomain}) must match the organisation website domain (${websiteHost})`
+        );
       }
     }
 
@@ -352,6 +352,49 @@ router.get("/stats", adminRequired, async (req, res, next) => {
 });
 
 /**
+ * GET /api/verification-requests/:id/documents
+ * Returns only the supporting document metadata for a request. Accessible to
+ * admins via Bearer token, or to the submitter via a matching ?wallet= param.
+ *
+ * The admin detail page calls this lazily (on scroll / expand) so the main
+ * GET /:id response stays lightweight even for 20-document submissions.
+ */
+router.get("/:id/documents", async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      "SELECT supporting_documents, wallet_address FROM verification_requests WHERE id = $1",
+      [req.params.id],
+    );
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ error: "Verification request not found" });
+
+    const documents = Array.isArray(row.supporting_documents) ? row.supporting_documents : [];
+
+    // Allow admin-readable without wallet guard.
+    const auth = req.headers.authorization || "";
+    if (auth.startsWith("Bearer ")) {
+      try {
+        const { verifyToken } = require("../middleware/auth");
+        const decoded = verifyToken(auth.slice(7));
+        if (decoded && decoded.role === "admin" && decoded.exp * 1000 > Date.now()) {
+          return res.json({ success: true, data: { documents } });
+        }
+      } catch (_err) {
+        // fall through to wallet check
+      }
+    }
+
+    const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
+    if (!wallet || wallet !== row.wallet_address) {
+      return res.status(403).json({ error: "Provide a matching ?wallet= query param to view these documents" });
+    }
+    res.json({ success: true, data: { documents } });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/verification-requests/:id
  * Public, but only returns the row if wallet query param matches
  * the row's wallet_address. Admins can pass ?wallet to bypass this check
@@ -436,7 +479,7 @@ router.get("/", adminRequired, async (req, res, next) => {
  * PATCH /api/verification-requests/:id/status
  * Admin only. Transitions the row's status and records reviewer notes.
  */
-router.patch("/:id/status", adminRequired, async (req, res, next) => {
+router.patch("/:id/status", adminTokenRequired, async (req, res, next) => {
   try {
     const { status, reviewerNotes, reviewedBy } = req.body || {};
     if (!status || !Object.keys(VALID_TRANSITIONS).includes(status)) {
@@ -506,7 +549,7 @@ router.patch("/:id/status", adminRequired, async (req, res, next) => {
  * Admin only. Hard-deletes spam or test submissions.
  * Only pending or rejected rows may be deleted (not approved / in_review).
  */
-router.delete("/:id", adminRequired, async (req, res, next) => {
+router.delete("/:id", adminTokenRequired, async (req, res, next) => {
   try {
     const existing = await pool.query("SELECT * FROM verification_requests WHERE id = $1", [
       req.params.id,

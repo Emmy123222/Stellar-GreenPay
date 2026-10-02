@@ -8,6 +8,7 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
+const { deliverPayload } = require("../services/webhook");
 const {
   STELLAR_ADDRESS_RE,
   getWalletAddressFromRequest,
@@ -118,6 +119,42 @@ router.get("/:projectId/history", async (req, res, next) => {
       page,
       pageSize,
     });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PATCH /api/webhooks/:projectId/test
+ * Send a signed test event to the project's configured webhook URL.
+ */
+router.patch("/:projectId/test", async (req, res, next) => {
+  try {
+    const project = await requireProjectOwner(req, res);
+    if (!project) return;
+    if (!project.webhook_url || !project.webhook_secret) {
+      return res.status(400).json({ error: "Webhook is not configured for this project" });
+    }
+
+    const payload = {
+      event: "webhook.test",
+      projectId: project.id,
+      sentAt: new Date().toISOString(),
+    };
+    const { statusCode } = await deliverPayload(
+      project.webhook_url,
+      project.webhook_secret,
+      payload,
+    );
+
+    if (statusCode < 200 || statusCode >= 300) {
+      return res.status(502).json({
+        error: "Test webhook endpoint returned a non-success status",
+        responseStatus: statusCode,
+      });
+    }
+
+    res.json({ success: true, responseStatus: statusCode });
   } catch (e) {
     next(e);
   }

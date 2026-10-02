@@ -9,18 +9,19 @@
  *   - Request 11 receives HTTP 429.
  *   - The 429 response includes a `Retry-After` header.
  *
- * The rate-limit store is reset between test suites by creating a fresh app
- * instance for each describe block.
+ * Redis-backed counters are cleared between tests so each assertion starts
+ * with a known state.
  */
 
 const express = require("express");
 const request = require("supertest");
 const { createRateLimiter } = require("./rateLimiter");
+const redis = require("../services/redis");
 
 /** Build a minimal app that applies the given limiter to GET /ping. */
-function buildApp(maxRequests = 10, windowMinutes = 1) {
+function buildApp(maxRequests = 10, windowMinutes = 1, namespace = "test") {
   const app = express();
-  const limiter = createRateLimiter(maxRequests, windowMinutes);
+  const limiter = createRateLimiter(maxRequests, windowMinutes, namespace);
   app.use(limiter);
   app.get("/ping", (_req, res) => res.status(200).json({ ok: true }));
   return app;
@@ -29,8 +30,8 @@ function buildApp(maxRequests = 10, windowMinutes = 1) {
 describe("Rate limiting middleware — donation endpoint", () => {
   let app;
 
-  beforeEach(() => {
-    // Fresh app → fresh in-memory store → counters reset to 0
+  beforeEach(async () => {
+    await redis.deletePattern("greenpay:rate-limit:test:*");
     app = buildApp(10, 1);
   });
 
@@ -99,25 +100,31 @@ describe("Rate limiting middleware — donation endpoint", () => {
 });
 
 describe("Rate limiting middleware — custom window", () => {
-  it("resets independent counters for separate app instances", async () => {
-    const appA = buildApp(2, 1);
-    const appB = buildApp(2, 1);
+  beforeEach(async () => {
+    await redis.deletePattern("greenpay:rate-limit:shared:*");
+  });
 
-    // Exhaust appA
+  it("shares counters between app instances through Redis", async () => {
+    const appA = buildApp(2, 1, "shared");
+    const appB = buildApp(2, 1, "shared");
+
     await request(appA).get("/ping");
     await request(appA).get("/ping");
     const blockedOnA = await request(appA).get("/ping");
     expect(blockedOnA.status).toBe(429);
 
-    // appB counter is untouched — first request must succeed
-    const okOnB = await request(appB).get("/ping");
-    expect(okOnB.status).toBe(200);
+    const blockedOnB = await request(appB).get("/ping");
+    expect(blockedOnB.status).toBe(429);
   });
 });
 
 describe("Rate limiting middleware — custom limits", () => {
+  beforeEach(async () => {
+    await redis.deletePattern("greenpay:rate-limit:custom:*");
+  });
+
   it("enforces a custom limit of 3 requests", async () => {
-    const customApp = buildApp(3, 1);
+    const customApp = buildApp(3, 1, "custom");
 
     for (let i = 0; i < 3; i++) {
       const res = await request(customApp).get("/ping");

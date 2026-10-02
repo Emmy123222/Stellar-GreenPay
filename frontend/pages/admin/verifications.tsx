@@ -15,36 +15,43 @@ interface AdminVerificationsProps {
 
 export default function AdminVerifications({ publicKey, onConnect }: AdminVerificationsProps) {
   const [requests, setRequests] = useState<VerificationRequestResponse[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The initial, wallet-driven load is tracked by comparing the wallet the
+  // request list was loaded for to the currently connected wallet (derived,
+  // rather than toggled synchronously inside an effect). Approve/reject
+  // actions run from event handlers, so they can set `manualLoading`
+  // directly.
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const [manualLoading, setManualLoading] = useState(false);
+  const loading = manualLoading || loadedForKey !== publicKey;
 
   const loadRequests = () => {
-    setLoading(true);
-    fetchVerificationRequests()
+    return fetchVerificationRequests()
       .then(data => {
         // Only show pending and in_review
         const filtered = data.filter(r => r.status === 'pending' || r.status === 'in_review');
         setRequests(filtered);
+        setError(null);
       })
-      .catch((e: unknown) => setError((e as Error).message || "Failed to load requests"))
-      .finally(() => setLoading(false));
+      .catch((e: unknown) => setError((e as Error).message || "Failed to load requests"));
   };
 
   useEffect(() => {
     if (!publicKey) return;
-    loadRequests();
+    loadRequests().finally(() => setLoadedForKey(publicKey));
   }, [publicKey]);
 
   const handleApprove = async (id: string) => {
     const reason = window.prompt("Enter approval note (optional):");
     if (reason === null) return;
     try {
-      setLoading(true);
+      setManualLoading(true);
       await updateVerificationRequestStatus(id, "approved", reason);
-      loadRequests();
+      await loadRequests();
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to approve request");
-      setLoading(false);
+    } finally {
+      setManualLoading(false);
     }
   };
 
@@ -52,12 +59,13 @@ export default function AdminVerifications({ publicKey, onConnect }: AdminVerifi
     const reason = window.prompt("Enter rejection reason:");
     if (reason === null) return;
     try {
-      setLoading(true);
+      setManualLoading(true);
       await updateVerificationRequestStatus(id, "rejected", reason);
-      loadRequests();
+      await loadRequests();
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to reject request");
-      setLoading(false);
+    } finally {
+      setManualLoading(false);
     }
   };
 

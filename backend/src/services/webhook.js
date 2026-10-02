@@ -2,265 +2,96 @@
  * backend/src/services/webhook.js
  * Webhook delivery service for project milestone notifications.
  *
- * Deliveries are persisted in `webhook_deliveries` and processed via pg-boss
- * with exponential backoff: retry at 1m, 5m, 30m, 2h. Marked failed after 5 attempts.
+ * Deliveries are persisted in `webhook_deliveries`. The first attempt runs
+ * inline via recordAndDeliver(); failures leave the row `pending` with
+ * `next_attempt_at` set, and a pg-boss worker (start()) drains due retries
+ * with exponential backoff at 1m, 5m, 30m, 2h, 8h. A delivery is marked
+ * `failed` once MAX_ATTEMPTS attempts have been made, or immediately when the
+ * failure is permanent (for example an SSRF-rejected URL); the project's
+ * operator is then notified by email.
  */
 "use strict";
 
 const crypto = require("crypto");
-const dns = require("dns");
-const net = require("net");
+const PgBoss = require("pg-boss");
 const https = require("https");
 const http = require("http");
-const net = require("net");
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { assertPublicHttpUrl } = require("../utils/ssrf");
+const { sendWebhookFailureNotification } = require("./email");
 
 const QUEUE = "webhook-delivery";
-const MAX_ATTEMPTS = 5;
-/** Delay (seconds) before the next attempt after failures 1–4. */
-const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200]; // 1m, 5m, 30m, 2h
+/** Total attempts (1 initial + 5 retries) before a delivery is abandoned. */
+const MAX_ATTEMPTS = 6;
+/** Delay (seconds) before the next attempt after failures 1–5. */
+const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200, 28800]; // 1m, 5m, 30m, 2h, 8h
+const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
+/** Retry worker tick. Must be at least as frequent as the shortest backoff. */
+const DEFAULT_RETRY_CRON = "* * * * *";
 
 let boss = null;
 
-// ---------------------------------------------------------------------------
-// Private & reserved IPv4 CIDR ranges (SSRF blacklist)
-// ---------------------------------------------------------------------------
-const PRIVATE_IPV4_RANGES = Object.freeze([
-  Object.freeze({ start: ip4ToInt("0.0.0.0"),       end: ip4ToInt("0.255.255.255"),     label: "0.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("10.0.0.0"),      end: ip4ToInt("10.255.255.255"),    label: "10.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("100.64.0.0"),    end: ip4ToInt("100.127.255.255"),   label: "100.64.0.0/10" }),
-  Object.freeze({ start: ip4ToInt("127.0.0.0"),     end: ip4ToInt("127.255.255.255"),   label: "127.0.0.0/8" }),
-  Object.freeze({ start: ip4ToInt("169.254.0.0"),   end: ip4ToInt("169.254.255.255"),   label: "169.254.0.0/16" }),
-  Object.freeze({ start: ip4ToInt("172.16.0.0"),    end: ip4ToInt("172.31.255.255"),    label: "172.16.0.0/12" }),
-  Object.freeze({ start: ip4ToInt("192.0.2.0"),     end: ip4ToInt("192.0.2.255"),       label: "192.0.2.0/24" }),
-  Object.freeze({ start: ip4ToInt("192.168.0.0"),   end: ip4ToInt("192.168.255.255"),   label: "192.168.0.0/16" }),
-  Object.freeze({ start: ip4ToInt("198.18.0.0"),    end: ip4ToInt("198.19.255.255"),    label: "198.18.0.0/15" }),
-  Object.freeze({ start: ip4ToInt("198.51.100.0"),  end: ip4ToInt("198.51.100.255"),    label: "198.51.100.0/24" }),
-  Object.freeze({ start: ip4ToInt("203.0.113.0"),   end: ip4ToInt("203.0.113.255"),     label: "203.0.113.0/24" }),
-]);
-
-/** Convert a dotted-quad IPv4 string to a 32-bit integer. */
-function ip4ToInt(ip) {
-  const parts = ip.split(".").map(Number);
-  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+function generateSignature(secret, body) {
+  return crypto
+    .createHmac("sha256", secret)
+    .update(body)
+    .digest("hex");
 }
 
-/** Default timeout (ms) for DNS lookups in webhook validation. */
-const DNS_TIMEOUT = 5000;
-
-// ---------------------------------------------------------------------------
-// IPv4 helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Check whether an IP address falls within loopback, private, or link-local ranges.
- *
- * Blocked ranges:
- * - 127.0.0.0/8 (loopback)
- * - 10.0.0.0/8 (private)
- * - 172.16.0.0/12 (private)
- * - 192.168.0.0/16 (private)
- * - 169.254.0.0/16 (link-local / cloud metadata)
- * - 0.0.0.0/8 (unspecified / broadcast)
- * - IPv6 loopback (::1, ::), link-local (fe80::/10), unique local (fc00::/7)
- *
- * @param {string} ip - IP address string.
- * @returns {boolean} True if private or restricted IP.
- */
-function isPrivateIP(ip) {
-  if (!ip || typeof ip !== "string") return true;
-
-  let normalizedIp = ip.trim();
-
-  // Handle IPv4-mapped IPv6 address (e.g. ::ffff:127.0.0.1)
-  if (normalizedIp.toLowerCase().startsWith("::ffff:")) {
-    normalizedIp = normalizedIp.substring(7);
-  }
-
-  if (net.isIPv4(normalizedIp)) {
-    const parts = normalizedIp.split(".").map(Number);
-    if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
-      return true;
-    }
-    const [a, b] = parts;
-    // 127.0.0.0/8 (loopback)
-    if (a === 127) return true;
-    // 10.0.0.0/8 (private)
-    if (a === 10) return true;
-    // 172.16.0.0/12 (private: 172.16.0.0 - 172.31.255.255)
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    // 192.168.0.0/16 (private)
-    if (a === 192 && b === 168) return true;
-    // 169.254.0.0/16 (link-local / cloud metadata)
-    if (a === 169 && b === 254) return true;
-    // 0.0.0.0/8 (current network / loopback route)
-    if (a === 0) return true;
-
-    return false;
-  }
-
-  if (net.isIPv6(normalizedIp)) {
-    const lower = normalizedIp.toLowerCase();
-    // IPv6 Loopback (::1 or ::)
-    if (lower === "::1" || lower === "::" || lower === "0:0:0:0:0:0:0:1" || lower === "0:0:0:0:0:0:0:0") {
-      return true;
-    }
-    // Unique local addresses (fc00::/7)
-    if (lower.startsWith("fc") || lower.startsWith("fd")) {
-      return true;
-    }
-    // Link-local addresses (fe80::/10)
-    if (
-      lower.startsWith("fe8") ||
-      lower.startsWith("fe9") ||
-      lower.startsWith("fea") ||
-      lower.startsWith("feb")
-    ) {
-      return true;
-    }
-    return false;
-  }
-
-  return true;
+function isGracePeriodActive(expiresAt, nowMs) {
+  if (!expiresAt) return false;
+  const expiry = new Date(expiresAt).getTime();
+  return !isNaN(expiry) && nowMs < expiry;
 }
 
-/**
- * POST a signed JSON payload to a webhook URL.
- * Resolves the hostname via DNS first to ensure the IP does not belong to private/restricted ranges.
- *
- * @param {string} address - IPv4 dotted-quad string.
- * @returns {{ blocked: boolean, range?: string }}
- */
-function checkPrivateIPv4(address) {
-  if (!net.isIPv4(address)) return { blocked: false };
-  const num = ip4ToInt(address);
-  for (const range of PRIVATE_IPV4_RANGES) {
-    if (num >= range.start && num <= range.end) {
-      return { blocked: true, range: range.label };
-    }
-  }
-  return { blocked: false };
-}
-
-// ---------------------------------------------------------------------------
-// IPv6 helpers
-// ---------------------------------------------------------------------------
-
-/** Regex to detect IPv4-mapped/compat IPv6 addresses in dotted-quad form (e.g. ::ffff:192.168.1.1). */
-const IPV4_MAPPED_DOT_RE = /^::(?:ffff|0)(?::0)?:(\d+\.\d+\.\d+\.\d+)$/i;
-
-/** Strip surrounding square brackets from a hostname if present. */
-function stripBrackets(host) {
-  return host.replace(/^\[|\]$/g, "");
-}
-
-/**
- * Normalize an IPv6 address to its canonical lowercase expanded form
- * (zero-padded 8 groups of 4 hex digits, ":" separated).
- *
- * @param {string} address
- * @returns {string | null} Normalised address or null if not valid IPv6.
- */
-async function deliverPayload(url, secret, payload) {
-  let urlObj;
+function timingSafeEqualHex(a, b) {
   try {
-    urlObj = new URL(url);
-  } catch (err) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: err.message,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: Invalid URL");
-    return;
-  }
-
-  if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `Unsupported protocol: ${urlObj.protocol}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: Unsupported protocol");
-    return;
-  }
-
-  let addresses;
-  try {
-    addresses = await dns.promises.lookup(urlObj.hostname, { all: true });
-  } catch (err) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `DNS resolution failed for ${urlObj.hostname}: ${err.message}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: DNS resolution error");
-    return;
-  }
-
-  if (!addresses || addresses.length === 0) {
-    logger.error({
-      event: "webhook_delivery_error",
-      url,
-      err: `No IP addresses resolved for ${urlObj.hostname}`,
-      payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-    }, "Webhook delivery failed: No IP addresses resolved");
-    return;
-  }
-
-  for (const entry of addresses) {
-    if (isPrivateIP(entry.address)) {
-      logger.error({
-        event: "webhook_delivery_error",
-        url,
-        ip: entry.address,
-        err: `Blocked SSRF target IP: ${entry.address}`,
-        payload: { projectId: payload?.projectId, milestone: payload?.milestone },
-      }, "Webhook delivery failed: Blocked private or restricted IP address");
-      return;
-    }
-  }
-
-  try {
-    urlObj = new URL(url);
+    const bufA = Buffer.from(a, "hex");
+    const bufB = Buffer.from(b, "hex");
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
   } catch {
-    throw new Error(`Invalid webhook URL: "${url}"`);
+    return false;
+  }
+}
+
+function verifyWebhookSignature(payload, signatureInput, currentSecret, options = {}) {
+  if (!signatureInput || !currentSecret || typeof currentSecret !== "string") return false;
+
+  const { previousSecret, previousSecretExpiresAt, now = Date.now() } = options;
+
+  let candidateSignatures = [];
+  if (typeof signatureInput === "string") {
+    candidateSignatures = signatureInput.split(",").map((s) => s.trim()).filter(Boolean);
+  } else if (Array.isArray(signatureInput)) {
+    candidateSignatures = signatureInput.filter((s) => typeof s === "string" && s.trim());
+  } else if (typeof signatureInput === "object") {
+    const mainSig = signatureInput["x-webhook-signature"] || signatureInput["X-Webhook-Signature"];
+    const prevSig = signatureInput["x-webhook-signature-previous"] || signatureInput["X-Webhook-Signature-Previous"];
+    if (mainSig) candidateSignatures.push(...mainSig.split(",").map((s) => s.trim()));
+    if (prevSig) candidateSignatures.push(...prevSig.split(",").map((s) => s.trim()));
   }
 
-  if (!["http:", "https:"].includes(urlObj.protocol)) {
-    throw new Error(`Webhook URL uses unsupported protocol "${urlObj.protocol}"`);
-  }
+  if (candidateSignatures.length === 0) return false;
 
-  // Strip brackets from the hostname because Node.js URL parser may
-  // leave them on for IPv6 literals.
-  const host = stripBrackets(urlObj.hostname).toLowerCase();
-
-  // Block IP-literal hostnames that we already know are private BEFORE DNS lookup.
-  if (BLOCKED_HOSTNAMES.has(host)) {
-    throw new Error(`Webhook URL uses blocked hostname "${host}"`);
-  }
-
-  // Block any IPv4 hostname that falls in a private range directly.
-  if (net.isIPv4(host)) {
-    const v4 = checkPrivateIPv4(host);
-    if (v4.blocked) {
-      throw new Error(`Webhook URL is a private IPv4 address (${v4.range})`);
+  const expectedCurrentSig = generateSignature(currentSecret, payload);
+  for (const sig of candidateSignatures) {
+    if (timingSafeEqualHex(sig, expectedCurrentSig)) {
+      return true;
     }
   }
 
-  // Block any IPv6 hostname that falls in a private range directly (pre-DNS).
-  // Also catches IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.1).
-  if (net.isIPv6(host)) {
-    const v6 = checkPrivateIPv6(host);
-    if (v6.blocked) {
-      throw new Error(`Webhook URL is a private IPv6 address (${v6.range})`);
+  if (previousSecret && typeof previousSecret === "string" && isGracePeriodActive(previousSecretExpiresAt, now)) {
+    const expectedPrevSig = generateSignature(previousSecret, payload);
+    for (const sig of candidateSignatures) {
+      if (timingSafeEqualHex(sig, expectedPrevSig)) {
+        return true;
+      }
     }
   }
 
-  // Resolve hostname and validate resolved IPs.
-  await resolveAndValidateHost(host, dnsTimeout);
+  return false;
 }
 
 /**
@@ -271,11 +102,12 @@ async function deliverPayload(url, secret, payload) {
  * @param {string} url
  * @param {string} secret
  * @param {object} payload
+ * @param {object} [options]
  * @returns {Promise<number>}
  */
-async function deliverPayload(url, secret, payload) {
+async function deliverPayload(url, secret, payload, options = {}) {
   // Validate the URL before making any outbound request.
-  await validateUrl(url);
+  await assertPublicHttpUrl(url);
 
   const body = JSON.stringify(payload);
   const signature = generateSignature(secret, body);
@@ -307,7 +139,7 @@ async function deliverPayload(url, secret, payload) {
   const lib = urlObj.protocol === "https:" ? https : http;
 
   return new Promise((resolve, reject) => {
-    const req = lib.request(options, (res) => {
+    const req = lib.request(reqOptions, (res) => {
       res.on("data", () => {});
       res.on("end", () => {
         logger.info({
@@ -343,6 +175,266 @@ async function deliverPayload(url, secret, payload) {
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Seconds to wait before the next attempt, given how many attempts have
+ * already failed. Returns null once the budget is exhausted.
+ *
+ * @param {number} failedAttempts - Number of attempts made so far (1-based).
+ * @returns {number|null} Delay in seconds, or null when no retry is left.
+ */
+function retryDelaySeconds(failedAttempts) {
+  if (failedAttempts >= MAX_ATTEMPTS) return null;
+  return RETRY_DELAYS_SECONDS[failedAttempts - 1] ?? null;
+}
+
+/**
+ * Write the outcome of a single delivery attempt to the delivery row.
+ *
+ * A failure that still has retry budget leaves the row `pending` with
+ * `next_attempt_at` set, which is what `processDueRetries` picks up. A failure
+ * with no budget left — or a permanent one, such as an SSRF-rejected URL that
+ * will never become deliverable — is terminal and marked `failed`.
+ *
+ * @param {object} outcome
+ * @param {string} outcome.id - Delivery row id.
+ * @param {number} outcome.attemptNumber - The attempt that just completed (1-based).
+ * @param {boolean} outcome.delivered - Whether the endpoint accepted the payload.
+ * @param {number|null} [outcome.statusCode] - HTTP status, when there was a response.
+ * @param {string|null} [outcome.error] - Failure message to persist.
+ * @param {boolean} [outcome.permanent] - Skip remaining retries.
+ * @param {string|null} [outcome.url] - Destination URL, used in failure alerts.
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
+ */
+async function recordAttemptOutcome({
+  id,
+  attemptNumber,
+  delivered,
+  statusCode = null,
+  error = null,
+  permanent = false,
+  url = null,
+}) {
+  if (delivered) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'delivered',
+           attempt_count = $2,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           delivered_at = NOW(),
+           last_error = NULL,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, attemptNumber, statusCode],
+    );
+    return { status: "delivered", nextAttemptInSeconds: null };
+  }
+
+  const delaySeconds = permanent ? null : retryDelaySeconds(attemptNumber);
+
+  if (delaySeconds === null) {
+    await pool.query(
+      `UPDATE webhook_deliveries
+       SET status = 'failed',
+           attempt_count = $2,
+           last_attempt_at = NOW(),
+           response_status = $3,
+           last_error = $4,
+           next_attempt_at = NULL
+       WHERE id = $1`,
+      [id, attemptNumber, statusCode, error],
+    );
+    logger.warn(
+      { event: "webhook_delivery_exhausted", deliveryId: id, attempts: attemptNumber, permanent },
+      "Webhook delivery failed permanently — no further retries",
+    );
+
+    // Alert the project operator that the event was dropped for good. Email is
+    // best-effort: a failure here must not mask the delivery outcome.
+    try {
+      await sendWebhookFailureNotification({
+        deliveryId: id,
+        url,
+        attempts: attemptNumber,
+        lastError: error,
+      });
+    } catch (err) {
+      logger.error(
+        { event: "webhook_failure_notification_error", deliveryId: id, err: err.message },
+        "Failed to send webhook failure notification",
+      );
+    }
+
+    return { status: "failed", nextAttemptInSeconds: null };
+  }
+
+  await pool.query(
+    `UPDATE webhook_deliveries
+     SET status = 'pending',
+         attempt_count = $2,
+         last_attempt_at = NOW(),
+         response_status = $3,
+         last_error = $4,
+         next_attempt_at = NOW() + ($5 * INTERVAL '1 second')
+     WHERE id = $1`,
+    [id, attemptNumber, statusCode, error, delaySeconds],
+  );
+  logger.info(
+    { event: "webhook_retry_scheduled", deliveryId: id, attempt: attemptNumber, delaySeconds },
+    `Webhook attempt ${attemptNumber} failed — retrying in ${delaySeconds}s`,
+  );
+  return { status: "pending", nextAttemptInSeconds: delaySeconds };
+}
+
+/**
+ * Run one delivery attempt against an existing delivery row and persist the
+ * outcome. Rethrows transport-level errors so callers can log them; status is
+ * already recorded by the time the error propagates.
+ *
+ * @param {object} attempt
+ * @param {string} attempt.id - Delivery row id.
+ * @param {string} attempt.url - Destination URL.
+ * @param {string} attempt.secret - Current signing secret.
+ * @param {object} attempt.payload - Webhook body.
+ * @param {number} attempt.previousAttempts - Attempts already recorded on the row.
+ * @param {object} [attempt.options] - Passed through to deliverPayload.
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
+ */
+async function attemptDelivery({ id, url, secret, payload, previousAttempts, options = {} }) {
+  const attemptNumber = previousAttempts + 1;
+
+  // A URL that fails SSRF validation is never going to become deliverable, so
+  // it burns no retry budget.
+  try {
+    await assertPublicHttpUrl(url);
+  } catch (err) {
+    await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered: false,
+      error: err.message,
+      permanent: true,
+      url,
+    });
+    throw err;
+  }
+
+  try {
+    const { statusCode } = await deliverPayload(url, secret, payload, options);
+    const delivered = statusCode >= 200 && statusCode < 300;
+    return await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered,
+      statusCode,
+      error: delivered ? null : `Webhook responded with HTTP ${statusCode}`,
+    });
+  } catch (err) {
+    await recordAttemptOutcome({
+      id,
+      attemptNumber,
+      delivered: false,
+      error: err.message,
+      url,
+    });
+    throw err;
+  }
+}
+
+/**
+ * Persist a delivery row and make the first attempt. Subsequent attempts are
+ * driven by `processDueRetries`.
+ *
+ * @param {{ projectId: string, url: string, secret: string, payload: object, options?: object }} opts
+ * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
+ */
+async function recordAndDeliver({ projectId, url, secret, payload, options = {} }) {
+  const id = crypto.randomUUID();
+  const body = JSON.stringify(payload);
+  const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+  const event = typeof payload?.event === "string" ? payload.event : null;
+
+  await pool.query(
+    `INSERT INTO webhook_deliveries (
+       id, project_id, url, payload, event, payload_hash, status, attempt_count
+     ) VALUES ($1, $2, $3, $4::jsonb, $5, $6, 'pending', 0)`,
+    [id, projectId, url, body, event, payloadHash],
+  );
+
+  return attemptDelivery({ id, url, secret, payload, previousAttempts: 0, options });
+}
+
+/**
+ * Re-attempt every delivery whose `next_attempt_at` has come due.
+ *
+ * The signing secret is read from the project at retry time rather than stored
+ * on the delivery row, so a rotated secret is picked up by pending retries.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.limit=50] - Maximum deliveries to process in one pass.
+ * @returns {Promise<Array<{id: string, status: string}>>}
+ */
+async function processDueRetries({ limit = 50 } = {}) {
+  const { rows } = await pool.query(
+    `SELECT d.id, d.url, d.payload, d.attempt_count,
+            p.webhook_secret,
+            p.previous_webhook_secret,
+            p.previous_webhook_secret_expires_at
+     FROM webhook_deliveries d
+     JOIN projects p ON p.id = d.project_id
+     WHERE d.status = 'pending'
+       AND d.next_attempt_at IS NOT NULL
+       AND d.next_attempt_at <= NOW()
+     ORDER BY d.next_attempt_at ASC
+     LIMIT $1`,
+    [limit],
+  );
+
+  const results = [];
+
+  for (const row of rows) {
+    if (!row.webhook_secret) {
+      await recordAttemptOutcome({
+        id: row.id,
+        attemptNumber: row.attempt_count,
+        delivered: false,
+        error: "Project has no webhook secret configured",
+        permanent: true,
+        url: row.url,
+      });
+      results.push({ id: row.id, status: "failed" });
+      continue;
+    }
+
+    const payload =
+      typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload;
+
+    try {
+      const outcome = await attemptDelivery({
+        id: row.id,
+        url: row.url,
+        secret: row.webhook_secret,
+        payload,
+        previousAttempts: row.attempt_count,
+        options: {
+          previousSecret: row.previous_webhook_secret,
+          previousSecretExpiresAt: row.previous_webhook_secret_expires_at,
+        },
+      });
+      results.push({ id: row.id, status: outcome.status });
+    } catch (err) {
+      // Outcome is already persisted by attemptDelivery; keep draining the batch.
+      logger.error(
+        { event: "webhook_retry_error", deliveryId: row.id, err: err.message },
+        "Webhook retry attempt failed",
+      );
+      results.push({ id: row.id, status: "error" });
+    }
+  }
+
+  return results;
 }
 
 /**
@@ -432,9 +524,9 @@ async function checkAndDeliverMilestones(projectId) {
 
     const goal = Number.parseFloat(project.goal_xlm);
     const raised = Number.parseFloat(project.raised_xlm);
-    if (goal <= 0) return;
+    if (goal <= 0 || Number.isNaN(goal) || Number.isNaN(raised)) return;
 
-    const progressPercent = Math.min(Math.round((raised / goal) * 100), 100);
+    const progressPercent = (raised / goal) * 100;
 
     const milestoneResult = await pool.query(
       `SELECT id, percentage, title
@@ -473,7 +565,7 @@ async function checkAndDeliverMilestones(projectId) {
 
     if (project.webhook_url && project.webhook_secret &&
         project.webhook_secret.length >= 32) {
-      for (const milestone of milestones) {
+      const deliveries = milestones.map((milestone) => {
         const payload = {
           event: "milestone.reached",
           projectId,
@@ -488,6 +580,10 @@ async function checkAndDeliverMilestones(projectId) {
           url: project.webhook_url,
           secret: project.webhook_secret,
           payload,
+          options: {
+            previousSecret: project.previous_webhook_secret,
+            previousSecretExpiresAt: project.previous_webhook_secret_expires_at,
+          }
         }).catch((err) => {
           logger.error({
             event: "webhook_url_rejected",
@@ -510,21 +606,68 @@ async function checkAndDeliverMilestones(projectId) {
 }
 
 /**
- * No-op queue start — delivery history is recorded inline.
- * Kept so server.js can await start() without a separate pg-boss worker.
+ * Start the webhook retry worker.
+ *
+ * Registers a pg-boss cron job that drains due retries. Schedule is every
+ * minute by default — the shortest backoff step is 1 minute, so a coarser
+ * tick would delay the first retry. Override with WEBHOOK_RETRY_CRON, or set
+ * it to "disabled" to turn retries off entirely.
+ *
+ * Safe to call more than once; guards on the module-level `boss`.
+ *
  * @returns {Promise<void>}
  */
 async function start() {
-  return;
+  const cronOverride = process.env.WEBHOOK_RETRY_CRON;
+  if (cronOverride === "disabled") {
+    logger.info(
+      { event: "webhook_retry_disabled" },
+      "[webhook] Retry worker disabled via WEBHOOK_RETRY_CRON",
+    );
+    return;
+  }
+
+  if (boss) return;
+
+  const cronSchedule = cronOverride || DEFAULT_RETRY_CRON;
+  const connectionString =
+    process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
+
+  boss = new PgBoss(connectionString);
+  boss.on("error", (err) =>
+    logger.error({ event: "webhook_retry_pgboss_error", err }, err.message),
+  );
+
+  await boss.start();
+  await boss.schedule(QUEUE, cronSchedule, {}, { tz: "UTC" });
+  await boss.work(QUEUE, { teamSize: 1, teamConcurrency: 1 }, async () => {
+    await processDueRetries();
+  });
+
+  logger.info(
+    { event: "webhook_retry_scheduled_worker", cron: cronSchedule },
+    `[webhook] Retry worker scheduled: ${cronSchedule}`,
+  );
 }
 
 module.exports = {
   checkAndDeliverMilestones,
   deliverPayload,
-  isPrivateIP,
+  start,
+  recordAndDeliver,
+  attemptDelivery,
+  recordAttemptOutcome,
+  processDueRetries,
+  retryDelaySeconds,
+  generateSignature,
+  isGracePeriodActive,
+  verifyWebhookSignature,
+  rotateWebhookSecret,
+  timingSafeEqualHex,
+  GRACE_PERIOD_MS,
+  QUEUE,
+  MAX_ATTEMPTS,
+  RETRY_DELAYS_SECONDS,
+  DEFAULT_RETRY_CRON,
+  boss,
 };
-
-// Export internal functions for testing
-if (process.env.NODE_ENV === "test") {
-  module.exports.deliverPayload = deliverPayload;
-}

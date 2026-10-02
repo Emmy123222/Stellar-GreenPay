@@ -20,9 +20,18 @@
  * called, auth fails → status banner shown) lives in
  * `useBiometricAuth.test.ts` so the donate screen stays testable
  * without mocking the entire Stellar SDK.
+ *
+ * `render()` is called bare (not wrapped in `act()`): RNTL 12's
+ * `render` is synchronous, and nesting it inside `act()` makes RNTL's
+ * host-component probe observe an already-unmounted test renderer
+ * ("Can't access .root on unmounted test renderer"). The async parts
+ * are awaited through `waitFor` instead.
+ *
+ * Keyboard avoidance for this screen is covered separately in
+ * `__tests__/DonateScreen.keyboard.test.tsx` (issue #1127).
  */
 import React from 'react';
-import { render, fireEvent, waitFor , act} from '@testing-library/react-native';
+import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import axios from 'axios';
 import * as LocalAuthentication from 'expo-local-authentication';
 
@@ -175,34 +184,37 @@ jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 describe('DonateScreen – biometric auth gate (issue #481)', () => {
   it('shows "Loading project..." before projects arrive', async () => {
     (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
-    const { getByText } = await act(async () => render(<DonateScreen />));
+    const { getByText } = render(<DonateScreen />);
     expect(getByText('Loading project...')).toBeTruthy();
   });
 
   it('renders the donate screen after projects are loaded', async () => {
-    const { getByText } = await act(async () => render(<DonateScreen />));
+    const { getByText } = render(<DonateScreen />);
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
   });
 
   it('renders the three preset amount chips (5, 10, 25 XLM)', async () => {
-    const { getByText } = await act(async () => render(<DonateScreen />));
+    const { getByText, getByLabelText } = render(<DonateScreen />);
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
-    expect(getByText('5 XLM')).toBeTruthy();
-    expect(getByText('10 XLM')).toBeTruthy();
-    expect(getByText('25 XLM')).toBeTruthy();
+    // Queried by accessibility label, not by text: the screen renders a
+    // second preset row (5 / 10 / 50 / 100) whose buttons carry the same
+    // "5 XLM" / "10 XLM" strings, so a text query would be ambiguous.
+    expect(getByLabelText('Donate 5 XLM')).toBeTruthy();
+    expect(getByLabelText('Donate 10 XLM')).toBeTruthy();
+    expect(getByLabelText('Donate 25 XLM')).toBeTruthy();
   });
 
   it('does NOT call authenticate when the wallet is not connected', async () => {
-    const { getByText } = await act(async () => render(<DonateScreen />));
+    const { getByText, getByLabelText } = render(<DonateScreen />);
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
 
-    fireEvent.press(getByText('10 XLM'));
+    fireEvent.press(getByLabelText('Donate 10 XLM'));
     fireEvent.press(getByText(/🌱 Donate/));
 
     expect(bioMock().authenticate).not.toHaveBeenCalled();
@@ -219,7 +231,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     // Alert.alert and the wallet connect callback; instead of doing
     // that, assert that pressing Donate without preconditions does NOT
     // hit the auth gate. (Happy-path coverage is in the hook tests.)
-    const { getByText } = await act(async () => render(<DonateScreen />));
+    const { getByText } = render(<DonateScreen />);
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
@@ -235,7 +247,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     // A naked `expect(useBiometricAuth).toBeDefined()` would also pass
     // but says nothing about wiring — instead we render the screen and
     // confirm the rendered "🔒" hint and disabled-donate behaviour.
-    const { getByText, queryByText } = await act(async () => render(<DonateScreen />));
+    const { getByText, queryByText } = render(<DonateScreen />);
     return waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     ).then(() => {
@@ -256,9 +268,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     // Hint advertises the upcoming biometric prompt
     expect(getByText(/authenticate with Biometrics before signing/i)).toBeTruthy();
 
-    const { getByText: getByText2, findByText } = await act(async () =>
-      render(<DonateScreen />)
-    );
+    const { findByText } = render(<DonateScreen />);
     await waitFor(() =>
       expect(getByText2('Donate to Amazon Reforestation')).toBeTruthy()
     );

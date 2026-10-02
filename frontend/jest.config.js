@@ -16,5 +16,10 @@ const customJestConfig = {
   // Only run unit/snapshot tests here; Playwright e2e lives in /e2e
   testMatch: ["<rootDir>/**/__tests__/**/*.test.{ts,tsx}"],
 };
-
-module.exports = createJestConfig(customJestConfig);
+module.exports = async () => {
+  const config = await createJestConfig(customJestConfig)();
+  config.transformIgnorePatterns = [
+    "/node_modules/(?!(@noble|@stellar|uint8array-extras)/)",
+  ];
+  return config;
+};
