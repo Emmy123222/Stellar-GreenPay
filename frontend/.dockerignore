@@ -1,8 +1,9 @@
-node_modules
-.next
+node_modules/
+.next/
 out
 build
 .git
 .github
+coverage/
 *.log
-.env*.local
+.env*
