@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
+import { toast } from "sonner";
 import { notifyAdmin, submitProject } from "@/lib/api";
+import { getConnectedPublicKey } from "@/lib/wallet";
 import { PROJECT_CATEGORIES } from "@/utils/format";
 
 type Step = "org" | "project" | "wallet" | "methodology" | "done";
@@ -68,6 +70,13 @@ export default function SubmitProjectPage() {
   const [serverError, setServerError] = useState("");
   const [reviewTimeline, setReviewTimeline] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+
+  // Wallet connection state — null means no Freighter wallet is connected.
+  const [publicKey, setPublicKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    getConnectedPublicKey().then((pk) => setPublicKey(pk));
+  }, []);
 
   const [form, setForm] = useState<FormData>({
     orgName: "",
@@ -147,6 +156,10 @@ export default function SubmitProjectPage() {
   }
 
   async function handleSubmit() {
+    if (publicKey === null) {
+      toast.error("Connect your Freighter wallet to submit a project");
+      return;
+    }
     if (!validateStep()) return;
     setSubmitting(true);
     setServerError("");
@@ -387,14 +400,21 @@ export default function SubmitProjectPage() {
         </button>
 
         {step === "methodology" ? (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {submitting ? "Submitting…" : "Submit Project"}
-          </button>
+          <span className="tooltip">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || publicKey === null}
+              className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {submitting ? "Submitting…" : "Submit Project"}
+            </button>
+            {publicKey === null && (
+              <span className="tooltip-text" role="tooltip">
+                Connect your Freighter wallet to submit a project
+              </span>
+            )}
+          </span>
         ) : (
           <button type="button" onClick={nextStep} className="btn-primary">
             Next

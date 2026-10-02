@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Configurable CPU/memory requests and limits (requests 100m/256Mi, limits 500m/512Mi) and a CPU-based (70%) Horizontal Pod Autoscaler for the GreenPay Helm chart (#1209).
+- Smart Contracts section in `CONTRIBUTING.md` covering Soroban test/build/WASM/deploy workflows and linking the deployment and integration docs (#1281).
+- Authentication section in `docs/api.md` documenting the JWT Bearer scheme, login/refresh flow, `X-Admin-Key` and wallet-signed alternatives, a curl example, and a public-vs-authenticated endpoint table (#1283).
+- Supported-versions table and concrete reporting channels (GitHub Security Advisories + private contact) in `SECURITY.md`, plus a README link to the security policy (#1284).
+- Dynamic Codecov coverage badges (backend + frontend) in `README.md`, a frontend unit-test coverage job in `frontend.yml`, and coverage upload to Codecov on every `main` push (#1286).
 - CHANGELOG.md — project changelog tracking.
 - Per-donation CO₂ offset in donation API responses via `co2OffsetKg` field, computed as `amount_xlm × co2_per_xlm / 1000` across all donation endpoints (#365).
 - On-chain USDC to XLM price conversion through a configured oracle adapter (#345).
@@ -40,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The selected language persists across sessions under `greenpay:locale` (migrated from the bare `locale` key), falls back to `navigator.language`, and sets `<html lang>` before first paint instead of re-rendering after hydration (#1073).
 
 
+### Fixed
+
+- Kubernetes manifests now pin container images to immutable git-SHA tags instead of the mutable `latest` tag, with CI injecting the short SHA at deploy time (#1212).
+
 ## [1.0.0] - 2025-01-01
 
 ### Added
@@ -57,3 +66,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mobile app (React Native / Expo).
 - Browser extension.
 - Helm chart for Kubernetes deployment.
+
+### Changed
+
+- Standardized monorepo workspace layout across `backend`, `frontend`, `mobile`, `extension`, and `contracts` packages for initial `v1.0.0` baseline release.
+- Standardized release notes generation via `@semantic-release/changelog` in `.github/workflows/release.yml` to parse Conventional Commits into Keep a Changelog sections (#1290).
+
+### Fixed
+
+- Resolved initial Stellar Horizon testnet transaction confirmation handling and database migration ordering for `v1.0.0`.
+
+### Security
+
+- Enforced environment-variable-only secret configuration for Stellar and PostgreSQL credentials alongside Gitleaks secret scanning in CI.
+
+[Unreleased]: https://github.com/Emmy123222/Stellar-GreenPay/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Emmy123222/Stellar-GreenPay/releases/tag/v1.0.0

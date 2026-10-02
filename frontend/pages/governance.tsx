@@ -82,7 +82,7 @@ async function buildVoteTransaction(voter: string, projectId: string, approve: b
         "vote_verify_project",
         new Address(voter).toScVal(),
         nativeToScVal(projectId, { type: "string" }),
-        nativeToScVal(approve, { type: "bool" }),
+        nativeToScVal(approve, { type: "bool" as any }),
       ),
     )
     .setTimeout(60)

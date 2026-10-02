@@ -48,6 +48,7 @@ export default function ContributorTimeline({
                   className="relative z-10 flex-shrink-0"
                   title={pr.author.login}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={pr.author.avatarUrl}
                     alt={`${pr.author.login}'s avatar`}

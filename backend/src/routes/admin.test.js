@@ -106,7 +106,7 @@ describe("POST /api/admin/digest/preview", () => {
     const loginRes = await request(app).post("/api/admin/login").send({ username: "admin", password: "testpass" });
     const token = loginRes.body.data.token;
 
-    pool.query.mockImplementation(async (query, params) => {
+    pool.query.mockImplementation(async (query) => {
       if (query.includes("FROM projects")) {
         return { rows: [{ id: "project-123", name: "Solar Haven", co2_offset_kg: 300 }] };
       }
@@ -301,3 +301,89 @@ describe("adminTokenRequired middleware", () => {
     expect(res.body.user.authMethod).toBe("x-admin-key");
   });
 });
+
+describe("Admin match pledge endpoints", () => {
+  let app;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    app = buildApp();
+  });
+
+  it("POST /api/admin/projects/:projectId/match-pledges creates a new match pledge", async () => {
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+    const mockPledge = {
+      id: "match-uuid-1",
+      project_id: "proj-1",
+      matcher_address: "GBVNQON4MFVGJXK5WT7VQJJZXFVHZJB6BHFWJCW7OF5BLNGOLZJQHIY",
+      cap_xlm: "1000.0000000",
+      multiplier: 2,
+      matched_xlm: "0",
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+      created_at: new Date().toISOString(),
+    };
+
+    pool.query.mockImplementation(async (query, params) => {
+      if (query.includes("SELECT id FROM projects")) {
+        return { rows: [{ id: "proj-1" }] };
+      }
+      if (query.includes("INSERT INTO donation_matches")) {
+        return { rows: [mockPledge] };
+      }
+      if (query.includes("INSERT INTO admin_audit_log")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .post("/api/admin/projects/proj-1/match-pledges")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        matcherAddress: "GBVNQON4MFVGJXK5WT7VQJJZXFVHZJB6BHFWJCW7OF5BLNGOLZJQHIY",
+        capXLM: "1000",
+        multiplier: 2,
+        expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.id).toBe("match-uuid-1");
+    expect(res.body.data.capXLM).toBe("1000.0000000");
+    expect(res.body.data.multiplier).toBe(2);
+  });
+
+  it("DELETE /api/admin/match-pledges/:id cancels an existing match pledge", async () => {
+    const token = signToken({ role: "admin", sub: "admin" }, "1h");
+
+    pool.query.mockImplementation(async (query, params) => {
+      if (query.includes("UPDATE donation_matches SET expires_at")) {
+        return {
+          rows: [
+            {
+              id: "match-uuid-1",
+              project_id: "proj-1",
+              matcher_address: "GBVNQON4MFVGJXK5WT7VQJJZXFVHZJB6BHFWJCW7OF5BLNGOLZJQHIY",
+              cap_xlm: "1000.0000000",
+              matched_xlm: "250.0000000",
+            },
+          ],
+        };
+      }
+      if (query.includes("INSERT INTO admin_audit_log")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    });
+
+    const res = await request(app)
+      .delete("/api/admin/match-pledges/match-uuid-1")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.id).toBe("match-uuid-1");
+    expect(res.body.data.cancelled).toBe(true);
+  });
+});
+

@@ -164,3 +164,19 @@ Test coverage includes:
 - API key authentication
 - Role claim validation
 - Token type validation
+
+
+## Redis cache key namespacing
+Redis is optional and often shared with other applications (managed instance, sidecar, or a cluster with several databases). Every cache key this service writes is therefore qualified with the `greenpay:` namespace — `greenpay:project:abc123`, `greenpay:leaderboard:page:1`, `greenpay:projects:list:*`. The prefix is applied centrally by the cache services (`backend/src/services/redis.js` and `backend/src/services/cache.js`) using `backend/src/utils/cacheKeys.js`, so a new call site cannot forget it and `KEYS`-based invalidation can never delete another service's data. Rate-limit counters use their own `greenpay:rate-limit:` prefix.
+
+
+| Concern | Mitigation |
+|---------|-----------|
+| Private key exposure | Freighter signs locally — keys never touch the app |
+| Fake donation records | Backend deduplicates by tx hash; contract is ground truth |
+| Project wallet spoofing | Admin must register projects on-chain via Soroban |
+| Sybil donors | On-chain stats cannot be faked — all linked to real wallet |
+| Backend downtime | Donations still work — backend is not on the critical path |
+| Reentrancy in cross-contract calls | Guarded by an `is_processing` flag in temporary storage. While Soroban's single-threaded nature reduces risk, malicious tokens/oracles could still re-enter `donate()`. Explicit guards prevent this. |
+| --- | --- |
+| Shared-Redis key collision | Every cache key is namespaced (`greenpay:…`) and invalidation is namespace-scoped |

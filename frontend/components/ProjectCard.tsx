@@ -74,7 +74,17 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           <h3 className="font-display font-semibold text-forest-900 text-base leading-snug mb-2 group-hover:text-forest-600 transition-colors line-clamp-2">
             {project.name}
           </h3>
-          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
+
+          {/* Active 2x Donation Match Badge */}
+          {project.activeMatch && Number(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM) > 0 && new Date(project.activeMatch.expiresAt).getTime() > Date.now() ? (
+            <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold tracking-tight shadow-sm">
+              <span>
+                🔥 Matched: {project.activeMatch.multiplier || 2}x up to {formatXLM(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM)} until {new Date(project.activeMatch.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            </div>
+          ) : null}
+
+          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
             {project.description}
           </p>
 

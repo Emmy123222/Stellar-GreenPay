@@ -386,6 +386,64 @@ function getProjectIdFromProjRegEvent(tx) {
   return null;
 }
 
+/**
+ * Query Soroban RPC for ProjectDeactivated events.
+ *
+ * @param {number} [startLedger] - Ledger sequence to start querying from.
+ * @returns {Promise<Array<{ projectId: string, ledger: number }>>}
+ */
+async function getProjectDeactivatedEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+
+  const request = {
+    filters: [
+      {
+        type: "contract",
+        contractIds: [CONTRACT_ID],
+        topics: [
+          [
+            xdr.ScVal.scvSymbol("ProjectDeactivated").toXDR("base64"),
+            "*",
+          ],
+        ],
+      },
+    ],
+    limit: 50,
+  };
+  if (startLedger) {
+    request.startLedger = startLedger;
+  }
+
+  let response;
+  try {
+    response = await rpcServer.getEvents(request);
+  } catch (err) {
+    return [];
+  }
+
+  if (!response || !response.events) return [];
+
+  const results = [];
+  for (const evt of response.events) {
+    try {
+      let projectId = null;
+      if (evt.value) {
+        if (typeof evt.value === "string") {
+          projectId = scValToNative(xdr.ScVal.fromXDR(evt.value, "base64"));
+        } else {
+          projectId = scValToNative(evt.value);
+        }
+      }
+      if (typeof projectId === "string" && projectId.length > 0) {
+        results.push({ projectId, ledger: evt.ledger });
+      }
+    } catch {
+      // skip unparseable
+    }
+  }
+  return results;
+}
+
 module.exports = {
   server,
   rpcServer,
@@ -395,5 +453,6 @@ module.exports = {
   isStellarTimeoutError,
   getOnChainProject,
   getProjectDonationEvents,
-  getRegisteredProjectIdFromTransaction
+  getRegisteredProjectIdFromTransaction,
+  getProjectDeactivatedEvents,
 };

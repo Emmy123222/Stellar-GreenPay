@@ -115,6 +115,33 @@ function adminRequired(req, res, next) {
   }
 }
 
+/**
+ * Require a wallet-authentication JWT issued by POST /api/auth/token.
+ * The token is only issued after the caller proves control of a Stellar
+ * wallet by signing a one-time challenge, so `req.walletAddress` can be
+ * trusted as the authenticated donor identity (ADR-003).
+ */
+function walletAuthRequired(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Missing or malformed Authorization header" });
+  }
+  const token = authHeader.slice(7);
+  try {
+    const decoded = verifyToken(token);
+    if (decoded.type !== "wallet" || !decoded.sub) {
+      return res.status(401).json({ error: "Invalid wallet token" });
+    }
+    req.walletAddress = decoded.sub;
+    next();
+  } catch (err) {
+    if (err.name === "TokenExpiredError") {
+      return res.status(401).json({ error: "Wallet token expired" });
+    }
+    return res.status(401).json({ error: "Invalid wallet token" });
+  }
+}
+
 function adminTokenRequired(req, res, next) {
   const adminKey = req.get("X-Admin-Key");
   if (adminKey && isValidAdminKey(adminKey)) {
@@ -166,4 +193,4 @@ async function validateAdminAddress(req, res, next) {
   }
 }
 
-module.exports = { signToken, verifyToken, signAdminToken, verifyAdminToken, adminRequired, adminTokenRequired, adminKeyRequired, isValidAdminKey, validateAdminAddress };
+module.exports = { signToken, verifyToken, signAdminToken, verifyAdminToken, adminRequired, adminTokenRequired, adminKeyRequired, isValidAdminKey, validateAdminAddress, walletAuthRequired };

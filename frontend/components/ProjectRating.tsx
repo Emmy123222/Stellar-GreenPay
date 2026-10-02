@@ -2,7 +2,7 @@
  * components/ProjectRating.tsx
  */
 import { useState } from "react";
-import { csrfFetch } from "@/lib/api";
+import { submitProjectRating } from "@/lib/api";
 
 interface ProjectRatingProps {
   projectId: string;
@@ -27,14 +27,14 @@ export default function ProjectRating({ projectId, projectName, donorAddress, on
     setSubmitting(true);
     setError(null);
     try {
-      const res = await csrfFetch(`${process.env.NEXT_PUBLIC_API_URL || ""}/api/v1/ratings`, {
-        method: "POST",
-        body: JSON.stringify({ projectId, donorAddress, rating, review }),
-      });
-      if (!res.ok) throw new Error("Failed to submit rating");
+      // The backend derives the donor address from the wallet-auth token
+      // and verifies the donation server-side — the body only carries the
+      // project id, stars, and review text.
+      await submitProjectRating({ projectId, stars: rating, reviewText: review || undefined });
       onSuccess();
     } catch (e: any) {
-      setError(e.message);
+      const msg = e?.response?.data?.error;
+      setError(msg || "Failed to submit rating");
     } finally {
       setSubmitting(false);
     }

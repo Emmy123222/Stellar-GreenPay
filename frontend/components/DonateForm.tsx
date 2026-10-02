@@ -335,6 +335,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           </div>
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={isProcessing}
             placeholder="Or enter custom amount..." min="1" step="1"
+            aria-label={`Donation amount in ${currency}`}
+            id={`donation-amount-${currency}`}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
           {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
           

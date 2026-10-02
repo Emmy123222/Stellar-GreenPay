@@ -3,10 +3,16 @@
  * Shows donation stats by category in a donut chart.
  */
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { fetchCategoryStats, CategoryStats } from "@/lib/api";
 import { formatXLM } from "@/utils/format";
 import WalletConnect from "@/components/WalletConnect";
+
+const DonationGrowthChartNoSSR = dynamic(
+  () => import("@/components/DonationGrowthChart"),
+  { ssr: false },
+);
 
 interface AdminAnalyticsProps {
   publicKey: string | null;
@@ -96,40 +102,50 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
       )}
 
       {!loading && !error && data.length > 0 && (
-        <div className="card w-full h-[500px]">
-          <h2 className="font-display text-xl font-bold text-forest-900 mb-6 text-center">Donations by Category</h2>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <defs>
-                {COLORS.map((color, index) => (
-                  <pattern key={`pattern-${index}`} id={`pattern-${index}`} patternUnits="userSpaceOnUse" width="8" height="8">
-                    <rect width="8" height="8" fill={color} />
-                    {index % 3 === 0 && <path d="M-2,2 l4,-4 M0,8 l8,-8 M6,10 l4,-4" stroke="#ffffff" strokeWidth="2" strokeOpacity={0.3} />}
-                    {index % 3 === 1 && <circle cx="4" cy="4" r="2" fill="#ffffff" fillOpacity={0.3} />}
-                    {index % 3 === 2 && <path d="M0,0 l8,8 Z" stroke="#ffffff" strokeWidth="2" strokeOpacity={0.3} />}
-                  </pattern>
-                ))}
-              </defs>
-              <Pie
-                data={data}
-                dataKey="total_donations"
-                nameKey="category"
-                cx="50%"
-                cy="50%"
-                innerRadius={80}
-                outerRadius={150}
-                paddingAngle={2}
-                stroke="#fff"
-                strokeWidth={2}
-              >
-                {data.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={`url(#pattern-${index % COLORS.length})`} />
-                ))}
-              </Pie>
-              <Tooltip content={<CustomTooltip />} />
-              <Legend verticalAlign="bottom" height={36} />
-            </PieChart>
-          </ResponsiveContainer>
+        <div className="space-y-6">
+          <section className="card">
+            <h2 className="font-display text-xl font-bold text-forest-900 mb-1">Weekly Donation Volume</h2>
+            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] mb-4">Total XLM received each week</p>
+            <div className="h-72">
+              <DonationGrowthChartNoSSR />
+            </div>
+          </section>
+
+          <section className="card w-full h-[500px]">
+            <h2 className="font-display text-xl font-bold text-forest-900 mb-6 text-center">Donations by Category</h2>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <defs>
+                  {COLORS.map((color, index) => (
+                    <pattern key={`pattern-${index}`} id={`pattern-${index}`} patternUnits="userSpaceOnUse" width="8" height="8">
+                      <rect width="8" height="8" fill={color} />
+                      {index % 3 === 0 && <path d="M-2,2 l4,-4 M0,8 l8,-8 M6,10 l4,-4" stroke="#ffffff" strokeWidth="2" strokeOpacity={0.3} />}
+                      {index % 3 === 1 && <circle cx="4" cy="4" r="2" fill="#ffffff" fillOpacity={0.3} />}
+                      {index % 3 === 2 && <path d="M0,0 l8,8 Z" stroke="#ffffff" strokeWidth="2" strokeOpacity={0.3} />}
+                    </pattern>
+                  ))}
+                </defs>
+                <Pie
+                  data={data}
+                  dataKey="total_donations"
+                  nameKey="category"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={80}
+                  outerRadius={150}
+                  paddingAngle={2}
+                  stroke="#fff"
+                  strokeWidth={2}
+                >
+                  {data.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={`url(#pattern-${index % COLORS.length})`} />
+                  ))}
+                </Pie>
+                <Tooltip content={<CustomTooltip />} />
+                <Legend verticalAlign="bottom" height={36} />
+              </PieChart>
+            </ResponsiveContainer>
+          </section>
         </div>
       )}
 

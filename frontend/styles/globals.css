@@ -1,8 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Nunito:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.ts";
 
 @layer base {
   /* ── Light theme (default) ───────────────────────────────────────── */
@@ -77,13 +76,13 @@
 }
 
 @layer components {
-  .card {
-    @apply bg-white dark:bg-[#102214] border border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)]
+  .card, .card-hover {
+    @apply bg-[#ffffff] dark:bg-[#102214] border border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)]
            rounded-2xl p-6 shadow-sm dark:shadow-none;
   }
 
   .card-hover {
-    @apply card hover:border-[rgba(34,114,57,0.30)] dark:hover:border-[rgba(96,208,123,0.40)]
+    @apply hover:border-[rgba(34,114,57,0.30)] dark:hover:border-[rgba(96,208,123,0.40)]
            hover:shadow-md dark:hover:bg-[#15291a] transition-all duration-200 cursor-pointer;
   }
 
@@ -111,7 +110,7 @@
            dark:hover:bg-[rgba(96,208,123,0.10)];
   }
 
-  .input-field {
+  .input-field, .textarea-field {
     @apply w-full bg-[#f0f7f0] dark:bg-[#0e1f13] border border-[rgba(34,114,57,0.18)] dark:border-[rgba(96,208,123,0.20)]
            rounded-xl px-4 py-3 text-[#1a2e1a] dark:text-[#e6f5e9] placeholder-[#8aaa8a] dark:placeholder-[#8aaa8a]
            focus:outline-none focus:border-[rgba(34,114,57,0.50)] dark:focus:border-[rgba(96,208,123,0.55)]
@@ -120,31 +119,31 @@
   }
 
   .textarea-field {
-    @apply input-field resize-none leading-relaxed;
+    @apply resize-none leading-relaxed;
   }
 
   .label {
     @apply block text-xs font-semibold text-[var(--text-secondary)] dark:text-[#b2d5b5] uppercase tracking-widest mb-2;
   }
 
-  .badge {
+  .badge, .badge-active, .badge-complete, .badge-paused, .badge-verified {
     @apply text-xs font-semibold px-2.5 py-1 rounded-full border;
   }
 
   .badge-active {
-    @apply badge bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/40;
+    @apply bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/40;
   }
 
   .badge-complete {
-    @apply badge bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/40;
+    @apply bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/40;
   }
 
   .badge-paused {
-    @apply badge bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700/40;
+    @apply bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700/40;
   }
 
   .badge-verified {
-    @apply badge bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/40;
+    @apply bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/40;
   }
 
   .progress-bar {

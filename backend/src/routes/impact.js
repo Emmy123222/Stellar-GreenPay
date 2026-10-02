@@ -2,6 +2,7 @@
 
 const express = require("express");
 const router = express.Router();
+const crypto = require("crypto");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { buildPdf } = require("../utils/pdf");
@@ -30,6 +31,10 @@ async function sendCached(req, res, payload) {
   await redis.set(cacheKey(req), payload, CACHE_TTL_SECONDS);
   res.set("Cache-Control", "public, max-age=300");
   return res.json(payload);
+}
+
+function generateSlug() {
+  return crypto.randomBytes(9).toString("base64url");
 }
 
 // GET /api/impact/project/:id
@@ -233,6 +238,126 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         co2OffsetKg,
         projectsSupported,
         topCategory,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/impact/certificate
+//
+// Creates a shareable impact certificate record with a unique slug.
+// The slug is used by GET /api/impact/certificate/:slug and by the public
+// certificate page at /certificate/:slug.
+router.post("/certificate", async (req, res, next) => {
+  try {
+    const {
+      donorAddress,
+      donorName,
+      totalDonatedXLM,
+      totalCO2OffsetKg,
+      badgeTier,
+      projectsSupported,
+    } = req.body || {};
+
+    if (!donorAddress || typeof donorAddress !== "string") {
+      return res.status(400).json({ success: false, error: "donorAddress is required" });
+    }
+
+    const displayName = (donorName && String(donorName).trim()) || donorAddress;
+    const projects = Array.isArray(projectsSupported) ? projectsSupported : [];
+    const totalXlm = Number.parseFloat(totalDonatedXLM || "0");
+    const co2Kg = Math.round(Number(totalCO2OffsetKg || 0));
+
+    let slug = generateSlug();
+    let inserted = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        const result = await pool.query(
+          `INSERT INTO impact_certificates
+             (slug, donor_address, donor_name, total_donated_xlm, co2_offset_kg, badge_tier, projects_supported)
+           VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+           RETURNING slug, donor_address, donor_name, total_donated_xlm, co2_offset_kg, badge_tier, projects_supported, created_at`,
+          [
+            slug,
+            donorAddress,
+            displayName,
+            Number.isFinite(totalXlm) ? totalXlm : 0,
+            co2Kg,
+            badgeTier || "Supporter",
+            JSON.stringify(projects),
+          ],
+        );
+        inserted = result.rows[0];
+        break;
+      } catch (err) {
+        if (err && err.code === "23505") {
+          slug = generateSlug();
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    if (!inserted) {
+      return res.status(500).json({ success: false, error: "Could not allocate certificate slug" });
+    }
+
+    const shareUrl = `${req.protocol}://${req.get("host")}/certificate/${inserted.slug}`;
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        slug: inserted.slug,
+        shareUrl,
+        donorAddress: inserted.donor_address,
+        donorName: inserted.donor_name,
+        totalDonatedXLM: Number.parseFloat(inserted.total_donated_xlm?.toString() || "0").toFixed(7),
+        co2OffsetKg: Number(inserted.co2_offset_kg || 0),
+        badgeTier: inserted.badge_tier,
+        projectsSupported: inserted.projects_supported || [],
+        createdAt: inserted.created_at,
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// GET /api/impact/certificate/:slug
+//
+// Public JSON representation of a certificate, consumed by the
+// /certificate/[slug] page for SSR and social previews.
+router.get("/certificate/:slug", async (req, res, next) => {
+  try {
+    const { slug } = req.params;
+    if (!slug || !/^[A-Za-z0-9_-]{6,64}$/.test(slug)) {
+      return res.status(400).json({ success: false, error: "Invalid slug" });
+    }
+
+    const result = await pool.query(
+      `SELECT slug, donor_address, donor_name, total_donated_xlm, co2_offset_kg, badge_tier, projects_supported, created_at
+       FROM impact_certificates
+       WHERE slug = $1`,
+      [slug],
+    );
+
+    const row = result.rows[0];
+    if (!row) return res.status(404).json({ success: false, error: "Certificate not found" });
+
+    res.set("Cache-Control", "public, max-age=300");
+    return res.json({
+      success: true,
+      data: {
+        slug: row.slug,
+        donorAddress: row.donor_address,
+        donorName: row.donor_name,
+        totalDonatedXLM: Number.parseFloat(row.total_donated_xlm?.toString() || "0").toFixed(7),
+        co2OffsetKg: Number(row.co2_offset_kg || 0),
+        badgeTier: row.badge_tier,
+        projectsSupported: row.projects_supported || [],
+        createdAt: row.created_at,
       },
     });
   } catch (e) {

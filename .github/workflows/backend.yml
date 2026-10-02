@@ -2,8 +2,9 @@ name: Backend CI
 
 on:
   push:
+    # No `paths` filter on push: coverage must be uploaded to Codecov on every
+    # main-branch push so the README badge reflects the current state (#1286).
     branches: [main, develop]
-    paths: [backend/**]
   pull_request:
     branches: [main]
     paths: [backend/**]
@@ -74,7 +75,9 @@ jobs:
       - run: npm ci
 
       - name: Run database migrations
-        run: npm run db:migrate
+        run: |
+          node src/db/pgboss-migrate.js
+          npm run db:migrate
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
 

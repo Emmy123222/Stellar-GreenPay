@@ -458,6 +458,19 @@ export async function savePaymentHistory(records: PaymentRecord[]): Promise<void
   await AsyncStorage.setItem('greenpay_payment_history', JSON.stringify(records));
 }
 
+/**
+ * cancelRecurringDonation
+ * Marks a donation as 'cancelled' in AsyncStorage. Safe to call on an
+ * already-cancelled donation (idempotent) and on a non-existent id (no-op).
+ */
+export async function cancelRecurringDonation(id: string): Promise<void> {
+  const all = await loadRecurringDonations();
+  const updated = all.map((d) =>
+    d.id === id ? { ...d, status: 'cancelled' as const } : d,
+  );
+  await saveRecurringDonations(updated);
+}
+
 export async function recordPayment(
   donationId: string,
   amountXLM: string,
