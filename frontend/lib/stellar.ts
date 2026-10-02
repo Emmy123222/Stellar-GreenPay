@@ -555,8 +555,11 @@ export async function getGlobalImpactStats() {
     ]);
 
     // totalRaised is in stroops (i128), totalCO2 is in grams (i128)
+    const totalRaisedXlm = Number(totalRaised) / 10_000_000;
     return {
-      totalRaisedXLM: (Number(totalRaised) / 10_000_000).toLocaleString(undefined, { minimumFractionDigits: 2 }),
+      totalRaisedXLM: Number.isFinite(totalRaisedXlm)
+        ? totalRaisedXlm.toFixed(7)
+        : "0.0000000",
       totalCO2OffsetGrams: totalCO2.toString(),
       donationCount: Number(donationCount),
     };
@@ -594,6 +597,137 @@ export async function getDonorStats(donorAddress: string) {
     console.error("Failed to fetch donor stats:", err);
     return null;
   }
+}
+
+/**
+ * Queries the contract for active match pledge status on a project.
+ *
+ * @param projectId - Project ID string.
+ * @returns Active match status or null on errors/unconfigured contract.
+ */
+export async function getActiveMatchStatus(projectId: string) {
+  if (!CONTRACT_ID) {
+    return null;
+  }
+
+  const contract = new Contract(CONTRACT_ID);
+
+  try {
+    const status = await simulateCall(contract, "get_active_match_status", [
+      nativeToScVal(projectId, { type: "string" }),
+    ]);
+
+    return {
+      hasActiveMatch: Boolean(status.has_active_match),
+      matcher: status.matcher ? String(status.matcher) : null,
+      capXLM: (Number(status.cap_xlm) / 10_000_000).toString(),
+      matchedAmount: (Number(status.matched_amount) / 10_000_000).toString(),
+      remainingCapXLM: (Number(status.remaining_cap_xlm) / 10_000_000).toString(),
+      deadlineLedger: Number(status.deadline_ledger),
+    };
+  } catch (err) {
+    console.error("Failed to fetch active match status:", err);
+    return null;
+  }
+}
+
+/**
+ * Builds a Soroban contract transaction to create a 2x match pledge on-chain.
+ *
+ * @param params - Match pledge parameters.
+ * @param params.matcher - Matcher / sponsor public key.
+ * @param params.projectId - Project ID string.
+ * @param params.capXLM - Match cap amount in XLM.
+ * @param params.deadlineLedger - Target deadline ledger sequence.
+ * @returns Assembled unsigned transaction ready for signing.
+ */
+export async function buildCreateMatchPledgeTransaction({
+  contractId = CONTRACT_ID,
+  matcher,
+  projectId,
+  capXLM,
+  deadlineLedger,
+}: {
+  contractId?: string;
+  matcher: string;
+  projectId: string;
+  capXLM: string | number;
+  deadlineLedger: number;
+}) {
+  if (!contractId.trim()) {
+    throw new Error("GreenPay contract is not configured (set NEXT_PUBLIC_CONTRACT_ID).");
+  }
+  const source = await server.loadAccount(matcher);
+  const contract = new Contract(contractId);
+  const matcherAddr = new Address(matcher);
+  const capInStroops = Math.floor(Number(capXLM) * 10_000_000);
+
+  const tx = new TransactionBuilder(source, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call(
+        "create_match_pledge",
+        matcherAddr.toScVal(),
+        nativeToScVal(projectId, { type: "string" }),
+        nativeToScVal(capInStroops, { type: "i128" }),
+        nativeToScVal(deadlineLedger, { type: "u32" }),
+      ),
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    return rpc.assembleTransaction(tx, simulated).build();
+  }
+  throw formatSimulationFailure(simulated);
+}
+
+/**
+ * Builds a Soroban contract transaction to cancel a match pledge on-chain.
+ *
+ * @param params - Cancellation parameters.
+ * @param params.caller - Address of admin or original matcher.
+ * @param params.projectId - Project ID string.
+ * @returns Assembled unsigned transaction.
+ */
+export async function buildCancelMatchPledgeTransaction({
+  contractId = CONTRACT_ID,
+  caller,
+  projectId,
+}: {
+  contractId?: string;
+  caller: string;
+  projectId: string;
+}) {
+  if (!contractId.trim()) {
+    throw new Error("GreenPay contract is not configured (set NEXT_PUBLIC_CONTRACT_ID).");
+  }
+  const source = await server.loadAccount(caller);
+  const contract = new Contract(contractId);
+  const callerAddr = new Address(caller);
+
+  const tx = new TransactionBuilder(source, {
+    fee: "1000000",
+    networkPassphrase: NETWORK_PASSPHRASE,
+  })
+    .addOperation(
+      contract.call(
+        "cancel_match_pledge",
+        callerAddr.toScVal(),
+        nativeToScVal(projectId, { type: "string" }),
+      ),
+    )
+    .setTimeout(60)
+    .build();
+
+  const simulated = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationSuccess(simulated)) {
+    return rpc.assembleTransaction(tx, simulated).build();
+  }
+  throw formatSimulationFailure(simulated);
 }
 
 /**

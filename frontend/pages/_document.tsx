@@ -6,6 +6,7 @@ import Document, {
   type DocumentContext,
   type DocumentInitialProps,
 } from "next/document";
+import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 interface Props extends DocumentInitialProps {
   nonce?: string;
@@ -33,17 +34,16 @@ class MyDocument extends Document<Props> {
     //    `applyLocaleToDocument()` in `lib/i18n.tsx`, including the
     //    migration off the legacy `"locale"` key;
     //  - the second applies (or removes) the `.dark` class, mirroring
-    //    `applyThemeToDocument` in `lib/theme.tsx`.
+    //    `THEME_INIT_SCRIPT` in `lib/theme.tsx` using `greenpay:theme`.
     // `lang="en"` on <Html> stays as the no-JS / SSR fallback value.
     return (
       <Html lang="en">
         <Head nonce={nonce}>
-          <title>Stellar GreenPay</title>
-          {/* The inline body scripts below are statically stringified —
-              they read `localStorage` directly rather than DOM meta tags,
-              so no `<meta name="csp-nonce">` echo is needed here. Each
-              script also carries `nonce={nonce}` so middleware-stamped
-              CSPs will accept it. */}
+          {/* The inline body script below is statically stringified — it
+              reads `localStorage` directly rather than DOM meta tags, so
+              no `<meta name="csp-nonce">` echo is needed here. The script
+              also carries `nonce={nonce}` so middleware-stamped CSPs will
+              accept it. */}
         </Head>
         <body>
           <script
@@ -55,7 +55,7 @@ class MyDocument extends Document<Props> {
           <script
             nonce={nonce}
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k="greenpay-theme";var m=window.localStorage.getItem(k);var sys=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches;var d=false;if(m==="dark"){d=true}else if(m==="light"){d=false}else if(sys){d=true}var r=document.documentElement;if(d){r.classList.add("dark");r.style.colorScheme="dark"}else{r.classList.remove("dark");r.style.colorScheme="light"}}catch(e){}})();`,
+              __html: THEME_INIT_SCRIPT,
             }}
           />
           <Main />

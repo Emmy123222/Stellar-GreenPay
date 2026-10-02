@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
-import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch, uploadSupportingDocument, updateProjectImage, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
+import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, createAdminMatchPledge, cancelAdminMatchPledge, csrfFetch, uploadSupportingDocument, updateProjectImage, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
@@ -51,6 +51,12 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [onChainMessage, setOnChainMessage] = useState<string | null>(null);
 
   const [matches, setMatches] = useState<any[]>([]);
+  const [matchMatcherAddress, setMatchMatcherAddress] = useState("");
+  const [matchCapXLM, setMatchCapXLM] = useState("");
+  const [matchMultiplier, setMatchMultiplier] = useState(2);
+  const [matchExpiresAt, setMatchExpiresAt] = useState("");
+  const [matchPledgeState, setMatchPledgeState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [matchPledgeError, setMatchPledgeError] = useState<string | null>(null);
 
   const [widgetAccent, setWidgetAccent] = useState("#059669");
   const [widgetButtonText, setWidgetButtonText] = useState("Donate on GreenPay");
@@ -448,6 +454,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         </div>
         {imageUploadError ? <p className="mb-3 text-sm text-red-600">{imageUploadError}</p> : null}
         {project.imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
           <img src={project.imageUrl} alt={`${project.name} banner`} className="h-48 w-full rounded-2xl object-cover" />
         ) : (
           <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-forest-200 bg-forest-50 text-sm text-[#5a7a5a]">No banner image yet. Upload one to personalize the project page.</div>
@@ -716,9 +723,9 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         </p>
 
         {matches.length === 0 ? (
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No active donation matches.</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-6">No active donation matches.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 mb-6">
             {matches.map((m: any) => (
               <div key={m.id} className="p-4 rounded-xl border border-forest-100 bg-forest-50">
                 <div className="flex items-center justify-between mb-2">
@@ -730,9 +737,26 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                       Matcher: {shortenAddress(m.matcherAddress)}
                     </p>
                   </div>
-                  <span className="text-xs px-2 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 font-body">
-                    Active
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 font-body">
+                      Active
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Are you sure you want to cancel this match pledge?")) return;
+                        try {
+                          await cancelAdminMatchPledge(m.id);
+                          const updated = await fetchProjectMatches(projectId as string);
+                          setMatches(updated);
+                        } catch (err: any) {
+                          alert(err?.response?.data?.error || err.message || "Failed to cancel match pledge");
+                        }
+                      }}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-body font-medium transition-colors"
+                    >
+                      Cancel Pledge
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-3">
                   <div>
@@ -755,6 +779,78 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             ))}
           </div>
         )}
+
+        {/* Create Match Pledge Form */}
+        <div className="p-4 rounded-xl border border-forest-100 bg-forest-50/50">
+          <h3 className="text-sm font-bold text-forest-900 mb-3 font-body">Set New Match Pledge (2x Match)</h3>
+          {matchPledgeError && (
+            <div className="mb-3 p-2.5 rounded-lg bg-red-50 text-red-700 text-xs font-body">
+              {matchPledgeError}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Matcher Address</label>
+              <input
+                value={matchMatcherAddress}
+                onChange={(e) => setMatchMatcherAddress(e.target.value)}
+                placeholder="G..."
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Cap (XLM)</label>
+              <input
+                type="number"
+                value={matchCapXLM}
+                onChange={(e) => setMatchCapXLM(e.target.value)}
+                placeholder="1000"
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Expiry Date</label>
+              <input
+                type="date"
+                value={matchExpiresAt}
+                onChange={(e) => setMatchExpiresAt(e.target.value)}
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              if (!matchMatcherAddress.trim() || !matchCapXLM.trim() || !matchExpiresAt) {
+                setMatchPledgeError("All fields are required");
+                return;
+              }
+              setMatchPledgeState("loading");
+              setMatchPledgeError(null);
+              try {
+                const expiresIso = new Date(matchExpiresAt + "T23:59:59Z").toISOString();
+                await createAdminMatchPledge(projectId as string, {
+                  matcherAddress: matchMatcherAddress.trim(),
+                  capXLM: matchCapXLM.trim(),
+                  multiplier: matchMultiplier,
+                  expiresAt: expiresIso,
+                });
+                const updated = await fetchProjectMatches(projectId as string);
+                setMatches(updated);
+                setMatchMatcherAddress("");
+                setMatchCapXLM("");
+                setMatchExpiresAt("");
+                setMatchPledgeState("success");
+              } catch (err: any) {
+                setMatchPledgeError(err?.response?.data?.error || err.message || "Failed to create match pledge");
+                setMatchPledgeState("error");
+              }
+            }}
+            disabled={matchPledgeState === "loading"}
+            className="btn-primary text-xs py-2 px-4 font-body disabled:opacity-50"
+          >
+            {matchPledgeState === "loading" ? "Creating Pledge…" : "Create Match Pledge"}
+          </button>
+        </div>
       </div>
 
       {/* Widget Builder */}
