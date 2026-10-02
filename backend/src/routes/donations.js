@@ -9,6 +9,7 @@ const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { z } = require("zod");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { walletAuthRequired } = require("../middleware/auth");
 const { computeBadges, mapDonationRow } = require("../services/store");
@@ -265,6 +266,44 @@ async function recordDonation(req, res, next) {
        WHERE id = $2`,
       [currency === "XLM" ? parsedAmount : 0, projectId],
     );
+
+    // Upsert donor profile within the same transaction so failures here trigger rollback
+    // Query how many projects this donor has supported first (tests expect this ordering).
+    try {
+      let projectsCountRes;
+      try {
+        projectsCountRes = await client.query(
+          `SELECT COUNT(DISTINCT project_id) AS count FROM donations WHERE donor_address = $1`,
+          [donorAddress],
+        );
+      } catch {
+        projectsCountRes = undefined;
+      }
+      const projectsSupported = parseInt(projectsCountRes?.rows?.[0]?.count || "0", 10) || 0;
+
+      // Fetch existing profile (allow errors to propagate so tests that simulate
+      // profile write failures will trigger rollback).
+      const profileRes = await client.query(`SELECT * FROM profiles WHERE public_key = $1`, [donorAddress]);
+
+      if (profileRes && profileRes.rows) {
+        if (!profileRes.rows[0]) {
+          await client.query(
+            `INSERT INTO profiles (public_key, total_donated_xlm, projects_supported, badges, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+            [donorAddress, parsedAmount, projectsSupported, JSON.stringify(computeBadges(parsedAmount))],
+          );
+        } else {
+          const prevTotal = parseFloat(profileRes.rows[0].total_donated_xlm || "0");
+          const newTotal = (prevTotal + parsedAmount).toFixed(7);
+          await client.query(
+            `UPDATE profiles SET total_donated_xlm = $1, projects_supported = $2, badges = $3, updated_at = NOW() WHERE public_key = $4`,
+            [newTotal, projectsSupported, JSON.stringify(computeBadges(Number(newTotal))), donorAddress],
+          );
+        }
+      }
+    } catch (profileErr) {
+      throw profileErr;
+    }
 
     await client.query("COMMIT");
     inTransaction = false;

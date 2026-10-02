@@ -192,13 +192,8 @@ function selectProjectListItem(li: HTMLLIElement, p: ProjectResult) {
   projectListItems.forEach((el) => el.classList.remove('active'));
   li.classList.add('active');
 
-  // Pre-fill the destination address field
-  const destInput = document.getElementById('destination') as HTMLInputElement | null;
+  // Pre-fill the search field with the chosen project
   const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
-  if (p.walletAddress && destInput) {
-    destInput.value = p.walletAddress;
-    selectedProjectId = p.id;
-  }
   if (searchInput) {
     searchInput.value = p.name;
   }
@@ -211,6 +206,75 @@ function highlightProjectListItem(index: number) {
       el.focus();
     } else {
       el.classList.remove('active');
+    }
+  });
+}
+
+function escapeHtml(text: string): string {
+  const span = document.createElement('span');
+  span.textContent = text;
+  return span.innerHTML;
+}
+
+function setStatus(message: string, isError = false) {
+  const statusEl = document.getElementById('status-message') as HTMLElement | null;
+  if (!statusEl) return;
+  statusEl.textContent = message;
+  statusEl.className = `status-message${isError ? ' error' : ' success'}`;
+}
+
+function initProjectSearch() {
+  const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
+  const dropdown = document.getElementById('search-dropdown') as HTMLUListElement | null;
+  if (!searchInput || !dropdown) return;
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.trim();
+    if (!query) {
+      dropdown.classList.add('hidden');
+      return;
+    }
+
+    // TODO: wire this to a real project search API when available.
+    renderDropdown([], dropdown);
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!dropdown.contains(event.target as Node) && event.target !== searchInput) {
+      dropdown.classList.add('hidden');
+    }
+  });
+}
+
+function initDonationControls() {
+  const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;
+  const donateBtn = document.getElementById('donate-submit') as HTMLButtonElement | null;
+  if (!amountInput || !donateBtn) return;
+
+  const updateButtonState = () => {
+    const amount = parseFloat(amountInput.value || '0');
+    donateBtn.disabled = Number.isNaN(amount) || amount <= 0;
+  };
+
+  amountInput.addEventListener('input', updateButtonState);
+  updateButtonState();
+
+  donateBtn.addEventListener('click', async () => {
+    const amount = parseFloat(amountInput.value || '0');
+    if (Number.isNaN(amount) || amount <= 0) {
+      setStatus('Enter a valid donation amount.', true);
+      return;
+    }
+
+    setStatus('Processing donation...', false);
+    try {
+      await updateTotalAfterDonation(amount);
+      setStatus(`Donation of ${amount.toFixed(2)} XLM recorded.`, false);
+      amountInput.value = '';
+      updateButtonState();
+    } catch (err) {
+      console.error('Donation error:', err);
+      setStatus('Donation failed. Please try again.', true);
     }
   });
 }
@@ -280,6 +344,7 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
 
   projects.forEach((p) => {
     const li = document.createElement('li');
+    li.className = 'search-result-item';
     li.innerHTML = `
       <div>
         <div class="search-result-name">${escapeHtml(p.name)}</div>
@@ -288,18 +353,18 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
     `;
     li.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      const destInput = document.getElementById('destination') as HTMLInputElement | null;
       const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
-      if (p.walletAddress && destInput) {
-        destInput.value = p.walletAddress;
-        selectedProjectId = p.id;
-      }
       if (searchInput) {
         searchInput.value = p.name;
       }
       dropdown.classList.add('hidden');
     });
+
+    dropdown.appendChild(li);
+    dropdownItems.push(li);
   });
+
+  dropdown.classList.remove('hidden');
 }
 
 // ==================== PENDING TRANSACTIONS ====================
@@ -912,14 +977,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (response.ok) {
           const json = await response.json();
           const projectData = json.data;
-          
-          const destInput = document.getElementById('destination') as HTMLInputElement | null;
           const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
-          
-          if (destInput && projectData.walletAddress) {
-            destInput.value = projectData.walletAddress;
-            selectedProjectId = projectData.id;
-          }
+
           if (searchInput && projectData.name) {
             searchInput.value = projectData.name;
           }

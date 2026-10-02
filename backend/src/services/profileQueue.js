@@ -314,7 +314,7 @@ async function start(io) {
   console.log("[profileQueue] pg-boss started, worker registered on queues:", QUEUE, AVATAR_QUEUE);
 }
 
-async function enqueueProfileUpdate(donorAddress) {
+async function _enqueueProfileUpdateImpl(donorAddress) {
   if (!boss) {
     return processProfileUpdate(donorAddress);
   }
