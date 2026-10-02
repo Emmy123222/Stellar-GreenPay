@@ -83,7 +83,7 @@ export default function DonationGrowthChart({ projectId, data: initialData }: Do
   if (!data || data.length === 0) {
     return (
       <div className="flex h-full w-full items-center justify-center rounded-xl border border-forest-100 bg-forest-50 p-4 text-center">
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
           No donations recorded yet.
         </p>
       </div>

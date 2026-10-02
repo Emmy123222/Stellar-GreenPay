@@ -7,8 +7,14 @@ require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
-const csurf = require("csurf");
 const http = require("http");
+const express = require("express");
+const helmet = require("helmet");
+const cookieParser = require("cookie-parser");
+const csurf = require("csurf");
+const rateLimit = require("express-rate-limit");
+const logger = require("./logger");
+const requestLogger = require("./middleware/requestLogger");
 const { Server } = require("socket.io");
 const { initSentry, errorHandler: sentryErrorMiddleware } = require("./services/sentry");
 const { runMigrations } = require("./db/migrate");
@@ -73,7 +79,8 @@ app.use(requestLogger);
 app.use(express.json({ limit: "20kb" }));
 app.use(cookieParser());
 
-const csrfProtection = csurf({
+const { createSelectiveCsrf } = require("./middleware/selectiveCsrf");
+app.use(createSelectiveCsrf({
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -81,6 +88,9 @@ const csrfProtection = csurf({
     path: "/",
   },
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
+ fix/csrf-mobile-extension-clients
+}));
+
 });
 app.use((req, res, next) => {
   if (
@@ -97,6 +107,7 @@ app.use((req, res, next) => {
   }
   return csrfProtection(req, res, next);
 });
+ main
 
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
@@ -107,6 +118,8 @@ app.use("/api/health", healthRouter);
 
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
+const donationsRouter = require("./routes/donations");
+const adminRouter = require("./routes/admin");
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/donations", donationsRouter);
@@ -115,6 +128,7 @@ app.use("/api/v1/uploads", uploadsRouter);
 app.use("/api/v1/donations", donationsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/v1/stats", statsRouter);
+main
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));

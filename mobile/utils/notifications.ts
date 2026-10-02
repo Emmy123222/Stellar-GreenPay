@@ -9,7 +9,10 @@ import { Platform } from 'react-native';
 // Configure notification behavior
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    // `shouldShowAlert` was replaced by the banner/list pair in SDK 53; the
+    // two flags below are what expo-notifications@57 actually reads.
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -271,21 +274,79 @@ export function setupNotificationListener(onUnreadCountChange?: (count: number) 
 }
 
 /**
- * Set up notification response listener for deep-link navigation (#483).
- * When the user taps a push notification that contains a projectId, navigate
- * directly to that project's detail screen.
+ * Map a notification payload to an in-app route (#1121).
+ *
+ * Preferred contract: `data.screen === 'ProjectDetail'` with
+ * `data.params.projectId`. Falls back to a bare `data.projectId`
+ * for payloads sent before the screen contract existed (#483).
+ */
+export function pathForNotificationData(
+  data: Record<string, unknown> | null | undefined
+): string | null {
+  if (!data) return null;
+
+  const params = (data.params ?? {}) as Record<string, unknown>;
+  const projectId = params.projectId ?? data.projectId;
+  if (!projectId) return null;
+
+  if (data.screen === 'ProjectDetail' || !data.screen) {
+    return `/projects/${projectId}`;
+  }
+
+  return null;
+}
+
+// Guards against the cold-start response also firing the warm-start
+// listener for the same notification (double navigation).
+let lastHandledIdentifier: string | null = null;
+
+/**
+ * Handle a tapped notification (cold or warm start) and navigate.
+ */
+export function handleNotificationResponse(
+  response: Notifications.NotificationResponse,
+  push: (path: string) => void
+): void {
+  const request = response?.notification?.request;
+  const identifier = request?.identifier ?? null;
+  if (identifier && identifier === lastHandledIdentifier) return;
+
+  const path = pathForNotificationData(request?.content.data as Record<string, unknown> | undefined);
+  if (!path) return;
+
+  lastHandledIdentifier = identifier;
+  push(path);
+}
+
+/**
+ * Set up notification response listener for tap navigation (#483, #1121).
+ * Covers warm-start taps (app in background/foreground).
  *
  * @param push - router.push function from expo-router
  * @returns the subscription (call .remove() on cleanup)
  */
 export function setupNotificationResponseListener(push: (path: string) => void) {
   const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-    const data = response.notification.request.content.data as Record<string, unknown>;
-    const projectId = data?.projectId as string | undefined;
-    if (projectId) {
-      push(`/projects/${projectId}`);
-    }
+    handleNotificationResponse(response, push);
   });
 
   return subscription;
+}
+
+/**
+ * Cold-start tap handling (#1121): when the app was fully closed, the tap
+ * response is delivered via getLastNotificationResponseAsync() instead of
+ * (or in addition to) the listener.
+ */
+export async function navigateFromInitialNotification(
+  push: (path: string) => void
+): Promise<void> {
+  try {
+    const response = await Notifications.getLastNotificationResponseAsync();
+    if (response) {
+      handleNotificationResponse(response, push);
+    }
+  } catch (error) {
+    console.error('Error reading initial notification response:', error);
+  }
 }

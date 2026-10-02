@@ -36,7 +36,7 @@ export default function ThemeToggle() {
       className={clsx(
         "inline-flex items-center justify-center h-10 w-10 rounded-lg transition-colors",
         "hover:bg-[rgba(34,114,57,0.06)] dark:hover:bg-[rgba(96,208,123,0.10)]",
-        "text-[#5a7a5a] dark:text-[#b2d5b5]",
+        "text-[var(--text-secondary)] dark:text-[#b2d5b5]",
         "hover:text-[#227239] dark:hover:text-[#81c784]",
         "border border-transparent hover:border-[rgba(34,114,57,0.20)] dark:hover:border-[rgba(96,208,123,0.25)] dark:hover:bg-[#1c3928]",
         "focus:outline-none focus:ring-2 focus:ring-[rgba(34,114,57,0.30)] dark:focus:ring-[rgba(96,208,123,0.40)]",

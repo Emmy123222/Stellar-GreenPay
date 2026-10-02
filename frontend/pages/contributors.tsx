@@ -28,7 +28,7 @@ export default function ContributorsPage({ pullRequests }: ContributorsPageProps
         <h1 className="font-display text-3xl sm:text-4xl font-bold text-forest-900 mb-3">
           Contributors
         </h1>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] max-w-xl mx-auto font-body leading-relaxed">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] max-w-xl mx-auto font-body leading-relaxed">
           Every feature on Stellar GreenPay was shipped by someone in the open-source
           community. Here&apos;s a timeline of merged pull requests and the people behind them.
         </p>
@@ -37,7 +37,7 @@ export default function ContributorsPage({ pullRequests }: ContributorsPageProps
       <ContributorTimeline pullRequests={pullRequests} />
 
       <div className="mt-10 text-center">
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm font-body">
           Want to see your name here?{" "}
           <a
             href="https://github.com/Emmy123222/Stellar-GreenPay"

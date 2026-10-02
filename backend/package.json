@@ -6,6 +6,7 @@
     "dev": "nodemon src/server.js",
     "dev:docker": "nodemon --legacy-watch --watch src src/server.js",
     "start": "node src/server.js",
+    "migrate": "node src/db/migrate.js",
     "db:migrate": "node src/db/migrate.js",
     "db:rollback": "node src/db/migrate.js --rollback",
     "db:rollback:n": "node src/db/migrate.js --rollback",
@@ -55,6 +56,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@humanwhocodes/object-schema": "^2.0.3",
     "@testcontainers/postgresql": "^12.0.4",
     "eslint": "^8.57.0",
     "eslint-plugin-security": "^4.0.1",
@@ -70,6 +72,6 @@
     "typedoc": "^0.28.20"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }

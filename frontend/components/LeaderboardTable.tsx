@@ -112,7 +112,7 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   if (entries.length === 0) return (
     <div className="text-center py-12">
-      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+      <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
         🌱 No donations yet — be the first donor on the leaderboard!
       </p>
       <Link href="/projects" className="btn-primary">
