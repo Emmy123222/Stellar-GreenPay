@@ -111,6 +111,54 @@ env.events().publish((symbol_short!("meta_upd"), admin), (project_id, ipfs_cid))
 
 ---
 
+## 10. `pledge_cr`
+
+**Description**: Emitted when a new 2x donation match pledge is created for a project.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("pledge_cr"), matcher, project_id), (cap_xlm, deadline_ledger))
+```
+
+| Event Name  | Topics                                     | Data                                      | When Emitted                             |
+|-------------|--------------------------------------------|-------------------------------------------|------------------------------------------|
+| `pledge_cr` | `["pledge_cr", matcher: Address, project_id: String]` | `(cap_xlm: i128, deadline_ledger: u32)`   | When a matcher creates a 2x match pledge |
+
+---
+
+## 11. `matched`
+
+**Description**: Emitted during `donate()` when matching funds from a pledge sponsor are matched and transferred to the project.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("matched"), matcher, project_id), (matched_amount, donor))
+```
+
+| Event Name | Topics                                    | Data                                    | When Emitted                                 |
+|------------|-------------------------------------------|-----------------------------------------|----------------------------------------------|
+| `matched`  | `["matched", matcher: Address, project_id: String]` | `(matched_amount: i128, donor: Address)` | When incoming donation is matched by pledge |
+
+---
+
+## 12. `pledge_cn`
+
+**Description**: Emitted when a match pledge is cancelled by the matcher or contract admin.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("pledge_cn"), caller, project_id), pledge.matched_amount)
+```
+
+| Event Name  | Topics                                    | Data                    | When Emitted                            |
+|-------------|-------------------------------------------|-------------------------|-----------------------------------------|
+| `pledge_cn` | `["pledge_cn", caller: Address, project_id: String]` | `matched_amount: i128`  | When an active match pledge is cancelled |
+
+---
+
 ## Usage Notes
 
 - All events follow Soroban’s standard event format: `topics: Vec<Val>`, `data: Val`.
@@ -118,4 +166,5 @@ env.events().publish((symbol_short!("meta_upd"), admin), (project_id, ipfs_cid))
 - Events can be queried via Horizon or Soroban RPC tools.
 - Frontend / backend should listen to these for real-time updates, notifications, and leaderboard.
 
-**Last Updated**: July 30, 2026
+**Last Updated**: September 30, 2026
+

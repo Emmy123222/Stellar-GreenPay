@@ -55,9 +55,9 @@ module.exports = {
       },
     ],
   },
-  plugins: [
-    new webpack.DefinePlugin(contractDefines()),
-  ],
+  performance: {
+    hints: false,
+  },
   optimization: {
     minimize: true,
   },

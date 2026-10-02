@@ -494,11 +494,17 @@ describe("recordAndDeliver", () => {
 // Retry scheduling (issue #1178)
 // ---------------------------------------------------------------------------
 describe("retryDelaySeconds", () => {
-  test("follows the documented 1m / 5m / 30m / 2h backoff", () => {
+  test("follows the documented 1m / 5m / 30m / 2h / 8h backoff", () => {
     expect(retryDelaySeconds(1)).toBe(60);
     expect(retryDelaySeconds(2)).toBe(300);
     expect(retryDelaySeconds(3)).toBe(1800);
     expect(retryDelaySeconds(4)).toBe(7200);
+    expect(retryDelaySeconds(5)).toBe(28800);
+  });
+
+  test("allows one initial attempt plus five retries", () => {
+    expect(MAX_ATTEMPTS).toBe(6);
+    expect(RETRY_DELAYS_SECONDS).toHaveLength(MAX_ATTEMPTS - 1);
   });
 
   test("returns null once MAX_ATTEMPTS attempts have been made", () => {
@@ -937,6 +943,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       return expect(true).toBe(true);
     }
 
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
+
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
     // eslint-disable-next-line global-require
@@ -991,7 +1000,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 2) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(2);
@@ -1042,6 +1054,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       console.warn("Skipping – testcontainer not available");
       return expect(true).toBe(true);
     }
+
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
 
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
@@ -1120,7 +1135,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(1);

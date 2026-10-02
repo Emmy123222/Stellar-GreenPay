@@ -236,7 +236,7 @@ describe("GET /api/projects/trending", () => {
   });
 
   test("caps limit at 50", async () => {
-    const res = await request(app)
+    await request(app)
       .get("/api/projects/trending?limit=100")
       .expect(200);
 
