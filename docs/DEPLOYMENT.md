@@ -50,6 +50,64 @@ helm install greenpay helm/greenpay/
 
 This will deploy the required deployments, services, and other resources as defined in the Helm chart.
 
+## Reproducible deployments: immutable image tags
+
+The `k8s/` manifests never reference a mutable image tag. The Deployments pin
+their images with a `${GIT_SHA}` placeholder:
+
+```yaml
+image: greenpay/backend:${GIT_SHA}
+```
+
+Before the manifests are applied, the placeholder must be resolved to a
+concrete, immutable tag (the short git SHA of the release). Use the render
+script, which fails fast if the placeholder is left unresolved or if a
+`latest` tag sneaks in:
+
+```bash
+./scripts/render-k8s-manifests.sh "$(git rev-parse --short=7 HEAD)" /tmp/greenpay-k8s.yaml
+kubectl apply -f /tmp/greenpay-k8s.yaml
+```
+
+CI performs the same steps: `.github/workflows/deploy.yml` derives `IMAGE_TAG`
+from `${GITHUB_SHA::7}`, builds the images with that tag, renders the manifests
+and applies them. Tag-pinned images guarantee that every node in the cluster
+runs the exact revision that CI built.
+
+### GitOps (Argo CD / Flux)
+
+This repository does **not** currently run Argo CD or Flux, so there is no
+GitOps controller to configure today. If one is introduced, it must track the
+immutable SHA tags produced above and never `latest`. For example, an Argo CD
+`Application` can point at a versioned overlay/revision and rely on the Argo CD
+Image Updater (or CI committing the rendered manifests) to move the tag
+forward, rather than following a floating tag:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: greenpay
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Emmy123222/Stellar-GreenPay
+    targetRevision: main
+    path: k8s
+    kustomize:
+      images:
+        - greenpay/backend=greenpay/backend:<git-sha>
+        - greenpay/frontend=greenpay/frontend:<git-sha>
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: greenpay
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+```
+
 ## Configuring Ingress and TLS
 
 To expose the application securely over HTTPS, configure an Ingress resource with TLS.

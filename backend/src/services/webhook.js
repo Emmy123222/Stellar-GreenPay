@@ -5,9 +5,10 @@
  * Deliveries are persisted in `webhook_deliveries`. The first attempt runs
  * inline via recordAndDeliver(); failures leave the row `pending` with
  * `next_attempt_at` set, and a pg-boss worker (start()) drains due retries
- * with exponential backoff at 1m, 5m, 30m, 2h. A delivery is marked `failed`
- * once MAX_ATTEMPTS attempts have been made, or immediately when the failure
- * is permanent (for example an SSRF-rejected URL).
+ * with exponential backoff at 1m, 5m, 30m, 2h, 8h. A delivery is marked
+ * `failed` once MAX_ATTEMPTS attempts have been made, or immediately when the
+ * failure is permanent (for example an SSRF-rejected URL); the project's
+ * operator is then notified by email.
  */
 "use strict";
 
@@ -18,11 +19,13 @@ const http = require("http");
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { assertPublicHttpUrl } = require("../utils/ssrf");
+const { sendWebhookFailureNotification } = require("./email");
 
 const QUEUE = "webhook-delivery";
-const MAX_ATTEMPTS = 5;
-/** Delay (seconds) before the next attempt after failures 1–4. */
-const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200]; // 1m, 5m, 30m, 2h
+/** Total attempts (1 initial + 5 retries) before a delivery is abandoned. */
+const MAX_ATTEMPTS = 6;
+/** Delay (seconds) before the next attempt after failures 1–5. */
+const RETRY_DELAYS_SECONDS = [60, 300, 1800, 7200, 28800]; // 1m, 5m, 30m, 2h, 8h
 const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000;
 /** Retry worker tick. Must be at least as frequent as the shortest backoff. */
 const DEFAULT_RETRY_CRON = "* * * * *";
@@ -201,6 +204,7 @@ function retryDelaySeconds(failedAttempts) {
  * @param {number|null} [outcome.statusCode] - HTTP status, when there was a response.
  * @param {string|null} [outcome.error] - Failure message to persist.
  * @param {boolean} [outcome.permanent] - Skip remaining retries.
+ * @param {string|null} [outcome.url] - Destination URL, used in failure alerts.
  * @returns {Promise<{status: string, nextAttemptInSeconds: number|null}>}
  */
 async function recordAttemptOutcome({
@@ -210,6 +214,7 @@ async function recordAttemptOutcome({
   statusCode = null,
   error = null,
   permanent = false,
+  url = null,
 }) {
   if (delivered) {
     await pool.query(
@@ -245,6 +250,23 @@ async function recordAttemptOutcome({
       { event: "webhook_delivery_exhausted", deliveryId: id, attempts: attemptNumber, permanent },
       "Webhook delivery failed permanently — no further retries",
     );
+
+    // Alert the project operator that the event was dropped for good. Email is
+    // best-effort: a failure here must not mask the delivery outcome.
+    try {
+      await sendWebhookFailureNotification({
+        deliveryId: id,
+        url,
+        attempts: attemptNumber,
+        lastError: error,
+      });
+    } catch (err) {
+      logger.error(
+        { event: "webhook_failure_notification_error", deliveryId: id, err: err.message },
+        "Failed to send webhook failure notification",
+      );
+    }
+
     return { status: "failed", nextAttemptInSeconds: null };
   }
 
@@ -294,6 +316,7 @@ async function attemptDelivery({ id, url, secret, payload, previousAttempts, opt
       delivered: false,
       error: err.message,
       permanent: true,
+      url,
     });
     throw err;
   }
@@ -314,6 +337,7 @@ async function attemptDelivery({ id, url, secret, payload, previousAttempts, opt
       attemptNumber,
       delivered: false,
       error: err.message,
+      url,
     });
     throw err;
   }
@@ -378,6 +402,7 @@ async function processDueRetries({ limit = 50 } = {}) {
         delivered: false,
         error: "Project has no webhook secret configured",
         permanent: true,
+        url: row.url,
       });
       results.push({ id: row.id, status: "failed" });
       continue;
@@ -499,9 +524,9 @@ async function checkAndDeliverMilestones(projectId) {
 
     const goal = Number.parseFloat(project.goal_xlm);
     const raised = Number.parseFloat(project.raised_xlm);
-    if (goal <= 0) return;
+    if (goal <= 0 || Number.isNaN(goal) || Number.isNaN(raised)) return;
 
-    const progressPercent = Math.min(Math.round((raised / goal) * 100), 100);
+    const progressPercent = (raised / goal) * 100;
 
     const milestoneResult = await pool.query(
       `SELECT id, percentage, title

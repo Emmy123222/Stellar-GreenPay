@@ -3,6 +3,26 @@
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 
+const AUDIT_RETENTION_DAYS = 90;
+const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let lastCleanupAt = 0;
+
+async function cleanupOldAuditEntries() {
+  const now = Date.now();
+  if (now - lastCleanupAt < CLEANUP_INTERVAL_MS) return;
+  lastCleanupAt = now;
+
+  try {
+    await pool.query(
+      `DELETE FROM admin_audit_log
+       WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`,
+      [AUDIT_RETENTION_DAYS],
+    );
+  } catch (err) {
+    console.error("[AuditLog] Failed to apply retention policy:", err.message);
+  }
+}
+
 async function logAdminAction({ actor, action, targetType, targetId, metadata, ipAddress }) {
   try {
     await pool.query(
@@ -10,6 +30,7 @@ async function logAdminAction({ actor, action, targetType, targetId, metadata, i
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [uuid(), actor, action, targetType || null, targetId || null, JSON.stringify(metadata || {}), ipAddress || null],
     );
+    await cleanupOldAuditEntries();
   } catch (err) {
     console.error("[AuditLog] Failed to record action:", err.message);
   }

@@ -68,8 +68,15 @@ async function isUrlSafeFromSsrf(urlString) {
   let hostname;
   try {
     hostname = new URL(urlString).hostname;
+    if (hostname.startsWith("[") && hostname.endsWith("]")) {
+      hostname = hostname.slice(1, -1);
+    }
   } catch {
     return false;
+  }
+
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    hostname = hostname.slice(1, -1);
   }
 
   if (net.isIP(hostname)) {

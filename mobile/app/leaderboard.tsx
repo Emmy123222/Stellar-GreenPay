@@ -6,16 +6,17 @@
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'expo-router';
 import axios from 'axios';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+const PAGE_SIZE = 20;
 
 // In a real app this would come from wallet connection state.
 // For demo purposes this is left empty so no row is auto-highlighted.
@@ -47,6 +48,10 @@ export default function LeaderboardScreen() {
   const router = useRouter();
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,13 +60,116 @@ export default function LeaderboardScreen() {
 
   const fetchLeaderboard = async () => {
     try {
-      const res = await axios.get(`${API_URL}/api/leaderboard`);
-      setEntries(res.data.data ?? []);
+      setLoading(true);
+      setError(null);
+      const res = await axios.get(`${API_URL}/api/leaderboard`, {
+        params: { limit: PAGE_SIZE },
+      });
+      const data = res.data?.data ?? [];
+      setEntries(data);
+      setNextCursor(res.data?.next_cursor ?? null);
+      setHasMore(res.data?.has_more ?? false);
     } catch {
       setError('Failed to load leaderboard');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const res = await axios.get(`${API_URL}/api/leaderboard`, {
+        params: { limit: PAGE_SIZE },
+      });
+      const data = res.data?.data ?? [];
+      setEntries(data);
+      setNextCursor(res.data?.next_cursor ?? null);
+      setHasMore(res.data?.has_more ?? false);
+      setError(null);
+    } catch {
+      setError('Failed to load leaderboard');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (loading || loadingMore || !hasMore || !nextCursor) {
+      return;
+    }
+
+    try {
+      setLoadingMore(true);
+      const res = await axios.get(`${API_URL}/api/leaderboard`, {
+        params: { limit: PAGE_SIZE, cursor: nextCursor },
+      });
+      const newEntries = res.data?.data ?? [];
+      setEntries((prev) => [...prev, ...newEntries]);
+      setNextCursor(res.data?.next_cursor ?? null);
+      setHasMore(res.data?.has_more ?? false);
+    } catch {
+      // Keep current list on pagination error
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const renderItem = useCallback(({ item }: { item: LeaderboardEntry }) => {
+    const isCurrentUser =
+      !!CURRENT_USER_ADDRESS && item.publicKey === CURRENT_USER_ADDRESS;
+    return (
+      <TouchableOpacity
+        key={item.publicKey}
+        activeOpacity={0.7}
+        onPress={() =>
+          router.push(`/profile/${item.publicKey}` as `${string}`)
+        }
+        style={[styles.row, isCurrentUser && styles.rowHighlighted]}
+        accessibilityLabel={`View profile of ${item.displayName ?? item.publicKey.slice(0, 6)}, donated ${parseFloat(item.totalDonatedXLM).toFixed(2)} XLM`}
+        accessibilityRole="button"
+      >
+        <Text style={styles.rankText}>
+          {RANK_MEDALS[item.rank] ?? `#${item.rank}`}
+        </Text>
+
+        <View style={styles.rowInfo}>
+          <Text
+            style={[styles.donorName, isCurrentUser && styles.donorNameHighlighted]}
+            numberOfLines={1}
+          >
+            {item.displayName ??
+              `${item.publicKey.slice(0, 6)}…${item.publicKey.slice(-4)}`}
+          </Text>
+          <Text style={styles.donorMeta}>
+            {item.projectsSupported}{' '}
+            {item.projectsSupported === 1 ? 'project' : 'projects'}
+          </Text>
+        </View>
+
+        <View style={styles.rowRight}>
+          {item.topBadge && (
+            <Text style={styles.badgeIcon}>
+              {BADGE_ICONS[item.topBadge] ?? '🏅'}
+            </Text>
+          )}
+          <Text
+            style={[styles.xlmAmount, isCurrentUser && styles.xlmAmountHighlighted]}
+          >
+            {parseFloat(item.totalDonatedXLM).toFixed(2)} XLM
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [router]);
+
+  const renderFooter = () => {
+    if (!loadingMore) return null;
+    return (
+      <View style={styles.footerLoader} testID="leaderboard-footer-loader">
+        <ActivityIndicator size="small" color="#227239" />
+      </View>
+    );
   };
 
   if (loading) {
@@ -72,7 +180,7 @@ export default function LeaderboardScreen() {
     );
   }
 
-  if (error) {
+  if (error && entries.length === 0) {
     return (
       <View style={styles.centered}>
         <Text style={styles.errorText}>{error}</Text>
@@ -81,66 +189,29 @@ export default function LeaderboardScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Top Donors</Text>
-        <Text style={styles.headerSub}>Ranked by total XLM donated</Text>
-      </View>
-
-      {entries.length === 0 ? (
+    <FlatList
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      data={entries}
+      keyExtractor={(item, index) => `${item.publicKey}-${item.rank ?? index}`}
+      renderItem={renderItem}
+      ListHeaderComponent={
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Top Donors</Text>
+          <Text style={styles.headerSub}>Ranked by total XLM donated</Text>
+        </View>
+      }
+      ListEmptyComponent={
         <View style={styles.centered}>
           <Text style={styles.emptyText}>No donors yet — be the first!</Text>
         </View>
-      ) : (
-        entries.map((entry) => {
-          const isCurrentUser =
-            !!CURRENT_USER_ADDRESS && entry.publicKey === CURRENT_USER_ADDRESS;
-          return (
-            <TouchableOpacity
-              key={entry.publicKey}
-              activeOpacity={0.7}
-              onPress={() =>
-                router.push(`/profile/${entry.publicKey}` as `${string}`)
-              }
-              style={[styles.row, isCurrentUser && styles.rowHighlighted]}
-              accessibilityLabel={`View profile of ${entry.displayName ?? entry.publicKey.slice(0, 6)}, donated ${parseFloat(entry.totalDonatedXLM).toFixed(2)} XLM`}
-              accessibilityRole="button"
-            >
-              <Text style={styles.rankText}>
-                {RANK_MEDALS[entry.rank] ?? `#${entry.rank}`}
-              </Text>
-
-              <View style={styles.rowInfo}>
-                <Text
-                  style={[styles.donorName, isCurrentUser && styles.donorNameHighlighted]}
-                  numberOfLines={1}
-                >
-                  {entry.displayName ??
-                    `${entry.publicKey.slice(0, 6)}…${entry.publicKey.slice(-4)}`}
-                </Text>
-                <Text style={styles.donorMeta}>
-                  {entry.projectsSupported}{' '}
-                  {entry.projectsSupported === 1 ? 'project' : 'projects'}
-                </Text>
-              </View>
-
-              <View style={styles.rowRight}>
-                {entry.topBadge && (
-                  <Text style={styles.badgeIcon}>
-                    {BADGE_ICONS[entry.topBadge] ?? '🏅'}
-                  </Text>
-                )}
-                <Text
-                  style={[styles.xlmAmount, isCurrentUser && styles.xlmAmountHighlighted]}
-                >
-                  {parseFloat(entry.totalDonatedXLM).toFixed(2)} XLM
-                </Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })
-      )}
-    </ScrollView>
+      }
+      ListFooterComponent={renderFooter}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.5}
+      refreshing={refreshing}
+      onRefresh={handleRefresh}
+    />
   );
 }
 
@@ -157,6 +228,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 40,
+  },
+  footerLoader: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   errorText: {
     fontSize: 15,
