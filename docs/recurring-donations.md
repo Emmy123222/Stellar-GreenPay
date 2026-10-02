@@ -1,18 +1,48 @@
 # Recurring Donations
 
-This document describes how recurring (monthly) donations work in Stellar GreenPay today, the tradeoffs of the current client-only storage approach, and the strategy for syncing recurring donation state to the backend when server-side support is added.
+This document describes how recurring (monthly) donations work in Stellar GreenPay today: the web frontend's client-only storage, the mobile app's backend-synced model, and the remaining gaps.
 
 ---
 
 ## Current State
 
-Recurring donations are fully implemented in the **web frontend** and partially planned for the **mobile app**. The backend currently has no dedicated recurring-donations table — all subscription state lives in the client.
-
 | Platform | Storage | Status |
 |----------|---------|--------|
-| Web (Next.js) | `window.localStorage` | ✅ Implemented |
-| Mobile (React Native / Expo) | `AsyncStorage` (planned) | ⏳ Not yet implemented |
-| Backend (PostgreSQL) | Dedicated table | ⏳ Not yet implemented |
+| Web (Next.js) | `window.localStorage` | ✅ Implemented (client-only) |
+| Mobile (React Native / Expo) | Backend `recurring_donations` = source of truth; `AsyncStorage` = offline cache | ✅ Implemented (see [Mobile sync](#mobile-sync--backend-as-source-of-truth)) |
+| Backend (PostgreSQL) | Dedicated table + REST API (`/api/recurring-donations`) | ✅ Implemented and mounted in `src/server.js` |
+
+The web frontend still keeps subscriptions purely in `localStorage`; only mobile reads and writes schedules through the backend API today.
+
+---
+
+## Mobile sync — backend as source of truth
+
+Implemented in [`mobile/utils/recurringDonations.ts`](../mobile/utils/recurringDonations.ts) for issue #1059.
+
+**Why:** when the schedule lived only in `AsyncStorage`, the next-fire timestamp was computed from the last stored value on the device. Resetting the device clock — or reinstalling the app, which wipes storage entirely — made pledges misfire or disappear for good. The backend row is now the durable record, and the server authors `next_due_date`, so the client's clock plays no part in deciding when a pledge is due.
+
+**The three rules:**
+
+1. **Backend is the source of truth.** `syncRecurringDonations(donorAddress)` calls `GET /api/recurring-donations?donor=<public key>` and rebuilds local state from the response.
+2. **`AsyncStorage` is a cache for offline display only.** Every successful reconciliation writes the server state through to the cache; every read falls back to it when the backend is unreachable (`remoteAvailable: false`), so an offline device still shows its last known schedule rather than an error or an empty list.
+3. **Foreground re-fetch.** `useRecurringDonations()` loads the cache, reconciles on mount, and re-runs the reconciliation whenever the app returns to the foreground (`AppState` transition into `active`). Concurrent refreshes share one in-flight request.
+
+**Reconciliation rules** (server wins, no duplicates, no losses):
+
+| Situation | Outcome |
+|-----------|---------|
+| Local entry and server row share a `serverId` | Server fields overwrite local ones; the local `id` is kept so UI keys stay stable |
+| Cached entry has a `serverId` the server no longer returns | Dropped — it was deleted upstream |
+| Server row is `cancelled` | Local copy dropped, so other devices stop firing it |
+| Local copy is `cancelled`, server still `active` (DELETE never landed) | Local cancellation kept; the next sync converges |
+| Local-only entry (created offline / before an address was known) | Preserved, and pushed via `POST /api/recurring-donations` on the next successful sync |
+
+**Known limits of the current API:**
+
+- A pledge must carry a **fixed term** — `durationMonths` is validated as an integer in 1–120, so open-ended (`durationMonths: null`) pledges stay local-only.
+- A pledge must have a known **donor address** (`G…` Stellar public key). The recurring screen has an address field for this; without it there is no account to fetch against, so the pledge is cached locally and synced as soon as an address is available.
+- The API has no update endpoint: a schedule edited on-device is re-created by the next sync rather than patched.
 
 ---
 
@@ -79,29 +109,15 @@ Reads and writes happen through `loadMonthlySubscriptions()` and `saveMonthlySub
 | **No server needed** | Works offline and requires no backend authentication. Low barrier to onboarding. |
 | **No durability guarantee** | The user or browser can delete `localStorage` data at any time. There is no recovery path. |
 
-### Mobile — AsyncStorage (planned)
+### Mobile — AsyncStorage as a cache
 
-The mobile app has `@react-native-async-storage/async-storage` installed (`^1.23.0` in `mobile/package.json`) but recurring donation scheduling is not yet implemented. When added, it should mirror the web pattern:
+The mobile app keeps its schedule under two keys defined in [`mobile/utils/recurringDonations.ts`](../mobile/utils/recurringDonations.ts):
 
 ```typescript
-import AsyncStorage from '@react-native-async-storage/async-storage';
+export const RECURRING_DONATIONS_KEY = 'greenpay_recurring_donations';
 
-const RECURRING_KEY = 'greenpay_monthly_subscriptions';
-
-async function loadSubscriptions(): Promise<MonthlySubscription[]> {
-  const raw = await AsyncStorage.getItem(RECURRING_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveSubscriptions(subs: MonthlySubscription[]): Promise<void> {
-  await AsyncStorage.setItem(RECURRING_KEY, JSON.stringify(subs));
-}
+// The cache is written only as a side effect of reconciling with the backend,
+// so what it holds is server state — never a device-computed schedule.
 ```
 
 **AsyncStorage vs localStorage — key differences:**
@@ -114,7 +130,7 @@ async function saveSubscriptions(subs: MonthlySubscription[]): Promise<void> {
 | Cross-device | ❌ No | ❌ No |
 | Capacity | ~5 MB | ~6 MB (iOS); ~6 MB (Android) |
 
-The same multi-device limitation applies: subscriptions exist only on the device where they were created.
+For mobile this multi-device limitation no longer applies: the schedule is restored from the backend for any donor address, so switching devices or reinstalling the app recovers the pledges (see [Mobile sync](#mobile-sync--backend-as-source-of-truth)). The web frontend's `localStorage` model still has it.
 
 ---
 
@@ -228,12 +244,16 @@ When the backend sync is added (see next section), the sync endpoint should:
 
 ## Backend Sync Strategy (Future)
 
-The current client-only model works well for a single device but breaks down for:
+> **Status:** the mobile half of this has landed — see [Mobile sync](#mobile-sync--backend-as-source-of-truth). Mobile reads schedules from `GET /api/recurring-donations` and writes them with `POST`/`DELETE`. What is still future work: the `/sync` upsert endpoint with payment `history[]` de-duplication by `transaction_hash`, `action`/`skipReason` responses for paused projects, and server-initiated payment scheduling. This section is kept as the design record for those.
+
+The web frontend still uses the client-only model, which works well for a single device but breaks down for:
 - Users who switch devices or reinstall the app.
 - Audit trails required for tax receipts.
 - Server-side scheduling (cron jobs that trigger donations without the user opening the app).
 
 ### Proposed database schema
+
+> **Status:** the table exists, but with a different shape than the design below — `backend/src/db/schema.sql` defines `recurring_donations` with `currency`, `duration_months`, `remaining_months` and a `status` lifecycle (which is what `backend/src/routes/recurringDonations.js` reads and writes), while migration `003_recurring_donations.js` defines an older `frequency`/`active`-boolean variant that `recurringDonationQueue.js` still queries. The two need to be reconciled; note it as follow-up rather than assuming this proposal is what ships.
 
 ```sql
 CREATE TABLE IF NOT EXISTS recurring_donations (
@@ -320,8 +340,11 @@ The migration should be **additive and non-breaking**:
 | `frontend/lib/monthlyGiving.ts` | Core subscription logic: `createMonthlySubscription`, `markMonthlySubscriptionPaid`, `getDueMonthlySubscriptions`, `addMonths` |
 | `frontend/components/MonthlyGivingSetup.tsx` | UI for creating and viewing subscriptions; duration picker (3 / 6 / 12 months / indefinite) |
 | `frontend/utils/types.ts` | `MonthlySubscription` and `MonthlyDonationHistoryItem` TypeScript types |
-| `mobile/package.json` | `@react-native-async-storage/async-storage` dependency (storage layer for future mobile implementation) |
-| `backend/src/db/schema.sql` | Current schema — no recurring_donations table yet |
+| `mobile/utils/recurringDonations.ts` | Mobile schedule sync (#1059): `syncRecurringDonations`, `createRecurringDonation`, `cancelRecurringDonation`, `useRecurringDonations` (mount + foreground reconciliation over an AsyncStorage cache) |
+| `mobile/app/recurring.tsx` | Monthly Giving screen — donor address field, active list and payment history tabs |
+| `backend/src/routes/recurringDonations.js` | REST API for pledges: `GET`/`POST`/`DELETE /api/recurring-donations`, mounted in `backend/src/server.js` |
+| `mobile/package.json` | `@react-native-async-storage/async-storage` dependency (offline cache layer for mobile) |
+| `backend/src/db/schema.sql` | `recurring_donations` table definition used by the API |
 
 ---
 

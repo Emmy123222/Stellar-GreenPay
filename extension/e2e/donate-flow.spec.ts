@@ -100,6 +100,40 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
     }
   });
 
+  test("should guide first-time users and remember onboarding completion", async () => {
+    const context = await setupExtension();
+    const page = await context.newPage();
+
+    try {
+      await page.goto(popupUrl, { waitUntil: "domcontentloaded" });
+      const overlay = page.locator(".onboarding-overlay");
+      await expect(overlay).toHaveAttribute("data-step", "1");
+      await expect(overlay).toContainText("What is GreenPay?");
+
+      await page.getByRole("button", { name: "Next" }).click();
+      await expect(overlay).toHaveAttribute("data-step", "2");
+      await expect(overlay).toContainText("Connect Freighter wallet");
+
+      await page.getByRole("button", { name: "Next" }).click();
+      await expect(overlay).toHaveAttribute("data-step", "3");
+      await expect(overlay).toContainText("Find your first project");
+      await page.getByRole("button", { name: "Got it" }).click();
+      await expect(overlay).toHaveCount(0);
+
+      const onboarded = await page.evaluate(
+        () => new Promise<boolean>((resolve) => {
+          chrome.storage.local.get(["onboarded"], (result) => resolve(result.onboarded === true));
+        }),
+      );
+      expect(onboarded).toBe(true);
+
+      await page.reload();
+      await expect(page.locator(".onboarding-overlay")).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("should display project list on popup open", async () => {
     const context = await setupExtension();
     const page = await context.newPage();

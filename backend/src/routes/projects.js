@@ -12,8 +12,9 @@ const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow, updateWebhook, computeBadges } = require("../services/store");
 const {
   getOnChainProject,
-  getProjectDonationEvents,
+getProjectDonationEvents,
   getRegisteredProjectIdFromTransaction,
+  buildSetFundingDeadlineTx,
   CONTRACT_ID,
   server,
   NETWORK_PASSPHRASE,
@@ -21,7 +22,7 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
@@ -33,6 +34,8 @@ const PROJECT_DETAIL_CACHE_PREFIX = "projects:detail:";
 const PROJECT_MILESTONES_CACHE_TTL = 300; // seconds (5 minutes)
 const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
 
+const FUNDING_DEADLINE_CACHE_PREFIX = "projects:funding-deadline:";
+
 function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
 }
@@ -41,6 +44,9 @@ function getProjectDetailCacheKey(projectId) {
   return PROJECT_DETAIL_CACHE_PREFIX + projectId;
 }
 
+function getFundingDeadlineCacheKey(projectId) {
+  return FUNDING_DEADLINE_CACHE_PREFIX + projectId;
+}
 const VALID_STATUSES = ["active", "completed", "paused"];
 const VALID_CATEGORIES = [
   "Reforestation",
@@ -102,6 +108,52 @@ function mapCampaignRow(row) {
     active: !completed,
     createdAt: new Date(row.created_at).toISOString(),
   };
+}
+
+/**
+ * Map a project_funding_deadlines row into the API shape.
+ *
+ * @param {object} row - Row from project_funding_deadlines.
+ * @returns {object|null} Normalized funding deadline payload, or null.
+ */
+function mapFundingDeadlineRow(row) {
+  if (!row) return null;
+  const goalXLM = Number.parseFloat(row.goal_amount?.toString() || "0");
+  const raisedXLM = Number.parseFloat(row.raised_xlm?.toString() || "0");
+  const deadlineMs = new Date(row.deadline_at).getTime();
+  const now = Date.now();
+  const past = now >= deadlineMs;
+  const met = goalXLM > 0 && raisedXLM >= goalXLM;
+  return {
+    projectId: row.project_id,
+    deadlineLedger: row.deadline_ledger != null ? Number(row.deadline_ledger) : null,
+    deadlineAt: new Date(row.deadline_at).toISOString(),
+    goalAmount: goalXLM.toFixed(7),
+    raisedXLM: raisedXLM.toFixed(7),
+    goalMet: met,
+    expired: past,
+    refundTriggered: Boolean(row.refund_triggered),
+    refundTriggeredAt: row.refund_triggered_at
+      ? new Date(row.refund_triggered_at).toISOString()
+      : null,
+  };
+}
+
+/**
+ * Fetch the funding deadline configuration for a project (may be null).
+ *
+ * @param {string} projectId - Project UUID.
+ * @returns {Promise<object|null>} Funding deadline payload or null.
+ */
+async function fetchFundingDeadline(projectId) {
+  const result = await pool.query(
+    `SELECT fd.*, COALESCE(p.raised_xlm, 0) AS raised_xlm
+       FROM project_funding_deadlines fd
+       LEFT JOIN projects p ON p.id = fd.project_id
+      WHERE fd.project_id = $1`,
+    [projectId],
+  );
+  return mapFundingDeadlineRow(result.rows[0]);
 }
 
 async function fetchCampaignsForProject(projectId) {
@@ -259,6 +311,7 @@ router.get("/", async (req, res, next) => {
       status,
       verified,
       search,
+      q,
       limit = 20,
       cursor,
       sort = "created_at",
@@ -272,7 +325,7 @@ router.get("/", async (req, res, next) => {
         category,
         status,
         verified,
-        search,
+search: search || q,
         sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
@@ -296,8 +349,9 @@ router.get("/", async (req, res, next) => {
     if (verified === "true") {
       where.push("verified = true");
     }
-    if (search && typeof search === "string") {
-      values.push(search.trim());
+const searchTerm = q || search;
+    if (searchTerm && typeof searchTerm === "string") {
+      values.push(searchTerm.trim());
       where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
     }
 
@@ -316,7 +370,7 @@ router.get("/", async (req, res, next) => {
       values.push(sortValue, id);
       const sortValIdx = values.length - 1;
       const idIdx = values.length;
-      where.push(
+where.push(
         `(${sortField} < $${sortValIdx} OR (${sortField} = $${sortValIdx} AND id < $${idIdx}))`,
       );
     }
@@ -450,6 +504,37 @@ router.post("/", async (req, res, next) => {
     res
       .status(201)
       .json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/donors
+ * Returns each donor address once for a project.
+ */
+router.get("/:id/donors", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ success: false, error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT DISTINCT donor_address
+         FROM donations
+        WHERE project_id = $1
+        ORDER BY donor_address ASC`,
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map((row) => row.donor_address),
+    });
   } catch (e) {
     next(e);
   }
@@ -833,7 +918,7 @@ router.get("/admin/pending", async (req, res, next) => {
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", adminRequired, async (req, res) => {
+router.post("/admin/register", adminTokenRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
 
@@ -884,7 +969,7 @@ router.post("/admin/register", adminRequired, async (req, res) => {
  * project as verified by replaying a registration transaction hash that
  * belongs to a different project.
  */
-router.post("/admin/confirm", adminRequired, async (req, res) => {
+router.post("/admin/confirm", adminTokenRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
@@ -1036,6 +1121,22 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch the most recent individual reviews for the project detail page.
+    const recentReviewsResult = await pool.query(
+      `SELECT donor_address, rating, review, created_at
+       FROM project_ratings
+       WHERE project_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [req.params.id],
+    );
+    const recentReviews = recentReviewsResult.rows.map((row) => ({
+      donorAddress: row.donor_address,
+      rating: row.rating,
+      review: row.review,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
     // Fetch subscriber count
     const subscriberResult = await pool.query(
       "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
@@ -1047,6 +1148,9 @@ router.get("/:id", async (req, res, next) => {
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
       [req.params.id],
     );
+
+// Funding deadline / auto-refund metadata (may be null if not configured).
+    const fundingDeadline = await fetchFundingDeadline(req.params.id);
 
     // Follower count + optional isFollowing from wallet-only project_follows rows.
     // When ?walletAddress=G... is passed, include whether that wallet follows.
@@ -1107,8 +1211,10 @@ router.get("/:id", async (req, res, next) => {
           : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
+        fundingDeadline,
         averageRating: parseFloat(ratingResult.rows[0]?.avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
+        recentReviews,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
         followCount,
         isFollowing,
@@ -1924,7 +2030,7 @@ const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
  *
  * Pass null / omit both to clear the existing webhook configuration.
  */
-router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
+router.patch("/:id/webhook", adminTokenRequired, async (req, res, next) => {
   try {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(req.params.id)) {
@@ -1999,6 +2105,8 @@ module.exports = router;
 // Export internal functions for testing
 if (process.env.NODE_ENV === "test") {
   module.exports.mapCampaignRow = mapCampaignRow;
-  module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
+module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
   module.exports.fetchCampaignsForProject = fetchCampaignsForProject;
+  module.exports.mapFundingDeadlineRow = mapFundingDeadlineRow;
+  module.exports.fetchFundingDeadline = fetchFundingDeadline;
 }

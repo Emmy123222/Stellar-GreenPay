@@ -1,57 +1,79 @@
-import "./widget.css";
+import './widget.css';
+import { isUrlAllowed } from './allowlist';
+import { loadSettings, DEFAULT_SETTINGS } from './settings';
 
 const STELLAR_ADDRESS_REGEX = /\bG[A-Z2-7]{55}\b/g;
 
-function createTooltip(): HTMLDivElement {
-  const tooltip = document.createElement("div");
-  tooltip.className = "greenpay-tooltip";
-  tooltip.textContent = "Donate to this address via GreenPay";
+let isWidgetInjected = false;
+let mutationObserver: MutationObserver | null = null;
+let currentProjectId: string | null = null;
+
+export function isWidgetActive(): boolean {
+  return isWidgetInjected;
+}
+
+export function createTooltip(): HTMLDivElement {
+  const tooltip = document.createElement('div');
+  tooltip.className = 'greenpay-tooltip';
+  tooltip.textContent = 'Donate to this address via GreenPay';
   return tooltip;
 }
 
-function highlightAddresses(node: Node) {
+export function highlightAddresses(node: Node) {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.textContent;
     if (!text || !STELLAR_ADDRESS_REGEX.test(text)) return;
 
+    // Do not re-process text inside an already created greenpay-address span or tooltip
+    if (
+      node.parentElement &&
+      (node.parentElement.classList.contains('greenpay-address') ||
+        node.parentElement.classList.contains('greenpay-tooltip'))
+    ) {
+      return;
+    }
+
     const fragment = document.createDocumentFragment();
     let lastIndex = 0;
-    let match;
+    let match: RegExpExecArray | null;
 
     STELLAR_ADDRESS_REGEX.lastIndex = 0;
     while ((match = STELLAR_ADDRESS_REGEX.exec(text)) !== null) {
       if (match.index > lastIndex) {
         fragment.appendChild(
-          document.createTextNode(text.substring(lastIndex, match.index)),
+          document.createTextNode(text.substring(lastIndex, match.index))
         );
       }
 
-      const span = document.createElement("span");
-      span.className = "greenpay-address";
+      const span = document.createElement('span');
+      span.className = 'greenpay-address';
       span.textContent = match[0];
 
       let tooltip: HTMLDivElement | null = null;
 
-      span.addEventListener("mouseenter", () => {
+      span.addEventListener('mouseenter', () => {
         tooltip = createTooltip();
         const rect = span.getBoundingClientRect();
-        tooltip.style.left = rect.left + rect.width / 2 + "px";
-        tooltip.style.top = rect.top + window.scrollY + "px";
+        tooltip.style.left = rect.left + rect.width / 2 + 'px';
+        tooltip.style.top = rect.top + window.scrollY + 'px';
         document.body.appendChild(tooltip);
       });
 
-      span.addEventListener("mouseleave", () => {
+      span.addEventListener('mouseleave', () => {
         if (tooltip && tooltip.parentNode) {
           tooltip.parentNode.removeChild(tooltip);
         }
         tooltip = null;
       });
 
-      span.addEventListener("click", () => {
-        chrome.runtime.sendMessage({
-          action: "openDonatePopup",
-          address: match![0],
-        });
+      const matchedAddress = match[0];
+      span.addEventListener('click', () => {
+        if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+          chrome.runtime.sendMessage({
+            action: 'openDonatePopup',
+            address: matchedAddress,
+          });
+        }
       });
 
       fragment.appendChild(span);
@@ -67,61 +89,159 @@ function highlightAddresses(node: Node) {
     }
   } else if (
     node.nodeType === Node.ELEMENT_NODE &&
-    !["SCRIPT", "STYLE", "NOSCRIPT", "IFRAME"].includes(
-      (node as HTMLElement).tagName,
+    !['SCRIPT', 'STYLE', 'NOSCRIPT', 'IFRAME'].includes(
+      (node as HTMLElement).tagName
     )
   ) {
-    node.childNodes.forEach((child) => highlightAddresses(child));
+    if (
+      (node as HTMLElement).classList?.contains('greenpay-address') ||
+      (node as HTMLElement).classList?.contains('greenpay-tooltip')
+    ) {
+      return;
+    }
+    const children = Array.from(node.childNodes);
+    children.forEach((child) => highlightAddresses(child));
   }
 }
 
-let currentProjectId: string | null = null;
+export function checkProjectContext() {
+  if (typeof document === 'undefined') return;
 
-function checkProjectContext() {
   const metaTag =
     document.querySelector('meta[name="greenpay:project:id"]') ||
     document.querySelector('meta[property="greenpay:project:id"]');
-  let projectId = metaTag ? metaTag.getAttribute("content") : null;
+  let projectId = metaTag ? metaTag.getAttribute('content') : null;
 
-  if (!projectId) {
-    const match = window.location.pathname.match(
-      /\/projects\/([a-zA-Z0-9_-]+)/,
-    );
+  if (!projectId && typeof window !== 'undefined' && window.location?.pathname) {
+    const match = window.location.pathname.match(/\/projects\/([a-zA-Z0-9_-]+)/);
     if (match) projectId = match[1];
   }
 
   if (projectId !== currentProjectId) {
     currentProjectId = projectId;
-    chrome.runtime
-      .sendMessage({ action: "setProjectContext", projectId })
-      .catch(() => {});
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({ action: 'setProjectContext', projectId }).catch(() => {});
+    }
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  highlightAddresses(document.body);
-  checkProjectContext();
-});
+export function injectWidget() {
+  if (isWidgetInjected) return;
+  isWidgetInjected = true;
 
-const observer = new MutationObserver((mutations) => {
-  mutations.forEach((mutation) => {
-    mutation.addedNodes.forEach((node) => {
-      if (
-        node.nodeType === Node.ELEMENT_NODE ||
-        node.nodeType === Node.TEXT_NODE
-      ) {
-        highlightAddresses(node);
+  if (typeof document !== 'undefined' && document.body) {
+    highlightAddresses(document.body);
+    checkProjectContext();
+
+    mutationObserver = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE) {
+            highlightAddresses(node);
+          }
+        });
+      });
+      checkProjectContext();
+    });
+
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('popstate', checkProjectContext);
+  }
+}
+
+export function cleanupWidget() {
+  if (!isWidgetInjected) return;
+  isWidgetInjected = false;
+
+  if (mutationObserver) {
+    mutationObserver.disconnect();
+    mutationObserver = null;
+  }
+
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('popstate', checkProjectContext);
+  }
+
+  if (typeof document !== 'undefined') {
+    // Remove tooltips
+    document.querySelectorAll('.greenpay-tooltip').forEach((el) => el.remove());
+
+    // Unwrap greenpay-address spans back to text
+    document.querySelectorAll('.greenpay-address').forEach((span) => {
+      const parent = span.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(span.textContent || ''), span);
+        parent.normalize();
       }
     });
-  });
-  checkProjectContext();
-});
+  }
+}
 
-observer.observe(document.body, {
-  childList: true,
-  subtree: true,
-});
+export async function checkAndInject(currentUrl?: string): Promise<boolean> {
+  const targetUrl =
+    currentUrl ||
+    (typeof window !== 'undefined' && window.location?.href ? window.location.href : '');
 
-window.addEventListener("popstate", checkProjectContext);
-// In case DOMContentLoaded already fired
-checkProjectContext();
+  let settings;
+  try {
+    settings = await loadSettings();
+  } catch {
+    settings = DEFAULT_SETTINGS;
+  }
+
+  const allowed = isUrlAllowed(targetUrl, settings.allowlist || []);
+  if (!allowed) {
+    if (isWidgetInjected) {
+      cleanupWidget();
+    }
+    return false;
+  }
+
+  injectWidget();
+  return true;
+}
+
+// Auto-initialize when running in browser content script context
+const isTestEnv =
+  typeof (globalThis as any).process !== 'undefined' &&
+  (globalThis as any).process?.env?.NODE_ENV === 'test';
+
+if (!isTestEnv) {
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        checkAndInject();
+      });
+    } else {
+      checkAndInject();
+    }
+  }
+
+  // Listen for storage changes (e.g. allowlist updated in popup or settings)
+  if (typeof chrome !== 'undefined' && chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'sync' && changes.allowlist) {
+        checkAndInject();
+      }
+    });
+  }
+
+  // Listen for runtime messages from popup
+  if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.action === 'checkAllowlist') {
+        checkAndInject().then((active) => sendResponse({ active }));
+        return true;
+      }
+      if (message.action === 'getWidgetStatus') {
+        sendResponse({ active: isWidgetInjected });
+      }
+    });
+  }
+}

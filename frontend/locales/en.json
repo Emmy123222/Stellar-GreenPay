@@ -252,5 +252,11 @@
     "circleDocs": "Circle's documentation",
     "docsLink": "Read the full bridge documentation",
     "backToProjects": "← Back to Projects"
+  },
+  "badge": {
+    "seedling": "Seedling",
+    "tree": "Tree",
+    "forest": "Forest",
+    "earth": "Earth Guardian"
   }
 }
