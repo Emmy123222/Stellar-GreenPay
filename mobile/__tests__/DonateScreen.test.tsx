@@ -282,7 +282,7 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
 
     const { findByText } = render(<DonateScreen />);
     await waitFor(() =>
-      expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
+      expect(getByText2('Donate to Amazon Reforestation')).toBeTruthy()
     );
     // Hint advertises the upcoming biometric prompt
     expect(getByText(/authenticate with Biometrics before signing/i)).toBeTruthy();

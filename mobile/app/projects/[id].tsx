@@ -32,6 +32,10 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
+import {
+  loadRecurringDonations,
+  type RecurringDonation,
+} from '../../utils/recurringDonations';
 
 import * as Notifications from 'expo-notifications';
 import MapView, { Marker } from 'react-native-maps';
@@ -244,6 +248,11 @@ export default function ProjectDetailScreen() {
   const [followLoading, setFollowLoading] = useState(false);
   const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const viewShotRef = useRef<View>(null);
+
+  const showToast = useCallback((message: string, variant: ToastVariant = 'success') => {
+    setToast({ message, variant });
+  }, []);
 
   const checkRecurringDonation = useCallback(async (projectId: string) => {
     try {
@@ -921,6 +930,7 @@ export default function ProjectDetailScreen() {
             <Text style={styles.unfollowHint}>Tap again to unfollow</Text>
           )}
         </TouchableOpacity>
+      )}
 
         {/* Donate button */}
         <TouchableOpacity

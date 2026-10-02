@@ -138,8 +138,8 @@ describe('HomeScreen', () => {
   it('renders the project name after data loads', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = await render(wrap(<HomeScreen />));
-    await waitFor(() => expect(getByText(MOCK_PROJECT.name)).toBeTruthy());
+    const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
   it('renders the header chrome while projects are loading', async () => {

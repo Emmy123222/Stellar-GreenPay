@@ -50,6 +50,7 @@ jest.mock('expo-notifications', () => ({
 
 jest.mock('../utils/recurringDonations', () => ({
   loadRecurringDonations: jest.fn(),
+  cancelRecurringDonation: jest.fn(),
 }));
 
 import * as notifUtils from '../utils/notifications';
