@@ -135,7 +135,6 @@ export default function DonationModal({
             publicKey={publicKey}
             onSuccess={() => {
               onSuccess?.();
-              onClose();
             }}
           />
         </div>

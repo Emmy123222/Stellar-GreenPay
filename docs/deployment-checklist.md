@@ -41,6 +41,7 @@ Use this checklist to ensure a smooth and safe mainnet deployment.
   - [ ] Contract initialization verified
   - [ ] Contract admin keys secured in vault
   - [ ] Contract functionality tested on mainnet
+  - [ ] [Contract deployment & rollback guide](contract-deployment.md) reviewed
 
 - [ ] **Environment Configuration**
   - [ ] Copy `.env.mainnet.example` to `.env.mainnet`
