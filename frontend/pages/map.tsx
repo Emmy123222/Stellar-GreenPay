@@ -100,7 +100,7 @@ export default function MapPage({ projects, fetchedAt }: MapPageProps) {
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-forest-50 text-forest-600 px-4 text-center">
               <span className="text-5xl">🌿</span>
               <p className="font-display font-semibold text-lg">{t("map.noProjects")}</p>
-              <p className="text-sm font-body text-forest-400">{t("map.noProjectsDesc")}</p>
+              <p className="text-sm font-body text-[var(--text-secondary)] dark:text-forest-600">{t("map.noProjectsDesc")}</p>
               <Link href="/projects" className="btn-primary text-sm mt-2">
                 {t("map.browseAll")}
               </Link>

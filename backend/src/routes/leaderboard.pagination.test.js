@@ -24,6 +24,12 @@
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
 
+jest.mock("../services/redis", () => ({
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(),
+  deletePattern: jest.fn().mockResolvedValue(),
+}));
+
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: jest.fn(() => (_req, _res, next) => next()),
 }));

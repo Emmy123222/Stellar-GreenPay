@@ -67,6 +67,25 @@ export function formatNextPaymentDate(isoDate: string): string {
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
+/**
+ * Format an ISO due date for the recurring-donation banner.
+ * Exported so `ProjectDetailScreen.test.tsx` can pin the locale-agnostic
+ * contract (invalid input must fall back to the raw string).
+ */
+export function formatNextPaymentDate(isoDate: string): string {
+  try {
+    const date = new Date(isoDate);
+    if (isNaN(date.getTime())) return isoDate;
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return isoDate;
+  }
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ClimateProject {
@@ -137,6 +156,10 @@ function Toast({
     // defence for any future async path that updates the closure.
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     let mounted = true;
+    let anim: Animated.CompositeAnimation | undefined;
+
+    // Fade in
+    anim = Animated.timing(opacity, {
     const anim = Animated.timing(opacity, {
       toValue: 1,
       duration: 200,
@@ -150,7 +173,6 @@ function Toast({
       // Hold for 2 s, then fade out
       holdTimer = setTimeout(() => {
         if (!mounted) return;
-
         Animated.timing(opacity, {
           toValue: 0,
           duration: 300,
@@ -169,6 +191,7 @@ function Toast({
       opacity.stopAnimation();
     };
   }, [opacity]);
+
 
   const bg = variant === 'success' ? '#227239' : '#b91c1c';
 
@@ -264,6 +287,12 @@ export default function ProjectDetailScreen() {
       });
     }
   }, [id]);
+
+  // ── helpers ────────────────────────────────────────────────────────────────
+
+  const showToast = (message: string, variant: ToastVariant = 'success') => {
+    setToast({ message, variant });
+  };
 
   const loadUpdates = async (projectId: string) => {
     try {
@@ -480,6 +509,10 @@ export default function ProjectDetailScreen() {
               </Text>
             </View>
             <TouchableOpacity
+              testID="share-button"
+              style={styles.shareButton}
+              onPress={handleShare}
+              activeOpacity={0.7}
               style={styles.shareButton}
               onPress={handleShare}
               activeOpacity={0.7}
@@ -505,7 +538,7 @@ export default function ProjectDetailScreen() {
                 shadowColor: colors.cardShadow,
               },
             ]}
-            accessibilityRole="region"
+            accessibilityRole="summary"
             accessibilityLabel={`Active recurring donation banner for ${project.name}`}
           >
             <View style={styles.recurringBannerContent}>
@@ -760,6 +793,8 @@ export default function ProjectDetailScreen() {
           </View>
         </View>
 
+        {/* Follow button — always visible; dimmed when no push token so the
+            feature is discoverable and pressing it explains why it can't run */}
         {/* Map — guarded on both coordinates being present. Projects created
             before we started capturing coordinates come back from the API with
             `latitude`/`longitude` set to `null`, and handing those straight to
@@ -1128,6 +1163,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   manageButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#227239',
+  },
+  manageButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
     backgroundColor: '#227239',
     paddingVertical: 8,
     paddingHorizontal: 14,
