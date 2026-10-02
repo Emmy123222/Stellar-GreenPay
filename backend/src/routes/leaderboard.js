@@ -51,6 +51,8 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       LEADERBOARD_MAX_LIMIT
     );
     const cursor = req.query.cursor;
+    const afterRank = req.query.after_rank;
+    const afterWallet = req.query.after_wallet;
     const period = req.query.period || "all";
     const sortBy = req.query.sortBy === "impactScore" ? "impact_score" : "total_donated_xlm";
     const onlyVerified = req.query.onlyVerified === "true";
@@ -84,6 +86,17 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }
 
     // Cursor-based pagination on (sortBy, public_key), mirroring /api/projects.
+    // The explicit after_rank/after_wallet form is kept for API consumers that
+    // cannot persist opaque cursors. The wallet is the stable tie-break key.
+    if (afterRank !== undefined || afterWallet !== undefined) {
+      const parsedRank = Number.parseInt(afterRank, 10);
+      if (!Number.isInteger(parsedRank) || parsedRank < 1 || typeof afterWallet !== "string" || !afterWallet) {
+        return res.status(400).json({ error: "after_rank and after_wallet are required and valid" });
+      }
+      params.push(afterWallet);
+      conditions.push(`p.public_key > $${params.length}`);
+    }
+
     if (cursor) {
       let cursorData;
       try {
@@ -101,7 +114,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       const sortIdx = params.length - 1;
       const keyIdx = params.length;
       conditions.push(
-        `(${sortBy} < $${sortIdx} OR (${sortBy} = $${sortIdx} AND p.public_key < $${keyIdx}))`,
+        `(${sortBy} < $${sortIdx} OR (${sortBy} = $${sortIdx} AND p.public_key > $${keyIdx}))`,
       );
     }
 
@@ -186,6 +199,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     }));
 
     let nextCursor = null;
+    let nextAfter = null;
     if (hasMore) {
       const last = pageRows[pageRows.length - 1];
       const lastSortVal = sortBy === "total_donated_xlm"
