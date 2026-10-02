@@ -3,7 +3,7 @@ import { useRouter } from "next/router";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
-import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, csrfFetch } from "@/lib/api";
+import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, createAdminMatchPledge, cancelAdminMatchPledge, csrfFetch, uploadSupportingDocument, updateProjectImage, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
@@ -18,26 +18,18 @@ interface AdminProps {
   onConnect: (pk: string) => void;
 }
 
-function weekKey(dateStr: string): string {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  // ISO week-like key (YYYY-WW) using UTC week start (Mon)
-  const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const day = utc.getUTCDay() || 7;
-  utc.setUTCDate(utc.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((utc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
-  return `${utc.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
-}
-
 export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const router = useRouter();
   const { projectId } = router.query;
 
   const [project, setProject] = useState<ClimateProject | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // `loading` is derived by comparing the in-flight request to the last one
+  // that resolved, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null>(null);
+  const loading = loadedProjectId !== projectId;
 
   const [updateTitle, setUpdateTitle] = useState("");
   const [updateBody, setUpdateBody] = useState("");
@@ -52,16 +44,31 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   const [approvalState, setApprovalState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [imageUploadState, setImageUploadState] = useState<"idle" | "uploading" | "saving" | "success" | "error">("idle");
+  const [imageUploadError, setImageUploadError] = useState<string | null>(null);
 
   const [onChainState, setOnChainState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [onChainMessage, setOnChainMessage] = useState<string | null>(null);
 
   const [matches, setMatches] = useState<any[]>([]);
+  const [matchMatcherAddress, setMatchMatcherAddress] = useState("");
+  const [matchCapXLM, setMatchCapXLM] = useState("");
+  const [matchMultiplier, setMatchMultiplier] = useState(2);
+  const [matchExpiresAt, setMatchExpiresAt] = useState("");
+  const [matchPledgeState, setMatchPledgeState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [matchPledgeError, setMatchPledgeError] = useState<string | null>(null);
 
   const [widgetAccent, setWidgetAccent] = useState("#059669");
   const [widgetButtonText, setWidgetButtonText] = useState("Donate on GreenPay");
   const [widgetCurrency, setWidgetCurrency] = useState<"XLM" | "USDC">("XLM");
   const [copied, setCopied] = useState(false);
+
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookState, setWebhookState] = useState<"idle" | "saving" | "success" | "error">("idle");
+  const [webhookMessage, setWebhookMessage] = useState<string | null>(null);
+  const [testState, setTestState] = useState<"idle" | "testing" | "success" | "error">("idle");
+  const [testMessage, setTestMessage] = useState<string | null>(null);
 
   const widgetEmbedCode = useMemo(() => {
     const baseUrl = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
@@ -96,10 +103,50 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     }
   };
 
+  const saveWebhook = async () => {
+    if (!project) return;
+    setWebhookState("saving");
+    setWebhookMessage(null);
+    try {
+      const updated = await updateProjectWebhook(project.id, {
+        webhookUrl: webhookUrl.trim() || null,
+        webhookSecret: webhookSecret.trim() || null,
+      });
+      setWebhookUrl(updated.webhookUrl || "");
+      setWebhookSecret(updated.webhookSecret || "");
+      setProject({ ...project, webhookUrl: updated.webhookUrl, webhookSecret: updated.webhookSecret });
+      setWebhookMessage("Webhook configuration saved.");
+      setWebhookState("success");
+      setTimeout(() => setWebhookState("idle"), 3000);
+    } catch (e: any) {
+      setWebhookMessage(e.message || "Failed to save webhook configuration");
+      setWebhookState("error");
+    }
+  };
+
+  const generateSecret = () => {
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    setWebhookSecret(Array.from(array, (b) => b.toString(16).padStart(2, "0")).join(""));
+  };
+
+  const sendTestWebhook = async () => {
+    if (!project) return;
+    setTestState("testing");
+    setTestMessage(null);
+    try {
+      const result = await testProjectWebhook(project.id);
+      setTestMessage(`Test event sent. Status: ${result.statusCode}`);
+      setTestState("success");
+      setTimeout(() => setTestState("idle"), 4000);
+    } catch (e: any) {
+      setTestMessage(e.message || "Failed to send test event");
+      setTestState("error");
+    }
+  };
+
   useEffect(() => {
     if (!projectId || typeof projectId !== "string") return;
-    setLoading(true);
-    setError(null);
 
     Promise.all([
       fetchProject(projectId),
@@ -112,9 +159,12 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         setDonations(d);
         setMilestones(m.data || []);
         setMatches(mt);
+        setWebhookUrl(p.webhookUrl || "");
+        setWebhookSecret(p.webhookSecret || "");
+        setError(null);
       })
       .catch((e: unknown) => setError((e as Error).message || "Failed to load project"))
-      .finally(() => setLoading(false));
+      .finally(() => setLoadedProjectId(projectId));
   }, [projectId]);
 
   const isOwner = !!publicKey && !!project && publicKey === project.walletAddress;
@@ -130,18 +180,6 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       byDonor.set(donorAddress, curr);
     }
     return Array.from(byDonor.values()).sort((a, b) => b.total - a.total);
-  }, [donations]);
-
-  const weeklyGrowth = useMemo(() => {
-    const byWeek = new Map<string, number>();
-    for (const d of donations) {
-      const key = weekKey(d.createdAt);
-      const amount = parseFloat(d.amountXLM || d.amount || "0");
-      byWeek.set(key, (byWeek.get(key) || 0) + (Number.isFinite(amount) ? amount : 0));
-    }
-    return Array.from(byWeek.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([week, totalXLM]) => ({ week, totalXLM: Number(totalXLM.toFixed(2)) }));
   }, [donations]);
 
   const downloadCsv = () => {
@@ -272,6 +310,25 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     }
   };
 
+  const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !project || !publicKey) return;
+    setImageUploadState("uploading");
+    setImageUploadError(null);
+
+    try {
+      const uploaded = await uploadSupportingDocument(file);
+      setImageUploadState("saving");
+      const updated = await updateProjectImage(project.id, uploaded.url, publicKey);
+      setProject(updated);
+      setImageUploadState("success");
+      setTimeout(() => setImageUploadState("idle"), 2500);
+    } catch (e: unknown) {
+      setImageUploadError(e instanceof Error ? e.message : "Failed to upload image");
+      setImageUploadState("error");
+    }
+  };
+
   const handleRegisterOnChain = async () => {
     if (!project || !publicKey) return;
     setOnChainState("loading");
@@ -389,6 +446,23 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
       <div className="card mb-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+          <h2 className="font-display text-xl font-bold text-forest-900">Project Banner</h2>
+          <label className="inline-flex cursor-pointer items-center rounded-xl border border-forest-200 bg-forest-50 px-4 py-2 text-sm font-semibold text-forest-700 transition hover:bg-forest-100">
+            <input type="file" accept="image/*" className="sr-only" onChange={handleImageUpload} />
+            {imageUploadState === "uploading" ? "Uploading…" : imageUploadState === "saving" ? "Saving…" : imageUploadState === "success" ? "Saved" : "Upload banner image"}
+          </label>
+        </div>
+        {imageUploadError ? <p className="mb-3 text-sm text-red-600">{imageUploadError}</p> : null}
+        {project.imageUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={project.imageUrl} alt={`${project.name} banner`} className="h-48 w-full rounded-2xl object-cover" />
+        ) : (
+          <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-forest-200 bg-forest-50 text-sm text-[#5a7a5a]">No banner image yet. Upload one to personalize the project page.</div>
+        )}
+      </div>
+
+      <div className="card mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
           <h2 className="font-display text-xl font-bold text-forest-900">Donation Growth</h2>
           <button
             onClick={downloadCsv}
@@ -398,7 +472,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           </button>
         </div>
         <div className="h-64">
-          <DonationGrowthChartNoSSR data={weeklyGrowth} />
+          <DonationGrowthChartNoSSR projectId={typeof projectId === "string" ? projectId : undefined} />
         </div>
         <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-3 font-body">
           Weekly totals based on recent donation history (up to 200 donations loaded).
@@ -649,9 +723,9 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         </p>
 
         {matches.length === 0 ? (
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No active donation matches.</p>
+          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-6">No active donation matches.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 mb-6">
             {matches.map((m: any) => (
               <div key={m.id} className="p-4 rounded-xl border border-forest-100 bg-forest-50">
                 <div className="flex items-center justify-between mb-2">
@@ -663,9 +737,26 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                       Matcher: {shortenAddress(m.matcherAddress)}
                     </p>
                   </div>
-                  <span className="text-xs px-2 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 font-body">
-                    Active
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs px-2 py-1 rounded-full bg-green-100 border border-green-200 text-green-700 font-body">
+                      Active
+                    </span>
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Are you sure you want to cancel this match pledge?")) return;
+                        try {
+                          await cancelAdminMatchPledge(m.id);
+                          const updated = await fetchProjectMatches(projectId as string);
+                          setMatches(updated);
+                        } catch (err: any) {
+                          alert(err?.response?.data?.error || err.message || "Failed to cancel match pledge");
+                        }
+                      }}
+                      className="text-xs px-2.5 py-1 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-body font-medium transition-colors"
+                    >
+                      Cancel Pledge
+                    </button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-3">
                   <div>
@@ -688,6 +779,78 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             ))}
           </div>
         )}
+
+        {/* Create Match Pledge Form */}
+        <div className="p-4 rounded-xl border border-forest-100 bg-forest-50/50">
+          <h3 className="text-sm font-bold text-forest-900 mb-3 font-body">Set New Match Pledge (2x Match)</h3>
+          {matchPledgeError && (
+            <div className="mb-3 p-2.5 rounded-lg bg-red-50 text-red-700 text-xs font-body">
+              {matchPledgeError}
+            </div>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Matcher Address</label>
+              <input
+                value={matchMatcherAddress}
+                onChange={(e) => setMatchMatcherAddress(e.target.value)}
+                placeholder="G..."
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Cap (XLM)</label>
+              <input
+                type="number"
+                value={matchCapXLM}
+                onChange={(e) => setMatchCapXLM(e.target.value)}
+                placeholder="1000"
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-forest-800 uppercase tracking-widest mb-1 opacity-60">Expiry Date</label>
+              <input
+                type="date"
+                value={matchExpiresAt}
+                onChange={(e) => setMatchExpiresAt(e.target.value)}
+                className="input-field text-xs py-1.5 bg-white"
+              />
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              if (!matchMatcherAddress.trim() || !matchCapXLM.trim() || !matchExpiresAt) {
+                setMatchPledgeError("All fields are required");
+                return;
+              }
+              setMatchPledgeState("loading");
+              setMatchPledgeError(null);
+              try {
+                const expiresIso = new Date(matchExpiresAt + "T23:59:59Z").toISOString();
+                await createAdminMatchPledge(projectId as string, {
+                  matcherAddress: matchMatcherAddress.trim(),
+                  capXLM: matchCapXLM.trim(),
+                  multiplier: matchMultiplier,
+                  expiresAt: expiresIso,
+                });
+                const updated = await fetchProjectMatches(projectId as string);
+                setMatches(updated);
+                setMatchMatcherAddress("");
+                setMatchCapXLM("");
+                setMatchExpiresAt("");
+                setMatchPledgeState("success");
+              } catch (err: any) {
+                setMatchPledgeError(err?.response?.data?.error || err.message || "Failed to create match pledge");
+                setMatchPledgeState("error");
+              }
+            }}
+            disabled={matchPledgeState === "loading"}
+            className="btn-primary text-xs py-2 px-4 font-body disabled:opacity-50"
+          >
+            {matchPledgeState === "loading" ? "Creating Pledge…" : "Create Match Pledge"}
+          </button>
+        </div>
       </div>
 
       {/* Widget Builder */}
@@ -791,6 +954,76 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
               {copied ? "✓ Copied!" : "Copy Embed Code"}
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Webhooks */}
+      <div className="card mt-6">
+        <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Webhooks</h2>
+        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+          Configure a webhook URL to receive signed POST notifications when milestones are reached.
+        </p>
+
+        {webhookMessage && (
+          <div className={`p-3 rounded-xl text-sm font-body mb-4 ${webhookState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+            {webhookMessage}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+              Webhook URL
+            </label>
+            <input
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              className="input-field"
+              placeholder="https://example.com/webhook"
+              type="url"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-forest-800 uppercase tracking-widest mb-1 ml-1 opacity-50">
+              Signing Secret
+            </label>
+            <div className="flex gap-2">
+              <input
+                value={webhookSecret}
+                onChange={(e) => setWebhookSecret(e.target.value)}
+                className="input-field flex-1 font-mono text-xs"
+                placeholder="Auto-generated if left empty"
+                type="text"
+              />
+              <button
+                onClick={generateSecret}
+                className="px-4 py-2 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all whitespace-nowrap"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={saveWebhook}
+              disabled={webhookState === "saving"}
+              className="btn-primary flex-1 disabled:opacity-50"
+            >
+              {webhookState === "saving" ? "Saving…" : "Save Webhook"}
+            </button>
+            <button
+              onClick={sendTestWebhook}
+              disabled={testState === "testing" || !webhookUrl.trim()}
+              className="flex-1 bg-forest-100 hover:bg-forest-200 text-forest-900 font-semibold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {testState === "testing" ? "Sending…" : "Send Test Event"}
+            </button>
+          </div>
+          {testMessage && (
+            <div className={`p-3 rounded-xl text-sm font-body ${testState === "success" ? "bg-green-50 border border-green-200 text-green-700" : "bg-red-50 border border-red-200 text-red-600"}`}>
+              {testMessage}
+            </div>
+          )}
         </div>
       </div>
     </div>

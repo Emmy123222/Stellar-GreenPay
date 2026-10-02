@@ -2,7 +2,9 @@
  * utils/format.ts
  * Formatting helpers and small UI-friendly utilities shared across the frontend.
  */
-import { formatDistanceToNow, format } from "date-fns";
+import dayjs from "dayjs";
+import relativeTime from "dayjs/plugin/relativeTime";
+dayjs.extend(relativeTime);
 import type { ProjectStatus, BadgeTier } from "./types";
 
 /**
@@ -22,6 +24,19 @@ export function formatXLM(amount: string | number, decimals = 2): string {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
   if (isNaN(n)) return "0 XLM";
   return `${n.toLocaleString("en-US", { maximumFractionDigits: decimals })} XLM`;
+}
+
+/**
+ * Normalize an XLM amount to 7 decimal places (1 stroop = 0.0000001 XLM).
+ * Handles numbers, strings, and scientific notation (e.g. 1e-6).
+ *
+ * @param amount - XLM amount as number or string.
+ * @returns Normalized fixed decimal string with 7 decimal places (e.g. "0.0000010").
+ */
+export function normalizeXLMAmount(amount: number | string): string {
+  const n = typeof amount === "string" ? parseFloat(amount.replace(/,/g, "")) : Number(amount);
+  if (isNaN(n) || !Number.isFinite(n)) return "0.0000000";
+  return n.toFixed(7);
 }
 
 /**
@@ -85,7 +100,7 @@ export function progressPercent(raised: string, goal: string): number {
  * @throws {Error} Never throws.
  */
 export function timeAgo(d: string): string {
-  try { return formatDistanceToNow(new Date(d), { addSuffix: true }); }
+  try { return dayjs(d).fromNow(); }
   catch { return d; }
 }
 
@@ -97,7 +112,7 @@ export function timeAgo(d: string): string {
  * @throws {Error} Never throws.
  */
 export function formatDate(d: string): string {
-  try { return format(new Date(d), "MMM d, yyyy"); }
+  try { return dayjs(d).format("MMM D, YYYY"); }
   catch { return d; }
 }
 

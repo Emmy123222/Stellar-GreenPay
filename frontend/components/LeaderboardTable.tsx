@@ -2,8 +2,9 @@
  * components/LeaderboardTable.tsx
  */
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { fetchLeaderboard } from "@/lib/api";
-import { formatXLM, formatUSDEquivalent, shortenAddress, badgeEmoji } from "@/utils/format";
+import { formatXLM, formatUSDEquivalent, formatCO2, shortenAddress, badgeEmoji } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import { useXlmPrice } from "@/lib/priceContext";
 import type { LeaderboardEntry } from "@/utils/types";
@@ -34,34 +35,63 @@ function avatarInitials(displayName: string | undefined, publicKey: string) {
   return `${first}${second}`.toUpperCase();
 }
 
-function Avatar({ publicKey, displayName }: { publicKey: string; displayName?: string }) {
+function Avatar({
+  publicKey,
+  displayName,
+  avatarUrl,
+}: {
+  publicKey: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const nameOrAddress = displayName || shortenAddress(publicKey);
+
+  if (avatarUrl && !imgError) {
+    return (
+      <img
+        src={avatarUrl}
+        alt={nameOrAddress}
+        className="w-9 h-9 rounded-full object-cover flex-shrink-0"
+        onError={() => setImgError(true)}
+      />
+    );
+  }
+
   const bg = AVATAR_COLORS[hashToIndex(publicKey, AVATAR_COLORS.length)];
   return (
     <div
       className="w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 font-display text-sm"
       style={{ backgroundColor: bg, color: "white" }}
       aria-hidden="true"
-      title={displayName || publicKey}
+      title={nameOrAddress}
     >
-      {avatarInitials(displayName, publicKey)}
+      {avatarInitials(displayName || undefined, publicKey)}
     </div>
   );
 }
 
-export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "month" | "year" }) {
+export default function LeaderboardTable({ limit = 20, period = "all" }: { limit?: number; period?: "all" | "week" | "month" | "year" }) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState<string | null>(null);
   const xlmUsd = useXlmPrice();
 
+  // `loading` is derived by comparing the in-flight request to the last one
+  // that resolved, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null);
+  const requestKey = `${limit}:${period}`;
+  const loading = loadedRequestKey !== requestKey;
+
   useEffect(() => {
-    setLoading(true);
-    setError(null);
     fetchLeaderboard(limit, period)
-      .then(setEntries)
+      .then((data) => {
+        setEntries(data);
+        setError(null);
+      })
       .catch(() => setError("Could not load leaderboard."))
-      .finally(() => setLoading(false));
-  }, [limit, period]);
+      .finally(() => setLoadedRequestKey(requestKey));
+  }, [limit, period, requestKey]);
 
   if (loading) return (
     <div className="space-y-2">
@@ -82,8 +112,12 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   if (entries.length === 0) return (
     <div className="text-center py-12">
-      <p className="text-3xl mb-3">🌱</p>
-      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No donors yet — be the first!</p>
+      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        🌱 No donations yet — be the first donor on the leaderboard!
+      </p>
+      <Link href="/projects" className="btn-primary">
+        Browse Projects
+      </Link>
     </div>
   );
 
@@ -91,57 +125,68 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
 
   return (
     <div className="space-y-2">
-      {entries.map((entry) => (
-        <div key={entry.publicKey}
-          className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] transition-all">
+      {entries.map((entry) => {
+        const displayName = entry.displayName || entry.display_name || undefined;
+        const avatarUrl = entry.avatarUrl || entry.avatar_url || undefined;
+        const nameOrAddress = displayName || shortenAddress(entry.publicKey);
 
-          {/* Rank */}
-          <div className="w-8 text-center flex-shrink-0">
-            {entry.rank <= 3
-              ? <span className="text-lg">{medals[entry.rank - 1]}</span>
-              : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>
-            }
-          </div>
-
-          {/* Badge */}
-          {entry.topBadge && (
-            <span className="text-xl flex-shrink-0" title={entry.topBadge}>
-              {badgeEmoji(entry.topBadge)}
-            </span>
-          )}
-
-          {/* Name / address */}
-          <div className="flex-1 min-w-0 flex items-center gap-3">
-            <Avatar publicKey={entry.publicKey} displayName={entry.displayName} />
-            <div className="min-w-0">
-              <a
-                href={accountUrl(entry.publicKey)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-forest-900 hover:text-forest-600 transition-colors text-sm font-body block truncate"
-              >
-                {entry.displayName || shortenAddress(entry.publicKey)}
-              </a>
-              <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
-                {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
-              </p>
+        return (
+          <Link
+            key={entry.publicKey}
+            href={`/donors/${entry.publicKey}`}
+            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] hover:shadow-sm transition-all cursor-pointer block group"
+          >
+            {/* Rank */}
+            <div className="w-8 text-center flex-shrink-0">
+              {entry.rank <= 3
+                ? <span className="text-lg">{medals[entry.rank - 1]}</span>
+                : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>
+              }
             </div>
-          </div>
 
-          {/* Total donated */}
-          <div className="text-right flex-shrink-0">
-            <p className="font-mono font-semibold text-forest-600 text-sm">
-              {formatXLM(entry.totalDonatedXLM)}
-            </p>
-            {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
-              <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
-                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
-              </p>
+            {/* Badge */}
+            {entry.topBadge && (
+              <span className="text-xl flex-shrink-0" title={entry.topBadge}>
+                {badgeEmoji(entry.topBadge)}
+              </span>
             )}
-            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
-          </div>
-        </div>
-      ))}
+
+            {/* Name / address */}
+            <div className="flex-1 min-w-0 flex items-center gap-3">
+              <Avatar publicKey={entry.publicKey} displayName={displayName} avatarUrl={avatarUrl} />
+              <div className="min-w-0">
+                <span className="font-semibold text-forest-900 group-hover:text-forest-600 transition-colors text-sm font-body block truncate">
+                  {nameOrAddress}
+                </span>
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
+                  {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
+                </p>
+              </div>
+            </div>
+
+            {/* Totals */}
+            <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
+              <div>
+                <p className="font-mono font-semibold text-forest-600 text-sm">
+                  {formatXLM(entry.totalDonatedXLM)}
+                </p>
+                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+                  <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
+                    {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+                  </p>
+                )}
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
+              </div>
+              <div>
+                <p className="font-mono font-semibold text-forest-600 text-sm">
+                  {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
+                </p>
+                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
+              </div>
+            </div>
+          </Link>
+        );
+      })}
     </div>
   );
 }

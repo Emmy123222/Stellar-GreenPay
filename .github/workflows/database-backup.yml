@@ -62,6 +62,22 @@ jobs:
         run: |
           echo "::error::Database backup failed. Check the logs above."
           exit 1
+          
+      - name: Backup local uploads directory
+        run: |
+          if [ -d "backend/uploads" ]; then
+            tar -czf /tmp/uploads-backup.tar.gz backend/uploads
+          else
+            echo "backend/uploads directory not found. Skipping."
+            touch /tmp/uploads-backup.tar.gz
+          fi
+
+      - name: Upload uploads backup to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: uploads-backup
+          path: /tmp/uploads-backup.tar.gz
+          retention-days: 30
       
       - name: Upload backup status
         if: always()

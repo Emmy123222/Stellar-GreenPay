@@ -32,6 +32,14 @@ beforeEach(() => {
   LA.authenticateAsync.mockResolvedValue({ success: true });
 });
 
+
+// ── Animated mock ──────────────────────────────────────────────────────────────
+// Silences warnIfUpdatesNotWrappedWithActDEV from React Native Animated. The animation
+// module's update path uses rAF/setTimeout which fires outside any act() block, so the
+// only reliable fix is to stub the native helper at the bridge level. Mirrors
+// ProjectDetailScreen.test.tsx.
+jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
+
 describe('authenticate (standalone helper)', () => {
   it('returns true when biometrics succeed', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: true });
@@ -101,6 +109,8 @@ describe('useBiometricAuth (React hook)', () => {
       `busy=${isAuthenticating}`,
       `last=${lastResult?.outcome ?? 'none'}`,
       `success=${lastResult?.success ?? 'n/a'}`,
+      `err=${lastResult?.error ?? 'none'}`,
+      `code=${lastResult?.code ?? 'none'}`,
     ].join('|');
 
     return (
@@ -127,7 +137,7 @@ describe('useBiometricAuth (React hook)', () => {
     LA.supportedAuthenticationTypesAsync.mockResolvedValue([
       LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
     ]);
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
 
     await waitFor(() => {
       const status = getByTestId('status').props.children;
@@ -140,7 +150,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('reports absent hardware correctly when no sensor exists', async () => {
     LA.hasHardwareAsync.mockResolvedValue(false);
     LA.isEnrolledAsync.mockResolvedValue(false);
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
 
     await waitFor(() => {
       const status = getByTestId('status').props.children;
@@ -158,7 +168,7 @@ describe('useBiometricAuth (React hook)', () => {
         })
     );
 
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -186,7 +196,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures cancellation as outcome=cancel', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
 
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -206,7 +216,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures system cancel as outcome=cancel', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'system_cancel' });
 
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -224,7 +234,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures fallback to PIN as outcome=fallback', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_fallback' });
 
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -242,7 +252,7 @@ describe('useBiometricAuth (React hook)', () => {
   it('captures any other failure as outcome=error', async () => {
     LA.authenticateAsync.mockResolvedValue({ success: false, error: 'lockout' });
 
-    const { getByTestId } = render(<Probe />);
+    const { getByTestId } = await act(async () => render(<Probe />));
     await waitFor(() => {
       expect(getByTestId('status').props.children).toMatch(/available=true/);
     });
@@ -255,6 +265,49 @@ describe('useBiometricAuth (React hook)', () => {
     await waitFor(() =>
       expect(getByTestId('status').props.children).toMatch(/last=error/)
     );
+  });
+
+  it('populates a human-readable error and the raw SDK code on failure (#1050)', async () => {
+    LA.authenticateAsync.mockResolvedValue({ success: false, error: 'lockout' });
+
+    const { getByTestId } = await act(async () => render(<Probe />));
+    await waitFor(() => {
+      expect(getByTestId('status').props.children).toMatch(/available=true/);
+    });
+
+    await act(async () => {
+      triggerAuth(getByTestId);
+      await new Promise((r) => setImmediate(r));
+    });
+
+    await waitFor(() => {
+      const status = getByTestId('status').props.children;
+      expect(status).toMatch(/last=error/);
+      // `error` is the user-facing reason, not the raw code.
+      expect(status).toMatch(/err=Biometrics are locked after too many failed attempts/);
+      expect(status).toMatch(/code=lockout/);
+    });
+  });
+
+  it('surfaces a cancellation message on user cancel (#1050)', async () => {
+    LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
+
+    const { getByTestId } = await act(async () => render(<Probe />));
+    await waitFor(() => {
+      expect(getByTestId('status').props.children).toMatch(/available=true/);
+    });
+
+    await act(async () => {
+      triggerAuth(getByTestId);
+      await new Promise((r) => setImmediate(r));
+    });
+
+    await waitFor(() => {
+      const status = getByTestId('status').props.children;
+      expect(status).toMatch(/last=cancel/);
+      expect(status).toMatch(/err=Authentication was cancelled/);
+      expect(status).toMatch(/code=user_cancel/);
+    });
   });
 
   it('blocks Soroban submission when authentication fails — outcome=error surfaces', async () => {

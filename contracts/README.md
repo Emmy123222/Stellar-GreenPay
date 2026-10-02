@@ -8,7 +8,7 @@ Ensure you have the Rust toolchain installed. You will also need to add the WebA
 
 ```bash
 # Install Rust toolchain target for WebAssembly
-rustup target add wasm32-unknown-unknown
+rustup target add wasm32v1-none
 ```
 
 ## Running Tests
@@ -49,16 +49,16 @@ To build the contract into a WebAssembly (.wasm) file ready for deployment:
 
 ```bash
 # Build WASM
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 ```
 
-The compiled WASM file will be located at `target/wasm32-unknown-unknown/release/<contract_name>.wasm`.
+The compiled WASM file will be located at `target/wasm32v1-none/release/<contract_name>.wasm`.
 
 ## Troubleshooting Common Errors
 
-### Error: `target wasm32-unknown-unknown not found`
+### Error: `target wasm32v1-none not found`
 *   **Cause**: The WebAssembly target is not installed for your active Rust toolchain.
-*   **Fix**: Run `rustup target add wasm32-unknown-unknown`.
+*   **Fix**: Run `rustup target add wasm32v1-none`.
 
 ### Error: `unresolved import` or `cannot find value` during tests
 *   **Cause**: You might be running tests without the `testutils` feature enabled, which provides mock data and utilities.

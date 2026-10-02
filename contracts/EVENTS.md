@@ -89,6 +89,76 @@ This document lists all events emitted by the Stellar GreenPay Soroban smart con
 
 ---
 
+## 9. `meta_upd`
+
+**Description**: Emitted when the admin sets or updates the off-chain metadata pointer (IPFS CID) for a project via `set_project_metadata`. The CID is persisted in contract storage under `DataKey::ProjectMetadata(project_id)` and can be read with `get_project_metadata`.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("meta_upd"), admin), (project_id, ipfs_cid))
+```
+
+| Event Name | Topics                | Data                                        | When Emitted                          |
+|------------|-----------------------|---------------------------------------------|---------------------------------------|
+| `meta_upd` | `["meta_upd", admin]` | `(project_id: String, ipfs_cid: String)`    | After project metadata CID is updated |
+
+**Parameter details**:
+
+- `admin` (`Address`, topic): the contract admin who authorized the update (must pass `require_auth` and match the stored admin).
+- `project_id` (`String`, data): the on-chain identifier of the project whose metadata changed.
+- `ipfs_cid` (`String`, data): the IPFS content identifier resolving to the project's metadata JSON (name, description, images, documents, etc.).
+
+---
+
+## 10. `pledge_cr`
+
+**Description**: Emitted when a new 2x donation match pledge is created for a project.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("pledge_cr"), matcher, project_id), (cap_xlm, deadline_ledger))
+```
+
+| Event Name  | Topics                                     | Data                                      | When Emitted                             |
+|-------------|--------------------------------------------|-------------------------------------------|------------------------------------------|
+| `pledge_cr` | `["pledge_cr", matcher: Address, project_id: String]` | `(cap_xlm: i128, deadline_ledger: u32)`   | When a matcher creates a 2x match pledge |
+
+---
+
+## 11. `matched`
+
+**Description**: Emitted during `donate()` when matching funds from a pledge sponsor are matched and transferred to the project.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("matched"), matcher, project_id), (matched_amount, donor))
+```
+
+| Event Name | Topics                                    | Data                                    | When Emitted                                 |
+|------------|-------------------------------------------|-----------------------------------------|----------------------------------------------|
+| `matched`  | `["matched", matcher: Address, project_id: String]` | `(matched_amount: i128, donor: Address)` | When incoming donation is matched by pledge |
+
+---
+
+## 12. `pledge_cn`
+
+**Description**: Emitted when a match pledge is cancelled by the matcher or contract admin.
+
+**Emission code**:
+
+```rust
+env.events().publish((symbol_short!("pledge_cn"), caller, project_id), pledge.matched_amount)
+```
+
+| Event Name  | Topics                                    | Data                    | When Emitted                            |
+|-------------|-------------------------------------------|-------------------------|-----------------------------------------|
+| `pledge_cn` | `["pledge_cn", caller: Address, project_id: String]` | `matched_amount: i128`  | When an active match pledge is cancelled |
+
+---
+
 ## Usage Notes
 
 - All events follow Soroban’s standard event format: `topics: Vec<Val>`, `data: Val`.
@@ -96,4 +166,5 @@ This document lists all events emitted by the Stellar GreenPay Soroban smart con
 - Events can be queried via Horizon or Soroban RPC tools.
 - Frontend / backend should listen to these for real-time updates, notifications, and leaderboard.
 
-**Last Updated**: June 30, 2026
+**Last Updated**: September 30, 2026
+

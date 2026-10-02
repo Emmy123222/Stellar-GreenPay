@@ -38,4 +38,14 @@ describe("ProjectCard", () => {
     const { container } = render(<ProjectCardSkeleton />);
     expect(container).toMatchSnapshot();
   });
+
+  it("renders an uploaded project image when present", () => {
+    const { getByRole } = render(
+      <ProjectCard
+        project={{ ...mockProject, imageUrl: "https://example.com/banner.png" }}
+      />,
+    );
+
+    expect(getByRole("img", { name: /amazon reforestation initiative/i })).toBeInTheDocument();
+  });
 });

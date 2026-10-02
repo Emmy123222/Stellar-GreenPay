@@ -51,6 +51,8 @@ export interface ClimateProject {
   activeCampaign?: ProjectCampaign | null;
   averageRating?: number;
   ratingCount?: number;
+  /** Most recent individual reviews (latest 5), from GET /api/projects/:id. */
+  recentReviews?: ProjectReview[];
   milestones?: ProjectMilestone[];
   // Cached AI-generated impact summary (populated by
   // POST /api/projects/:id/generate-summary). Null until the project owner
@@ -66,6 +68,34 @@ export interface ClimateProject {
   // passed to the fetch; defaults to false when omitted.
   followCount?: number;
   isFollowing?: boolean;
+  webhookUrl?: string | null;
+  webhookSecret?: string | null;
+  activeMatch?: DonationMatch | null;
+}
+
+/**
+ * A donation matching pledge for a project.
+ */
+export interface DonationMatch {
+  id?: string;
+  projectId?: string;
+  matcherAddress?: string;
+  capXLM: string | number;
+  multiplier: number;
+  matchedXLM?: string | number;
+  remainingXLM?: string | number;
+  expiresAt: string;
+  createdAt?: string;
+}
+
+/**
+ * A single donor review of a project.
+ */
+export interface ProjectReview {
+  donorAddress: string;
+  rating: number;
+  review: string | null;
+  createdAt: string;
 }
 
 /**
@@ -91,6 +121,7 @@ export interface ProjectCampaign {
   description: string;
   goalXLM: string;
   raisedXLM: string;
+  raisedUSDC: string;
   deadline: string;
   progressPercent: number;
   completed: boolean;
@@ -177,8 +208,12 @@ export interface ProjectUpdate {
 export interface LeaderboardEntry {
   rank: number;
   publicKey: string;
-  displayName?: string;
+  displayName?: string | null;
+  display_name?: string | null;
+  avatarUrl?: string | null;
+  avatar_url?: string | null;
   totalDonatedXLM: string;
+  totalCO2OffsetKg: string;
   projectsSupported: number;
   topBadge?: BadgeTier;
 }
@@ -249,4 +284,74 @@ export interface MonthlySubscription {
   status: "active" | "completed";
   createdAt: string;
   history: MonthlyDonationHistoryItem[];
+}
+
+/**
+ * A merged pull request displayed on the /contributors timeline.
+ */
+export interface ContributorPR {
+  id: number;
+  number: number;
+  title: string;
+  htmlUrl: string;
+  mergedAt: string;
+  feature: string;
+  author: {
+    login: string;
+    avatarUrl: string;
+    htmlUrl: string;
+  };
+}
+
+export interface VerificationRequest {
+  id: string;
+  organizationName: string;
+  organizationWebsite: string | null;
+  organizationCountry: string | null;
+  contactEmail: string;
+  walletAddress: string;
+  projectName: string;
+  projectCategory: string;
+  projectLocation: string;
+  projectDescription: string | null;
+  co2PerXLM: string;
+  expectedAnnualTonnesCO2: string | null;
+  supportingDocuments: any[];
+  storageBackend: string;
+  notes: string | null;
+  status: "pending" | "in_review" | "approved" | "rejected";
+  reviewerNotes: string | null;
+  reviewedBy: string | null;
+  submittedAt: string | null;
+  reviewedAt: string | null;
+}
+
+/**
+ * A team giving profile: multiple wallets grouped under one named team with
+ * a combined donation total.
+ */
+export interface Team {
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  inviteCode: string;
+  createdBy: string;
+  createdAt: string;
+  memberCount: number;
+  totalDonatedXLM: string;
+  totalCO2OffsetKg: string;
+  isMember?: boolean;
+}
+
+/**
+ * One entry on the team leaderboard, ranked by combined total donated.
+ */
+export interface TeamLeaderboardEntry {
+  rank: number;
+  id: string;
+  name: string;
+  logoUrl: string | null;
+  memberCount: number;
+  totalDonatedXLM: string;
+  totalCO2OffsetKg: string;
 }

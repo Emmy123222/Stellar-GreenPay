@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS projects (
   raised_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   donor_count INTEGER NOT NULL DEFAULT 0,
   co2_offset_kg INTEGER NOT NULL DEFAULT 0,
+  co2_per_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'active',
   verified BOOLEAN NOT NULL DEFAULT FALSE,
   on_chain_verified BOOLEAN NOT NULL DEFAULT FALSE,
@@ -35,9 +36,13 @@ ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash  TEXT;
 -- signed POSTs when donation milestones are reached.
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret_rotated_at TIMESTAMPTZ;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS previous_webhook_secret_expires_at TIMESTAMPTZ;
 
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_url    TEXT;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS webhook_secret TEXT;
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
 -- donations: immutable donation ledger. Each row is a single
 -- contribution from donor_address to a project. transaction_hash must be
@@ -52,8 +57,10 @@ CREATE TABLE IF NOT EXISTS donations (
   currency TEXT NOT NULL DEFAULT 'XLM',
   message TEXT,
   transaction_hash TEXT NOT NULL UNIQUE,
+  donor_country TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_donations_donor_project ON donations(donor_address, project_id);
 
 -- profiles: aggregated donor stats and public profile for a Stellar wallet.
 -- total_donated_xlm and projects_supported are computed counters kept in
@@ -62,6 +69,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   public_key TEXT PRIMARY KEY,
   display_name TEXT,
   bio TEXT,
+  avatar_url TEXT,
   total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   projects_supported INTEGER NOT NULL DEFAULT 0,
   badges JSONB NOT NULL DEFAULT '[]'::JSONB,
@@ -71,13 +79,61 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- project_updates: news / blog posts published by project owners. Listed
 -- on the project detail page in reverse chronological order.
+-- image_url is an optional link to a photo or chart uploaded via /api/uploads.
 CREATE TABLE IF NOT EXISTS project_updates (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
+  image_url TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- update_images: content-moderation audit log + admin review queue for images
+-- attached to project updates (issue #1101, migration
+-- 008_update_images_moderation.js). One row per AWS Rekognition
+-- DetectModerationLabels verdict. update_id/project_id are nullable because an
+-- image is scanned when it reaches storage, i.e. before any update references
+-- it. max_confidence is a percentage (0–100), matching Rekognition's units.
+-- moderation_labels holds the normalised label summary as JSONB.
+CREATE TABLE IF NOT EXISTS update_images (
+  id UUID PRIMARY KEY,
+  update_id UUID REFERENCES project_updates(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  storage_key TEXT,
+  image_url TEXT NOT NULL,
+  storage_backend TEXT NOT NULL DEFAULT 's3',
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  flagged_for_review BOOLEAN NOT NULL DEFAULT FALSE,
+  provider TEXT NOT NULL DEFAULT 'aws_rekognition',
+  max_confidence NUMERIC(5, 2),
+  moderation_labels JSONB NOT NULL DEFAULT '[]'::JSONB,
+  reason TEXT,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT update_images_status_check
+    CHECK (status IN ('approved', 'rejected', 'pending_review')),
+  CONSTRAINT update_images_max_confidence_range
+    CHECK (
+      max_confidence IS NULL
+      OR (max_confidence >= 0 AND max_confidence <= 100)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_update_images_storage_key
+  ON update_images (storage_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_update_images_image_url
+  ON update_images (image_url, created_at DESC);
+-- Admin review queue: unreviewed rows, newest first.
+CREATE INDEX IF NOT EXISTS idx_update_images_pending_review
+  ON update_images (created_at DESC)
+  WHERE status = 'pending_review';
+CREATE INDEX IF NOT EXISTS idx_update_images_update_id
+  ON update_images (update_id);
+CREATE INDEX IF NOT EXISTS idx_update_images_project_created
+  ON update_images (project_id, created_at DESC);
 
 -- project_subscriptions: email-based subscriptions to project updates.
 -- UNIQUE(project_id, email) prevents duplicate sign-ups.
@@ -157,6 +213,34 @@ CREATE TABLE IF NOT EXISTS donation_matches (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- recurring_donations: monthly pledge schedule. Each row represents a
+-- donor's commitment to donate amount_xlm per month for duration_months.
+-- The pg-boss daily job (recurringDonationQueue.js) processes due pledges,
+-- builds Soroban transactions, and sends push/email reminders.
+-- Status lifecycle: active → completed | cancelled
+CREATE TABLE IF NOT EXISTS recurring_donations (
+  id               UUID PRIMARY KEY,
+  donor_address    TEXT NOT NULL,
+  project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  amount_xlm       NUMERIC(20, 7) NOT NULL CHECK (amount_xlm > 0),
+  currency         TEXT NOT NULL DEFAULT 'XLM',
+  next_due_date    DATE NOT NULL,
+  duration_months  INTEGER NOT NULL CHECK (duration_months >= 1),
+  remaining_months INTEGER NOT NULL CHECK (remaining_months >= 0),
+  status           TEXT NOT NULL DEFAULT 'active',
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT recurring_donations_status_check
+    CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
+  CONSTRAINT recurring_donations_remaining_lte_duration
+    CHECK (remaining_months <= duration_months)
+);
+CREATE INDEX IF NOT EXISTS recurring_donations_due_idx
+  ON recurring_donations (next_due_date, status)
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS recurring_donations_donor_idx
+  ON recurring_donations (donor_address);
+CREATE INDEX IF NOT EXISTS recurring_donations_project_idx
+  ON recurring_donations (project_id);
 
 -- device_tokens: push notification device registrations. token is the FCM /
 -- APNs device token; platform is 'ios' or 'android'. wallet_address links
@@ -167,51 +251,41 @@ CREATE TABLE IF NOT EXISTS device_tokens (
   platform TEXT NOT NULL,
   wallet_address TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_delivered_at TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_device_tokens_last_delivered
+  ON device_tokens (last_delivered_at)
+  WHERE last_delivered_at IS NULL;
 
--- project_follows: many-to-many join between projects and device_tokens.
--- A device "follows" a project to receive push notifications.
--- UNIQUE(project_id, device_token_id) prevents duplicate follows.
-CREATE TABLE IF NOT EXISTS project_follows (
+-- recurring_donations: recurring donation schedules set by donors.
+-- next_due_date is calculated from the schedule when the donation is created
+-- or renewed; the recurring-donation queue polls this column daily.
+CREATE TABLE IF NOT EXISTS recurring_donations (
   id UUID PRIMARY KEY,
   project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  device_token_id UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
-  wallet_address TEXT,
+  donor_address TEXT NOT NULL,
+  amount_xlm NUMERIC(20, 7) NOT NULL,
+  frequency TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly', 'biweekly', 'monthly')),
+  next_due_date TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(project_id, device_token_id)
+  updated_at TIMESTAMPTZ
 );
 
--- Verification requests submitted via the /apply form on the frontend.
--- Each row represents an organisation asking the GreenPay admin team to
--- verify their climate project. Mirrors the columns of migration 002.
-CREATE TABLE IF NOT EXISTS verification_requests (
-  id UUID PRIMARY KEY,
-  organization_name TEXT NOT NULL,
-  organization_website TEXT,
-  organization_country TEXT,
-  contact_email TEXT NOT NULL,
-  wallet_address TEXT NOT NULL,
-  project_name TEXT NOT NULL,
-  project_category TEXT NOT NULL,
-  project_location TEXT NOT NULL,
-  project_description TEXT,
-  co2_per_xlm NUMERIC(20, 7) NOT NULL,
-  expected_annual_tonnes_co2 NUMERIC(20, 7),
-  supporting_documents JSONB NOT NULL DEFAULT '[]'::JSONB,
-  storage_backend TEXT NOT NULL DEFAULT 'local',
-  notes TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  reviewer_notes TEXT,
-  reviewed_by TEXT,
-  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  reviewed_at TIMESTAMPTZ,
-  CONSTRAINT verification_requests_status_check
-    CHECK (status IN ('pending', 'in_review', 'approved', 'rejected')),
-  CONSTRAINT verification_requests_co2_positive
-    CHECK (co2_per_xlm >= 0)
+-- impact_certificates: shareable impact certificates. Each row is a public
+-- certificate identified by a unique slug, rendered at /certificate/:slug
+-- and served as JSON by GET /api/impact/certificate/:slug.
+CREATE TABLE IF NOT EXISTS impact_certificates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug TEXT NOT NULL UNIQUE,
+  donor_address TEXT NOT NULL,
+  donor_name TEXT,
+  total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
+  co2_offset_kg INTEGER NOT NULL DEFAULT 0,
+  badge_tier TEXT NOT NULL DEFAULT 'Supporter',
+  projects_supported JSONB NOT NULL DEFAULT '[]'::JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS verification_requests_status_idx
-  ON verification_requests (status, submitted_at DESC);
-CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
-  ON verification_requests (wallet_address);
+CREATE INDEX IF NOT EXISTS idx_impact_certificates_donor
+  ON impact_certificates (donor_address, created_at DESC);
