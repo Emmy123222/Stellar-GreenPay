@@ -2,9 +2,9 @@
 const express = require("express");
 const router = express.Router();
 const pool = require("../db/pool");
-const { signToken, adminRequired } = require("../middleware/auth");
+const { signToken, signAdminToken, adminRequired } = require("../middleware/auth");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { buildDigestHtml, buildDigestText } = require("../services/digestQueue");
+const { buildDigestHtml } = require("../services/digestQueue");
 const {
   getMaxRecurringAmount,
   setMaxRecurringAmount,
@@ -13,6 +13,7 @@ const {
 const loginLimiter = createRateLimiter(10, 15, "admin-login");
 
 const TOKEN_EXPIRY = "1h";
+const ADMIN_TOKEN_EXPIRY = "15m";
 const REFRESH_EXPIRY = "24h";
 
 /**
@@ -38,8 +39,9 @@ router.post("/login", loginLimiter, (req, res) => {
   }
 
   const token = signToken({ role: "admin", sub: username }, TOKEN_EXPIRY);
+  const adminToken = signAdminToken({ role: "admin", sub: username, type: "admin" });
   const refreshToken = signToken({ role: "admin", sub: username, type: "refresh" }, REFRESH_EXPIRY);
-  return res.json({ success: true, data: { token, refreshToken, expiresIn: 3600 } });
+  return res.json({ success: true, data: { token, adminToken, refreshToken, expiresIn: 3600, adminTokenExpiresIn: 900 } });
 });
 
 /**
@@ -279,4 +281,114 @@ router.put("/recurring-max-amount", adminRequired, (req, res) => {
   return res.json({ success: true, data: { maxAmountXlm: updated } });
 });
 
+/**
+ * Admin endpoint to set/create a match pledge for a project.
+ *
+ * @route POST /api/admin/projects/:projectId/match-pledges
+ */
+router.post("/projects/:projectId/match-pledges", adminRequired, async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const { matcherAddress, capXLM, multiplier = 2, expiresAt } = req.body || {};
+
+    if (!matcherAddress || typeof matcherAddress !== "string") {
+      return res.status(400).json({ success: false, error: "matcherAddress is required" });
+    }
+    const capNum = Number.parseFloat(capXLM);
+    if (!Number.isFinite(capNum) || capNum <= 0) {
+      return res.status(400).json({ success: false, error: "capXLM must be a positive number" });
+    }
+    if (!expiresAt || Number.isNaN(new Date(expiresAt).getTime())) {
+      return res.status(400).json({ success: false, error: "expiresAt must be a valid ISO date string" });
+    }
+
+    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ success: false, error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO donation_matches (id, project_id, matcher_address, cap_xlm, multiplier, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, project_id, matcher_address, cap_xlm, multiplier, matched_xlm, expires_at, created_at`,
+      [
+        uuid(),
+        projectId,
+        matcherAddress,
+        capNum.toFixed(7),
+        multiplier,
+        new Date(expiresAt).toISOString(),
+      ],
+    );
+
+    logAdminAction({
+      actor: req.admin?.sub || "admin",
+      action: "admin.match_pledge.create",
+      targetType: "donation_match",
+      targetId: result.rows[0].id,
+      metadata: { projectId, matcherAddress, capXLM, multiplier, expiresAt },
+      ipAddress: req.ip,
+    });
+
+    const row = result.rows[0];
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: row.id,
+        projectId: row.project_id,
+        matcherAddress: row.matcher_address,
+        capXLM: row.cap_xlm?.toString() || "0",
+        multiplier: row.multiplier,
+        matchedXLM: row.matched_xlm?.toString() || "0",
+        remainingXLM: (
+          Number.parseFloat(row.cap_xlm) - Number.parseFloat(row.matched_xlm)
+        ).toFixed(7),
+        expiresAt: new Date(row.expires_at).toISOString(),
+        createdAt: new Date(row.created_at).toISOString(),
+      },
+    });
+  } catch (e) {
+    return next(e);
+  }
+});
+
+/**
+ * Admin endpoint to cancel a match pledge.
+ *
+ * @route DELETE /api/admin/match-pledges/:id
+ */
+router.delete("/match-pledges/:id", adminRequired, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "UPDATE donation_matches SET expires_at = NOW() WHERE id = $1 RETURNING id, project_id, matcher_address, cap_xlm, matched_xlm",
+      [id],
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ success: false, error: "Match pledge not found" });
+    }
+
+    logAdminAction({
+      actor: req.admin?.sub || "admin",
+      action: "admin.match_pledge.cancel",
+      targetType: "donation_match",
+      targetId: id,
+      metadata: { result: result.rows[0] },
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        id,
+        cancelled: true,
+      },
+    });
+  } catch (e) {
+    return next(e);
+  }
+});
+
 module.exports = router;
+

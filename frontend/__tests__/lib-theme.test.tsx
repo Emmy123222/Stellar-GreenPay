@@ -13,6 +13,7 @@
 import React from "react";
 import { render, act, screen, fireEvent } from "@testing-library/react";
 import {
+  THEME_INIT_SCRIPT,
   THEME_STORAGE_KEY,
   ThemeProvider,
   applyThemeToDocument,
@@ -215,5 +216,166 @@ describe("ThemeProvider", () => {
 
     expect(screen.getByTestId("theme").textContent).toBe("system");
     expect(screen.getByTestId("effective").textContent).toBe("light");
+  });
+
+  it("stores the preference under the greenpay:theme key (issue #1084)", () => {
+    mockSystemDark(false);
+    render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    act(() => fireEvent.click(screen.getByTestId("set-dark")));
+    expect(THEME_STORAGE_KEY).toBe("greenpay:theme");
+    expect(localStorage.getItem("greenpay:theme")).toBe("dark");
+  });
+
+  it("migrates a legacy greenpay-theme value to the new key", () => {
+    mockSystemDark(false);
+    localStorage.setItem("greenpay-theme", "dark");
+    render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId("effective").textContent).toBe("dark");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    expect(localStorage.getItem("greenpay-theme")).toBeNull();
+  });
+
+  it("prefers the new key over a stale legacy value", () => {
+    mockSystemDark(false);
+    localStorage.setItem(THEME_STORAGE_KEY, "light");
+    localStorage.setItem("greenpay-theme", "dark");
+    render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId("effective").textContent).toBe("light");
+  });
+
+  it("an explicit choice overrides the OS preference after remount (new session)", () => {
+    mockSystemDark(true);
+    const first = render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    act(() => fireEvent.click(screen.getByTestId("set-light")));
+    first.unmount();
+    document.documentElement.classList.add("dark");
+
+    render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId("theme").textContent).toBe("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+  });
+
+  it("syncs when another tab changes the stored theme", () => {
+    mockSystemDark(false);
+    render(
+      <ThemeProvider>
+        <ExportProbe />
+      </ThemeProvider>,
+    );
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: THEME_STORAGE_KEY, newValue: "dark" }),
+      );
+    });
+    expect(screen.getByTestId("effective").textContent).toBe("dark");
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "unrelated", newValue: "light" }),
+      );
+    });
+    expect(screen.getByTestId("effective").textContent).toBe("dark");
+  });
+});
+
+function mockSystemDark(dark: boolean) {
+  window.matchMedia = jest.fn().mockImplementation((query: string) => ({
+    matches: dark && query.includes("dark"),
+    media: query,
+    addEventListener: jest.fn(),
+    removeEventListener: jest.fn(),
+    addListener: jest.fn(),
+    removeListener: jest.fn(),
+    dispatchEvent: jest.fn(),
+  }));
+}
+
+describe("THEME_INIT_SCRIPT (pre-paint, runs before React)", () => {
+  const runScript = () => new Function(THEME_INIT_SCRIPT)();
+  const isDark = () => document.documentElement.classList.contains("dark");
+
+  it("embeds the greenpay:theme key", () => {
+    expect(THEME_INIT_SCRIPT).toContain('"greenpay:theme"');
+  });
+
+  it.each([
+    // [stored, legacy, osDark, expectedDark]
+    [null, null, false, false],
+    [null, null, true, true],
+    ["dark", null, false, true],
+    ["light", null, true, false],
+    ["system", null, true, true],
+    ["system", null, false, false],
+    ["rainbow", null, true, true],
+    [null, "dark", false, true],
+    ["light", "dark", false, false],
+  ])(
+    "stored=%p legacy=%p osDark=%p -> dark=%p",
+    (stored, legacy, osDark, expectedDark) => {
+      if (stored !== null) localStorage.setItem(THEME_STORAGE_KEY, stored);
+      if (legacy !== null) localStorage.setItem("greenpay-theme", legacy);
+      mockSystemDark(osDark);
+      document.documentElement.classList.toggle("dark", !expectedDark);
+
+      runScript();
+
+      expect(isDark()).toBe(expectedDark);
+      expect(document.documentElement.style.colorScheme).toBe(
+        expectedDark ? "dark" : "light",
+      );
+    },
+  );
+
+  it("agrees with ThemeProvider for every stored value", () => {
+    for (const stored of ["light", "dark", "system", null]) {
+      for (const osDark of [false, true]) {
+        localStorage.clear();
+        if (stored) localStorage.setItem(THEME_STORAGE_KEY, stored);
+        mockSystemDark(osDark);
+        runScript();
+        const scriptDark = isDark();
+
+        const { unmount } = render(
+          <ThemeProvider>
+            <ExportProbe />
+          </ThemeProvider>,
+        );
+        expect(isDark()).toBe(scriptDark);
+        unmount();
+      }
+    }
+  });
+
+  it("does not throw when localStorage is unavailable", () => {
+    const spy = jest
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("SecurityError");
+      });
+    try {
+      expect(runScript).not.toThrow();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -3,7 +3,8 @@
  */
 "use strict";
 
-const { server: stellarServer } = require("./stellar");
+const { server: stellarServer, getProjectDeactivatedEvents } = require("./stellar");
+const { sendRecurringDonationCancelledEmail } = require("./email");
 const pool = require("../db/pool");
 const { v4: uuid } = require("uuid");
 const { computeBadges } = require("./store");
@@ -12,9 +13,11 @@ const donationEvents = require("./donationEvents");
 const logger = require("../logger");
 
 let lastProcessedLedger = 0;
+let lastDeactivationLedger = 0;
 let isRunning = false;
 let io = null;
 let projectWallets = new Map(); // wallet_address -> project_id
+let deactivationPollTimer = null;
 
 /**
  * Fetch all active project wallets and cache them.
@@ -53,6 +56,12 @@ async function startIndexer(socketIo) {
   setInterval(updateProjectWallets, 10 * 60 * 1000);
 
   logger.info({ event: "indexer_started" }, "Starting Horizon operations stream");
+
+  // Poll Soroban contract events for ProjectDeactivated
+  pollDeactivationEvents().catch(() => {});
+  if (!deactivationPollTimer) {
+    deactivationPollTimer = setInterval(pollDeactivationEvents, 30 * 1000);
+  }
 
   // Start streaming operations from 'now'
   stellarServer.operations()
@@ -230,19 +239,143 @@ function getStatus() {
   return {
     isRunning,
     lastProcessedLedger,
+    lastDeactivationLedger,
     projectWalletsCount: projectWallets.size,
     timestamp: new Date().toISOString()
   };
 }
 
 /**
- * Get the current indexer status used by the health endpoint.
+ * Handle a project deactivation event.
+ * Cancels all recurring donations for the project and notifies donors via email.
  *
- * @returns {{isRunning:boolean,lastProcessedLedger:number,projectWalletsCount:number,timestamp:string}}
+ * @param {string} projectId - Project identifier (UUID or wallet address).
+ * @returns {Promise<{ cancelledCount: number }>}
  */
-// exported as `getStatus`
+async function handleProjectDeactivated(projectId) {
+  if (!projectId) return { cancelledCount: 0 };
+
+  const client = await pool.connect();
+  let inTransaction = false;
+
+  try {
+    // 1. Find all active/pending recurring donations for this project
+    const donationsResult = await client.query(
+      `SELECT rd.id, rd.donor_address, p.name AS project_name
+       FROM recurring_donations rd
+       JOIN projects p ON rd.project_id = p.id
+       WHERE (p.id::text = $1 OR p.wallet_address = $1)
+         AND (rd.status IS NULL OR rd.status NOT IN ('cancelled', 'completed'))`,
+      [projectId]
+    );
+
+    const activeDonations = donationsResult.rows;
+
+    await client.query("BEGIN");
+    inTransaction = true;
+
+    // 2. Cancel recurring donations for the project
+    try {
+      await client.query(
+        `UPDATE recurring_donations
+         SET status = 'cancelled', active = false, updated_at = NOW()
+         WHERE project_id IN (
+           SELECT id FROM projects WHERE id::text = $1 OR wallet_address = $1
+         )
+         AND (status IS NULL OR status NOT IN ('cancelled', 'completed'))`,
+        [projectId]
+      );
+    } catch {
+      await client.query(
+        `UPDATE recurring_donations
+         SET status = 'cancelled'
+         WHERE project_id IN (
+           SELECT id FROM projects WHERE id::text = $1 OR wallet_address = $1
+         )
+         AND (status IS NULL OR status NOT IN ('cancelled', 'completed'))`,
+        [projectId]
+      );
+    }
+
+    await client.query("COMMIT");
+    inTransaction = false;
+
+    logger.info(
+      { event: "project_deactivated_recurring_cancelled", projectId, count: activeDonations.length },
+      `Cancelled ${activeDonations.length} recurring donations for deactivated project ${projectId}`
+    );
+
+    // 3. Notify donors by email
+    for (const donation of activeDonations) {
+      try {
+        const subResult = await pool.query(
+          `SELECT email FROM project_subscriptions
+           WHERE donor_address = $1 AND (unsubscribed = false OR unsubscribed IS NULL)
+           ORDER BY (project_id IN (SELECT id FROM projects WHERE id::text = $2 OR wallet_address = $2)) DESC, created_at DESC
+           LIMIT 1`,
+          [donation.donor_address, projectId]
+        );
+
+        const email = subResult.rows[0]?.email;
+        if (email) {
+          await sendRecurringDonationCancelledEmail({
+            email,
+            projectName: donation.project_name,
+            donationId: donation.id,
+          });
+        }
+      } catch (emailErr) {
+        logger.error(
+          { event: "recurring_cancellation_email_error", donationId: donation.id, err: emailErr },
+          emailErr.message
+        );
+      }
+    }
+
+    return { cancelledCount: activeDonations.length };
+  } catch (err) {
+    if (inTransaction) await client.query("ROLLBACK");
+    logger.error({ event: "handle_project_deactivated_error", projectId, err }, err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Poll Soroban RPC for ProjectDeactivated contract events and process them.
+ */
+async function pollDeactivationEvents() {
+  try {
+    const events = await getProjectDeactivatedEvents(lastDeactivationLedger || undefined);
+    for (const evt of events) {
+      if (evt.ledger && evt.ledger > lastDeactivationLedger) {
+        lastDeactivationLedger = evt.ledger;
+      }
+      if (evt.projectId) {
+        await handleProjectDeactivated(evt.projectId);
+      }
+    }
+  } catch (err) {
+    logger.error({ event: "poll_deactivation_events_error", err }, err.message);
+  }
+}
+
+/**
+ * Stop the indexer and timers.
+ */
+function stopIndexer() {
+  if (deactivationPollTimer) {
+    clearInterval(deactivationPollTimer);
+    deactivationPollTimer = null;
+  }
+  isRunning = false;
+}
 
 module.exports = {
   startIndexer,
-  getStatus
+  stopIndexer,
+  getStatus,
+  handleProjectDeactivated,
+  pollDeactivationEvents,
 };

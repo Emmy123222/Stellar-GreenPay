@@ -5,7 +5,7 @@
  * `useTheme()` from `@/lib/theme`. Renders a sun icon when the active
  * theme is dark (clicking reverts to light) and a moon icon when it is
  * light (clicking activates dark mode). Persists the choice via the
- * ThemeProvider's localStorage write-through.
+ * ThemeProvider's localStorage write-through under key `greenpay:theme`.
  */
 import { useTheme } from "@/lib/theme";
 import clsx from "clsx";

@@ -1,87 +1,174 @@
-# Architecture — Stellar GreenPay
+# Architecture Documentation
 
-## System Overview
+## Admin Authentication Model
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                          User's Browser                             │
-│  ┌────────────────────────────┐   ┌────────────────────────────┐   │
-│  │  Next.js Frontend          │   │  Freighter Extension       │   │
-│  │  (React + Tailwind)        │◄─►│  (Stellar Wallet)          │   │
-│  └──────────┬─────────────────┘   └────────────────────────────┘   │
-└─────────────┼───────────────────────────────────────────────────────┘
-              │ REST API (non-critical path)
-              ▼
-┌─────────────────────────────┐
-│  Node.js Backend (Express)  │
-│                             │
-│  • Project metadata         │
-│  • Donation record keeping  │
-│  • Leaderboard aggregation  │
-│  • Profile management       │
-│  • Project updates feed     │
-└──────────────┬──────────────┘
-               │ Horizon REST
-               ▼
-┌─────────────────────────────┐     ┌──────────────────────────────┐
-│  Stellar Horizon API        │◄───►│  Stellar Network             │
-│  (horizon-testnet           │     │  (Validators)                │
-│   .stellar.org)             │     │                              │
-└─────────────────────────────┘     └──────────────────────────────┘
-                                               ▲
-                                               │ Soroban
-                                  ┌────────────────────────────────┐
-                                  │  GreenPay Donation Contract    │
-                                  │  (Rust/WASM)                   │
-                                  │                                │
-                                  │  register_project()            │
-                                  │  donate()                      │
-                                  │  get_donor_stats()             │
-                                  │  get_badge()                   │
-                                  │  get_global_total()            │
-                                  │  get_global_co2()              │
-                                  └────────────────────────────────┘
+### Overview
+The Stellar GreenPay platform implements a multi-layered authentication system for administrative operations to ensure security and proper access control.
+
+### Authentication Methods
+
+#### 1. JWT-Based Authentication
+Admin users authenticate using JSON Web Tokens (JWT) with role-based access control.
+
+**Token Types:**
+- **Standard Admin Token**: 1-hour TTL, used for general admin operations
+- **Short-Lived Admin Token**: 15-minute TTL, used for sensitive operations (project registration, user management, status changes)
+- **Refresh Token**: 24-hour TTL, used to obtain new access tokens
+
+**Token Structure:**
+```json
+{
+  "role": "admin",
+  "sub": "username",
+  "type": "admin|refresh",
+  "iat": 1234567890,
+  "exp": 1234571490
+}
 ```
 
-## Donation Flow
+#### 2. API Key Authentication
+For automated systems and internal services, admin API keys can be used via the `X-Admin-Key` header.
 
+**Configuration:**
+- `ADMIN_API_KEY`: Primary admin API key
+- `ADMIN_API_KEYS`: Comma-separated list of rotated keys for key rotation support
+
+### Route Protection Levels
+
+#### Level 1: Standard Admin Protection (`adminRequired`)
+Used for read-only admin operations and non-sensitive administrative tasks.
+
+**Protected Routes:**
+- `GET /api/admin/me` - Get admin profile
+- `GET /api/admin/audit-log` - View audit logs
+- `POST /api/admin/digest/preview` - Preview email digests
+- `GET /api/verification-requests/stats` - Get verification statistics
+- `GET /api/verification-requests` - List verification requests
+
+**Authentication Requirements:**
+- Valid JWT with `role: "admin"` claim, OR
+- Valid `X-Admin-Key` header
+
+#### Level 2: Enhanced Admin Protection (`adminTokenRequired`)
+Used for sensitive administrative operations that modify data or perform critical actions.
+
+**Protected Routes:**
+- `POST /api/projects/admin/register` - Register projects on-chain
+- `POST /api/projects/admin/confirm` - Confirm project registrations
+- `PATCH /api/projects/:id/webhook` - Update project webhooks
+- `PATCH /api/verification-requests/:id/status` - Change verification request status
+- `DELETE /api/verification-requests/:id` - Delete verification requests
+- `POST /api/updates` - Create project updates
+
+**Authentication Requirements:**
+- Valid short-lived admin token (15-minute TTL) with `role: "admin"` and `type: "admin"` claims, OR
+- Valid `X-Admin-Key` header
+
+### Security Features
+
+#### Role-Based Access Control
+All admin tokens must include a `role: "admin"` claim. The middleware verifies this claim before granting access to protected routes.
+
+#### Time-Based Token Expiration
+- Standard admin tokens expire after 1 hour
+- Short-lived admin tokens expire after 15 minutes
+- Refresh tokens expire after 24 hours
+- This limits the window of opportunity for token theft
+
+#### Token Type Validation
+Enhanced admin protection requires tokens with `type: "admin"` claim, preventing standard tokens from being used for sensitive operations.
+
+#### Timing-Safe Key Comparison
+API key comparison uses timing-safe functions to prevent timing attacks.
+
+### Implementation Details
+
+#### Middleware Functions
+- `adminRequired(req, res, next)`: Standard admin authentication
+- `adminTokenRequired(req, res, next)`: Enhanced admin authentication with short-lived token validation
+- `adminKeyRequired(req, res, next)`: API key-only authentication
+
+#### Token Generation
+```javascript
+// Standard admin token
+const token = signToken({ role: "admin", sub: username }, "1h");
+
+// Short-lived admin token for sensitive operations
+const adminToken = signAdminToken({ role: "admin", sub: username, type: "admin" });
+
+// Refresh token
+const refreshToken = signToken({ role: "admin", sub: username, type: "refresh" }, "24h");
 ```
-Donor selects amount ──► buildDonationTransaction()
-                                    │
-                                    ▼
-                         Freighter signs tx
-                                    │
-                                    ▼
-                    submitTransaction() → Horizon
-                                    │
-                                    ▼
-                    XLM sent directly to project wallet
-                                    │
-                        ┌───────────┴───────────┐
-                        ▼                       ▼
-              recordDonation()           Soroban donate()
-              (backend)                  (on-chain record)
-                        │                       │
-                        └───────────┬───────────┘
-                                    ▼
-                        Leaderboard + badge updated
+
+### Deployment Considerations
+
+#### IP Allowlisting (Optional)
+For additional security, consider restricting admin routes to internal networks via nginx IP allowlisting:
+
+```nginx
+location /api/admin/ {
+    allow 192.168.1.0/24;
+    allow 10.0.0.0/8;
+    deny all;
+    # ... proxy_pass configuration
+}
 ```
 
-## Key Design Decisions
+#### Environment Variables
+Required environment variables for admin authentication:
+- `JWT_SECRET`: Secret key for JWT signing/verification
+- `ADMIN_USERNAME`: Admin username for login
+- `ADMIN_PASSWORD`: Admin password for login
+- `ADMIN_API_KEY`: (Optional) API key for automated admin access
+- `ADMIN_API_KEYS`: (Optional) Comma-separated list of rotated API keys
 
-### Direct-to-project payments
-Donations go straight to the project wallet via a standard Stellar payment. The contract records the event but does not custody funds — this maximises trust and minimises attack surface.
+### Audit Logging
+All administrative actions are logged to the `admin_audit_log` table with:
+- Actor (admin username or identifier)
+- Action performed
+- Target type and ID
+- IP address
+- Timestamp
+- Additional metadata
 
-### Backend as optional layer
-The Node.js backend provides project metadata, the leaderboard, and the update feed. If the backend is unavailable, core donations still work — users just can't see the leaderboard or feed.
+### Security Best Practices
 
-### Soroban as the source of truth
-The contract is the immutable, auditable record of all donations. Anyone can verify total raised, donor stats, and CO₂ offsets without trusting the backend.
+1. **Token Storage**: Store tokens securely (httpOnly cookies, secure storage)
+2. **Key Rotation**: Regularly rotate JWT secrets and API keys
+3. **Monitoring**: Monitor audit logs for suspicious activity
+4. **Rate Limiting**: Admin login endpoints are rate-limited
+5. **Network Security**: Consider VPN/private network access for admin operations
+6. **Token Refresh**: Implement proper token refresh mechanisms
+7. **Error Handling**: Return generic error messages to prevent information leakage
 
-### Community features
-The leaderboard and donation feed create social accountability — donors can see their rank and impact publicly, encouraging more giving.
+### Migration Guide
 
-## Security
+When upgrading to the enhanced authentication model:
+
+1. Update admin clients to handle the new `adminToken` field in login responses
+2. Use `adminToken` for sensitive operations instead of the standard `token`
+3. Implement token refresh logic to handle short-lived token expiration
+4. Update API calls to use the appropriate token based on operation sensitivity
+5. Test all admin operations with both authentication methods
+
+### Testing
+
+Authentication is tested in:
+- `backend/src/routes/admin.test.js` - Admin route authentication tests
+- `backend/src/middleware/auth.test.js` - Authentication middleware tests
+
+Test coverage includes:
+- Valid token authentication
+- Invalid token rejection
+- Expired token handling
+- API key authentication
+- Role claim validation
+- Token type validation
+
+
+## Redis cache key namespacing
+Redis is optional and often shared with other applications (managed instance, sidecar, or a cluster with several databases). Every cache key this service writes is therefore qualified with the `greenpay:` namespace — `greenpay:project:abc123`, `greenpay:leaderboard:page:1`, `greenpay:projects:list:*`. The prefix is applied centrally by the cache services (`backend/src/services/redis.js` and `backend/src/services/cache.js`) using `backend/src/utils/cacheKeys.js`, so a new call site cannot forget it and `KEYS`-based invalidation can never delete another service's data. Rate-limit counters use their own `greenpay:rate-limit:` prefix.
+
 
 | Concern | Mitigation |
 |---------|-----------|
@@ -90,53 +177,6 @@ The leaderboard and donation feed create social accountability — donors can se
 | Project wallet spoofing | Admin must register projects on-chain via Soroban |
 | Sybil donors | On-chain stats cannot be faked — all linked to real wallet |
 | Backend downtime | Donations still work — backend is not on the critical path |
-
-### CSRF Strategy
-
-The backend uses **cookie-based CSRF protection** (`csurf`) for browser clients and **selective exemption** for non-browser clients that cannot participate in the cookie/token handshake.
-
-#### How it works
-
-The `selectiveCsrf` middleware (`backend/src/middleware/selectiveCsrf.js`) wraps `csurf` with a path-based routing decision:
-
-```
-incoming request
-       │
-       ▼
- isCsrfExempt(req.path)?
-  ├─ YES → skip csurf → next()
-  └─ NO  → csurf validates X-CSRF-Token header
-                │
-                ├─ valid   → next()
-                └─ invalid → 403 ForbiddenError
-```
-
-#### Exempt paths
-
-| Prefix / Path | Client type | Reason for exemption |
-|---|---|---|
-| `/api/mobile/*` | React Native app | No browser cookie jar; uses `Authorization: Bearer` JWT |
-| `/api/extension/*` | Freighter companion extension | Service-worker context; no access to main-frame cookies |
-| `/api/notifications*` | SSE push streams | Long-lived GET streams; no mutation |
-| `/health`, `/api/health`, `/api/v1/health`, `/api/readiness` | Infrastructure probes | No mutation; no browser context |
-
-#### Protected paths
-
-All other routes (`/api/projects`, `/api/donations`, `/api/ratings`, `/api/uploads`, etc.) require a valid CSRF token obtained from `GET /api/csrf-token` or `GET /api/v1/csrf-token`.
-
-Browser clients must:
-1. `GET /api/csrf-token` — server sets the CSRF cookie and returns `{ csrfToken }` in the body.
-2. Include `X-CSRF-Token: <token>` on every mutating request (`POST`, `PUT`, `PATCH`, `DELETE`).
-
-#### Mobile / Extension clients
-
-Mobile (React Native) and extension clients use the `/api/mobile/*` and `/api/extension/*` prefixes respectively. These route to the same underlying handlers — there is no logic duplication. Authentication is handled separately via `Authorization: Bearer <jwt>` or Stellar wallet-signature headers.
-
-#### Security trade-off
-
-Skipping CSRF for non-browser prefixes is safe because:
-- CSRF is a browser-specific attack vector (the browser auto-attaches cookies to cross-site requests).
-- Native and extension clients do not have a cookie jar shared with an attacker-controlled page.
-- The mobile/extension endpoints are still protected by rate-limiting, input validation, and any auth middleware on individual routes.
-
-The exempt prefix list is an explicit allowlist in `isCsrfExempt()` — new routes are CSRF-protected by default unless explicitly added.
+| Reentrancy in cross-contract calls | Guarded by an `is_processing` flag in temporary storage. While Soroban's single-threaded nature reduces risk, malicious tokens/oracles could still re-enter `donate()`. Explicit guards prevent this. |
+| --- | --- |
+| Shared-Redis key collision | Every cache key is namespaced (`greenpay:…`) and invalidation is namespace-scoped |

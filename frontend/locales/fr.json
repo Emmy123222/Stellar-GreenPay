@@ -202,5 +202,11 @@
     "circleDocs": "la documentation de Circle",
     "docsLink": "Lire la documentation complète du pont",
     "backToProjects": "← Retour aux projets"
+  },
+  "badge": {
+    "seedling": "Pousse",
+    "tree": "Arbre",
+    "forest": "Forêt",
+    "earth": "Gardien de la Terre"
   }
 }

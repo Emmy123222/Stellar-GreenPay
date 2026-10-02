@@ -56,6 +56,7 @@ function buildApp() {
   app.use("/api/projects", projectsRouter);
 
 
+  // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
@@ -167,6 +168,25 @@ describe("POST /api/donations", () => {
     expect(res.body.data.projectId).toBe("proj-1");
     expect(res.body.data.donorAddress).toBe(donorAddress);
   });
+
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+  ])("returns 400 with a friendly error for a %s amount", async (_label, amountXLM) => {
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey("A"),
+        amountXLM,
+        currency: "XLM",
+        transactionHash: makeTxHash("a"),
+      })
+      .expect(400);
+
+    expect(res.body).toEqual({ error: "Donation amount must be a positive number" });
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/projects/:id", () => {
@@ -184,6 +204,7 @@ describe("GET /api/projects/:id", () => {
     });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
     pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats

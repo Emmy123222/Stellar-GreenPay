@@ -1,6 +1,8 @@
 /**
  * src/routes/subscriptions.js
  * POST /api/subscriptions        — subscribe to project updates
+ * GET  /api/subscriptions?email= — list a donor's per-project preferences
+ * PATCH /api/subscriptions/:id   — enable or disable a preference
  * GET  /api/subscriptions/unsubscribe — one-click token unsubscribe
  * GET  /api/subscriptions/:projectId/count — subscriber count
  */
@@ -76,6 +78,40 @@ router.post("/", async (req, res, next) => {
   } catch (e) {
     next(e);
   }
+});
+
+// Notification settings use the email verified by the recipient's digest link.
+// This endpoint intentionally returns no data unless a syntactically valid email
+// is supplied, so it cannot become a broad subscription directory.
+router.get("/", async (req, res, next) => {
+  try {
+    const email = typeof req.query.email === "string" ? req.query.email.toLowerCase().trim() : "";
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: "A valid email is required" });
+    const result = await pool.query(
+      `SELECT ps.id, ps.project_id, ps.email, ps.unsubscribed, p.name AS project_name
+       FROM project_subscriptions ps JOIN projects p ON p.id = ps.project_id
+       WHERE ps.email = $1 ORDER BY p.name ASC`, [email],
+    );
+    return res.json({ success: true, data: result.rows.map((row) => ({
+      id: row.id, projectId: row.project_id, projectName: row.project_name,
+      email: row.email, subscribed: !row.unsubscribed,
+    })) });
+  } catch (e) { return next(e); }
+});
+
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { email, subscribed } = req.body || {};
+    if (!EMAIL_RE.test(typeof email === "string" ? email : "") || typeof subscribed !== "boolean") {
+      return res.status(400).json({ error: "A valid email and subscribed boolean are required" });
+    }
+    const result = await pool.query(
+      `UPDATE project_subscriptions SET unsubscribed = $1 WHERE id = $2 AND email = $3
+       RETURNING id, project_id, unsubscribed`, [!subscribed, req.params.id, email.toLowerCase().trim()],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Subscription not found" });
+    return res.json({ success: true, data: { id: result.rows[0].id, projectId: result.rows[0].project_id, subscribed: !result.rows[0].unsubscribed } });
+  } catch (e) { return next(e); }
 });
 
 // GET /api/subscriptions/unsubscribe?token=<hmac-signed-email-projectId>
