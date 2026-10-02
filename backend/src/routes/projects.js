@@ -315,9 +315,25 @@ router.get("/", async (req, res, next) => {
       limit = 20,
       cursor,
       sort = "created_at",
+      include_inactive,
     } = req.query;
     const sortField = VALID_SORT_FIELDS.includes(sort) ? sort : "created_at";
     const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+
+    const adminKey = req.get("X-Admin-Key");
+    const authHeader = req.headers.authorization;
+    const isAdminOverride =
+      include_inactive === "true" &&
+      ((typeof adminKey === "string" && isValidAdminKey(adminKey)) ||
+        (typeof authHeader === "string" &&
+          authHeader.startsWith("Bearer ") &&
+          (() => {
+            try {
+              return Boolean(verifyToken(authHeader.slice(7)));
+            } catch {
+              return false;
+            }
+          })()));
 
     const cacheKey =
       PROJECTS_LIST_CACHE_PREFIX +
@@ -341,6 +357,8 @@ search: search || q,
     if (status && VALID_STATUSES.includes(status)) {
       values.push(status);
       where.push(`status = $${values.length}`);
+    } else if (!status && !isAdminOverride && include_inactive !== "true") {
+      where.push("status = 'active'");
     }
     if (category && VALID_CATEGORIES.includes(category)) {
       values.push(category);
