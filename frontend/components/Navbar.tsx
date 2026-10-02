@@ -123,7 +123,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
               </span>
               <button
                 onClick={onDisconnect}
-                className="text-xs text-[#8aaa8a] dark:text-[#7a9b80] hover:text-[#5a7a5a] dark:hover:text-[#b2d5b5] transition-colors px-2"
+                className="text-xs text-[var(--text-tertiary)] dark:text-[#7a9b80] hover:text-[var(--text-secondary)] dark:hover:text-[#b2d5b5] transition-colors px-2"
               >
                 {t("nav.disconnect")}
               </button>

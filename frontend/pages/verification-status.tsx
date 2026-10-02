@@ -53,16 +53,16 @@ function StatusCard({ request }: { request: VerificationRequestResponse }) {
         >
           {request.status.replace("_", " ")}
         </span>
-        <span className="text-sm text-[#5a7a5a] font-body">{request.projectName}</span>
+        <span className="text-sm text-[var(--text-secondary)] font-body">{request.projectName}</span>
       </div>
 
       <div>
-        <p className="text-xs uppercase tracking-wider text-[#8aaa8a] font-body">Submitted</p>
+        <p className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-body">Submitted</p>
         <p className="text-sm text-forest-900 font-body">{submitted}</p>
       </div>
 
       <div className="pt-2 border-t border-forest-50">
-        <p className="text-xs uppercase tracking-wider text-[#8aaa8a] font-body">Reviewer notes</p>
+        <p className="text-xs uppercase tracking-wider text-[var(--text-tertiary)] font-body">Reviewer notes</p>
         <p className="mt-1 text-sm text-forest-900 font-body whitespace-pre-wrap min-h-[4rem]">
           {request.reviewerNotes || "No reviewer notes yet."}
         </p>
@@ -133,7 +133,7 @@ export default function VerificationStatusPage() {
             <h1 className="font-display text-3xl font-bold text-forest-900">
               Verification status
             </h1>
-            <p className="mt-2 text-sm text-[#5a7a5a] font-body">
+            <p className="mt-2 text-sm text-[var(--text-secondary)] font-body">
               Look up your project verification request by Stellar wallet address.
             </p>
           </div>
@@ -157,7 +157,7 @@ export default function VerificationStatusPage() {
           {loading && <StatusSkeleton />}
 
           {!loading && queryWallet && requests.length === 0 && !error && (
-            <p className="text-sm text-[#5a7a5a] font-body">
+            <p className="text-sm text-[var(--text-secondary)] font-body">
               No verification requests found for this wallet.
             </p>
           )}

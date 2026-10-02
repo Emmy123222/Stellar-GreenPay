@@ -85,7 +85,7 @@ export default function ProjectMapMarker({ project, position }: ProjectMapMarker
             </div>
             <div className="flex items-center justify-between text-[11px] text-forest-600 font-body">
               <span className="font-semibold">{formatXLM(project.raisedXLM, 0)} raised</span>
-              <span className="text-forest-400">{pct.toFixed(0)}%</span>
+              <span className="text-[var(--text-secondary)] dark:text-forest-400">{pct.toFixed(0)}%</span>
             </div>
           </div>
 

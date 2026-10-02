@@ -191,7 +191,7 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
                 </div>
               ))
             ) : (
-              <p className="col-span-3 text-center text-forest-400 py-10">No leaderboard data available yet.</p>
+              <p className="col-span-3 text-center text-[var(--text-secondary)] dark:text-forest-400 py-10">No leaderboard data available yet.</p>
             )}
           </div>
         </div>
@@ -242,7 +242,7 @@ export function StatCard({
         ) : (
           <span className="w-24 h-8 bg-forest-50 animate-pulse rounded" />
         )}
-        {unit && <span className="text-xl text-forest-400 font-normal">{unit}</span>}
+        {unit && <span className="text-xl text-[var(--text-secondary)] dark:text-forest-400 font-normal">{unit}</span>}
       </div>
     </div>
   );

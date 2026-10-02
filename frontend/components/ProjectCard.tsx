@@ -38,10 +38,10 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 {CATEGORY_ICONS[project.category] || "🌿"}
               </div>
               <div>
-                <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+                <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
                   {project.category}
                 </p>
-                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
                   {project.location}
                 </p>
               </div>
@@ -101,7 +101,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 goalXLM={project.goalXLM}
                 className="w-full"
               />
-              <div className="flex items-center justify-between text-[11px] text-[#8aaa8a] font-body">
+              <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)] font-body">
                 <span>{formatXLM(project.raisedXLM)} raised</span>
                 <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM)}` : "No goal set"}</span>
               </div>
@@ -111,7 +111,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
 
 	        {/* Stats row */}
 	        <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]">
-	          <div className="flex items-center gap-3 text-xs text-[#5a7a5a] font-body">
+	          <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] font-body">
 	            <span>👥 {project.donorCount} donors</span>
             <span className="flex items-center gap-1">
               ♻️ {formatCO2(project.co2OffsetKg)}
@@ -147,7 +147,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           ${
             isWishlisted
               ? "bg-red-50 text-red-500 border-red-200 opacity-100"
-              : "bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
+              : "bg-white/90 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
           }`}
         aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
       >
