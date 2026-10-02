@@ -53,4 +53,4 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: npm test
+    command: sh -c "node src/db/pgboss-migrate.js && npm run db:migrate && npm test"

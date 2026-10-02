@@ -1,4 +1,5 @@
 # Mainnet Preflight Check - Quick Reference Card
+<!-- Verified testing workflows & coverage requirements -->
 
 ## 🚀 One-Line Deployment Check
 

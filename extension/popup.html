@@ -24,8 +24,33 @@
           <span id="wallet-address">--</span>
         </div>
         <h2 id="wallet-balance" class="balance-text">0.00 XLM</h2>
+        <div class="donor-stats" aria-label="Donation statistics">
+          <div>
+            <span class="donor-stat-label">Donor badge</span>
+            <strong id="donor-badge-tier" class="donor-tier">No badge</strong>
+          </div>
+          <div>
+            <span class="donor-stat-label">Total donated</span>
+            <strong id="donor-total" class="donor-total">0.0000000 XLM</strong>
+          </div>
+        </div>
       </div>
     </header>
+
+    <!-- Per-site Injection Opt-in -->
+    <section id="site-optin-panel" class="glass-panel site-optin-panel hidden">
+      <div class="site-toggle-row">
+        <div class="site-info-wrapper">
+          <span class="site-section-title">Site Widget</span>
+          <span id="current-site-domain" class="current-site-domain">--</span>
+        </div>
+        <label class="switch" for="site-optin-toggle" title="Toggle GreenPay widget on this site">
+          <input type="checkbox" id="site-optin-toggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <p id="site-optin-status" class="site-optin-status">Widget disabled on this site</p>
+    </section>
 
     <!-- Top Projects -->
     <main>
@@ -75,6 +100,16 @@
           <button id="donate-submit" class="btn donate-btn" disabled>Donate</button>
         </div>
         <div id="status-message" class="status-message"></div>
+      </section>
+
+      <!-- Pending Transactions -->
+      <section id="pending-section" class="glass-panel pending-section hidden" aria-live="polite">
+        <div class="section-header">
+          <h3>Pending</h3>
+          <span id="pending-count" class="badge pending-badge">0</span>
+        </div>
+        <p class="subtitle">Submitted donations waiting for ledger confirmation.</p>
+        <ul id="pending-list" class="pending-list"></ul>
       </section>
     </main>
   </div>
