@@ -19,18 +19,10 @@ jest.mock("../services/s3Presign", () => ({
   isS3Configured: jest.fn(),
   buildKey: jest.fn(),
   ALLOWED_MIME: new Set([
-    "application/pdf",
-    "image/png",
     "image/jpeg",
+    "image/png",
     "image/webp",
-    "image/gif",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "text/plain",
-    "text/csv",
-    "application/zip",
+    "application/pdf",
   ]),
 }));
 
@@ -153,14 +145,6 @@ describe("POST /api/uploads/presign — success", () => {
       "image/png",
       "image/jpeg",
       "image/webp",
-      "image/gif",
-      "text/plain",
-      "text/csv",
-      "application/zip",
-      "application/msword",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "application/vnd.ms-excel",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ];
 
     for (const contentType of mimeTypes) {

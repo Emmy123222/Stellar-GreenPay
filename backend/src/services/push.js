@@ -205,6 +205,71 @@ async function sendUpdatePushNotifications({ project, update }) {
 }
 
 /**
+ * Send a push notification to project admin(s) when a donation is received.
+ *
+ * @param {Object} params - { projectId, projectName, amountXLM, donorBadge }
+ */
+async function sendDonationPushNotification({ projectId, projectName, amountXLM, donorBadge }) {
+  try {
+    const result = await pool.query(
+      `SELECT dt.token, dt.platform
+       FROM device_tokens dt
+       WHERE dt.wallet_address = (SELECT wallet_address FROM projects WHERE id = $1)`,
+      [projectId]
+    );
+
+    if (result.rows.length === 0) {
+      logger.info({ event: "push_no_admin_tokens", projectId }, "[Push] No admin device tokens found");
+      return;
+    }
+
+    const messages = [];
+    const validTokens = [];
+    for (const row of result.rows) {
+      if (!Expo.isExpoPushToken(row.token)) {
+        logger.error({ event: "push_invalid_token", token: row.token }, "[Push] Invalid push token");
+        continue;
+      }
+      messages.push({
+        to: row.token,
+        sound: "default",
+        title: `New Donation to ${projectName}`,
+        body: `${donorBadge ? donorBadge + " donor" : "Someone"} donated ${amountXLM} XLM to your project.`,
+        data: {
+          projectId,
+          type: "new_donation",
+          amountXLM,
+          donorBadge,
+        },
+      });
+      validTokens.push(row.token);
+    }
+
+    const allTickets = [];
+    const allTokens = [];
+    const chunks = expo.chunkPushNotifications(messages);
+    for (let i = 0; i < chunks.length; i++) {
+      const tickets = await expo.sendPushNotificationsAsync(chunks[i]);
+      const chunkTokens = validTokens.slice(
+        chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0),
+        chunks.slice(0, i).reduce((sum, c) => sum + c.length, 0) + chunks[i].length
+      );
+      allTickets.push(...tickets);
+      allTokens.push(...chunkTokens);
+    }
+
+    await processTickets(allTickets, allTokens);
+    logger.info(
+      { event: "push_donation_sent", projectId, count: allTickets.length },
+      `[Push] Sent ${allTickets.length} donation notifications for project ${projectId}`
+    );
+  } catch (error) {
+    logger.error({ event: "push_donation_error", projectId, err: error }, error.message);
+    throw error;
+  }
+}
+
+/**
  * Send a push notification reminder for an upcoming recurring donation.
  *
  * @param {Object} params - { token, donation }
@@ -252,5 +317,6 @@ module.exports = {
   sendPushToToken,
   sendUpdatePushNotifications,
   sendRecurringDonationReminder,
+  sendDonationPushNotification,
   processTickets,
 };

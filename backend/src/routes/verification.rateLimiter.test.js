@@ -17,13 +17,13 @@ jest.unmock("../middleware/rateLimiter");
 
 const express = require("express");
 const request = require("supertest");
-const redis = require("../services/redis");
 
 function buildApp() {
   const app = express();
   const verification = require("./verification");
   app.use(express.json());
   app.use("/api/verification-requests", verification);
+  // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });

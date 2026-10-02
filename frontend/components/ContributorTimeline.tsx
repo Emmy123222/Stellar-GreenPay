@@ -3,6 +3,7 @@
  * Vertical timeline of merged pull requests, celebrating who shipped what.
  */
 import type { ContributorPR } from "@/utils/types";
+import { timeAgo } from "@/utils/format";
 
 interface ContributorTimelineProps {
   pullRequests: ContributorPR[];
@@ -25,14 +26,18 @@ export default function ContributorTimeline({
     );
   }
 
+  const sortedPullRequests = [...pullRequests].sort(
+    (a, b) => new Date(a.mergedAt).getTime() - new Date(b.mergedAt).getTime()
+  );
+
   return (
     <div className="card animate-fade-in">
       <div className="relative">
         <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-forest-200" />
 
         <div className="space-y-6">
-          {pullRequests.map((pr, index) => {
-            const isLast = index === pullRequests.length - 1;
+          {sortedPullRequests.map((pr, index) => {
+            const isLast = index === sortedPullRequests.length - 1;
 
             return (
               <div key={pr.id} className="relative flex gap-4">
@@ -43,6 +48,7 @@ export default function ContributorTimeline({
                   className="relative z-10 flex-shrink-0"
                   title={pr.author.login}
                 >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={pr.author.avatarUrl}
                     alt={`${pr.author.login}'s avatar`}
@@ -84,7 +90,7 @@ export default function ContributorTimeline({
                   </div>
 
                   <div className="flex items-center gap-3 mt-2 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
-                    <span>
+                    <span title={timeAgo(pr.mergedAt)}>
                       🎉 Merged {new Date(pr.mergedAt).toLocaleDateString()}
                     </span>
                   </div>
