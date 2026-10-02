@@ -2480,31 +2480,15 @@ impl GreenPayContract {
 
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
-        admin.require_auth();
-        let stored_admin: Address = env
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized");
-        if stored_admin != admin {
-            panic!("Only admin can upgrade");
-        }
+        admin.require_auth();
 
-        // Store the new WASM hash for upgrade verification
-        env.storage()
-            .instance()
-            .set(&DataKey::ContractWasmHash, &new_wasm_hash);
-
-        // Execute the actual upgrade
         env.deployer().update_current_contract_wasm(new_wasm_hash);
-
-        env.events().publish((symbol_short!("upgrade"),), admin);
-    }
-
-    /// Get the current contract WASM hash.
-    pub fn get_contract_wasm_hash(env: Env) -> Option<BytesN<32>> {
-        env.storage().instance().get(&DataKey::ContractWasmHash)
     }
 
     // ─── Donation matching program (2x match pledges) ─────────────────────────
