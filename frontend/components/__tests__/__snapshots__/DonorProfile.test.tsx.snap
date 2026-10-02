@@ -155,11 +155,24 @@ exports[`DonorProfile Component matches snapshot for badge tier: EarthGuardian 1
       <div
         class="card"
       >
-        <h2
-          class="label mb-1"
+        <div
+          class="flex items-baseline justify-between gap-3 mb-1"
         >
-          Recent Donations
-        </h2>
+          <h2
+            class="label"
+          >
+            Recent Donations
+          </h2>
+          <span
+            class="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]"
+          >
+            Showing 
+            1
+             of 
+            1
+             donations
+          </span>
+        </div>
         <div>
           <div
             class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
@@ -361,11 +374,24 @@ exports[`DonorProfile Component matches snapshot for badge tier: Forest 1`] = `
       <div
         class="card"
       >
-        <h2
-          class="label mb-1"
+        <div
+          class="flex items-baseline justify-between gap-3 mb-1"
         >
-          Recent Donations
-        </h2>
+          <h2
+            class="label"
+          >
+            Recent Donations
+          </h2>
+          <span
+            class="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]"
+          >
+            Showing 
+            1
+             of 
+            1
+             donations
+          </span>
+        </div>
         <div>
           <div
             class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
@@ -512,11 +538,24 @@ exports[`DonorProfile Component matches snapshot for badge tier: None 1`] = `
       <div
         class="card"
       >
-        <h2
-          class="label mb-1"
+        <div
+          class="flex items-baseline justify-between gap-3 mb-1"
         >
-          Recent Donations
-        </h2>
+          <h2
+            class="label"
+          >
+            Recent Donations
+          </h2>
+          <span
+            class="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]"
+          >
+            Showing 
+            1
+             of 
+            1
+             donations
+          </span>
+        </div>
         <div>
           <div
             class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
@@ -718,11 +757,24 @@ exports[`DonorProfile Component matches snapshot for badge tier: Seedling 1`] = 
       <div
         class="card"
       >
-        <h2
-          class="label mb-1"
+        <div
+          class="flex items-baseline justify-between gap-3 mb-1"
         >
-          Recent Donations
-        </h2>
+          <h2
+            class="label"
+          >
+            Recent Donations
+          </h2>
+          <span
+            class="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]"
+          >
+            Showing 
+            1
+             of 
+            1
+             donations
+          </span>
+        </div>
         <div>
           <div
             class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"
@@ -924,11 +976,24 @@ exports[`DonorProfile Component matches snapshot for badge tier: Tree 1`] = `
       <div
         class="card"
       >
-        <h2
-          class="label mb-1"
+        <div
+          class="flex items-baseline justify-between gap-3 mb-1"
         >
-          Recent Donations
-        </h2>
+          <h2
+            class="label"
+          >
+            Recent Donations
+          </h2>
+          <span
+            class="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]"
+          >
+            Showing 
+            1
+             of 
+            1
+             donations
+          </span>
+        </div>
         <div>
           <div
             class="flex items-center justify-between py-3 border-b border-[rgba(34,114,57,0.07)] last:border-0 gap-3"

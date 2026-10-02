@@ -28,6 +28,7 @@
  *    case.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 
 export type BiometricAuthOutcome = 'success' | 'cancel' | 'fallback' | 'error';
@@ -36,13 +37,18 @@ export interface BiometricAuthResult {
   /** `true` only when the user successfully authenticated. */
   success: boolean;
   /**
-   * Why authentication ended the way it did. Useful for surfacing a
-   * more specific message in the UI (e.g. "Authentication cancelled"
-   * vs. "Authentication failed — please try again").
+   * Why authentication ended the way it did. Useful for branching UI on the
+   * kind of failure (cancelled vs. failed vs. PIN fallback).
    */
   outcome: BiometricAuthOutcome;
-  /** Underlying error message returned by expo-local-authentication, if any. */
-  error?: string;
+  /**
+   * Human-readable failure reason, safe to show directly to the user. Empty
+   * string when `success` is `true`. Callers should surface this rather than
+   * the raw SDK code, which is not meant for end users.
+   */
+  error: string;
+  /** Raw `expo-local-authentication` error code, when the SDK supplied one. */
+  code?: string;
 }
 
 export interface BiometricCapabilities {
@@ -71,6 +77,27 @@ export interface UseBiometricAuthReturn extends BiometricCapabilities {
 
 const DEFAULT_PROMPT = 'Confirm your identity to proceed';
 const PIN_PROMPT = 'Enter your device PIN to proceed';
+
+export const DEFAULT_REAUTH_TIMEOUT_MS = 30_000;
+
+let runtimeReauthTimeoutMs: number | null = null;
+
+export function getBiometricReauthTimeoutMs(): number {
+  return runtimeReauthTimeoutMs ?? DEFAULT_REAUTH_TIMEOUT_MS;
+}
+
+export function setBiometricReauthTimeoutMs(valueMs: number): number {
+  runtimeReauthTimeoutMs = valueMs;
+  return runtimeReauthTimeoutMs;
+}
+
+export function _resetBiometricReauthTimeoutForTests(): void {
+  runtimeReauthTimeoutMs = null;
+}
+
+export interface UseBiometricAuthOptions {
+  timeoutSeconds?: number;
+}
 
 /**
  * Resolve the strongest biometric label available on the device so the
@@ -124,7 +151,8 @@ async function runAuthentication(
     return {
       success: false,
       outcome: 'error',
-      error: error?.message ?? 'Unable to query biometric capabilities',
+      error: error?.message ?? 'Unable to query biometric capabilities on this device.',
+      code: 'capability_probe_failed',
     };
   }
 
@@ -150,6 +178,28 @@ async function runAuthentication(
   return mapResult(result);
 }
 
+/** Failure outcomes that carry a user-facing message. */
+const FAILURE_MESSAGES: Record<'cancel' | 'fallback' | 'error', string> = {
+  cancel: 'Authentication was cancelled, so nothing was sent.',
+  fallback: 'Biometric authentication was not completed — the device passcode/PIN fallback was used. Nothing was sent.',
+  error: 'Biometric authentication failed. Please try again.',
+};
+
+/**
+ * Maps a failure outcome (and the raw SDK code, when present) to a
+ * message that can be shown to the user as-is.
+ */
+export function biometricFailureMessage(
+  outcome: BiometricAuthOutcome,
+  code?: string
+): string {
+  if (outcome === 'success') return '';
+  if (outcome === 'error' && (code === 'lockout' || code === 'lockout_permanent')) {
+    return 'Biometrics are locked after too many failed attempts. Unlock your device or use your device PIN, then try again.';
+  }
+  return FAILURE_MESSAGES[outcome] ?? FAILURE_MESSAGES.error;
+}
+
 /**
  * Translate the SDK result object into our richer outcome enum.
  * `result.success === true` ⇒ `'success'`; otherwise we distinguish
@@ -159,16 +209,16 @@ function mapResult(
   result: LocalAuthentication.LocalAuthenticationResult
 ): BiometricAuthResult {
   if (result.success) {
-    return { success: true, outcome: 'success' };
+    return { success: true, outcome: 'success', error: '' };
   }
   const code = result.error;
+  let outcome: BiometricAuthOutcome = 'error';
   if (code === 'user_cancel' || code === 'system_cancel' || code === 'app_cancel') {
-    return { success: false, outcome: 'cancel', error: code };
+    outcome = 'cancel';
+  } else if (code === 'user_fallback') {
+    outcome = 'fallback';
   }
-  if (code === 'user_fallback') {
-    return { success: false, outcome: 'fallback', error: code };
-  }
-  return { success: false, outcome: 'error', error: code };
+  return { success: false, outcome, error: biometricFailureMessage(outcome, code), code };
 }
 
 /**
@@ -176,7 +226,9 @@ function mapResult(
  * exposes a memoised `authenticate` action that mirrors the standalone
  * helper.
  */
-export function useBiometricAuth(): UseBiometricAuthReturn {
+export function useBiometricAuth(
+  options: UseBiometricAuthOptions = {}
+): UseBiometricAuthReturn {
   const [available, setAvailable] = useState(false);
   const [enrolled, setEnrolled] = useState(false);
   const [label, setLabel] = useState('Biometrics');
@@ -186,6 +238,20 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
   // Internal mount guard prevents setState-after-unmount warnings when the
   // consumer navigates away while the OS biometric prompt is open.
   const mountedRef = useRef(true);
+  const lastAuthTimestampRef = useRef(Date.now());
+  const isAuthenticatingRef = useRef(false);
+  const timeoutMsRef = useRef(
+    options.timeoutSeconds != null
+      ? options.timeoutSeconds * 1000
+      : getBiometricReauthTimeoutMs()
+  );
+
+  useEffect(() => {
+    timeoutMsRef.current =
+      options.timeoutSeconds != null
+        ? options.timeoutSeconds * 1000
+        : getBiometricReauthTimeoutMs();
+  }, [options.timeoutSeconds]);
 
   const safeSetAvailable = (next: boolean) => {
     if (mountedRef.current) setAvailable(next);
@@ -229,6 +295,7 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
 
   const authenticateFn = useCallback(
     async (prompt: string = DEFAULT_PROMPT): Promise<BiometricAuthResult> => {
+      isAuthenticatingRef.current = true;
       safeSetIsAuthenticating(true);
       try {
         // `runAuthentication` re-probes hardware capabilities on each
@@ -237,8 +304,12 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
         // keeps the security logic in one place and avoids drift.
         const result = await runAuthentication(prompt);
         safeSetLastResult(result);
+        if (result.success) {
+          lastAuthTimestampRef.current = Date.now();
+        }
         return result;
       } finally {
+        isAuthenticatingRef.current = false;
         safeSetIsAuthenticating(false);
       }
     },
@@ -247,6 +318,29 @@ export function useBiometricAuth(): UseBiometricAuthReturn {
     // without re-firing on every render.
     []
   );
+
+  useEffect(() => {
+    const prevStateRef: { current: AppStateStatus } = {
+      current: AppState.currentState,
+    };
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const prevState = prevStateRef.current;
+      prevStateRef.current = nextState;
+      if (
+        (prevState === 'background' || prevState === 'inactive') &&
+        nextState === 'active'
+      ) {
+        if (isAuthenticatingRef.current) return;
+        const elapsed = Date.now() - lastAuthTimestampRef.current;
+        if (elapsed > timeoutMsRef.current) {
+          void authenticateFn();
+        }
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [authenticateFn]);
 
   return {
     available,

@@ -17,12 +17,17 @@ const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
 const { startIndexer } = require("./services/indexerService");
+const { isStellarTimeoutError } = require("./services/stellar");
 const logger = require("./logger");
 const requestLogger = require("./middleware/requestLogger");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
+const { metricsHandler, countRequest, startQueueRefresh } = require("./services/metrics");
 const projectsRouter = require("./routes/projects");
 const uploadsRouter = require("./routes/uploads");
+const donationsRouter = require("./routes/donations");
+const statsRouter = require("./routes/stats");
+const certificateRouter = require("./routes/certificate");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -46,6 +51,18 @@ if (process.env.NODE_ENV !== "production") {
     console.warn("[swagger] docs unavailable:", err.message);
   }
 }
+
+app.use((req, res, next) => {
+  const originalEnd = res.end.bind(res);
+  res.end = function promCountEnd(chunk, encoding, cb) {
+    if (!res.__metricsCounted) {
+      res.__metricsCounted = true;
+      countRequest(req, res);
+    }
+    return originalEnd(chunk, encoding, cb);
+  };
+  next();
+});
 
 app.use(helmet());
 app.use((req, res, next) => {
@@ -71,7 +88,10 @@ app.use((req, res, next) => {
     req.path.startsWith("/api/v1/notifications") ||
     req.path === "/health" ||
     req.path === "/api/health" ||
-    req.path === "/api/v1/health"
+    req.path === "/api/v1/health" ||
+    req.path === "/api/readiness" ||
+    req.path === "/metrics" ||
+    req.path === "/api/metrics"
   ) {
     return next();
   }
@@ -79,13 +99,22 @@ app.use((req, res, next) => {
 });
 
 const healthRouter = require("./routes/health");
+const readinessRouter = require("./routes/readiness");
+app.get("/metrics", metricsHandler);
+app.get("/api/metrics", metricsHandler);
 app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
+
 app.use("/api/v1/health", healthRouter);
+app.use("/api/readiness", readinessRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
+app.use("/api/donations", donationsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/v1/uploads", uploadsRouter);
+app.use("/api/v1/donations", donationsRouter);
+app.use("/api/stats", statsRouter);
+app.use("/api/v1/stats", statsRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -98,6 +127,10 @@ const io = new Server(server, {
   },
 });
 app.set("io", io);
+
+const { registerSocketHandlers } = require("./services/socketHandler");
+registerSocketHandlers(io);
+
 app.use(createRateLimiter(150, 15, "global"));
 
 // ── CSRF token endpoint ────────────────────────────────────────────
@@ -107,39 +140,26 @@ function csrfTokenHandler(req, res) {
 app.get("/api/csrf-token", csrfTokenHandler);
 app.get("/api/v1/csrf-token", csrfTokenHandler);
 
-// ── Route mounts — each router registered at /api and /api/v1 ───────────────
-const projectsRouter      = require("./routes/projects");
-const donationsRouter     = require("./routes/donations");
-const profilesRouter      = require("./routes/profiles");
-const leaderboardRouter   = require("./routes/leaderboard");
-const updatesRouter       = require("./routes/updates");
-const subscriptionsRouter = require("./routes/subscriptions");
-const jobsRouter          = require("./routes/jobs");
-const statsRouter         = require("./routes/stats");
-const impactRouter        = require("./routes/impact");
-const ratingsRouter       = require("./routes/ratings");
-const adminRouter         = require("./routes/admin");
-const priceRouter         = require("./routes/price");
-
-function mount(path, router) {
-  app.use(path, router);
-  app.use("/api/v1" + path.replace(/^\/api/, ""), router);
-}
-
-app.use("/health", require("./routes/health"));
-mount("/api/projects",      projectsRouter);
-mount("/api/donations",     donationsRouter);
-mount("/api/profiles",      profilesRouter);
-mount("/api/leaderboard",   leaderboardRouter);
-mount("/api/updates",       updatesRouter);
-mount("/api/subscriptions", subscriptionsRouter);
-mount("/api/jobs",          jobsRouter);
-mount("/api/stats",         statsRouter);
-mount("/api/impact",        impactRouter);
-mount("/api/ratings",       ratingsRouter);
-mount("/api/admin",         adminRouter);
-mount("/api/price",         priceRouter);
-
+app.use("/api/impact", require("./routes/impact"));
+app.use("/api/subscriptions", require("./routes/subscriptions"));
+app.use("/api/v1/subscriptions", require("./routes/subscriptions"));
+app.use("/api/referrals", require("./routes/referrals"));
+app.use("/api/v1/referrals", require("./routes/referrals"));
+app.use("/api/impact/certificate", certificateRouter);
+app.use("/api/v1/impact/certificate", certificateRouter);
+// Recurring donation schedules are the source of truth for mobile (#1059):
+// the app reads them from here and treats AsyncStorage as an offline cache.
+app.use("/api/recurring-donations", require("./routes/recurringDonations"));
+app.use("/api/v1/recurring-donations", require("./routes/recurringDonations"));
+// Wallet-signature authentication (challenge → signed tx → JWT).
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/v1/auth", require("./routes/auth"));
+// Project ratings (donor-submitted, wallet-authenticated).
+app.use("/api/ratings", require("./routes/ratings"));
+app.use("/api/v1/ratings", require("./routes/ratings"));
+// Team giving (corporate/group donation profiles).
+app.use("/api/teams", require("./routes/teams"));
+app.use("/api/v1/teams", require("./routes/teams"));
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());
@@ -147,7 +167,16 @@ app.use(sentryErrorMiddleware());
 app.use((err, req, res, next) => {
   void next;
   console.error("[Error]", err.message);
-  res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+  const isTimeout = isStellarTimeoutError(err);
+  const status = isTimeout ? 503 : err.status || 500;
+  if (!res.__metricsCounted) {
+    res.__metricsCounted = true;
+    countRequest(req, { ...res, statusCode: status });
+  }
+  if (isTimeout) {
+    return res.status(status).json({ error: "Stellar network did not respond in time, please retry" });
+  }
+  res.status(status).json({ error: err.message || "Internal server error" });
 });
 
 async function startServer() {
@@ -169,7 +198,12 @@ async function startServer() {
   const { start: startTokenCleanupQueue } = require("./services/tokenCleanupQueue");
   await startTokenCleanupQueue();
 
+  const { start: startDonationPushQueue } = require("./services/donationPushQueue");
+  await startDonationPushQueue();
+
   startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
+
+  startQueueRefresh();
 
   server.listen(PORT, () => {
     logger.info({ event: "server_start", port: PORT }, `API listening on port ${PORT}`);

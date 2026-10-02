@@ -72,6 +72,7 @@ mod fuzz {
         token_client.mint(donor, &amount);
     }
 
+
     /// Mint `amount` of a USDC-like stellar asset to `donor`.
     fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
         StellarAssetClient::new(env, token).mint(donor, amount);
@@ -239,11 +240,11 @@ mod fuzz {
             prop_assert_eq!(project.donor_count, 2u32);
         }
 
-        /// Donating a zero amount is an edge case — the contract uses
-        /// `checked_add(0)` which is always safe. Verify no state mutation occurs
-        /// when amount == 0 is passed (or contract rejects it gracefully).
+        /// A zero donation must be rejected by the amount > 0 guard (issue
+        /// #1058) and must leave global accounting untouched, regardless of
+        /// the size of the preceding legitimate donation.
         #[test]
-        fn prop_zero_donation_does_not_corrupt_state(
+        fn prop_zero_donation_is_rejected_without_state_mutation(
             legit in 1i128..=MAX_DONATION,
         ) {
             let (env, _contract_id, client, _wallet, project_id, token) = setup();
@@ -252,11 +253,18 @@ mod fuzz {
 
             client.donate(&token, &donor, &project_id, &legit, &42u32);
             let total_before = client.get_global_total();
-
-            // A second call with the same donor — amount 0 may panic or succeed
-            // depending on contract implementation; we only assert the state
-            // before the second call was not corrupted.
             prop_assert_eq!(total_before, legit);
+
+            // amount == 0 must be rejected by the contract's amount guard.
+            let rejected = client.try_donate(&token, &donor, &project_id, &0i128, &42u32);
+            prop_assert!(rejected.is_err(), "donate must reject amount 0");
+
+            // ...and the rejected attempt must not mutate any accounting state.
+            prop_assert_eq!(client.get_global_total(), total_before);
+            prop_assert_eq!(
+                client.get_project(&project_id).total_raised,
+                total_before,
+            );
         }
 
         // ── USDC fuzz cases ────────────────────────────────────────────────────
