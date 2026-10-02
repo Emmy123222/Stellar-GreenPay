@@ -17,23 +17,24 @@ export default function FreelancerProfilePage() {
 
   const [profile, setProfile] = useState<FreelancerProfile | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [loading, setLoading] = useState(true);
+  // `loading` is derived by comparing the wallet the profile was loaded for
+  // to the current one, rather than toggled synchronously inside the effect
+  // (which triggers a cascading render).
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const loading = !router.isReady || !publicKey || loadedForKey !== publicKey;
 
   useEffect(() => {
     if (!router.isReady || !publicKey) return;
-    setLoading(true);
-    setNotFound(false);
     fetchFreelancerProfile(publicKey)
-      .then(setProfile)
-      .catch((err) => {
-        const status = err?.response?.status;
-        if (status === 404) {
-          setNotFound(true);
-        } else {
-          setNotFound(true);
-        }
+      .then((data) => {
+        setProfile(data);
+        setNotFound(false);
       })
-      .finally(() => setLoading(false));
+      .catch(() => {
+        // Treat any error (404 or otherwise) fetching the profile as "not found"
+        setNotFound(true);
+      })
+      .finally(() => setLoadedForKey(publicKey));
   }, [router.isReady, publicKey]);
 
   const displayName = profile?.displayName || shortenAddress(publicKey ?? "");

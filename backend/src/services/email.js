@@ -116,11 +116,11 @@ function buildVerificationHtml({ request, adminUrl }) {
   const docsList =
     request.supportingDocuments && request.supportingDocuments.length
       ? `<ul>${request.supportingDocuments
-          .map(
-            (d) =>
-              `<li><a href="${escHtml(d.url)}">${escHtml(d.name)}</a>${d.size ? ` (${(d.size / 1024).toFixed(1)} KB)` : ""}</li>`,
-          )
-          .join("")}</ul>`
+        .map(
+          (d) =>
+            `<li><a href="${escHtml(d.url)}">${escHtml(d.name)}</a>${d.size ? ` (${(d.size / 1024).toFixed(1)} KB)` : ""}</li>`,
+        )
+        .join("")}</ul>`
       : "<p><em>No documents attached.</em></p>";
 
   return `<!DOCTYPE html>
@@ -246,4 +246,291 @@ function escHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-module.exports = { sendUpdateNotifications, sendAdminVerificationNotification };
+/**
+ * Send a status-change notification to the submitter when an admin
+ * transitions a verification request to approved, rejected, or in_review.
+ * Fire-and-forget from the route layer — Resend failures must not block
+ * the PATCH response.
+ *
+ * @param {object} request - The mapped verification_requests row.
+ * @param {string} newStatus - The target status (approved|rejected|in_review).
+ * @returns {Promise<void>} Resolves when the email has been dispatched (or
+ * silently skipped when no API key is configured).
+ */
+async function sendVerificationStatusNotification(request, newStatus) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[email] RESEND_API_KEY not set — skipping status-change notification");
+    }
+    return;
+  }
+  if (!request || typeof request !== "object" || !request.contactEmail) return;
+
+  const recipient = request.contactEmail;
+  const subject = `Verification status update: ${sanitizeHeader(request.projectName)} is now ${newStatus}`;
+
+  const adminUrl = `${(APP_URL || "").replace(/\/$/, "")}/admin/verification/${request.id}`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [recipient],
+      subject,
+      html: buildStatusChangeHtml({ request, newStatus, adminUrl }),
+      text: buildStatusChangeText({ request, newStatus, adminUrl }),
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error("[email] Resend error (status-change notification):", errBody);
+  }
+}
+
+function buildStatusChangeHtml({ request, newStatus, adminUrl }) {
+  const statusLabel = { approved: "Approved ✅", rejected: "Not Approved", in_review: "Under Review 🔍" }[newStatus] || newStatus;
+  const statusColor = { approved: "#2d6a2d", rejected: "#c53030", in_review: "#2b6cb0" }[newStatus] || "#2d6a2d";
+
+  let nextStepsHtml = "";
+  if (newStatus === "approved") {
+    nextStepsHtml = `
+      <div style="background:#f0faf0;border-radius:8px;margin-top:20px;padding:16px 20px;">
+        <p style="margin:0;font-size:16px;font-weight:700;color:#1a3a1a;">Next Steps</p>
+        <p style="margin:6px 0 0;font-size:14px;color:#3a5a3a;">Your project has been approved! To complete on-chain registration, use the admin register endpoint:</p>
+        <p style="margin:8px 0 0;font-family:monospace;font-size:13px;background:#ffffff;padding:8px;border-radius:4px;border:1px solid #e2e8e2;color:#1a3a1a;">POST ${escHtml(APP_URL)}/api/projects/admin/register</p>
+        <p style="margin:4px 0 0;font-size:13px;color:#5a7a5a;">See <a href="${escHtml(APP_URL)}/api-docs" style="color:#2d6a2d;">API docs</a> for the full request shape.</p>
+      </div>`;
+  } else if (newStatus === "rejected") {
+    nextStepsHtml = `
+      <div style="background:#fff5f5;border-radius:8px;margin-top:20px;padding:16px 20px;">
+        <p style="margin:0;font-size:16px;font-weight:700;color:#742a2a;">Next Steps</p>
+        <p style="margin:6px 0 0;font-size:14px;color:#5a3a3a;">Your submission was not approved at this time. You may address the reviewer notes below and re-submit via the <a href="${escHtml(APP_URL)}/apply" style="color:#2d6a2d;">project application form</a>.</p>
+      </div>`;
+  } else if (newStatus === "in_review") {
+    nextStepsHtml = `
+      <div style="background:#ebf8ff;border-radius:8px;margin-top:20px;padding:16px 20px;">
+        <p style="margin:0;font-size:16px;font-weight:700;color:#2a4365;">What Happens Next</p>
+        <p style="margin:6px 0 0;font-size:14px;color:#3a5a6a;">Our team is reviewing your submission. This typically takes 5–10 business days. We'll email you once a decision is made. No action is needed from you right now.</p>
+      </div>`;
+  }
+
+  const reviewerNotesBlock = request.reviewerNotes
+    ? `<div style="margin-top:20px;">
+        <p style="margin:0 0 6px;font-size:13px;color:#8aaa8a;text-transform:uppercase;letter-spacing:.05em;">Reviewer Notes</p>
+        <p style="margin:0;font-size:14px;color:#3a5a3a;line-height:1.6;background:#f8faf8;padding:12px 16px;border-radius:8px;">${escHtml(request.reviewerNotes)}</p>
+      </div>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f7f0;font-family:sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+        <tr><td style="background:${statusColor};padding:24px 32px;">
+          <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">🌱 Verification Status Update</p>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <p style="margin:0 0 4px;font-size:13px;color:#8aaa8a;text-transform:uppercase;letter-spacing:.05em;">Stellar GreenPay</p>
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1a3a1a;">${escHtml(request.projectName)}</h1>
+          <p style="margin:0;font-size:18px;font-weight:600;color:${statusColor};">${statusLabel}</p>
+          ${reviewerNotesBlock}
+          ${nextStepsHtml}
+          <a href="${adminUrl}" style="display:inline-block;margin-top:24px;background:#2d6a2d;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">View in Admin →</a>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+function buildStatusChangeText({ request, newStatus, adminUrl }) {
+  const statusLabel = { approved: "Approved ✅", rejected: "Not Approved", in_review: "Under Review 🔍" }[newStatus] || newStatus;
+
+  let nextSteps = "";
+  if (newStatus === "approved") {
+    nextSteps = [
+      "",
+      "Next Steps:",
+      "Your project has been approved! To complete on-chain registration,",
+      `use the admin register endpoint: POST ${APP_URL}/api/projects/admin/register`,
+      `See API docs: ${APP_URL}/api-docs`,
+    ].join("\n");
+  } else if (newStatus === "rejected") {
+    nextSteps = [
+      "",
+      "Next Steps:",
+      "Your submission was not approved at this time. You may address",
+      "the reviewer notes and re-submit via the application form:",
+      `${APP_URL}/apply`,
+    ].join("\n");
+  } else if (newStatus === "in_review") {
+    nextSteps = [
+      "",
+      "What Happens Next:",
+      "Our team is reviewing your submission. This typically takes 5–10",
+      "business days. We'll email you once a decision is made.",
+    ].join("\n");
+  }
+
+  return [
+    `Verification Status Update — ${request.projectName}`,
+    "",
+    `Organisation: ${request.organizationName}`,
+    `Project:      ${request.projectName}`,
+    `New Status:   ${statusLabel}`,
+    "",
+    request.reviewerNotes ? `Reviewer Notes:\n${request.reviewerNotes}\n` : "",
+    nextSteps,
+    "",
+    `View in admin: ${adminUrl}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+<<<<<<< HEAD
+ * Notify a donor that their recurring donation was cancelled because the project was deactivated.
+ *
+ * @param {object} opts
+ * @param {string} opts.email - Donor's email address.
+ * @param {string} opts.projectName - Name of the deactivated project.
+ * @param {string} [opts.donationId] - ID of the cancelled recurring donation.
+ * @returns {Promise<void>}
+ */
+async function sendRecurringDonationCancelledEmail({ email, projectName, donationId }) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn(
+        "[email] RESEND_API_KEY not set — skipping recurring donation cancellation notification",
+      );
+    }
+    return;
+  }
+  if (!email) return;
+
+  const safeProjectName = sanitizeHeader(projectName || "Project");
+  const subject = `Recurring Donation Cancelled: ${safeProjectName}`;
+  const donationRefHtml = donationId ? `<p style="margin:0 0 16px;font-size:13px;color:#888888;">Pledge ID: ${escHtml(donationId)}</p>` : "";
+  const donationRefText = donationId ? `\nPledge ID: ${donationId}\n` : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f7f0;font-family:sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+        <tr><td style="background:#c0392b;padding:24px 32px;">
+          <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">🌱 Recurring Donation Cancelled</p>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1a3a1a;">${escHtml(safeProjectName)}</h1>
+          ${donationRefHtml}
+          <p style="margin:0 0 16px;font-size:16px;color:#4a6a4a;line-height:1.6;">
+            Your recurring donation to <strong>${escHtml(safeProjectName)}</strong> has been cancelled because the project has been deactivated.
+          </p>
+          <p style="margin:0;font-size:14px;color:#666666;">
+            No further charges or automated donations will be attempted. If you have any questions, please contact our support team.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Recurring Donation Cancelled\n\nYour recurring donation to ${safeProjectName} has been cancelled because the project has been deactivated.${donationRefText}\n\nNo further charges or automated donations will be attempted.`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [email],
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error("[email] Resend error (recurring donation cancellation):", errBody);
+  }
+}
+
+/**
+=======
+>>>>>>> ibrahim/fix/1148-deactivate-project-cancel-recurring
+ * Alert platform admins that a webhook delivery has been abandoned after all
+ * retries were exhausted, so the dropped event can be investigated and the
+ * project owner can be told to reconcile manually.
+ *
+ * Best-effort: silently skips when Resend is not configured.
+ *
+ * @param {object} opts
+ * @param {string} opts.deliveryId - webhook_deliveries row id.
+ * @param {string} [opts.url] - Destination URL that kept failing.
+ * @param {number} [opts.attempts] - Number of attempts made.
+ * @param {string|null} [opts.lastError] - Final error message recorded.
+ * @returns {Promise<void>}
+ */
+async function sendWebhookFailureNotification({ deliveryId, url, attempts, lastError } = {}) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      console.warn("[email] RESEND_API_KEY not set — skipping webhook failure notification");
+    }
+    return;
+  }
+
+  const subject = `Webhook delivery abandoned after ${attempts} attempts`;
+  const text = [
+    "A webhook delivery permanently failed and has been removed from the retry queue.",
+    "",
+    `Delivery ID: ${deliveryId || "(unknown)"}`,
+    `URL:         ${url || "(unknown)"}`,
+    `Attempts:    ${attempts}`,
+    `Last error:  ${lastError || "(none recorded)"}`,
+    "",
+    "The event was not delivered. Review the webhook endpoint and re-send from the admin dashboard.",
+  ].join("\n");
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [ADMIN_NOTIFICATION_EMAIL],
+      subject,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    console.error("[email] Resend error (webhook failure notification):", errBody);
+  }
+}
+
+module.exports = {
+  sendUpdateNotifications,
+  sendAdminVerificationNotification,
+  sendVerificationStatusNotification,
+  sendRecurringDonationCancelledEmail,
+  sendWebhookFailureNotification,
+};

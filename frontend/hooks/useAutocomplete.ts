@@ -10,10 +10,20 @@ export function useAutocomplete<T>(
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
 
-  useEffect(() => {
+  // Reset results/open state as soon as the query drops below the minimum
+  // length, computed during render (guarded against re-firing) instead of
+  // via a synchronous setState in an effect.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
     if (query.length < 2) {
       setResults([]);
       setIsOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    if (query.length < 2) {
       return;
     }
 

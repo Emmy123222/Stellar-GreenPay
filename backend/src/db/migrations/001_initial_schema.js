@@ -25,10 +25,10 @@ module.exports = {
       )
     `);
 
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary TEXT`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model TEXT`);
-    await client.query(`ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash TEXT`);
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary TEXT");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_generated_at TIMESTAMPTZ");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_model TEXT");
+    await client.query("ALTER TABLE projects ADD COLUMN IF NOT EXISTS ai_summary_source_hash TEXT");
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS donations (
@@ -157,27 +157,37 @@ module.exports = {
       CREATE TABLE IF NOT EXISTS project_follows (
         id UUID PRIMARY KEY,
         project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        device_token_id UUID NOT NULL REFERENCES device_tokens(id) ON DELETE CASCADE,
+        device_token_id UUID REFERENCES device_tokens(id) ON DELETE CASCADE,
         wallet_address TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         UNIQUE(project_id, device_token_id)
       )
     `);
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS project_follows_project_wallet_uidx
+        ON project_follows (project_id, wallet_address)
+        WHERE device_token_id IS NULL AND wallet_address IS NOT NULL
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS project_follows_wallet_lookup_idx
+        ON project_follows (project_id, wallet_address)
+        WHERE wallet_address IS NOT NULL
+    `);
   },
 
   async down(client) {
     // Drop in reverse dependency order
-    await client.query(`DROP TABLE IF EXISTS project_follows`);
-    await client.query(`DROP TABLE IF EXISTS device_tokens`);
-    await client.query(`DROP TABLE IF EXISTS donation_matches`);
-    await client.query(`DROP TABLE IF EXISTS project_ratings`);
-    await client.query(`DROP TABLE IF EXISTS project_milestones`);
-    await client.query(`DROP TABLE IF EXISTS project_campaigns`);
-    await client.query(`DROP TABLE IF EXISTS project_subscriptions`);
-    await client.query(`DROP TABLE IF EXISTS project_updates`);
-    await client.query(`DROP TABLE IF EXISTS jobs`);
-    await client.query(`DROP TABLE IF EXISTS profiles`);
-    await client.query(`DROP TABLE IF EXISTS donations`);
-    await client.query(`DROP TABLE IF EXISTS projects`);
+    await client.query("DROP TABLE IF EXISTS project_follows");
+    await client.query("DROP TABLE IF EXISTS device_tokens");
+    await client.query("DROP TABLE IF EXISTS donation_matches");
+    await client.query("DROP TABLE IF EXISTS project_ratings");
+    await client.query("DROP TABLE IF EXISTS project_milestones");
+    await client.query("DROP TABLE IF EXISTS project_campaigns");
+    await client.query("DROP TABLE IF EXISTS project_subscriptions");
+    await client.query("DROP TABLE IF EXISTS project_updates");
+    await client.query("DROP TABLE IF EXISTS jobs");
+    await client.query("DROP TABLE IF EXISTS profiles");
+    await client.query("DROP TABLE IF EXISTS donations");
+    await client.query("DROP TABLE IF EXISTS projects");
   },
 };

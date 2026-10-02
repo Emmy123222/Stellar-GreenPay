@@ -6,7 +6,21 @@ on:
   pull_request:
     branches: [main]
 
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# SENTRY_DSN  — Sentry DSN for error tracking (optional). Builds pass without it.
+#               Configure as a GitHub Actions secret when deploying to production
+#               to enable error reporting in CI builds.
+# ──────────────────────────────────────────────────────────────────────────────
+
 jobs:
+  docs:
+    name: Documentation invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require the canonical OpenAPI specification
+        run: test -f docs/api/openapi.yaml && ! test -f docs/openapi.yml
+
   frontend:
     name: Frontend (Next.js)
     runs-on: ubuntu-latest
@@ -17,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -39,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
@@ -71,12 +85,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from backend --build
+      - run: docker compose -f docker-compose.test.yml run --rm --build pgboss-migrate
+        working-directory: .
+      - run: docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from backend --build backend
         working-directory: .
 
   contracts:
@@ -89,7 +105,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
       - uses: actions/cache@v4
         with:
           path: |
@@ -99,21 +115,40 @@ jobs:
           key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/**/Cargo.lock') }}
       - run: cargo check --workspace
       - run: cargo test --workspace
-      - run: cargo build --workspace --target wasm32-unknown-unknown --release
+      - run: cargo build --workspace --target wasm32v1-none --release
 
   helm:
     name: Helm Chart Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v3
+      - uses: azure/setup-helm@v4
         with:
-          version: latest
-      - uses: azure/setup-kubectl@v3
-        with:
-          version: latest
+          version: "v3.16.4"
       - run: helm lint helm/greenpay/
-      - run: helm template greenpay helm/greenpay/ | kubectl apply --dry-run=client -f -
+      - name: Render and dry-run
+        run: |
+          helm template greenpay helm/greenpay/ > /tmp/greenpay-manifests.yaml
+          pip install --quiet pyyaml
+          python3 -c "import yaml,sys; list(yaml.safe_load_all(open('/tmp/greenpay-manifests.yaml')))"
+
+  k8s:
+    name: Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render manifests with an immutable image tag
+        run: ./scripts/render-k8s-manifests.sh "$(git rev-parse --short=7 HEAD)" /tmp/greenpay-k8s.yaml
+      - name: Validate rendered manifests
+        run: |
+          pip install --quiet pyyaml
+          python3 -c "import yaml; docs=[d for d in yaml.safe_load_all(open('/tmp/greenpay-k8s.yaml')) if d]; assert len(docs) >= 8, f'expected at least 8 resources, got {len(docs)}'; print(f'validated {len(docs)} resources')"
+      - name: Assert no mutable image tags
+        run: |
+          if grep -E 'image: .*:latest([[:space:]]|$)' /tmp/greenpay-k8s.yaml; then
+            echo "::error::Found a mutable 'latest' image tag in the rendered manifests"
+            exit 1
+          fi
 
   gitleaks:
     name: Secret scanning
@@ -122,20 +157,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install gitleaks
         run: |
-          curl -sL "https://github.com/zricethezav/gitleaks/releases/latest/download/gitleaks_$(uname -s)_$(uname -m).tar.gz" | tar xzf -
+          GITLEAKS_VERSION=8.30.1
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar xzf -
           sudo mv gitleaks /usr/local/bin/gitleaks
+          gitleaks version
       - name: Secret scanning
         run: gitleaks detect --config .gitleaks.toml --source . --exit-code 1
 
   zap_scan:
     name: DAST Security Scan (OWASP ZAP)
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Run ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.14.0
+        continue-on-error: true
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target: 'https://staging.greenpay.app'

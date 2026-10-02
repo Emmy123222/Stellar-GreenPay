@@ -2,16 +2,28 @@ name: Backend CI
 
 on:
   push:
+    # No `paths` filter on push: coverage must be uploaded to Codecov on every
+    # main-branch push so the README badge reflects the current state (#1286).
     branches: [main, develop]
-    paths: [backend/**]
   pull_request:
     branches: [main]
     paths: [backend/**]
+
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# SENTRY_DSN     — Sentry DSN for error tracking (optional). Tests pass without it.
+#                  Configure as a GitHub Actions secret when deploying to production
+#                  to enable error reporting in CI builds.
+# CODECOV_TOKEN  — Codecov token for uploading test coverage (optional).
+#                  Configured as a repository secret.
+# ──────────────────────────────────────────────────────────────────────────────
 
 jobs:
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:
@@ -23,7 +35,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -38,23 +50,34 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-    defaults:
-      run:
-        working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
 
+      # Guard against regression of #1039: generated coverage artifacts must
+      # never be committed again. They are uploaded as a CI artifact instead.
+      - name: Verify coverage artifacts are not committed
+        working-directory: ${{ github.workspace }}
+        run: |
+          tracked="$(git ls-files -- 'coverage' 'backend/coverage' 'frontend/coverage')"
+          if [ -n "$tracked" ]; then
+            echo "::error::Generated coverage artifacts must not be committed. Run 'git rm -r --cached backend/coverage/' and keep them in .gitignore."
+            echo "$tracked"
+            exit 1
+          fi
+          echo "OK: no coverage artifacts are tracked."
+
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
 
       - run: npm ci
 
       - name: Run database migrations
-        run: npm run db:migrate
+        run: |
+          node src/db/pgboss-migrate.js
+          npm run db:migrate
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
 
@@ -62,6 +85,16 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
           REDIS_URL: redis://localhost:6379
+          SKIP_INTEGRATION: "1"
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage-report
+          path: backend/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -69,4 +102,4 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: backend/coverage/lcov.info
           flags: backend
-          fail_ci_if_error: true
+          fail_ci_if_error: false

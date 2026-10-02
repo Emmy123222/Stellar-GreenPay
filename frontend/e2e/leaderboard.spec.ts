@@ -9,6 +9,7 @@ const MOCK_LEADERBOARD = [
     publicKey: MOCK_PUBLIC_KEY,
     displayName: "EcoChampion",
     totalDonatedXLM: "5000",
+    totalCO2OffsetKg: "2400",
     projectsSupported: 8,
     topBadge: "earth",
   },
@@ -17,6 +18,7 @@ const MOCK_LEADERBOARD = [
     publicKey: MOCK_PUBLIC_KEY_2,
     displayName: "GreenDonor",
     totalDonatedXLM: "1200",
+    totalCO2OffsetKg: "600",
     projectsSupported: 3,
     topBadge: "forest",
   },
@@ -25,6 +27,7 @@ const MOCK_LEADERBOARD = [
     publicKey: "GBCDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGH",
     displayName: "TreeHugger",
     totalDonatedXLM: "500",
+    totalCO2OffsetKg: "250",
     projectsSupported: 2,
     topBadge: "tree",
   },
@@ -33,6 +36,7 @@ const MOCK_LEADERBOARD = [
     publicKey: "GDEFGHIJKLMNOPQRSTUVWXYZ234567890ABCDEFGHIJ",
     displayName: undefined,
     totalDonatedXLM: "50",
+    totalCO2OffsetKg: "25",
     projectsSupported: 1,
     topBadge: "seedling",
   },
@@ -50,11 +54,11 @@ async function mockApi(page: Page) {
       },
     }),
   );
-  await page.route("**/api/leaderboard**", (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
-  await page.route("**/api/stats/global", (r) =>
+  await page.route("**/api/**/leaderboard**", (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
+  await page.route("**/api/**/stats/global", (r) =>
     r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })),
   );
-  await page.route("**/api/stats/categories", (r) =>
+  await page.route("**/api/**/stats/categories", (r) =>
     r.fulfill(ok([{ category: "Reforestation", count: 1 }])),
   );
 }
@@ -127,5 +131,13 @@ test.describe("Leaderboard page", () => {
     await expect(page.getByText("Impact Badge Tiers")).toBeVisible();
     await expect(page.getByText("Seedling").first()).toBeVisible();
     await expect(page.getByText("Earth Guardian").first()).toBeVisible();
+  });
+
+  test("shows CO2 offset alongside XLM donated", async ({ page }) => {
+    await mockApi(page);
+    await page.goto("/leaderboard");
+
+    await expect(page.getByText("2.4k kg CO₂").first()).toBeVisible();
+    await expect(page.getByText("offset").first()).toBeVisible();
   });
 });

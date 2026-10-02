@@ -22,9 +22,36 @@ type Step = "idle" | "building" | "signing" | "submitting" | "recording" | "succ
 const PRESETS_XLM = ["10", "25", "50", "100", "250"];
 const PRESETS_USDC = ["5", "10", "25", "50", "100"];
 
+interface DonationDraft {
+  amount?: string;
+  message?: string;
+  currency?: "XLM" | "USDC";
+}
+
+const draftKey = (projectId: string) => `greenpay:donate-draft:${projectId}`;
+
+function readDraft(projectId: string): DonationDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(draftKey(projectId));
+    return raw ? (JSON.parse(raw) as DonationDraft) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearDraft(projectId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(draftKey(projectId));
+  } catch {
+    // sessionStorage may be unavailable (private mode); ignore.
+  }
+}
+
 export default function DonateForm({ project, publicKey, initialAmount, initialMessage, onSuccess }: DonateFormProps) {
-  const [amount, setAmount]   = useState("");
-  const [message, setMessage] = useState("");
+  const [amount, setAmount]   = useState(initialAmount || "");
+  const [message, setMessage] = useState(initialMessage || "");
   const [currency, setCurrency] = useState<"XLM" | "USDC">("XLM");
   const [step, setStep]       = useState<Step>("idle");
   const [error, setError]     = useState<string | null>(null);
@@ -34,15 +61,56 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!initialAmount) return;
-    setAmount(initialAmount);
-  }, [initialAmount]);
+  // Re-seed the editable amount/message fields whenever the caller passes a
+  // new initial value (e.g. clicking a different preset/reply elsewhere on
+  // the page), while still letting the user freely edit them afterwards.
+  // This is the "adjusting state when a prop changes" pattern from the React
+  // docs, done during render instead of in an effect.
+  const [prevInitialAmount, setPrevInitialAmount] = useState(initialAmount);
+  if (initialAmount !== prevInitialAmount) {
+    setPrevInitialAmount(initialAmount);
+    if (initialAmount) setAmount(initialAmount);
+  }
 
+  const [prevInitialMessage, setPrevInitialMessage] = useState(initialMessage);
+  if (initialMessage !== prevInitialMessage) {
+    setPrevInitialMessage(initialMessage);
+    if (initialMessage) setMessage(initialMessage);
+  }
+
+  // Restore any in-progress draft when navigating back to a previously filled
+  // form within the same tab.
   useEffect(() => {
-    if (!initialMessage) return;
-    setMessage(initialMessage);
-  }, [initialMessage]);
+    const draft = readDraft(project.id);
+    if (!draft) return;
+    // Defer setState calls to avoid synchronous state updates inside an effect
+    // body which can trigger cascading renders (react-hooks/set-state-in-effect).
+    queueMicrotask(() => {
+      if (draft.amount) setAmount(draft.amount);
+      if (draft.message) setMessage(draft.message);
+      if (draft.currency) setCurrency(draft.currency);
+    });
+  }, [project.id]);
+
+  // Persist the draft on every change so a back-navigation doesn't lose it.
+  useEffect(() => {
+    if (step === "success") return;
+    if (typeof window === "undefined") return;
+    // Nothing worth restoring — drop any stale draft instead of persisting an
+    // empty one (this is what an explicit Cancel leaves behind).
+    if (!amount && !message) {
+      clearDraft(project.id);
+      return;
+    }
+    try {
+      window.sessionStorage.setItem(
+        draftKey(project.id),
+        JSON.stringify({ amount, message, currency }),
+      );
+    } catch {
+      // Ignore storage quota / availability errors.
+    }
+  }, [project.id, amount, message, currency, step]);
 
   useEffect(() => {
     let mounted = true;
@@ -95,16 +163,25 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         return "text-green-600";
       };
 
-  const handleDonate = async () => {
-    if (!isValid || step !== "idle") return;
+  const isProcessing = step === "building" || step === "signing" || step === "submitting" || step === "recording";
+
+  const handleCancel = () => {
+    clearDraft(project.id);
+    setAmount("");
+    setMessage("");
     setError(null);
+    setStep("idle");
+  };
+
+  const handleDonate = async () => {
+    if (!isValid || isProcessing || step !== "idle") return;
+    setError(null);
+    setStep("signing");
 
     try {
       const useContract = CONTRACT_ID && currency === "XLM";
 
       if (useContract) {
-        setStep("building");
-
         // Get native XLM token address (for testnet/mainnet)
         const nativeTokenAddress = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"; // Native XLM on testnet
         const msgHash = message.trim() ? hashMessage(message.trim()) : 0;
@@ -118,7 +195,6 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           msgHash,
         });
 
-        setStep("signing");
         const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
         if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
 
@@ -149,11 +225,11 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           transactionHash: result.hash,
         });
 
+        clearDraft(project.id);
         setStep("success");
         onSuccess?.();
       } else {
-      // Fallback to standard payment
-        setStep("building");
+        // Fallback to standard payment
         const asset = currency === "USDC"
           ? { code: "USDC", issuer: process.env.NEXT_PUBLIC_USDC_ISSUER }
           : undefined;
@@ -171,7 +247,6 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           asset,
         });
 
-        setStep("signing");
         const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
         if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
 
@@ -189,6 +264,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           transactionHash: result.hash,
         });
 
+        clearDraft(project.id);
         setStep("success");
         onSuccess?.();
       }
@@ -199,13 +275,13 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
     }
   };
 
-  if (step === "success" && txHash) {
+  if (step === "success") {
     return (
       <div className="card text-center animate-slide-up">
         <div className="text-4xl mb-3">🌱</div>
-        <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Thank you!</h3>
+        <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
         <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">
-          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>.
+          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>. Thank you!
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
@@ -213,10 +289,12 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
             <p className="text-lg font-bold text-forest-700">{donorBadge}</p>
           </div>
         )}
-        <a href={explorerUrl(txHash)} target="_blank" rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-forest-600 hover:text-forest-700 transition-colors font-body">
-          View on Stellar Expert ↗
-        </a>
+        {txHash && (
+          <a href={explorerUrl(txHash)} target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-forest-600 hover:text-forest-700 transition-colors font-body">
+            View on Stellar Expert ↗
+          </a>
+        )}
       </div>
     );
   }
@@ -230,12 +308,12 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         <div>
           <label className="label">Currency</label>
           <div className="flex gap-2">
-            <button onClick={() => setCurrency("XLM")}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "XLM" ? "bg-forest-500 text-white" : "bg-white"}`}>
+            <button onClick={() => setCurrency("XLM")} disabled={isProcessing}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "XLM" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
               XLM
             </button>
-            <button onClick={() => setCurrency("USDC")}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "USDC" ? "bg-forest-500 text-white" : "bg-white"}`}>
+            <button onClick={() => setCurrency("USDC")} disabled={isProcessing}
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "USDC" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
               USDC
             </button>
           </div>
@@ -245,19 +323,21 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <label className="label">Choose Amount ({currency})</label>
           <div className="flex flex-wrap gap-2 mb-3">
             {(currency === "XLM" ? PRESETS_XLM : PRESETS_USDC).map((p) => (
-              <button key={p} onClick={() => setAmount(p)}
+              <button key={p} onClick={() => setAmount(p)} disabled={isProcessing}
                 className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all font-body ${
                   amount === p
                     ? "bg-forest-500 text-white border-forest-500"
                     : "bg-forest-50 text-forest-700 border-forest-200 hover:border-forest-400"
-                }`}>
+                } ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
                 {p} {currency}
               </button>
             ))}
           </div>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)}
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={isProcessing}
             placeholder="Or enter custom amount..." min="1" step="1"
-            className="input-field" />
+            aria-label={`Donation amount in ${currency}`}
+            id={`donation-amount-${currency}`}
+            className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
           {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
           
           {/* CO₂ Impact Calculator */}
@@ -278,9 +358,9 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         {/* Message */}
         <div>
           <label className="label">Message <span className="normal-case text-[#8aaa8a] dark:text-forest-300 font-normal">(optional)</span></label>
-          <input type="text" value={message} onChange={(e) => setMessage(e.target.value)}
+          <input type="text" value={message} onChange={(e) => setMessage(e.target.value)} disabled={isProcessing}
             placeholder="Leave a message of support..." maxLength={100}
-            className="input-field" />
+            className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
         </div>
 
         {/*  Helper text */}
@@ -311,19 +391,49 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           </div>
         )}
 
-        <button onClick={handleDonate} disabled={!isValid || step !== "idle"}
-          className="btn-primary w-full flex items-center justify-center gap-2">
-          {step === "building"   && <><Spinner />Building transaction...</>}
-          {step === "signing"    && <><Spinner />Sign in Freighter...</>}
-          {step === "submitting" && <><Spinner />Submitting...</>}
-          {step === "recording"  && <>Done</>}
-          {step === "idle"       && <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`) : currency}</>}
-          {step === "error"      && "Retry"}
+        <button
+          type="button"
+          onClick={handleDonate}
+          disabled={!isValid || isProcessing || step !== "idle"}
+          className="btn-primary w-full flex items-center justify-center gap-2"
+        >
+          {(step === "building" || step === "signing") && (
+            <>
+              <Spinner />
+              Signing with Freighter…
+            </>
+          )}
+          {(step === "submitting" || step === "recording") && (
+            <>
+              <Spinner />
+              Submitting to Stellar network…
+            </>
+          )}
+          {step === "idle" && (
+            <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`) : currency}</>
+          )}
+          {step === "error" && "Retry"}
         </button>
 
-        {step === "signing" && (
+        {(amount || message) && !isProcessing && (
+          <button
+            type="button"
+            onClick={handleCancel}
+            className="w-full text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body underline"
+          >
+            Cancel
+          </button>
+        )}
+
+        {(step === "building" || step === "signing") && (
           <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
-            Please confirm in your Freighter wallet...
+            Signing with Freighter… Please confirm in your Freighter wallet.
+          </p>
+        )}
+
+        {(step === "submitting" || step === "recording") && (
+          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
+            Submitting to Stellar network…
           </p>
         )}
       </div>
@@ -331,5 +441,10 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 }
 
 function Spinner() {
-  return <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>;
+  return (
+    <svg role="status" aria-label="Loading" className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+    </svg>
+  );
 }

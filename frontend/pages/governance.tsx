@@ -82,7 +82,7 @@ async function buildVoteTransaction(voter: string, projectId: string, approve: b
         "vote_verify_project",
         new Address(voter).toScVal(),
         nativeToScVal(projectId, { type: "string" }),
-        nativeToScVal(approve, { type: "bool" }),
+        nativeToScVal(approve, { type: "bool" as any }),
       ),
     )
     .setTimeout(60)
@@ -150,7 +150,7 @@ export default function GovernancePage() {
       if (pk) {
         try {
           const stats = await getDonorStats(pk);
-          if (mounted && stats.badge !== "None") setIsBadgeHolder(true);
+          if (mounted && stats && (stats as any).badge !== "None") setIsBadgeHolder(true);
         } catch {
           // not a badge holder yet
         }
@@ -170,7 +170,7 @@ export default function GovernancePage() {
     if (pk) {
       try {
         const stats = await getDonorStats(pk);
-        if (stats.badge !== "None") setIsBadgeHolder(true);
+        if (stats && (stats as any).badge !== "None") setIsBadgeHolder(true);
       } catch { /* not a badge holder */ }
     }
   }

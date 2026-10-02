@@ -34,8 +34,9 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
       ? window.localStorage.getItem("greenpay:notifications:lastSeen") || undefined
       : undefined;
 
+    // unreadCount already defaults to 0, so there's nothing to synchronize
+    // when there's no device token to fetch notifications for.
     if (!token) {
-      setUnreadCount(0);
       return;
     }
 
@@ -61,6 +62,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
     { href: "/bridge",      label: t("nav.bridge") },
     { href: "/impact",      label: t("nav.impact") },
     { href: "/leaderboard", label: t("nav.leaderboard") },
+    { href: "/contributors", label: t("nav.contributors") },
     { href: "/dashboard",   label: t("nav.myImpact") },
     { href: "/apply",       label: t("nav.apply") },
   ];
@@ -83,17 +85,23 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
         </div>
 
         <div className="hidden md:flex items-center gap-1">
-          {links.map((l) => (
-            <Link key={l.href} href={l.href}
-              className={clsx(
-                "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 font-body",
-                router.pathname === l.href || (router.pathname.startsWith(l.href + "/") && l.href !== "/")
-                  ? "bg-forest-100 dark:bg-[#1c3928] text-forest-700 dark:text-[#81c784]"
-                  : "text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-forest-700 dark:hover:text-[#81c784] hover:bg-forest-50 dark:hover:bg-[rgba(96,208,123,0.10)]"
-              )}>
-              {l.label}
-            </Link>
-          ))}
+          {links.map((l) => {
+            const isActive =
+              router.pathname === l.href ||
+              (router.pathname.startsWith(l.href + "/") && l.href !== "/");
+            return (
+              <Link key={l.href} href={l.href}
+                aria-current={isActive ? "page" : undefined}
+                className={clsx(
+                  "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 font-body",
+                  isActive
+                    ? "bg-forest-100 dark:bg-[#1c3928] text-forest-700 dark:text-[#81c784]"
+                    : "text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-forest-700 dark:hover:text-[#81c784] hover:bg-forest-50 dark:hover:bg-[rgba(96,208,123,0.10)]"
+                )}>
+                {l.label}
+              </Link>
+            );
+          })}
         </div>
 
         <div className="flex items-center gap-2">

@@ -1,3 +1,4 @@
+
 "use strict";
 
 const fs = require("fs");
@@ -21,7 +22,12 @@ function loadMigrationFiles() {
   if (!fs.existsSync(MIGRATIONS_DIR)) return [];
   return fs
     .readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".js"))
+    .filter(
+      (f) =>
+        f.endsWith(".js") &&
+        !f.endsWith(".test.js") &&
+        !f.endsWith(".spec.js")
+    )
     .sort()
     .map((f) => ({
       version: f.replace(".js", ""),
@@ -48,6 +54,7 @@ async function runMigrations() {
 
     for (const { version, file } of files) {
       if (applied.includes(version)) continue;
+      // eslint-disable-next-line security/detect-non-literal-require
       const migration = require(file);
       console.log(`[DB] Applying migration: ${version}`);
       await migration.up(client);
@@ -99,9 +106,11 @@ async function rollbackMigrations(steps = 1) {
 
     for (const row of result.rows) {
       const file = path.join(MIGRATIONS_DIR, `${row.version}.js`);
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
       if (!fs.existsSync(file)) {
         throw new Error(`Migration file not found for rollback: ${file}`);
       }
+      // eslint-disable-next-line security/detect-non-literal-require
       const migration = require(file);
       if (typeof migration.down !== "function") {
         throw new Error(`Migration ${row.version} does not export a down() function`);

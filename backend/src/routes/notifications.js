@@ -84,7 +84,7 @@ router.post("/register", async (req, res, next) => {
     if (!platform || typeof platform !== "string") {
       return res.status(400).json({ error: "platform is required (ios/android)" });
     }
-    if (!['ios', 'android'].includes(platform.toLowerCase())) {
+    if (!["ios", "android"].includes(platform.toLowerCase())) {
       return res.status(400).json({ error: "platform must be either ios or android" });
     }
 
