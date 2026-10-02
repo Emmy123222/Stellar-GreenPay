@@ -216,7 +216,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('every touchable element has a non-empty accessibilityLabel', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getAllByRole } = render(wrap(<RecurringScreen />));
+    const { getAllByRole } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const buttons = getAllByRole('button');
@@ -230,7 +230,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('amount input exposes a non-announced / numeric accessibility role', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = render(wrap(<RecurringScreen />));
+    const { getByLabelText } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const input = getByLabelText('Recurring donation amount in XLM');
@@ -243,7 +243,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('cancel button has a label distinct from the confirm button', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = render(wrap(<RecurringScreen />));
+    const { getByLabelText } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const confirmBtn = getByLabelText('Confirm recurring donation');
@@ -260,7 +260,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('announces donation status changes via an alert live region', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText, getByRole } = render(wrap(<RecurringScreen />));
+    const { getByLabelText, getByRole } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       expect(getByLabelText('Confirm recurring donation')).toBeTruthy();
