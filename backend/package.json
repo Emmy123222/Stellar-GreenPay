@@ -55,6 +55,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@humanwhocodes/object-schema": "^2.0.3",
     "@testcontainers/postgresql": "^12.0.4",
     "eslint": "^8.57.0",
     "eslint-plugin-security": "^4.0.1",
