@@ -7,19 +7,56 @@ const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const { mapProjectRatingRow } = require("../services/store");
+const { walletAuthRequired } = require("../middleware/auth");
+
+const MAX_REVIEW_LENGTH = 500;
 
 /**
  * POST /api/ratings
- * Submits a rating for a project.
+ * Submits or updates the authenticated donor's rating for a project.
+ *
+ * Body: { project_id, stars, review_text }
+ * Only wallets that have actually donated to the project may rate it —
+ * verified against the donations ledger, not the request body.
  */
-router.post("/", async (req, res, next) => {
+router.post("/", walletAuthRequired, async (req, res, next) => {
   try {
-    const { projectId, donorAddress, rating, review } = req.body;
-    if (!projectId || !donorAddress || !rating) {
-      return res.status(400).json({ error: "projectId, donorAddress, and rating are required" });
+    const { project_id: projectId, stars, review_text: reviewText } = req.body || {};
+
+    if (!projectId || typeof projectId !== "string") {
+      return res.status(400).json({ error: "project_id is required" });
     }
-    if (rating < 1 || rating > 5) {
-      return res.status(400).json({ error: "rating must be between 1 and 5" });
+    if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+      return res.status(400).json({ error: "stars must be an integer between 1 and 5" });
+    }
+    if (reviewText !== undefined && reviewText !== null && typeof reviewText !== "string") {
+      return res.status(400).json({ error: "review_text must be a string" });
+    }
+    if (typeof reviewText === "string" && reviewText.length > MAX_REVIEW_LENGTH) {
+      return res.status(400).json({ error: `review_text must be at most ${MAX_REVIEW_LENGTH} characters` });
+    }
+
+    const donorAddress = req.walletAddress;
+
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [projectId],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Backend verification: the authenticated donor must have a recorded
+    // donation for this project. The donor address comes from the verified
+    // wallet token, never from the request body.
+    const donationResult = await pool.query(
+      `SELECT 1 FROM donations
+       WHERE project_id = $1 AND donor_address = $2
+       LIMIT 1`,
+      [projectId, donorAddress],
+    );
+    if (!donationResult.rows[0]) {
+      return res.status(403).json({ error: "Only donors who have donated to this project can rate it" });
     }
 
     const result = await pool.query(
@@ -28,7 +65,7 @@ router.post("/", async (req, res, next) => {
        ON CONFLICT (project_id, donor_address) DO UPDATE
        SET rating = EXCLUDED.rating, review = EXCLUDED.review, created_at = NOW()
        RETURNING *`,
-      [uuid(), projectId, donorAddress, rating, review || null],
+      [uuid(), projectId, donorAddress, stars, reviewText?.trim() ? reviewText.trim() : null],
     );
 
     res.status(201).json({ success: true, data: mapProjectRatingRow(result.rows[0]) });

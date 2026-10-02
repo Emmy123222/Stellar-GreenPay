@@ -7,7 +7,9 @@ function initSentry(app) {
 
   Sentry.init({
     dsn: process.env.SENTRY_DSN,
-    tracesSampleRate: 0.1,
+    // Keep performance traces bounded in production while retaining every error event.
+    tracesSampleRate: 0.05,
+    sampleRate: 1.0,
     environment: process.env.NODE_ENV,
   });
 
