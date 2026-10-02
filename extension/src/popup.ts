@@ -6,13 +6,33 @@ import {
   Operation,
   TransactionBuilder,
 } from '@stellar/stellar-sdk';
-import { loadSettings, type ExtensionSettings } from './settings';
+import {
+  loadSettings,
+  addSiteToAllowlist,
+  removeSiteFromAllowlist,
+  type ExtensionSettings,
+} from './settings';
+import { getHostnameFromUrl, isUrlAllowed } from './allowlist';
 
+} from "@stellar/stellar-sdk";
+import { loadSettings, type ExtensionSettings } from "./settings";
+import {
+  addPendingDonation,
+  checkPendingDonations,
+  getPendingDonations,
+  horizonUrlForNetwork,
+  PENDING_STORAGE_KEY,
+  stellarExpertTxUrl,
+  syncBadge,
+  type PendingDonation,
+} from "./pendingTransactions";
 
 // Module-level vars
 let API_BASE = 'https://api.stellar-greenpay.app';
 let NETWORK_PASSPHRASE: string = Networks.TESTNET;
 let horizonUrl = 'https://horizon-testnet.stellar.org';
+let currentNetwork: "testnet" | "mainnet" = "testnet";
+let horizonUrl = "https://horizon-testnet.stellar.org";
 let server = new Horizon.Server(horizonUrl);
 
 function applySettings(settings: ExtensionSettings) {
@@ -23,7 +43,13 @@ function applySettings(settings: ExtensionSettings) {
   } else {
     NETWORK_PASSPHRASE = Networks.TESTNET;
     horizonUrl = 'https://horizon-testnet.stellar.org';
+  currentNetwork = settings.network === "mainnet" ? "mainnet" : "testnet";
+  if (settings.network === "mainnet") {
+    NETWORK_PASSPHRASE = Networks.PUBLIC;
+  } else {
+    NETWORK_PASSPHRASE = Networks.TESTNET;
   }
+  horizonUrl = horizonUrlForNetwork(currentNetwork);
   server = new Horizon.Server(horizonUrl);
 }
 
@@ -99,10 +125,27 @@ function renderProjectList(projects: ProjectResult[]) {
   activeProjectListIndex = -1;
 
   if (projects.length === 0) {
-    const empty = document.createElement('li');
-    empty.className = 'glass-panel project-item';
-    empty.textContent = 'No saved projects yet.';
+    const empty = document.createElement("li");
+    empty.className = "glass-panel empty-state";
+    empty.innerHTML = `
+      <div class="empty-state-icon" aria-hidden="true">🌱</div>
+      <div class="empty-state-content">
+        <h4 class="empty-state-title">Start your climate journey</h4>
+        <p class="empty-state-text">You haven't donated to any projects yet. Discover amazing climate initiatives and make your first donation!</p>
+        <button class="btn empty-state-btn" id="find-project-btn">
+          Find a project
+        </button>
+      </div>
+    `;
     list.appendChild(empty);
+    
+    // Add event listener for the "Find a project" button
+    const findProjectBtn = empty.querySelector("#find-project-btn");
+    if (findProjectBtn) {
+      findProjectBtn.addEventListener("click", () => {
+        chrome.tabs.create({ url: "https://stellar-greenpay.app/projects" });
+      });
+    }
     return;
   }
 
@@ -259,20 +302,130 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
   });
 }
 
+// ==================== PENDING TRANSACTIONS ====================
+
+async function renderPendingFromStorage() {
+  renderPendingDonations(await getPendingDonations());
+}
+
+async function refreshPendingSection() {
+  renderPendingDonations(await checkPendingDonations());
+}
+
+function truncateAddress(address: string): string {
+  return address.length > 12
+    ? `${address.slice(0, 6)}…${address.slice(-4)}`
+    : address;
+}
+
+function formatAge(createdAt: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
+
+function renderPendingDonations(donations: PendingDonation[]) {
+  const section = document.getElementById("pending-section");
+  const list = document.getElementById(
+    "pending-list",
+  ) as HTMLUListElement | null;
+  const count = document.getElementById("pending-count");
+  if (!section || !list || !count) return;
+
+  list.innerHTML = "";
+  count.textContent = String(donations.length);
+  section.classList.toggle("hidden", donations.length === 0);
+
+  donations.forEach((donation) => {
+    const info = document.createElement("div");
+    info.className = "pending-info";
+
+    const amount = document.createElement("div");
+    amount.className = "pending-amount";
+    amount.textContent = `${donation.amount} XLM pending`;
+
+    const recipient = document.createElement("div");
+    recipient.className = "pending-dest";
+    recipient.textContent = `to ${truncateAddress(donation.destination)} · ${formatAge(donation.createdAt)}`;
+
+    info.append(amount, recipient);
+
+    const link = document.createElement("a");
+    link.className = "pending-link";
+    link.href = stellarExpertTxUrl(donation.hash, currentNetwork);
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Stellar Expert";
+
+    const item = document.createElement("li");
+    item.className = "glass-panel pending-item";
+    item.append(info, link);
+    list.appendChild(item);
+  });
+}
+
+function initPendingSection() {
+  void refreshPendingSection();
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes[PENDING_STORAGE_KEY])
+      void renderPendingFromStorage();
+  });
+
+  window.setInterval(() => void refreshPendingSection(), 15000);
+}
+
 async function saveTotalDonated(total: number) {
   return new Promise<void>((resolve) => {
-    chrome.storage.local.set({ totalDonatedXLM: Math.max(0, total) }, () => {
-      updateDonationBadge(total);
-      resolve();
-    });
+    // syncBadge gives the pending red dot precedence while a donation is in
+    // flight, and restores the donation total once everything has settled.
+    chrome.storage.local.set(
+      { totalDonatedXLM: Math.max(0, total) },
+      async () => {
+        await syncBadge();
+        resolve();
+      },
+    );
   });
 }
 
 async function updateTotalAfterDonation(amount: number) {
-  chrome.storage.local.get(['totalDonatedXLM'], async (result: Record<string, unknown>) => {
-    const current = (result.totalDonatedXLM as number) || 0;
-    await saveTotalDonated(current + amount);
-  });
+  chrome.storage.local.get(
+    ["totalDonatedXLM"],
+    async (result: Record<string, unknown>) => {
+      const current = (result.totalDonatedXLM as number) || 0;
+      const total = current + amount;
+      const badgeTier = total >= 2000
+        ? "earth"
+        : total >= 500
+          ? "forest"
+          : total >= 100
+            ? "tree"
+            : total >= 10
+              ? "seedling"
+              : null;
+      await saveTotalDonated(total);
+      renderDonorStats(total, badgeTier);
+    },
+  );
+}
+
+function renderDonorStats(totalXLM: number, badgeTier: string | null) {
+  const totalElement = document.getElementById("donor-total");
+  const tierElement = document.getElementById("donor-badge-tier");
+  const tierLabels: Record<string, string> = {
+    seedling: "Seedling",
+    tree: "Tree",
+    forest: "Forest",
+    earth: "Earth",
+  };
+
+  if (totalElement) {
+    totalElement.textContent = `${totalXLM.toLocaleString(undefined, { maximumFractionDigits: 7 })} XLM`;
+  }
+  if (tierElement) {
+    tierElement.textContent = badgeTier ? tierLabels[badgeTier] || badgeTier : "No badge";
+  }
 }
 
 // ==================== PROFILE API ====================
@@ -290,6 +443,79 @@ async function fetchProfile(publicKey: string): Promise<any> {
 // ==================== WALLET CONNECT ====================
 let currentPublicKey: string | null = null;
 
+/** Key used to cache the connected address in `chrome.storage.session`. */
+const SESSION_ADDRESS_KEY = 'connectedWalletAddress';
+
+/**
+ * Session storage is in-memory and dropped when the browser closes, so the
+ * cached address never outlives the browsing session. Browsers without
+ * `storage.session` (older Firefox) fall back to no caching.
+ */
+const sessionArea = (): chrome.storage.StorageArea | null =>
+  chrome.storage?.session ?? null;
+
+function getSessionAddress(): Promise<string | null> {
+  return new Promise((resolve) => {
+    const area = sessionArea();
+    if (!area) {
+      resolve(null);
+      return;
+    }
+    try {
+      area.get([SESSION_ADDRESS_KEY], (result) => {
+        const value = result?.[SESSION_ADDRESS_KEY];
+        resolve(typeof value === 'string' && value ? value : null);
+      });
+    } catch (e) {
+      console.warn('Session storage read failed:', e);
+      resolve(null);
+    }
+  });
+}
+
+function setSessionAddress(address: string): void {
+  const area = sessionArea();
+  if (!area) return;
+  try {
+    area.set({ [SESSION_ADDRESS_KEY]: address }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {
+    console.warn('Session storage write failed:', e);
+  }
+}
+
+function clearSessionAddress(): void {
+  const area = sessionArea();
+  if (!area) return;
+  try {
+    area.remove([SESSION_ADDRESS_KEY], () => {
+      void chrome.runtime.lastError;
+    });
+  } catch (e) {
+    console.warn('Session storage clear failed:', e);
+  }
+}
+
+function abbreviateAddress(address: string): string {
+  return `${address.slice(0, 8)}...${address.slice(-4)}`;
+}
+
+/** Paint the wallet header for a known address (cached or freshly resolved). */
+function renderConnectedAddress(publicKey: string) {
+  const addressEl = document.getElementById('wallet-address') as HTMLSpanElement | null;
+  if (addressEl) addressEl.textContent = abbreviateAddress(publicKey);
+
+  const walletInfo = document.getElementById('wallet-info') as HTMLElement | null;
+  if (walletInfo) walletInfo.classList.remove('hidden');
+
+  const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
+  if (connectBtn) {
+    connectBtn.textContent = '✓ Connected';
+    connectBtn.disabled = true;
+  }
+}
+
 async function connectWallet() {
   try {
     const freighter = (window as any).freighter;
@@ -300,6 +526,8 @@ async function connectWallet() {
 
     const publicKey = await freighter.getPublicKey();
     currentPublicKey = publicKey;
+    setSessionAddress(publicKey);
+    renderConnectedAddress(publicKey);
 
     // UI Updates
     const addressEl = document.getElementById('wallet-address') as HTMLSpanElement | null;
@@ -316,15 +544,54 @@ async function connectWallet() {
 
     // Fetch total donated from backend
     const profile = await fetchProfile(publicKey);
-    let total = 0;
-    if (profile?.data?.totalDonatedXLM || profile?.totalDonatedXLM) {
-      total = parseFloat(profile.data?.totalDonatedXLM || profile.totalDonatedXLM) || 0;
-    }
+    const profileData = profile?.data ?? profile;
+    const total = Number.parseFloat(profileData?.totalDonatedXLM || "0") || 0;
+    const badgeTier = Array.isArray(profileData?.badges)
+      ? profileData.badges[0]?.tier || null
+      : null;
+    renderDonorStats(total, badgeTier);
     await saveTotalDonated(total);
 
   } catch (err: any) {
     console.error('Wallet connect error:', err);
     alert('Failed to connect wallet: ' + (err.message || 'Unknown error'));
+  }
+}
+
+/**
+ * Restore the wallet header on popup open (#1132).
+ *
+ * 1. Read the address cached in `chrome.storage.session` and paint it
+ *    synchronously so the popup never shows an empty wallet.
+ * 2. Re-validate against Freighter in the background; if the user switched
+ *    accounts, the display and the cache are updated to the new address.
+ */
+async function restoreWalletSession() {
+  const cached = await getSessionAddress();
+  if (cached) {
+    currentPublicKey = cached;
+    renderConnectedAddress(cached);
+  }
+
+  const freighter = (window as any).freighter;
+  if (!freighter) {
+    // No wallet available — drop any stale cached address.
+    if (cached) clearSessionAddress();
+    return;
+  }
+
+  try {
+    const publicKey: string = await freighter.getPublicKey();
+    if (!publicKey) return;
+    if (publicKey !== currentPublicKey) {
+      console.log('[GreenPay] Connected wallet changed — updating');
+      currentPublicKey = publicKey;
+      renderConnectedAddress(publicKey);
+      setSessionAddress(publicKey);
+    }
+  } catch (err) {
+    // Freighter locked / unreachable — keep showing the cached address.
+    console.warn('Wallet re-validation failed (showing cached address):', err);
   }
 }
 
@@ -348,6 +615,136 @@ function setStatus(message: string, isError = false) {
     statusEl.textContent = message;
     statusEl.style.color = isError ? '#ef4444' : '#10b981';
   }
+}
+
+const onboardingSteps = [
+  {
+    title: "What is GreenPay?",
+    description:
+      "GreenPay helps you discover climate projects and support them with Stellar payments.",
+  },
+  {
+    title: "Connect Freighter wallet",
+    description:
+      "Connect your Freighter wallet to GreenPay on the selected Stellar network. Review each request in Freighter before signing a donation.",
+  },
+  {
+    title: "Find your first project",
+    description:
+      "Choose an active climate project from the catalog or search for one to prepare your first donation.",
+  },
+];
+
+function closeOnboarding(overlay: HTMLElement) {
+  const previousFocus = (overlay as any).__previousFocus as HTMLElement | null;
+  overlay.remove();
+  previousFocus?.focus();
+}
+
+function trapFocus(overlay: HTMLElement, e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closeOnboarding(overlay);
+    return;
+  }
+
+  if (e.key !== "Tab") return;
+
+  const card = overlay.querySelector<HTMLElement>(".onboarding-card");
+  if (!card) return;
+
+  const focusable = card.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+  );
+  if (focusable.length === 0) return;
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+
+  if (e.shiftKey) {
+    if (document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    }
+  } else {
+    if (document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+}
+
+function renderOnboardingStep(overlay: HTMLElement, stepIndex: number) {
+  const step = onboardingSteps[stepIndex];
+  overlay.dataset.step = String(stepIndex + 1);
+  overlay.innerHTML = `
+    <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+      <p class="onboarding-progress">Step ${stepIndex + 1} of ${onboardingSteps.length}</p>
+      <h2 id="onboarding-title" tabindex="-1">${step.title}</h2>
+      <p class="onboarding-description">${step.description}</p>
+      <p class="onboarding-error" role="status" aria-live="polite"></p>
+      <div class="onboarding-actions">
+        ${stepIndex > 0 ? '<button class="btn onboarding-back" type="button">Back</button>' : ""}
+        ${stepIndex < onboardingSteps.length - 1
+          ? '<button class="btn onboarding-next" type="button">Next</button>'
+          : '<button class="btn onboarding-done" type="button">Got it</button>'}
+      </div>
+    </section>
+  `;
+
+  overlay.querySelector<HTMLButtonElement>(".onboarding-back")?.addEventListener(
+    "click",
+    () => renderOnboardingStep(overlay, stepIndex - 1),
+  );
+  overlay.querySelector<HTMLButtonElement>(".onboarding-next")?.addEventListener(
+    "click",
+    () => renderOnboardingStep(overlay, stepIndex + 1),
+  );
+  overlay.querySelector<HTMLButtonElement>(".onboarding-done")?.addEventListener(
+    "click",
+    (event) => {
+      const button = event.currentTarget as HTMLButtonElement;
+      button.disabled = true;
+      chrome.storage.local.set({ onboarded: true }, () => {
+        if (chrome.runtime.lastError) {
+          button.disabled = false;
+          const error = overlay.querySelector<HTMLElement>(".onboarding-error");
+          if (error) error.textContent = "Could not save your progress. Please try again.";
+          return;
+        }
+        closeOnboarding(overlay);
+      });
+    },
+  );
+
+  overlay.querySelector<HTMLElement>("#onboarding-title")?.focus();
+}
+
+function showOnboardingIfNeeded() {
+  chrome.storage.local.get(["onboarded"], (result: Record<string, unknown>) => {
+    if (result.onboarded === true) return;
+
+    const main = document.querySelector("main");
+    if (!main) return;
+
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const overlay = document.createElement("div");
+    overlay.className = "onboarding-overlay";
+    (overlay as any).__previousFocus = previousFocus;
+
+    const onKeyDown = (e: KeyboardEvent) => trapFocus(overlay, e);
+    document.addEventListener("keydown", onKeyDown);
+    const observer = new MutationObserver(() => {
+      if (!overlay.isConnected) {
+        document.removeEventListener("keydown", onKeyDown);
+        observer.disconnect();
+      }
+    });
+    observer.observe(main, { childList: true });
+
+    main.appendChild(overlay);
+    renderOnboardingStep(overlay, 0);
+  });
 }
 
 async function initProjectSearch() {
@@ -386,9 +783,92 @@ async function initProjectSearch() {
   });
 }
 
+async function initSiteOptin() {
+  const panel = document.getElementById('site-optin-panel');
+  const domainEl = document.getElementById('current-site-domain');
+  const toggle = document.getElementById('site-optin-toggle') as HTMLInputElement | null;
+  const statusEl = document.getElementById('site-optin-status');
+document.addEventListener("DOMContentLoaded", async () => {
+  const settings = await loadSettings();
+  applySettings(settings);
+  showOnboardingIfNeeded();
+
+  if (!panel || !domainEl || !toggle || !statusEl) return;
+  if (typeof chrome === 'undefined' || !chrome.tabs?.query) return;
+
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    if (!activeTab?.url) return;
+
+    const hostname = getHostnameFromUrl(activeTab.url);
+    if (!hostname) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    panel.classList.remove('hidden');
+    domainEl.textContent = hostname;
+
+    const settings = await loadSettings();
+    const isAllowed = isUrlAllowed(activeTab.url, settings.allowlist);
+    toggle.checked = isAllowed;
+    statusEl.textContent = isAllowed
+      ? 'Widget enabled on this site'
+      : 'Widget disabled on this site';
+    statusEl.classList.toggle('enabled', isAllowed);
+
+    toggle.addEventListener('change', async () => {
+      const checked = toggle.checked;
+      statusEl.textContent = checked ? 'Enabling widget…' : 'Disabling widget…';
+
+      try {
+        if (checked) {
+          await addSiteToAllowlist(`${hostname}/*`);
+          statusEl.textContent = 'Widget enabled on this site';
+          statusEl.classList.add('enabled');
+
+          if (activeTab.id) {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'checkAllowlist' }, (response) => {
+              if (chrome.runtime.lastError || !response) {
+                if (chrome.scripting?.executeScript && activeTab.id) {
+                  chrome.scripting
+                    .executeScript({
+                      target: { tabId: activeTab.id },
+                      files: ['dist/content-script.js'],
+                    })
+                    .catch(() => {});
+                }
+              }
+            });
+          }
+        } else {
+          await removeSiteFromAllowlist(hostname);
+          statusEl.textContent = 'Widget disabled on this site';
+          statusEl.classList.remove('enabled');
+
+          if (activeTab.id) {
+            chrome.tabs.sendMessage(activeTab.id, { action: 'checkAllowlist' }, () => {
+              if (chrome.runtime.lastError) {
+                // Ignore if tab closed or script not active
+              }
+            });
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to update site allowlist:', err);
+        statusEl.textContent = 'Failed to update site settings';
+      }
+    });
+  } catch (err) {
+    console.warn('Could not query active tab for site opt-in:', err);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   applySettings(settings);
+  initSiteOptin();
 
   // Pre-fill donation amount from saved default
   const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;
@@ -404,8 +884,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  document.getElementById("connect-btn")?.addEventListener("click", connectWallet);
+
   initProjectSearch();
   initProjectListKeyNav();
+  initPendingSection();
+
+  // Paint the cached wallet address first, then re-validate in the background.
+  // Not awaited: the popup must finish wiring up while Freighter is queried.
+  void restoreWalletSession();
+
+  const connectBtn = document.getElementById('connect-btn');
+  if (connectBtn) {
+    connectBtn.addEventListener('click', () => {
+      void connectWallet();
+    });
+  }
+  // Initialize with empty project list to show empty state
+  renderProjectList([]);
 
   // Check for pending context-menu donation
   chrome.storage.local.get(['pendingDonationProjectId', 'pendingDonationAddress'], async (res) => {
@@ -477,9 +973,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       setStatus('Submitting transaction…');
       const hash = await submitTransaction(signedXdr);
 
+      // Horizon accepts the transaction before the ledger has applied it, so it
+      // is tracked as pending until the background poller sees it land.
+      await addPendingDonation({ hash, amount, destination });
       await updateTotalAfterDonation(parseFloat(amount));
 
-      setStatus(`✅ Transaction submitted! Hash: ${hash.slice(0, 16)}…`);
+      setStatus(
+        `⏳ Transaction submitted! Awaiting confirmation. Hash: ${hash.slice(0, 16)}…`,
+      );
     } catch (err: any) {
       console.error('Donation error:', err);
       setStatus(`❌ Transaction failed: ${err.message || 'Unknown error'}`, true);

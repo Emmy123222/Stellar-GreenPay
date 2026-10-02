@@ -26,6 +26,7 @@ import {
   toggleUpdateLike,
   followProject,
   unfollowProject,
+  fetchProjectReviews,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
@@ -35,6 +36,7 @@ import type {
   ClimateProject,
   Donation,
   ProjectCampaign,
+  ProjectReview,
   ProjectUpdate,
 } from "@/utils/types";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -101,6 +103,11 @@ export default function ProjectDetail({
   const [isFollowing, setIsFollowing] = useState(false);
   const [followCount, setFollowCount] = useState(0);
   const [followLoading, setFollowLoading] = useState(false);
+  const [reviews, setReviews] = useState<ProjectReview[]>([]);
+  const [reviewsTotal, setReviewsTotal] = useState(0);
+  const [reviewsOffset, setReviewsOffset] = useState(0);
+  const [reviewsHasMore, setReviewsHasMore] = useState(false);
+  const [loadingMoreReviews, setLoadingMoreReviews] = useState(false);
 
   // Stable per-particle randomness for the completion celebration animation.
   // A useState lazy initializer (unlike useMemo, which React may recompute
@@ -143,15 +150,18 @@ export default function ProjectDetail({
       .finally(() => setLoading(false));
   }, [id, publicKey, router]);
 
-  const discussionLoading = Boolean(project) && discussionLoadedFor !== project?.walletAddress;
+  const projectWalletAddress = project?.walletAddress;
+  const projectId = project?.id;
+
+  const discussionLoading = Boolean(project) && discussionLoadedFor !== projectWalletAddress;
 
   useEffect(() => {
-    if (!project) return;
-    fetchProjectDiscussion(project.walletAddress, 50)
+    if (!projectWalletAddress) return;
+    fetchProjectDiscussion(projectWalletAddress, 50)
       .then(setDiscussion)
       .catch(() => setDiscussion([]))
-      .finally(() => setDiscussionLoadedFor(project.walletAddress));
-  }, [project?.walletAddress]);
+      .finally(() => setDiscussionLoadedFor(projectWalletAddress));
+  }, [projectWalletAddress]);
 
   useEffect(() => {
     if (!id) return;
@@ -160,9 +170,61 @@ export default function ProjectDetail({
       .catch(() => null);
   }, [id]);
 
+  // Load the first page of donor reviews. Re-runs when the donation feed
+  // signals a new donation (refreshKey) so fresh reviews appear without a
+  // manual reload.
+  //
+  // `reviewsLoading` is derived by comparing the in-flight request to the
+  // last one that resolved, rather than toggled synchronously inside the
+  // effect (which triggers a cascading render).
+  const reviewsRequestKey = `${id}:${refreshKey}`;
+  const [reviewsLoadedKey, setReviewsLoadedKey] = useState<string | null>(null);
+  const reviewsLoading = reviewsLoadedKey !== reviewsRequestKey;
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    fetchProjectReviews(id as string, { limit: 5, offset: 0 })
+      .then((res) => {
+        if (cancelled) return;
+        setReviews(res.data);
+        setReviewsTotal(res.pagination.total);
+        setReviewsOffset(res.data.length);
+        setReviewsHasMore(res.pagination.has_more);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setReviews([]);
+        setReviewsTotal(0);
+        setReviewsHasMore(false);
+      })
+      .finally(() => {
+        if (!cancelled) setReviewsLoadedKey(reviewsRequestKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, refreshKey, reviewsRequestKey]);
+
+  const handleLoadMoreReviews = async () => {
+    if (!id || reviewsLoading || loadingMoreReviews) return;
+    setLoadingMoreReviews(true);
+    try {
+      const res = await fetchProjectReviews(id as string, { limit: 5, offset: reviewsOffset });
+      setReviews((prev) => [...prev, ...res.data]);
+      setReviewsTotal(res.pagination.total);
+      setReviewsOffset((prev) => prev + res.data.length);
+      setReviewsHasMore(res.pagination.has_more);
+    } catch {
+      // keep the already-loaded reviews on failure
+    } finally {
+      setLoadingMoreReviews(false);
+    }
+  };
+
   // Subscribe to badge_earned WebSocket events for this project
   useEffect(() => {
-    if (!project) return;
+    if (!projectId) return;
     let socket: any = null;
     let mounted = true;
 
@@ -173,12 +235,12 @@ export default function ProjectDetail({
         socket = io(base, { path: "/socket.io", transports: ["websocket"] });
 
         socket.on("connect", () => {
-          socket.emit("join_project", project.id);
+          socket.emit("join_project", projectId);
         });
 
         socket.on("badge_earned", (payload: { donorAddress: string; badge: string; projectId: string }) => {
           if (!mounted) return;
-          if (payload.projectId !== project.id) return;
+          if (payload.projectId !== projectId) return;
           setToasts((prev) => [
             ...prev,
             {
@@ -198,14 +260,14 @@ export default function ProjectDetail({
       mounted = false;
       try {
         if (socket) {
-          socket.emit("leave_project", project.id);
+          socket.emit("leave_project", projectId);
           if (typeof socket.disconnect === "function") socket.disconnect();
         }
       } catch (e) {
         // ignore
       }
     };
-  }, [project?.id]);
+  }, [projectId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1000);
@@ -928,6 +990,7 @@ export default function ProjectDetail({
           <div className="card">
             {project.imageUrl ? (
               <div className="mb-5 overflow-hidden rounded-3xl border border-forest-100 bg-forest-50">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={project.imageUrl}
                   alt={project.name}
@@ -1270,6 +1333,80 @@ export default function ProjectDetail({
                   </span>
                 ))}
               </div>
+            )}
+          </div>
+
+          {/* Donor reviews — star summary plus a paginated list of the
+              most recent reviews, so future donors can see what others
+              experienced. */}
+          <div className="card">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="font-display text-lg font-semibold text-forest-900">
+                Donor Reviews
+              </h2>
+              {(project.ratingCount || 0) > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-amber-400 text-lg" aria-hidden="true">★</span>
+                  <span className="font-bold text-forest-900 font-body">
+                    {(project.averageRating || 0).toFixed(1)}
+                  </span>
+                  <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                    ({project.ratingCount} review{project.ratingCount === 1 ? "" : "s"})
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {reviewsLoading && reviews.length === 0 ? (
+              <div className="space-y-3">
+                {[1, 2].map((i) => (
+                  <div key={i} className="animate-pulse h-12 bg-forest-100 rounded-xl" />
+                ))}
+              </div>
+            ) : reviews.length === 0 ? (
+              <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] font-body">
+                No reviews yet. Donate to this project and be the first to share your experience.
+              </p>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  {reviews.map((r, i) => (
+                    <div
+                      key={`${r.donorAddress}-${i}`}
+                      className="pb-4 border-b border-forest-100 last:border-0 last:pb-0"
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-amber-400 text-sm tracking-wide" aria-label={`${r.rating} out of 5 stars`}>
+                            {"★".repeat(r.rating)}
+                            <span className="text-forest-200">{"★".repeat(5 - r.rating)}</span>
+                          </span>
+                          <span className="text-xs font-semibold text-forest-700 font-body">
+                            {shortenAddress(r.donorAddress)}
+                          </span>
+                        </div>
+                        <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                          {timeAgo(r.createdAt)}
+                        </span>
+                      </div>
+                      {r.review && (
+                        <p className="text-sm text-forest-900/90 leading-relaxed font-body">
+                          {r.review}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {reviewsHasMore && (
+                  <button
+                    onClick={handleLoadMoreReviews}
+                    disabled={loadingMoreReviews}
+                    className="btn-secondary text-sm py-2 px-4 mt-4 disabled:opacity-60"
+                  >
+                    {loadingMoreReviews ? "Loading…" : `Load more reviews (${reviewsTotal - reviews.length} remaining)`}
+                  </button>
+                )}
+              </>
             )}
           </div>
 
@@ -1675,6 +1812,14 @@ export default function ProjectDetail({
               <WalletConnect onConnect={onConnect} />
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => setShowMonthlySetup(true)}
+            className="btn-secondary w-full text-sm"
+          >
+            Give monthly
+          </button>
 
           {/* Share card */}
           <div className="card text-center bg-forest-50 border-forest-200">

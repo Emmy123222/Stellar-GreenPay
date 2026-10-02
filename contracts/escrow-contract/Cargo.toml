@@ -9,9 +9,9 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-soroban-sdk = "27.0.3"
+soroban-sdk = "28.0.0"
 
 [dev-dependencies]
-soroban-sdk = { version = "27.0.3", features = ["testutils"] }
+soroban-sdk = { version = "28.0.0", features = ["testutils"] }
 
 # [profile.release] is configured once at the workspace root (contracts/Cargo.toml)
