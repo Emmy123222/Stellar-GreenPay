@@ -34,8 +34,8 @@ jest.mock("../middleware/rateLimiter", () => ({
 const pool = require("../db/pool");
 const leaderboardRouter = require("./leaderboard");
 
-// leaderboard.js calls createRateLimiter(30, 1) exactly once, at module load
-// time (`const leaderboardLimiter = createRateLimiter(30, 1);`). That call
+// leaderboard.js calls createRateLimiter(30, 1, "leaderboard") exactly once,
+// at module load time. That call
 // already happened on the `require` above. jest.clearAllMocks() in later
 // beforeEach hooks wipes createRateLimiter.mock.calls, so we snapshot the
 // call args here, before any clearAllMocks runs, and assert against the
@@ -50,7 +50,7 @@ function createApp() {
   const app = express();
   app.use("/api/leaderboard", leaderboardRouter);
   // Catch-all error handler so errors don't crash tests
-  app.use((err, req, res, next) => {
+  app.use((err, req, res, _next) => {
     res.status(500).json({ success: false, error: err.message });
   });
   return app;
@@ -77,6 +77,7 @@ const SORTED_DONORS = [
   {
     public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     display_name: "Alice",
+    avatar_url: "https://example.com/alice.png",
     badges: [{ tier: "earth", earnedAt: "2026-01-01T00:00:00.000Z" }],
     total_donated_xlm: "5000",
     total_co2_offset_kg: "1250.5",
@@ -86,6 +87,7 @@ const SORTED_DONORS = [
   {
     public_key: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     display_name: "Bob",
+    avatar_url: null,
     badges: [{ tier: "forest", earnedAt: "2026-01-02T00:00:00.000Z" }],
     total_donated_xlm: "750",
     total_co2_offset_kg: "180",
@@ -95,6 +97,7 @@ const SORTED_DONORS = [
   {
     public_key: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
     display_name: null,
+    avatar_url: null,
     badges: [],
     total_donated_xlm: "12",
     total_co2_offset_kg: "0",
@@ -107,7 +110,7 @@ const SORTED_DONORS = [
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("GET /api/leaderboard — ranking assignment", () => {
+describe("GET /api/leaderboard — ranking assignment & profile fields", () => {
   beforeEach(resetQueries);
 
   test("assigns rank 1 to the highest donor and increments for each subsequent entry", async () => {
@@ -123,6 +126,27 @@ describe("GET /api/leaderboard — ranking assignment", () => {
     res.body.data.forEach((entry, i) => {
       expect(entry.rank).toBe(i + 1);
     });
+  });
+
+  test("includes display_name/displayName and avatar_url/avatarUrl per entry", async () => {
+    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+
+    const app = createApp();
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].displayName).toBe("Alice");
+    expect(res.body.data[0].display_name).toBe("Alice");
+    expect(res.body.data[0].avatarUrl).toBe("https://example.com/alice.png");
+    expect(res.body.data[0].avatar_url).toBe("https://example.com/alice.png");
+
+    expect(res.body.data[1].displayName).toBe("Bob");
+    expect(res.body.data[1].avatarUrl).toBeNull();
+    expect(res.body.data[1].avatar_url).toBeNull();
+
+    expect(res.body.data[2].displayName).toBeNull();
+    expect(res.body.data[2].display_name).toBeNull();
+    expect(res.body.data[2].avatarUrl).toBeNull();
+    expect(res.body.data[2].avatar_url).toBeNull();
   });
 });
 
@@ -273,14 +297,37 @@ describe("leaderboard route SQL structure", () => {
   // LIMIT
   // -----------------------------------------------------------------------
 
-  test("respects limit parameter", async () => {
+  test("respects limit parameter by fetching pageSize + 1 rows", async () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?limit=10");
 
     expect(queries[0].sql).toMatch(/LIMIT\s+\$1/i);
+    // The route fetches pageSize + 1 to detect a next page.
     expect(pool.query).toHaveBeenCalledWith(
       expect.any(String),
-      expect.arrayContaining([10]),
+      expect.arrayContaining([11]),
+    );
+  });
+
+  test("uses default limit of 50 when limit is not specified", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard");
+
+    // Default pageSize = 50, so it fetches 51 rows to detect a next page.
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.stringMatching(/LIMIT\s+\$1/i),
+      expect.arrayContaining([51]),
+    );
+  });
+
+  test("caps limit at the maximum of 200", async () => {
+    const app = createApp();
+    await request(app).get("/api/leaderboard?limit=10000");
+
+    // pageSize is clamped to 200, so it fetches 201 rows.
+    expect(pool.query).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.arrayContaining([201]),
     );
   });
 
@@ -548,12 +595,12 @@ describe("GET /api/leaderboard/history", () => {
 });
 
 describe("GET /api/leaderboard — rate limiting (issue #695)", () => {
-  test("createRateLimiter is called with (30, 1) — 30 req/min per IP", () => {
+  test("createRateLimiter is called with (30, 1, leaderboard) — 30 req/min per IP", () => {
     // See the module-load-time comment near the top of this file: this
     // checks the snapshot taken immediately after require(), since later
     // beforeEach hooks call jest.clearAllMocks() and would otherwise erase
     // the one-time call record.
-    expect(rateLimiterInitCall).toEqual([30, 1]);
+    expect(rateLimiterInitCall).toEqual([30, 1, "leaderboard"]);
   });
 
   test("GET / returns 429 with Retry-After when the limiter blocks the request", async () => {
@@ -629,7 +676,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=true").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).toMatch(/NOT EXISTS/i);
     expect(sql).toMatch(/verified\s*=\s*false/i);
     expect(sql).toMatch(/EXISTS/i);
@@ -647,7 +694,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
     expect(sql).not.toMatch(/verified\s*=\s*false/i);
   });
@@ -685,7 +732,7 @@ describe("GET /api/leaderboard — onlyVerified filter", () => {
     const app = createApp();
     await request(app).get("/api/leaderboard?onlyVerified=false").expect(200);
 
-    const sql = queries[0].sql;
+    const [sql] = pool.query.mock.calls[0];
     expect(sql).not.toMatch(/NOT EXISTS/i);
   });
 });

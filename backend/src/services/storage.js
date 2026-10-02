@@ -5,9 +5,13 @@
  * spreadsheets). This service normalises upload handling so the same
  * `uploadFile()` contract works regardless of which backend is configured:
  *
- *   - "local"   (default)  → writes to backend/uploads/<key> and returns a
- *                            static URL served by GET /api/uploads/<key>.
- *                            No external credentials required.
+ *   - "local"   (default)  → writes to UPLOAD_DIR/<key> and returns a static
+ *                            URL served by GET /api/uploads/<key>. No
+ *                            external credentials required. UPLOAD_DIR
+ *                            defaults to backend/uploads, or /tmp/greenpay-
+ *                            uploads when running inside a Docker container
+ *                            (detected via /.dockerenv), since the app
+ *                            directory may be read-only for a non-root user.
  *   - "s3"     → uploads to a configured S3-compatible bucket using the
  *                AWS SDK; requires AWS_REGION, AWS_ACCESS_KEY_ID,
  *                AWS_SECRET_ACCESS_KEY, S3_BUCKET, optionally S3_PUBLIC_URL.
@@ -40,7 +44,18 @@ const crypto = require("crypto");
 const logger = require("../logger");
 
 const STORAGE_BACKEND = process.env.STORAGE_BACKEND || "local";
-const UPLOAD_DIR = path.join(__dirname, "..", "..", "uploads");
+
+// Resolve the local-storage directory. An explicit UPLOAD_DIR always wins;
+// otherwise fall back to /tmp/greenpay-uploads inside a Docker container
+// (the app directory is often read-only for a non-root user there), or the
+// legacy backend/uploads path for plain local development.
+function resolveUploadDir() {
+  if (process.env.UPLOAD_DIR) return process.env.UPLOAD_DIR;
+  if (fs.existsSync("/.dockerenv")) return "/tmp/greenpay-uploads";
+  return path.join(__dirname, "..", "..", "uploads");
+}
+
+const UPLOAD_DIR = resolveUploadDir();
 
 // Lazy-require AWS SDK so projects that don't use S3 don't need it.
 function getAwsS3() {
@@ -57,8 +72,15 @@ function getAwsS3() {
 }
 
 function ensureUploadDir() {
-  if (!fs.existsSync(UPLOAD_DIR)) {
+  if (fs.existsSync(UPLOAD_DIR)) return;
+  try {
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+  } catch (err) {
+    logger.error(
+      { event: "storage_upload_dir_create_failed", dir: UPLOAD_DIR, err: err.message },
+      "Failed to create local upload directory — set UPLOAD_DIR to a writable path"
+    );
+    throw err;
   }
 }
 

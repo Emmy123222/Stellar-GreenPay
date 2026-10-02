@@ -23,6 +23,8 @@ tags:
   - name: Updates
   - name: Jobs
   - name: Stats
+  - name: Auth
+  - name: Teams
   - name: Admin
 security:
   - BearerAuth: []
@@ -32,6 +34,11 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    WalletAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Wallet JWT issued after signing a one-time Stellar challenge.
   parameters:
     ProjectId:
       name: id
@@ -169,6 +176,8 @@ components:
           type: string
         raisedXLM:
           type: string
+        raisedUSDC:
+          type: string
         donorCount:
           type: integer
         co2OffsetKg:
@@ -222,6 +231,8 @@ components:
         goalXLM:
           type: string
         raisedXLM:
+          type: string
+        raisedUSDC:
           type: string
         deadline:
           type: string
@@ -350,6 +361,15 @@ components:
         displayName:
           type: string
           nullable: true
+        display_name:
+          type: string
+          nullable: true
+        avatarUrl:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
         totalDonatedXLM:
           type: string
         projectsSupported:
@@ -471,6 +491,51 @@ components:
         createdAt:
           type: string
           format: date-time
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        logoUrl:
+          type: string
+          nullable: true
+        inviteCode:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        memberCount:
+          type: integer
+        totalDonatedXLM:
+          type: string
+        totalCO2OffsetKg:
+          type: string
+        isMember:
+          type: boolean
+    TeamLeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        logoUrl:
+          type: string
+          nullable: true
+        memberCount:
+          type: integer
+        totalDonatedXLM:
+          type: string
+        totalCO2OffsetKg:
+          type: string
     AdminLoginResponse:
       type: object
       properties:
@@ -640,20 +705,19 @@ components:
           maxLength: 300
     CreateRatingRequest:
       type: object
-      required: [projectId, donorAddress, rating]
+      required: [project_id, stars]
       properties:
-        projectId:
+        project_id:
           type: string
           format: uuid
-        donorAddress:
-          type: string
-          pattern: '^G[A-Z0-9]{55}$'
-        rating:
+        stars:
           type: integer
           minimum: 1
           maximum: 5
-        review:
+        review_text:
           type: string
+          maxLength: 500
+          nullable: true
     CreateUpdateRequest:
       type: object
       required: [projectId, title, body]
@@ -1473,7 +1537,9 @@ paths:
     post:
       tags: [Ratings]
       summary: Submit or update a project rating
-      security: []
+      description: Only authenticated wallets that donated to the project may rate it.
+      security:
+        - WalletAuth: []
       requestBody:
         required: true
         content:
@@ -1494,10 +1560,17 @@ paths:
                     $ref: '#/components/schemas/Rating'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/ratings/pending:
     get:
       tags: [Ratings]
       summary: Get a pending rating candidate for a donor
+      security: []
       parameters:
         - $ref: '#/components/parameters/DonorAddressQuery'
       responses:
@@ -1518,6 +1591,322 @@ paths:
                         type: string
                       name:
                         type: string
+  /api/ratings/project/{projectId}:
+    get:
+      tags: [Ratings]
+      summary: List reviews for a project
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: cursor
+          in: query
+          description: ISO timestamp of the last review on the previous page.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Paginated project reviews.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        donorAddress:
+                          type: string
+                        rating:
+                          type: integer
+                        review:
+                          type: string
+                          nullable: true
+                        createdAt:
+                          type: string
+                          format: date-time
+                  pagination:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      has_more:
+                        type: boolean
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/auth/challenge:
+    post:
+      tags: [Auth]
+      summary: Request a one-time wallet authentication challenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [walletAddress]
+              properties:
+                walletAddress:
+                  type: string
+                  pattern: '^G[A-Z2-7]{55}$'
+      responses:
+        '200':
+          description: Challenge issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      challenge:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/auth/token:
+    post:
+      tags: [Auth]
+      summary: Exchange a signed challenge for a wallet JWT
+      description: Verifies the transaction memo and wallet signature, then consumes the challenge.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [walletAddress, signedXdr]
+              properties:
+                walletAddress:
+                  type: string
+                  pattern: '^G[A-Z2-7]{55}$'
+                signedXdr:
+                  type: string
+                  description: Signed transaction XDR whose text memo contains the challenge.
+      responses:
+        '200':
+          description: Wallet JWT issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+                      tokenType:
+                        type: string
+                        example: Bearer
+                      expiresIn:
+                        type: integer
+                        example: 3600
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/teams:
+    post:
+      tags: [Teams]
+      summary: Create a team
+      description: The authenticated wallet becomes the team's first member.
+      security:
+        - WalletAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                logoUrl:
+                  type: string
+                  format: uri
+                inviteCode:
+                  type: string
+                  pattern: '^[A-Za-z0-9_-]{6,20}$'
+      responses:
+        '201':
+          description: Team created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Team'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: The wallet already belongs to a team or the invite code is taken.
+  /api/teams/{teamId}/join:
+    post:
+      tags: [Teams]
+      summary: Join a team with its invite code
+      security:
+        - WalletAuth: []
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode]
+              properties:
+                inviteCode:
+                  type: string
+      responses:
+        '200':
+          description: Already a member; operation is idempotent.
+        '201':
+          description: Joined the team.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Invalid invite code.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Wallet is already a member of another team.
+  /api/teams/my:
+    get:
+      tags: [Teams]
+      summary: Get the authenticated wallet's team
+      security:
+        - WalletAuth: []
+      responses:
+        '200':
+          description: The caller's team and combined stats, or null when not a member.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/Team'
+                    nullable: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/teams/{teamId}:
+    get:
+      tags: [Teams]
+      summary: Get a public team profile and combined stats
+      security: []
+      parameters:
+        - name: teamId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Team profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Team'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/leaderboard/teams:
+    get:
+      tags: [Teams, Leaderboard]
+      summary: List teams ranked by combined donations
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: period
+          in: query
+          schema:
+            type: string
+            enum: [week, month, year, all]
+            default: all
+      responses:
+        '200':
+          description: Paginated team leaderboard.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TeamLeaderboardEntry'
+                  has_more:
+                    type: boolean
+                  next_offset:
+                    type: integer
+                    nullable: true
   /api/updates:
     post:
       tags: [Updates]
@@ -1709,6 +2098,21 @@ paths:
                     type: boolean
                   data:
                     $ref: '#/components/schemas/StatsGlobal'
+  /api/stats/trends:
+    get:
+      tags: [Stats]
+      summary: Get week-over-week donation growth
+      description: >
+        Returns donation totals for the current 7-day window and the preceding
+        7-day window, along with the percentage growth. Used by the admin
+        analytics dashboard to show donation trend indicators.
+      responses:
+        '200':
+          description: Week-over-week trend data.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatsTrends'
   /api/stats/categories:
     get:
       tags: [Stats]

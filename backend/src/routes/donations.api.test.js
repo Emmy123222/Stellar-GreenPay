@@ -17,6 +17,7 @@ jest.mock("../services/redis", () => ({
   get: jest.fn(),
   set: jest.fn(),
   del: jest.fn(),
+  deletePattern: jest.fn(),
 }));
 
 const redis = require("../services/redis");
@@ -35,6 +36,10 @@ jest.mock("../services/stellar", () => ({
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
 }));
 
+jest.mock("../services/webhook", () => ({
+  checkAndDeliverMilestones: jest.fn().mockResolvedValue(undefined),
+}));
+
 const pool = require("../db/pool");
 const express = require("express");
 const http = require("http");
@@ -51,6 +56,7 @@ function buildApp() {
   app.use("/api/projects", projectsRouter);
 
 
+  // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
@@ -136,13 +142,14 @@ describe("POST /api/donations", () => {
     };
 
     createMockClient(
-      queryResult([{ id: "proj-1" }]),
-      queryResult([]),
-      queryResult(),
-      queryResult([donationRow]),
-      queryResult([]),
-      queryResult(),
-      queryResult(),
+      queryResult([{ id: "proj-1" }]), // projectResult
+      queryResult([]), // existingResult (no dup by tx hash)
+      queryResult(), // BEGIN
+      queryResult([{ total: "0" }]), // prevTotalResult
+      queryResult([donationRow]), // donationResult (INSERT RETURNING *)
+      queryResult([]), // matchesResult (no active matches)
+      queryResult(), // UPDATE projects
+      queryResult(), // COMMIT
     );
 
     const res = await request(app)
@@ -161,6 +168,25 @@ describe("POST /api/donations", () => {
     expect(res.body.data.projectId).toBe("proj-1");
     expect(res.body.data.donorAddress).toBe(donorAddress);
   });
+
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+  ])("returns 400 with a friendly error for a %s amount", async (_label, amountXLM) => {
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey("A"),
+        amountXLM,
+        currency: "XLM",
+        transactionHash: makeTxHash("a"),
+      })
+      .expect(400);
+
+    expect(res.body).toEqual({ error: "Donation amount must be a positive number" });
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/projects/:id", () => {
@@ -178,8 +204,10 @@ describe("GET /api/projects/:id", () => {
     });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);
 
@@ -275,7 +303,7 @@ describe("GET /api/donations/:id", () => {
           ...MOCK_DONATION_ROW,
           project_name: "Amazon Reforestation",
           donor_display_name: "John Doe",
-          co2_per_xlm: 2000,
+          co2_per_xlm: 5000,
         },
       ],
     });

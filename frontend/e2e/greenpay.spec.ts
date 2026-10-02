@@ -65,25 +65,25 @@ async function mockApi(page: Page) {
   );
 
   // Stats / categories / impact / leaderboard.
-  await page.route("**/api/impact/**",          (r) => r.fulfill(ok({})));
-  await page.route("**/api/stats/categories",   (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
-  await page.route("**/api/stats/global",       (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
-  await page.route("**/api/leaderboard**",      (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
+  await page.route("**/api/**/impact/**",          (r) => r.fulfill(ok({})));
+  await page.route("**/api/**/stats/categories",   (r) => r.fulfill(ok([{ category: "Reforestation", count: 1 }])));
+  await page.route("**/api/**/stats/global",       (r) => r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })));
+  await page.route("**/api/**/leaderboard**",      (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
 
   // Profile, donations, subscriptions, updates.
-  await page.route("**/api/profiles/**",        (r) => r.fulfill(ok({ publicKey: MOCK_PUBLIC_KEY, totalDonatedXLM: "0", projectsSupported: 0, badges: [] })));
-  await page.route("**/api/donations",          (r) => r.fulfill(ok({ id: "d1" })));
-  await page.route("**/api/donations/**",       (r) => r.fulfill(ok([])));
-  await page.route("**/api/subscriptions",      (r) => r.fulfill(okMsg("subscribed")));
-  await page.route("**/api/subscriptions/**",   (r) => r.fulfill({ json: { success: true, count: 0 } }));
-  await page.route("**/api/updates/**",         (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/profiles/**",        (r) => r.fulfill(ok({ publicKey: MOCK_PUBLIC_KEY, totalDonatedXLM: "0", projectsSupported: 0, badges: [] })));
+  await page.route("**/api/**/donations",          (r) => r.fulfill(ok({ id: "d1" })));
+  await page.route("**/api/**/donations/**",       (r) => r.fulfill(ok([])));
+  await page.route("**/api/**/subscriptions",      (r) => r.fulfill(okMsg("subscribed")));
+  await page.route("**/api/**/subscriptions/**",   (r) => r.fulfill({ json: { success: true, count: 0 } }));
+  await page.route("**/api/**/updates/**",         (r) => r.fulfill(ok([])));
 
   // Projects (broadest first within this group, then more specific).
-  await page.route("**/api/projects?**",                        (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects",                           (r) => r.fulfill(ok([MOCK_PROJECT])));
-  await page.route("**/api/projects/featured",                  (r) => r.fulfill(ok(MOCK_PROJECT)));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}/**`,     (r) => r.fulfill(ok([])));
-  await page.route(`**/api/projects/${MOCK_PROJECT_ID}`,        (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route("**/api/**/projects?**",                        (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects",                           (r) => r.fulfill(ok([MOCK_PROJECT])));
+  await page.route("**/api/**/projects/featured",                  (r) => r.fulfill(ok(MOCK_PROJECT)));
+  await page.route(`**/api/**/projects/${MOCK_PROJECT_ID}/**`,     (r) => r.fulfill(ok([])));
+  await page.route(new RegExp(`/api/(v1/)?projects/${MOCK_PROJECT_ID}(\\?.*)?$`), (r) => r.fulfill(ok(MOCK_PROJECT)));
 }
 
 /**
@@ -98,6 +98,7 @@ async function mockApi(page: Page) {
 async function mockFreighter(page: Page, publicKey = MOCK_PUBLIC_KEY) {
   await page.addInitScript((pk) => {
     (window as unknown as Record<string, unknown>).__test_publicKey__ = pk;
+    (window as unknown as Record<string, unknown>).__test_signTransaction__ = true;
     // Keep window.freighter present so any code that does an
     // `isFreighterInstalled` check still sees a wallet.
     (window as unknown as Record<string, unknown>).freighter = {
@@ -141,8 +142,8 @@ test.describe("Projects page", () => {
     await mockApi(page);
     // Override the projects list mock — registered AFTER mockApi so the
     // reverse-insertion-order tiebreaker picks this one.
-    await page.route("**/api/projects",    (r) => r.fulfill(ok([])));
-    await page.route("**/api/projects?**", (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects",    (r) => r.fulfill(ok([])));
+    await page.route("**/api/**/projects?**", (r) => r.fulfill(ok([])));
     await page.goto("/projects");
     await expect(page.getByText(/no projects found/i)).toBeVisible();
   });
@@ -160,6 +161,39 @@ test.describe("Project detail & DonateForm", () => {
     await mockApi(page);
     await page.goto(`/projects/${MOCK_PROJECT_ID}`);
     await expect(page.getByText(/connect your wallet to donate/i)).toBeVisible();
+  });
+
+  test("connects Freighter, browses a project, donates, and confirms", async ({ page }) => {
+    await mockFreighter(page);
+    await mockApi(page);
+    await page.route(`**/horizon-testnet.stellar.org/accounts/${MOCK_PUBLIC_KEY}`, (route) =>
+      route.fulfill({
+        json: {
+          account_id: MOCK_PUBLIC_KEY,
+          sequence: "1000",
+          subentry_count: 0,
+          thresholds: { low_threshold: 1, med_threshold: 1, high_threshold: 1 },
+          flags: { auth_required: false, auth_revocable: false, auth_immutable: false },
+          balances: [{ asset_type: "native", balance: "500.0000000" }],
+          signers: [{ key: MOCK_PUBLIC_KEY, type: "ed25519_public_key", weight: 1 }],
+          data: {},
+        },
+      }),
+    );
+    await page.route("**/horizon-testnet.stellar.org/transactions", (route) =>
+      route.fulfill({ json: { hash: "e2e-confirmed-transaction", successful: true } }),
+    );
+
+    await page.goto("/projects");
+    await page.getByText(MOCK_PROJECT.name).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${MOCK_PROJECT_ID}`));
+
+    const form = page.locator(".card", { hasText: /make a donation/i });
+    await form.getByPlaceholder(/or enter custom amount/i).fill("10");
+    await form.getByRole("button", { name: /Donate/ }).click();
+
+    await expect(form.getByRole("heading", { name: /transaction confirmed/i })).toBeVisible();
+    await expect(form).toContainText("10 XLM");
   });
 
   test.describe("with a connected (mocked) Freighter wallet", () => {

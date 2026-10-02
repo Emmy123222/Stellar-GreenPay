@@ -1,5 +1,6 @@
 "use strict";
 
+const path = require("path");
 const { buildKey } = require("./storage");
 
 describe("buildKey", () => {
@@ -96,6 +97,74 @@ describe("pinCidWithPinata", () => {
 
     const { pinCidWithPinata } = require("./storage");
     await expect(pinCidWithPinata("QmFail")).resolves.toBeUndefined();
+  });
+});
+
+describe("UPLOAD_DIR resolution", () => {
+  const originalUploadDir = process.env.UPLOAD_DIR;
+
+  afterEach(() => {
+    if (originalUploadDir === undefined) delete process.env.UPLOAD_DIR;
+    else process.env.UPLOAD_DIR = originalUploadDir;
+    jest.restoreAllMocks();
+    jest.resetModules();
+  });
+
+  it("uses the UPLOAD_DIR env var when set", () => {
+    process.env.UPLOAD_DIR = "/custom/upload/path";
+    const { UPLOAD_DIR } = require("./storage");
+    expect(UPLOAD_DIR).toBe("/custom/upload/path");
+  });
+
+  it("defaults to /tmp/greenpay-uploads inside a Docker container", () => {
+    delete process.env.UPLOAD_DIR;
+    jest.spyOn(require("fs"), "existsSync").mockImplementation((p) => p === "/.dockerenv");
+
+    const { UPLOAD_DIR } = require("./storage");
+    expect(UPLOAD_DIR).toBe("/tmp/greenpay-uploads");
+  });
+
+  it("defaults to backend/uploads outside Docker", () => {
+    delete process.env.UPLOAD_DIR;
+    jest.spyOn(require("fs"), "existsSync").mockReturnValue(false);
+
+    const { UPLOAD_DIR } = require("./storage");
+    expect(UPLOAD_DIR).toBe(path.join(__dirname, "..", "..", "uploads"));
+  });
+});
+
+describe("ensureUploadDir permission errors", () => {
+  const originalBackend = process.env.STORAGE_BACKEND;
+  const originalUploadDir = process.env.UPLOAD_DIR;
+
+  afterEach(() => {
+    if (originalBackend === undefined) delete process.env.STORAGE_BACKEND;
+    else process.env.STORAGE_BACKEND = originalBackend;
+    if (originalUploadDir === undefined) delete process.env.UPLOAD_DIR;
+    else process.env.UPLOAD_DIR = originalUploadDir;
+    jest.restoreAllMocks();
+    jest.resetModules();
+  });
+
+  it("logs and rethrows when the upload directory can't be created", async () => {
+    process.env.STORAGE_BACKEND = "local";
+    process.env.UPLOAD_DIR = "/no/such/writable/dir";
+
+    const fs = require("fs");
+    jest.spyOn(fs, "existsSync").mockReturnValue(false);
+    const mkdirErr = Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+    jest.spyOn(fs, "mkdirSync").mockImplementation(() => {
+      throw mkdirErr;
+    });
+    const logger = require("../logger");
+    const errorSpy = jest.spyOn(logger, "error").mockImplementation(() => {});
+
+    const { uploadFile } = require("./storage");
+    await expect(uploadFile(Buffer.from("x"), "f.txt", "text/plain")).rejects.toThrow("EACCES");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "storage_upload_dir_create_failed", dir: "/no/such/writable/dir" }),
+      expect.any(String),
+    );
   });
 });
 

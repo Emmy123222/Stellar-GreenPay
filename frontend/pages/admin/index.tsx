@@ -15,26 +15,34 @@ interface AdminIndexProps {
 
 export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
   const [projects, setProjects] = useState<ClimateProject[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The initial, wallet-driven load is tracked by comparing the wallet the
+  // project list was loaded for to the currently connected wallet (derived,
+  // rather than toggled synchronously inside an effect). Approve/reject
+  // actions run from event handlers, so they can set `manualLoading`
+  // directly.
+  const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
+  const [manualLoading, setManualLoading] = useState(false);
+  const loading = manualLoading || loadedForKey !== publicKey;
 
   const loadProjects = () => {
-    setLoading(true);
-    fetchProjects({ limit: 100 })
-      .then(setProjects)
-      .catch((e: unknown) => setError((e as Error).message || "Failed to load projects"))
-      .finally(() => setLoading(false));
+    return fetchProjects({ limit: 100 })
+      .then((data) => {
+        setProjects(data);
+        setError(null);
+      })
+      .catch((e: unknown) => setError((e as Error).message || "Failed to load projects"));
   };
 
   useEffect(() => {
     if (!publicKey) return;
-    loadProjects();
+    loadProjects().finally(() => setLoadedForKey(publicKey));
   }, [publicKey]);
 
   const handleApprove = async (p: ClimateProject) => {
     if (!publicKey) return;
     try {
-      setLoading(true);
+      setManualLoading(true);
       const reg = await registerProjectOnChain({
         projectId: p.id,
         name: p.name,
@@ -48,10 +56,11 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
         transactionHash: "mock-tx-hash-auto-confirmed", // MOCK since no real wallet sign requested in issue
       });
       await updateProjectStatus(p.id, "active");
-      loadProjects();
+      await loadProjects();
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to approve project");
-      setLoading(false);
+    } finally {
+      setManualLoading(false);
     }
   };
 
@@ -59,12 +68,13 @@ export default function AdminIndex({ publicKey, onConnect }: AdminIndexProps) {
     const reason = window.prompt("Enter rejection reason:");
     if (reason === null) return;
     try {
-      setLoading(true);
+      setManualLoading(true);
       await updateProjectStatus(p.id, "rejected", reason);
-      loadProjects();
+      await loadProjects();
     } catch (e: unknown) {
       setError((e as Error).message || "Failed to reject project");
-      setLoading(false);
+    } finally {
+      setManualLoading(false);
     }
   };
 

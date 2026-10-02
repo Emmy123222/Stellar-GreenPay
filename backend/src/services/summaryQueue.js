@@ -14,6 +14,11 @@ const { logAdminAction } = require("./audit");
 
 const QUEUE = "ai-summary";
 
+const activeJobs = new Set();
+const lastRunMap = new Map();
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
+
+
 let boss = null;
 
 /**
@@ -69,13 +74,21 @@ async function start(io) {
     if (!row) return; // project was deleted while job was queued
 
     if (io) {
-      io.emit("ai_summary_ready", {
+      const summaryPayload = {
         projectId,
         aiSummary:            row.ai_summary,
         aiSummaryGeneratedAt: new Date(row.ai_summary_generated_at).toISOString(),
         aiSummaryModel:       row.ai_summary_model,
-      });
+      };
+      if (typeof io.to === "function") {
+        io.to(`project:${projectId}`).emit("ai_summary_ready", summaryPayload);
+      } else if (typeof io.emit === "function") {
+        io.emit("ai_summary_ready", summaryPayload);
+      }
     }
+
+    lastRunMap.set(projectId, Date.now());
+    activeJobs.delete(projectId);
 
     logAdminAction({
       actor: adminAddress || "system",
@@ -97,12 +110,47 @@ async function start(io) {
  * @param {{ name: string, category: string, description: string, adminAddress?: string }} projectData
  * @returns {Promise<string>} job ID
  */
+
+
+/**
+ * Enqueue an AI summary generation job with deduplication and 5-min rate limiting per project.
+ *
+ * @param {string} projectId
+ * @param {{ name: string, category: string, description: string, adminAddress?: string }} projectData
+ * @returns {Promise<string|null>} job ID or null if skipped
+ */
+
 async function enqueueAISummary(projectId, projectData) {
   if (!boss) {
     throw new Error("summaryQueue not started — call start(io) first");
   }
-  const jobId = await boss.send(QUEUE, { projectId, ...projectData }, { retryLimit: 3, retryDelay: 10 });
-  return jobId;
+
+  // 1. Deduplicate: Skip if a summary job for this project is already queued/running
+  if (activeJobs.has(projectId)) {
+    console.info(`[summaryQueue] [INFO] Job for project ${projectId} already queued/running; skipping.`);
+    return null;
+  }
+
+  // 2. Cooldown: Skip if less than 5 minutes have elapsed since last summary generation
+  const lastRun = lastRunMap.get(projectId) || 0;
+  if (Date.now() - lastRun < FIVE_MINUTES_MS) {
+    console.info(`[summaryQueue] [INFO] Job for project ${projectId} rate limited (5-min cooldown); skipping.`);
+    return null;
+  }
+
+  activeJobs.add(projectId);
+
+  try {
+    const jobId = await boss.send(
+      QUEUE,
+      { projectId, ...projectData },
+      { retryLimit: 3, retryDelay: 10, singletonKey: `summary-${projectId}` }
+    );
+    return jobId;
+  } catch (err) {
+    activeJobs.delete(projectId);
+    throw err;
+  }
 }
 
 module.exports = { start, enqueueAISummary };

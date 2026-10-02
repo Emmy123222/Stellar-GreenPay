@@ -54,11 +54,11 @@ async function mockApi(page: Page) {
       },
     }),
   );
-  await page.route("**/api/leaderboard**", (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
-  await page.route("**/api/stats/global", (r) =>
+  await page.route("**/api/**/leaderboard**", (r) => r.fulfill(ok(MOCK_LEADERBOARD)));
+  await page.route("**/api/**/stats/global", (r) =>
     r.fulfill(ok({ totalDonations: 1, totalXLMRaised: "100", totalCO2OffsetKg: 1000 })),
   );
-  await page.route("**/api/stats/categories", (r) =>
+  await page.route("**/api/**/stats/categories", (r) =>
     r.fulfill(ok([{ category: "Reforestation", count: 1 }])),
   );
 }

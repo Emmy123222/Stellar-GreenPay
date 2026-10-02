@@ -4,50 +4,111 @@
 "use strict";
 const express = require("express");
 const router  = express.Router();
-const EventEmitter = require("events");
 const { v4: uuid } = require("uuid");
-const { z } = require("zod");
 const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
-const { invalidateProjectImpactCache } = require("./impact");
 const { createRateLimiter } = require("../middleware/rateLimiter");
-const { mapDonationRow } = require("../services/store");
+const { walletAuthRequired } = require("../middleware/auth");
+const { computeBadges, mapDonationRow } = require("../services/store");
 const { server } = require("../services/stellar");
 const donationEvents = require("../services/donationEvents");
 const { enqueueProfileUpdate } = require("../services/profileQueue");
-const donationLimiter = createRateLimiter(10, 1); // 10 requests per minute
+const { countDonation } = require("../services/metrics");
+const { checkAndDeliverMilestones } = require("../services/webhook");
+const { enqueueDonationPushNotification } = require("../services/donationPushQueue");
+const configuredDonationLimit = Number.parseInt(process.env.DONATIONS_RATE_LIMIT_PER_MINUTE || "10", 10);
+const donationLimiter = createRateLimiter(
+  Number.isFinite(configuredDonationLimit) && configuredDonationLimit > 0 ? configuredDonationLimit : 10,
+  1,
+  "donations",
+);
+
+// ── CSV export helpers ────────────────────────────────────────────────────────
+
+// In-memory cache of historical XLM/USD prices keyed by YYYY-MM-DD, so a
+// donor's export (and repeat exports) don't re-fetch the same day.
+const historicalPriceCache = new Map();
+
+/**
+ * Fetch the historical XLM/USD price for a single day from CoinGecko's
+ * free history endpoint. Returns null when the price is unavailable
+ * (network error, rate limit, or malformed response) — the export still
+ * succeeds, the USD column is just left blank for that day.
+ *
+ * @param {string} isoDate — YYYY-MM-DD
+ * @returns {Promise<number|null>}
+ */
+async function fetchHistoricalXlmPrice(isoDate) {
+  if (historicalPriceCache.has(isoDate)) {
+    return historicalPriceCache.get(isoDate);
+  }
+
+  // CoinGecko expects DD-MM-YYYY.
+  const [year, month, day] = isoDate.split("-");
+  const coinGeckoDate = `${day}-${month}-${year}`;
+  let price = null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/coins/stellar/history?date=${encodeURIComponent(coinGeckoDate)}`,
+      { signal: controller.signal },
+    );
+    clearTimeout(timeout);
+    if (res.ok) {
+      const body = await res.json();
+      const usd = body?.market_data?.current_price?.usd;
+      if (typeof usd === "number" && usd > 0) price = usd;
+    }
+  } catch {
+    price = null;
+  }
+
+  historicalPriceCache.set(isoDate, price);
+  return price;
+}
+
+/**
+ * Resolve the historical XLM/USD price for every unique donation date.
+ *
+ * @param {Array<{created_at: string|Date}>} rows
+ * @returns {Promise<Map<string, number|null>>} — YYYY-MM-DD → price (or null)
+ */
+async function resolveHistoricalPrices(rows) {
+  const dates = new Set();
+  for (const row of rows) {
+    const iso = new Date(row.created_at).toISOString().slice(0, 10);
+    dates.add(iso);
+  }
+  const entries = await Promise.all(
+    [...dates].map(async (iso) => [iso, await fetchHistoricalXlmPrice(iso)]),
+  );
+  return new Map(entries);
+}
+
+/**
+ * Escape a value for CSV output: wrap in quotes when it contains a comma,
+ * quote, or newline, and double any embedded quotes.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function csvEscape(value) {
+  const s = String(value ?? "");
+  if (/[",\r\n]/.test(s)) {
+    return `"${s.replace(/"/g, "\"\"")}"`;
+  }
+  return s;
+}
 
 function resolveDonorCountry(ip) {
   if (!ip || typeof ip !== "string") return null;
   const normalizedIp = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
   const geo = geoip.lookup(normalizedIp);
   return geo?.country || null;
-}
-
-const donationStreamSubscribers = new Set();
-
-function formatDonationStreamPayload(donation) {
-  return {
-    ...donation,
-    projectName: donation.projectName || null,
-  };
-}
-
-function emitDonationStreamEvent(eventName, payload) {
-  const eventBody = `event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`;
-  for (const subscriber of donationStreamSubscribers) {
-    try {
-      subscriber.write(eventBody);
-    } catch (error) {
-      donationStreamSubscribers.delete(subscriber);
-    }
-  }
-}
-
-function broadcastDonationEvent(donation) {
-  emitDonationStreamEvent("donation", { donation: formatDonationStreamPayload(donation) });
 }
 
 function validateKey(k) {
@@ -78,18 +139,19 @@ async function recordDonation(req, res, next) {
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
-    client = await pool.connect();
-
-    const projectResult = await client.query("SELECT id, co2_per_xlm FROM projects WHERE id = $1", [projectId]);
-    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
-    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
-    const projectResult = await client.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
-    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
-    const project = projectResult.rows[0] || {};
-
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) { const e = new Error("Invalid amount"); e.status = 400; throw e; }
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      const e = new Error("Donation amount must be a positive number");
+      e.status = 400;
+      throw e;
+    }
+
+    client = await pool.connect();
+
+    const projectResult = await client.query("SELECT id, co2_per_xlm, name, wallet_address FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
 
     // Deduplicate by tx hash
     const existingResult = await client.query(
@@ -98,7 +160,7 @@ async function recordDonation(req, res, next) {
     );
     if (existingResult.rows[0]) {
       const existingRow = { ...existingResult.rows[0], co2_per_xlm: projectCo2PerXlm };
-      return res.json({ success: true, data: mapDonationRow(existingRow) });
+      return res.status(200).json({ success: true, data: mapDonationRow(existingRow) });
     }
 
     // Verify the transaction is confirmed on-chain before recording it.
@@ -125,6 +187,7 @@ async function recordDonation(req, res, next) {
       [donorAddress],
     );
     const prevTotalDonated = parseFloat(prevTotalResult.rows[0]?.total || "0");
+    const newTotalDonated = prevTotalDonated + (currency === "XLM" ? parsedAmount : 0);
 
     const donationResult = await client.query(
       `INSERT INTO donations (
@@ -145,17 +208,6 @@ async function recordDonation(req, res, next) {
       ],
     );
 
-    const recordedDonation = donationResult.rows[0] || {
-      id: uuid(),
-      project_id: projectId,
-      donor_address: donorAddress,
-      amount_xlm: currency === "XLM" ? parsedAmount : null,
-      amount: parsedAmount,
-      currency,
-      message: message?.trim().slice(0, 100) || null,
-      transaction_hash: transactionHash,
-      created_at: new Date().toISOString(),
-    };
 
     // Check for active matching offers
     if (currency === "XLM") {
@@ -217,10 +269,42 @@ async function recordDonation(req, res, next) {
     await client.query("COMMIT");
     inTransaction = false;
 
-    // NOTE: enqueueProfileUpdate is not currently imported in this file — add
-    // `const { enqueueProfileUpdate } = require("../services/profileQueue");`
-    // (or wherever it lives) before deploying, or this will throw at runtime.
-    enqueueProfileUpdate(donorAddress).catch((err) => {
+    // Award referral bonus if this is the referred user's first donation
+    if (currency === "XLM") {
+      try {
+        const referralCheck = await pool.query(
+          "SELECT COUNT(*) as count FROM donations WHERE donor_address = $1",
+          [donorAddress]
+        );
+        const donationCount = parseInt(referralCheck.rows[0]?.count || "0");
+        
+        // If this is the first donation, award referral bonus
+        if (donationCount === 1) {
+          await fetch(`${process.env.API_URL || "http://localhost:4000"}/api/v1/referrals/award-bonus`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              referredAddress: donorAddress,
+              donationId: donationResult.rows[0].id,
+              amountXLM: parsedAmount.toString()
+            })
+          }).catch(err => logger.error("Failed to award referral bonus:", err));
+        }
+      } catch (err) {
+        logger.error("Referral bonus check failed:", err);
+      }
+    }
+
+    await redis.deletePattern("projects:list:*");
+    // The leaderboard aggregates the row just inserted, so every cached page is
+    // now stale (issue #1093). Donations recorded out-of-band by the indexer are
+    // not invalidated here; the 60-second TTL bounds how long they stay stale.
+    await redis.deletePattern("leaderboard:*");
+
+    const xlmForMetrics = currency === "XLM" ? parsedAmount : 0;
+    countDonation(currency, xlmForMetrics);
+
+    await enqueueProfileUpdate(donorAddress).catch((err) => {
       logger.error({ event: "profile_update_enqueue_failed", err, donorAddress }, "Failed to enqueue profile update job");
     });
 
@@ -236,28 +320,15 @@ async function recordDonation(req, res, next) {
     const donationRow = donationResult?.rows?.[0] || {};
     const io = req.app?.get("io");
 
-    // Compute donor badge for the SSE payload
-    let donorBadge = "";
-    try {
-      const profileResult = await pool.query(
-        "SELECT total_donated_xlm FROM profiles WHERE public_key = $1",
-        [donorAddress],
-      );
-      const totalXLM = profileResult.rows[0]
-        ? parseFloat(profileResult.rows[0].total_donated_xlm || "0")
-        : parsedAmount;
-      if (totalXLM >= 10000) donorBadge = "EarthGuardian";
-      else if (totalXLM >= 1000) donorBadge = "Forest";
-      else if (totalXLM >= 100) donorBadge = "Tree";
-      else if (totalXLM >= 10) donorBadge = "Seedling";
-    } catch {
-      // Badge computation is best-effort; don't fail the request
-    }
+    // Badge tier reflects the donor's cumulative total after this donation.
+    const newBadges = computeBadges(newTotalDonated);
+    const newTier = newBadges[0]?.tier || null;
+    const donorBadge = newTier ? newTier.charAt(0).toUpperCase() + newTier.slice(1) : "";
 
     const projectName = (projectResult.rows[0] && projectResult.rows[0].name) || "GreenPay Project";
 
-    if (io && typeof io.emit === "function") {
-      io.emit("donation_event", {
+    if (io) {
+      const donationPayload = {
         projectId,
         projectName,
         donorAddress,
@@ -268,22 +339,53 @@ async function recordDonation(req, res, next) {
         campaignGoalXLM: null,
         campaignRaisedXLM: null,
         donorBadge,
-      });
+      };
+      if (typeof io.to === "function") {
+        io.to([`project:${projectId}`, "all-donations"]).emit("donation_event", donationPayload);
+      } else if (typeof io.emit === "function") {
+        io.emit("donation_event", donationPayload);
+      }
     }
-    const donationPayload = {
-      ...mapDonationRow({
-        ...donationRow,
-        amount_xlm: donationRow.amount_xlm ?? parsedAmount,
-        amount: donationRow.amount ?? parsedAmount,
-      }),
-      projectName: project?.name || null,
-    };
-    broadcastDonationEvent(donationPayload);
 
-    const mappedRow = { ...donationResult.rows[0], co2_per_xlm: projectCo2PerXlm };
-    const mappedDonation = mapDonationRow(mappedRow);
-    donationEvents.emit("new_donation", mappedDonation);
-    donationEvents.emit("new_donation", ssePayload);
+    // Detect badge tier upgrades caused by this donation and emit badge_earned
+    try {
+      const prevTier = computeBadges(prevTotalDonated)[0]?.tier || null;
+      if (newTier && prevTier !== newTier && io) {
+        const badgePayload = {
+          donorAddress,
+          badge: newTier,
+          projectId,
+        };
+        if (typeof io.to === "function") {
+          io.to(`project:${projectId}`).emit("badge_earned", badgePayload);
+        } else if (typeof io.emit === "function") {
+          io.emit("badge_earned", badgePayload);
+        }
+      }
+    } catch (err) {
+      // Do not let badge emit failures break donation flow
+      logger.error({ event: "badge_emit_failed", err, donorAddress, projectId }, "Failed to emit badge_earned");
+    }
+
+    donationEvents.emit("new_donation", {
+      projectName,
+      amountXLM: String(donationRow.amount_xlm ?? parsedAmount),
+      donorBadge,
+    });
+
+    // Enqueue push notification to project admin (non-blocking)
+    enqueueDonationPushNotification({
+      projectId,
+      projectName,
+      amountXLM: String(donationRow.amount_xlm ?? parsedAmount),
+      donorBadge,
+    }).catch((err) => {
+      logger.error({ event: "donation_push_enqueue_error", projectId, err: err.message }, "Failed to enqueue donation push notification");
+    });
+
+    await checkAndDeliverMilestones(projectId).catch((err) => {
+      logger.error({ event: "milestone_webhook_error", projectId, err: err.message }, "Failed to deliver milestone webhooks");
+    });
 
     res.status(201).json({ success: true, data: mapDonationRow(donationResult.rows[0]) });
   } catch (e) {
@@ -308,45 +410,82 @@ async function recordDonation(req, res, next) {
 router.post("/", donationLimiter, recordDonation);
 
 // GET /api/donations/stream
-router.get("/stream", async (req, res, next) => {
-  try {
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-    res.write("retry: 1000\n\n");
+router.get("/stream", (req, res) => {
+  const projectId = req.query.projectId || req.query.project_id || "default";
+  const lastEventId = req.headers["last-event-id"];
 
-    const recentDonations = (await pool.query(
-      `SELECT d.*, p.name AS project_name
-       FROM donations d
-       JOIN projects p ON p.id = d.project_id
-       ORDER BY d.created_at DESC
-       LIMIT 10`,
-    )).rows;
+  // When reconnecting, a Last-Event-ID that belongs to a different project
+  // than this stream is scoped to is rejected before committing to SSE.
+  if (lastEventId != null && lastEventId !== "") {
+    const lastIdNum = Number(lastEventId);
+    const lastEvent = Number.isNaN(lastIdNum)
+      ? undefined
+      : donationEvents.findEvent(lastIdNum);
+    if (lastEvent && lastEvent.projectId !== projectId) {
+      return res.status(400).json({
+        error: `Last-Event-ID ${lastEventId} does not belong to project ${projectId}`,
+      });
+    }
+  }
 
-    res.write(`event: initial\ndata: ${JSON.stringify({ donations: recentDonations.map((row) => ({
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.write("retry: 1000\n\n");
+
+  // Replay events missed since the Last-Event-ID. An unknown id is treated as
+  // a cold start and the full project history is replayed (stream reset).
+  if (lastEventId != null && lastEventId !== "") {
+    const lastIdNum = Number(lastEventId);
+    const lastEvent = Number.isNaN(lastIdNum)
+      ? undefined
+      : donationEvents.findEvent(lastIdNum);
+    const replay = lastEvent
+      ? donationEvents.getEventsAfter(projectId, lastIdNum)
+      : donationEvents.getEventsForProject(projectId);
+    for (const event of replay) {
+      res.write(`id: ${event.id}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    }
+  }
+
+  const onNewDonation = (donation) => {
+    res.write(`data: ${JSON.stringify(donation)}\n\n`);
+  };
+  donationEvents.on("new_donation", onNewDonation);
+
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(": keepalive\n\n");
+    }
+  }, 15000);
+
+  const cleanup = () => {
+    clearInterval(heartbeat);
+    donationEvents.removeListener("new_donation", onNewDonation);
+  };
+
+  req.on("close", cleanup);
+  req.on("end", cleanup);
+  req.on("aborted", cleanup);
+
+  // Best-effort initial snapshot of recent donations; a failure here must
+  // not tear down the already-open SSE connection or its listener.
+  Promise.resolve(pool.query(
+    `SELECT d.*, p.name AS project_name
+     FROM donations d
+     JOIN projects p ON p.id = d.project_id
+     ORDER BY d.created_at DESC
+     LIMIT 10`,
+  )).then((result) => {
+    if (res.writableEnded) return;
+    res.write(`event: initial\ndata: ${JSON.stringify({ donations: result.rows.map((row) => ({
       ...mapDonationRow(row),
       projectName: row.project_name || null,
     })) })}\n\n`);
-
-    const heartbeat = setInterval(() => {
-      if (!res.writableEnded) {
-        res.write(": keepalive\n\n");
-      }
-    }, 15000);
-
-    const cleanup = () => {
-      clearInterval(heartbeat);
-      donationStreamSubscribers.delete(res);
-    };
-
-    donationStreamSubscribers.add(res);
-    req.on("close", cleanup);
-    req.on("end", cleanup);
-    req.on("aborted", cleanup);
-  } catch (e) {
-    next(e);
-  }
+  }).catch(() => {
+    // Non-fatal: the live stream still works without the initial snapshot.
+  });
 });
 
 // GET /api/donations/project/:id
@@ -415,28 +554,146 @@ router.get("/project/:projectId", async (req, res, next) => {
 });
 
 /**
- * List donations for a specific donor.
+ * List donations for a specific donor, one keyset-paginated page at a time.
+ *
+ * Query params: `limit` (default 20, max 100) and `cursor` (base64 of
+ * `{ created_at, id }`, echoed back as `next_cursor`). The response carries
+ * `total` — the donor's whole donation count — so a caller can show progress
+ * through the history without fetching all of it (issue #1080).
  *
  * @route GET /api/donations/donor/:publicKey
  * @param {import('express').Request} req - Express request containing the donor public key.
  * @param {import('express').Response} res - Express response object.
  * @param {import('express').NextFunction} next - Express error middleware.
- * @returns {Promise<void>} Sends the donor donation history.
+ * @returns {Promise<void>} Sends one page of the donor's history plus the total count.
  * @throws {Error} If validation or the donation query fails.
  */
 router.get("/donor/:publicKey", async (req, res, next) => {
   try {
     validateKey(req.params.publicKey);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+    const values = [req.params.publicKey];
+
+    if (hasCursor) {
+      try {
+        const cursorData = JSON.parse(
+          Buffer.from(req.query.cursor, "base64").toString("utf8"),
+        );
+        const cursorCreatedAt = cursorData.created_at;
+        const cursorId = cursorData.id;
+        if (!cursorCreatedAt || !cursorId) {
+          return res.status(400).json({ error: "Invalid cursor" });
+        }
+        values.push(cursorCreatedAt, cursorId);
+      } catch {
+        return res.status(400).json({ error: "Invalid cursor" });
+      }
+    }
+
+    values.push(limit + 1);
+    const query = hasCursor
+      ? `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+           AND (d.created_at < $2::timestamptz OR (d.created_at = $2::timestamptz AND d.id < $3))
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $4`
+      : `SELECT d.*, p.co2_per_xlm
+         FROM donations d
+         JOIN projects p ON d.project_id = p.id
+         WHERE d.donor_address = $1
+         ORDER BY d.created_at DESC, d.id DESC
+         LIMIT $2`;
+
+    // A keyset window can't answer "how many are there in total", which the
+    // donor page needs to show progress through its history (issue #1080).
+    // Counted concurrently with the page, and served by the same
+    // donor_address index the page query uses.
+    const [pageResult, totalResult] = await Promise.all([
+      pool.query(query, values),
+      pool.query(
+        "SELECT COUNT(*)::int AS total FROM donations WHERE donor_address = $1",
+        [req.params.publicKey],
+      ),
+    ]);
+    const donations = pageResult.rows.map(mapDonationRow);
+    const total = Number(totalResult.rows[0]?.total ?? 0);
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore
+      ? Buffer.from(
+        JSON.stringify({
+          created_at: result[result.length - 1].createdAt,
+          id: result[result.length - 1].id,
+        }),
+      ).toString("base64")
+      : null;
+
+    res.json({ success: true, data: result, has_more: hasMore, next_cursor: nextCursor, total });
+  } catch (e) { next(e); }
+});
+
+/**
+ * GET /api/donations/export?format=csv
+ * Authenticated donor downloads their complete donation history as CSV.
+ *
+ * Columns: date, project_name, amount_xlm, amount_usd, co2_offset_kg,
+ * transaction_hash. The USD value uses the historical XLM price on the
+ * donation date (CoinGecko); when a day's price is unavailable the USD
+ * cell is left blank rather than fabricating a number.
+ *
+ * Must be registered before "/:id" so "export" isn't captured as an id.
+ */
+router.get("/export", walletAuthRequired, async (req, res, next) => {
+  try {
+    const format = req.query.format || "csv";
+    if (format !== "csv") {
+      return res.status(400).json({ error: "Unsupported format. Only 'csv' is supported." });
+    }
+
+    const donorAddress = req.walletAddress;
+
     const result = await pool.query(
-      `SELECT d.*, p.co2_per_xlm
+      `SELECT d.created_at, p.name AS project_name, d.amount_xlm, d.transaction_hash, p.co2_per_xlm
        FROM donations d
        JOIN projects p ON d.project_id = p.id
        WHERE d.donor_address = $1
-       ORDER BY d.created_at DESC`,
-      [req.params.publicKey],
+       ORDER BY d.created_at ASC, d.id ASC`,
+      [donorAddress],
     );
-    res.json({ success: true, data: result.rows.map(mapDonationRow) });
-  } catch (e) { next(e); }
+    const rows = result.rows;
+
+    const priceByDate = await resolveHistoricalPrices(rows);
+
+    const lines = ["date,project_name,amount_xlm,amount_usd,co2_offset_kg,transaction_hash"];
+    for (const row of rows) {
+      const date = new Date(row.created_at).toISOString().slice(0, 10);
+      const amountXlm = Number.parseFloat(row.amount_xlm) || 0;
+      const price = priceByDate.get(date);
+      const amountUsd = price != null ? (amountXlm * price).toFixed(2) : "";
+      // co2_per_xlm is stored in grams per XLM; /1000 converts to kg.
+      const co2PerXlm = Number.parseFloat(row.co2_per_xlm) || 0;
+      const co2OffsetKg = ((amountXlm * co2PerXlm) / 1000).toFixed(2);
+
+      lines.push([
+        date,
+        csvEscape(row.project_name),
+        amountXlm.toFixed(7),
+        amountUsd,
+        co2OffsetKg,
+        row.transaction_hash,
+      ].join(","));
+    }
+
+    const csv = lines.join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", "attachment; filename=\"donation-history.csv\"");
+    res.send(csv);
+  } catch (e) {
+    next(e);
+  }
 });
 
 // GET /api/donations/:id - single donation fetch endpoint

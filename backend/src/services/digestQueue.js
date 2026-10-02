@@ -1,20 +1,4 @@
-/**
- * src/services/digestQueue.js
- *
- * Monthly impact digest email for project subscribers.
- *
- * Uses pg-boss cron scheduling (no extra dependency — pg-boss is already
- * present). On the 1st of every month at 08:00 UTC a single job is enqueued;
- * the worker iterates over every active project that has subscribers and sends
- * each subscriber a summary of:
- *   - Total XLM raised that month
- *   - CO₂ offset achieved
- *   - New milestones reached
- *   - Recent project updates
- *
- * The MONTHLY_DIGEST_CRON env var can override the schedule (cron syntax).
- * Set MONTHLY_DIGEST_CRON="disabled" to turn it off entirely.
- */
+/** Weekly project-update digest for subscribed donors. */
 "use strict";
 
 const PgBoss = require("pg-boss");
@@ -22,300 +6,91 @@ const pool = require("../db/pool");
 const logger = require("../logger");
 const { signUnsubscribeToken } = require("./unsubscribeToken");
 
-const QUEUE = "monthly-impact-digest";
-// Default: 1st of every month at 08:00 UTC
-const DEFAULT_CRON = "0 8 1 * *";
-
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
-const FROM_ADDRESS   = process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>";
-const APP_URL        = process.env.APP_URL || "http://localhost:3000";
-const API_URL        = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
-
+const QUEUE = "weekly-project-update-digest";
+const DEFAULT_CRON = "0 8 * * 1"; // Monday 08:00 UTC
 let boss = null;
 
-// ── HTML / text builders ─────────────────────────────────────────────────────
-
-function escHtml(str) {
-  return String(str ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+function escHtml(value) {
+  return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }) {
-  const milestonesHtml = milestones.length
-    ? `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1a3a1a;">🏆 New Milestones</p><ul style="margin:0 0 24px;padding-left:20px;">${milestones.map(m => `<li style="color:#3a5a3a;font-size:14px;line-height:1.7;">${escHtml(m.title)} (${m.percentage}%)</li>`).join("")}</ul>`
-    : "";
-
-  const updatesHtml = updates.length
-    ? `<p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#1a3a1a;">📰 Recent Updates</p><ul style="margin:0 0 24px;padding-left:20px;">${updates.map(u => `<li style="color:#3a5a3a;font-size:14px;line-height:1.7;"><strong>${escHtml(u.title)}</strong> — ${escHtml(u.body.slice(0, 120))}${u.body.length > 120 ? "…" : ""}</li>`).join("")}</ul>`
-    : "";
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f0f7f0;font-family:sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;padding:32px 0;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
-        <tr><td style="background:#2d6a2d;padding:24px 32px;">
-          <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">🌱 Stellar GreenPay</p>
-          <p style="margin:4px 0 0;color:#c8e6c8;font-size:13px;">Monthly Impact Digest — ${escHtml(monthLabel)}</p>
-        </td></tr>
-        <tr><td style="padding:32px;">
-          <h1 style="margin:0 0 4px;font-size:22px;color:#1a3a1a;">${escHtml(project.name)}</h1>
-          <p style="margin:0 0 24px;font-size:13px;color:#5a7a5a;">Here's what happened this month</p>
-
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
-            <tr>
-              <td style="background:#f0f7f0;border-radius:8px;padding:16px;text-align:center;width:50%;">
-                <p style="margin:0;font-size:24px;font-weight:700;color:#2d6a2d;">${escHtml(stats.raisedXLM)} XLM</p>
-                <p style="margin:4px 0 0;font-size:12px;color:#5a7a5a;">Raised this month</p>
-              </td>
-              <td style="width:16px;"></td>
-              <td style="background:#f0f7f0;border-radius:8px;padding:16px;text-align:center;width:50%;">
-                <p style="margin:0;font-size:24px;font-weight:700;color:#2d6a2d;">${escHtml(String(stats.co2OffsetKg))} kg</p>
-                <p style="margin:4px 0 0;font-size:12px;color:#5a7a5a;">CO₂ offset this month</p>
-              </td>
-            </tr>
-          </table>
-
-          ${milestonesHtml}
-          ${updatesHtml}
-
-          <a href="${projectUrl}" style="display:inline-block;background:#2d6a2d;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;">View Project →</a>
-        </td></tr>
-        <tr><td style="padding:16px 32px;border-top:1px solid #e8f0e8;">
-          <p style="margin:0;font-size:12px;color:#8aaa8a;">You're receiving this monthly digest because you subscribed to <strong>${escHtml(project.name)}</strong>.</p>
-          <p style="margin:8px 0 0;font-size:12px;color:#8aaa8a;"><a href="${escHtml(unsubscribeUrl)}" style="color:#5a7a5a;">Unsubscribe</a> from these digests.</p>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
+/** A donor receives one email containing updates from every subscribed project. */
+function buildDigestHtml({ projects, weekLabel, unsubscribeUrl, project, updates = [], monthLabel, stats, milestones = [] }) {
+  // Keep the admin preview endpoint compatible while it is migrated to weekly previews.
+  if (!projects && stats) {
+    return `<!doctype html><html><body><h1>Monthly Impact Digest — ${escHtml(monthLabel || "Preview")}</h1><h2>${escHtml(project.name)}</h2><p>${escHtml(stats.raisedXLM)} XLM</p><ul>${milestones.map((m) => `<li>${escHtml(m.title)}</li>`).join("")}</ul></body></html>`;
+  }
+  projects = projects || [{ project, updates: updates.map((update) => ({ ...update, id: update.id || "" })), unsubscribeUrl: "#" }];
+  weekLabel = weekLabel || monthLabel || "Preview";
+  unsubscribeUrl = unsubscribeUrl || "#";
+  const projectBlocks = projects.map(({ project, updates, unsubscribeUrl: projectUnsubscribeUrl }) => `
+    <section style="margin:0 0 28px"><h2 style="margin:0 0 10px;color:#1a3a1a;font-size:20px">${escHtml(project.name)}</h2>
+    ${updates.map((update) => `<article style="margin:0 0 14px"><strong style="color:#2d6a2d">${escHtml(update.title)}</strong><p style="margin:5px 0;color:#3a5a3a;line-height:1.5">${escHtml(update.body.slice(0, 180))}${update.body.length > 180 ? "…" : ""}</p><a href="${escHtml(update.url)}" style="color:#2d6a2d">Read the full update →</a></article>`).join("")}
+    <a href="${escHtml(projectUnsubscribeUrl)}" style="font-size:12px;color:#5a7a5a">Unsubscribe from ${escHtml(project.name)}</a></section>`).join("");
+  return `<!doctype html><html><body style="margin:0;padding:32px 16px;background:#f0f7f0;font-family:sans-serif"><main style="max-width:600px;margin:auto;background:#fff;padding:32px;border-radius:12px"><header style="margin:-32px -32px 28px;padding:24px 32px;background:#2d6a2d;color:#fff"><strong style="font-size:20px">🌱 Stellar GreenPay</strong><p style="margin:6px 0 0">Weekly project updates — ${escHtml(weekLabel)}</p></header>${projectBlocks}<footer style="border-top:1px solid #e8f0e8;padding-top:16px;font-size:12px;color:#5a7a5a">You receive this email because you subscribed to these projects. <a href="${escHtml(unsubscribeUrl)}">Manage subscriptions</a>.</footer></main></body></html>`;
 }
 
-function buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }) {
-  const lines = [
-    `Stellar GreenPay — Monthly Impact Digest (${monthLabel})`,
-    `Project: ${project.name}`,
-    "",
-    `XLM Raised This Month : ${stats.raisedXLM} XLM`,
-    `CO₂ Offset This Month : ${stats.co2OffsetKg} kg`,
-    "",
-  ];
-
-  if (milestones.length) {
-    lines.push("New Milestones:");
-    milestones.forEach(m => lines.push(`  • ${m.title} (${m.percentage}%)`));
+function buildDigestText({ projects, weekLabel, unsubscribeUrl, project, updates = [], monthLabel, stats }) {
+  if (!projects && stats) return `Monthly Impact Digest — ${monthLabel || "Preview"}\n${project.name}\n${stats.raisedXLM} XLM`;
+  projects = projects || [{ project, updates: updates.map((update) => ({ ...update, id: update.id || "" })) }];
+  weekLabel = weekLabel || monthLabel || "Preview";
+  unsubscribeUrl = unsubscribeUrl || "#";
+  const lines = [`Stellar GreenPay — Weekly project updates (${weekLabel})`, ""];
+  projects.forEach(({ project, updates }) => {
+    lines.push(project.name);
+    updates.forEach((u) => lines.push(`• ${u.title}: ${u.body.slice(0, 180)}\n  ${u.url}`));
     lines.push("");
-  }
-
-  if (updates.length) {
-    lines.push("Recent Updates:");
-    updates.forEach(u => lines.push(`  • ${u.title} — ${u.body.slice(0, 120)}${u.body.length > 120 ? "…" : ""}`));
-    lines.push("");
-  }
-
-  lines.push(`View the project: ${projectUrl}`);
-  lines.push("");
-  lines.push(`You're receiving this because you subscribed to ${project.name}.`);
-  lines.push(`Unsubscribe: ${unsubscribeUrl}`);
+  });
+  lines.push(`Manage subscriptions: ${unsubscribeUrl}`);
   return lines.join("\n");
 }
 
-// ── Email sender (individual BCC sends to protect subscriber privacy) ────────
-
-async function sendDigestEmails({ project, stats, milestones, updates, emails, monthLabel }) {
-  if (!RESEND_API_KEY) {
-    logger.warn({ event: "digest_skip_no_key", projectId: project.id }, "[digestQueue] RESEND_API_KEY not set — skipping");
-    return;
-  }
-  if (!emails.length) return;
-
-  const projectUrl = `${APP_URL}/projects/${project.id}`;
-  const subject    = `Your ${monthLabel} Impact Digest — ${project.name}`;
-
-  for (const email of emails) {
-    try {
-      let unsubscribeUrl = "";
-      try {
-        const token = signUnsubscribeToken(email, project.id);
-        unsubscribeUrl = `${API_URL}/api/projects/${project.id}/unsubscribe?token=${token}`;
-      } catch (err) {
-        logger.warn({ event: "digest_unsubscribe_token_error", email, projectId: project.id, err }, "Failed to generate unsubscribe token");
-      }
-
-      const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${RESEND_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: FROM_ADDRESS,
-          to: email,
-          subject,
-          html: buildDigestHtml({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
-          text: buildDigestText({ project, stats, milestones, updates, projectUrl, monthLabel, unsubscribeUrl }),
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        logger.error({ event: "digest_resend_error", projectId: project.id, email }, body);
-      }
-    } catch (err) {
-      logger.error({ event: "digest_fetch_error", projectId: project.id, email, err }, err.message);
-    }
-  }
-}
-
-// ── Worker logic ─────────────────────────────────────────────────────────────
-
-async function runDigest() {
-  // Month window: first day of the previous calendar month → first day of current month
-  const now       = new Date();
-  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-  const monthEnd   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const monthLabel = monthStart.toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-
-  logger.info({ event: "digest_run_start", monthLabel }, "[digestQueue] Starting monthly digest run");
-
-  // Fetch all active projects that have at least one subscriber
-  const projectsResult = await pool.query(
-    `SELECT p.id, p.name, p.co2_offset_kg
-     FROM projects p
-     WHERE p.status = 'active'
-       AND EXISTS (SELECT 1 FROM project_subscriptions ps WHERE ps.project_id = p.id)`,
-  );
-
-  let sent = 0;
-  let errors = 0;
-
-  for (const project of projectsResult.rows) {
-    try {
-      // --- stats: XLM raised and CO₂ offset during the month window ---
-      const statsResult = await pool.query(
-        `SELECT
-           COALESCE(SUM(CASE WHEN currency = 'XLM' THEN amount_xlm ELSE 0 END), 0) AS raised_xlm,
-           COUNT(*) AS donation_count
-         FROM donations
-         WHERE project_id = $1
-           AND created_at >= $2
-           AND created_at <  $3`,
-        [project.id, monthStart.toISOString(), monthEnd.toISOString()],
-      );
-      const raisedXLM = parseFloat(statsResult.rows[0].raised_xlm || "0").toFixed(2);
-
-      // Derive a proportional CO₂ estimate for the month based on project total
-      // (project.co2_offset_kg is the lifetime total; we scale by monthly fraction)
-      const lifetimeTotResult = await pool.query(
-        "SELECT COALESCE(SUM(amount_xlm), 0) AS total FROM donations WHERE project_id = $1 AND currency = 'XLM'",
-        [project.id],
-      );
-      const lifetimeXLM = parseFloat(lifetimeTotResult.rows[0].total || "0");
-      const co2Total    = parseInt(project.co2_offset_kg, 10) || 0;
-      const monthXLM    = parseFloat(raisedXLM);
-      const co2OffsetKg = lifetimeXLM > 0
-        ? Math.round((monthXLM / lifetimeXLM) * co2Total)
-        : 0;
-
-      // --- milestones reached during the month ---
-      const milestonesResult = await pool.query(
-        `SELECT title, percentage FROM project_milestones
-         WHERE project_id = $1
-           AND reached_at >= $2
-           AND reached_at <  $3
-         ORDER BY percentage ASC`,
-        [project.id, monthStart.toISOString(), monthEnd.toISOString()],
-      );
-
-      // --- recent project updates posted during the month ---
-      const updatesResult = await pool.query(
-        `SELECT title, body FROM project_updates
-         WHERE project_id = $1
-           AND created_at >= $2
-           AND created_at <  $3
-         ORDER BY created_at DESC
-         LIMIT 5`,
-        [project.id, monthStart.toISOString(), monthEnd.toISOString()],
-      );
-
-      // Skip projects with nothing to report (no donations, milestones, or updates)
-      const hasContent =
-        parseFloat(raisedXLM) > 0 ||
-        milestonesResult.rows.length > 0 ||
-        updatesResult.rows.length > 0;
-
-      if (!hasContent) continue;
-
-      // --- subscriber emails ---
-      const subsResult = await pool.query(
-        "SELECT email FROM project_subscriptions WHERE project_id = $1",
-        [project.id],
-      );
-      const emails = subsResult.rows.map(r => r.email);
-      if (!emails.length) continue;
-
-      await sendDigestEmails({
-        project: { id: project.id, name: project.name },
-        stats: { raisedXLM, co2OffsetKg },
-        milestones: milestonesResult.rows,
-        updates: updatesResult.rows,
-        emails,
-        monthLabel,
-      });
-
-      sent += emails.length;
-      logger.info({ event: "digest_project_sent", projectId: project.id, recipients: emails.length }, "[digestQueue] Digest sent");
-    } catch (err) {
-      errors++;
-      logger.error({ event: "digest_project_error", projectId: project.id, err }, err.message);
-    }
-  }
-
-  logger.info({ event: "digest_run_complete", sent, errors, monthLabel }, "[digestQueue] Monthly digest run complete");
-}
-
-// ── pg-boss wiring ────────────────────────────────────────────────────────────
-
-/**
- * Start the digest scheduler.
- * Registers a pg-boss cron job and a worker that processes it.
- * Safe to call multiple times (guards with module-level `boss`).
- */
-async function start() {
-  const cronOverride = process.env.MONTHLY_DIGEST_CRON;
-  if (cronOverride === "disabled") {
-    logger.info({ event: "digest_disabled" }, "[digestQueue] Monthly digest disabled via env");
-    return;
-  }
-
-  const cronSchedule = cronOverride || DEFAULT_CRON;
-  const connectionString =
-    process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
-
-  boss = new PgBoss(connectionString);
-  boss.on("error", (err) => logger.error({ event: "digest_pgboss_error", err }, err.message));
-
-  await boss.start();
-
-  // Register the cron schedule (idempotent — pg-boss deduplicates by name)
-  await boss.schedule(QUEUE, cronSchedule, {}, { tz: "UTC" });
-
-  // Register the worker
-  await boss.work(QUEUE, { teamSize: 1, teamConcurrency: 1 }, async () => {
-    await runDigest();
+async function sendDigestEmail(email, projects, weekLabel) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return false;
+  const apiUrl = process.env.API_URL || `http://localhost:${process.env.PORT || 4000}`;
+  const appUrl = process.env.APP_URL || "http://localhost:3000";
+  const decorated = projects.map(({ project, updates }) => ({ project, updates: updates.map((u) => ({ ...u, url: `${appUrl}/projects/${project.id}/updates/${u.id}` })), unsubscribeUrl: `${apiUrl}/api/subscriptions/unsubscribe?token=${signUnsubscribeToken(email, project.id)}` }));
+  const unsubscribeUrl = `${appUrl}/settings/notifications?email=${encodeURIComponent(email)}`;
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>", to: email, subject: `Your weekly project updates — ${weekLabel}`, html: buildDigestHtml({ projects: decorated, weekLabel, unsubscribeUrl }), text: buildDigestText({ projects: decorated, weekLabel, unsubscribeUrl }) }),
   });
-
-  logger.info({ event: "digest_scheduled", cron: cronSchedule }, `[digestQueue] Monthly digest scheduled: ${cronSchedule}`);
+  if (!response.ok) throw new Error(`Email provider returned ${response.status}: ${await response.text()}`);
+  return true;
 }
 
-module.exports = {
-  start,
-  runDigest,
-  buildDigestHtml,
-  buildDigestText,
-};
+async function runDigest(now = new Date()) {
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const start = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const weekLabel = `${start.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}–${new Date(end.getTime() - 1).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`;
+  const result = await pool.query(`SELECT ps.email, p.id AS project_id, p.name, u.id AS update_id, u.title, u.body
+    FROM project_subscriptions ps JOIN projects p ON p.id = ps.project_id JOIN project_updates u ON u.project_id = p.id
+    WHERE (ps.unsubscribed = false OR ps.unsubscribed IS NULL) AND u.created_at >= $1 AND u.created_at < $2
+    ORDER BY ps.email, p.name, u.created_at DESC`, [start.toISOString(), end.toISOString()]);
+  const donors = new Map();
+  result.rows.forEach((row) => {
+    const projects = donors.get(row.email) || new Map();
+    const entry = projects.get(row.project_id) || { project: { id: row.project_id, name: row.name }, updates: [] };
+    entry.updates.push({ id: row.update_id, title: row.title, body: row.body }); projects.set(row.project_id, entry); donors.set(row.email, projects);
+  });
+  let sent = 0;
+  for (const [email, projectMap] of donors) {
+    try { if (await sendDigestEmail(email, [...projectMap.values()], weekLabel)) sent++; }
+    catch (err) { logger.error({ event: "weekly_digest_send_error", email, err }, err.message); }
+  }
+  logger.info({ event: "weekly_digest_complete", sent, donors: donors.size }, "Weekly update digest complete");
+  return { sent, donors: donors.size };
+}
+
+async function start() {
+  const cron = process.env.WEEKLY_DIGEST_CRON;
+  if (cron === "disabled") return;
+  boss = new PgBoss(process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay");
+  boss.on("error", (err) => logger.error({ event: "weekly_digest_pgboss_error", err }, err.message));
+  await boss.start(); await boss.schedule(QUEUE, cron || DEFAULT_CRON, {}, { tz: "UTC" });
+  await boss.work(QUEUE, { teamSize: 1, teamConcurrency: 1 }, () => runDigest());
+}
+
+module.exports = { start, runDigest, buildDigestHtml, buildDigestText };
