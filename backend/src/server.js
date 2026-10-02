@@ -114,6 +114,8 @@ app.use("/api/health", healthRouter);
 
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
+const donationsRouter = require("./routes/donations");
+const adminRouter = require("./routes/admin");
 app.use("/api/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/donations", donationsRouter);
