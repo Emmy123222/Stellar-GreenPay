@@ -109,6 +109,8 @@ describe('useBiometricAuth (React hook)', () => {
       `busy=${isAuthenticating}`,
       `last=${lastResult?.outcome ?? 'none'}`,
       `success=${lastResult?.success ?? 'n/a'}`,
+      `err=${lastResult?.error ?? 'none'}`,
+      `code=${lastResult?.code ?? 'none'}`,
     ].join('|');
 
     return (
@@ -263,6 +265,49 @@ describe('useBiometricAuth (React hook)', () => {
     await waitFor(() =>
       expect(getByTestId('status').props.children).toMatch(/last=error/)
     );
+  });
+
+  it('populates a human-readable error and the raw SDK code on failure (#1050)', async () => {
+    LA.authenticateAsync.mockResolvedValue({ success: false, error: 'lockout' });
+
+    const { getByTestId } = await act(async () => render(<Probe />));
+    await waitFor(() => {
+      expect(getByTestId('status').props.children).toMatch(/available=true/);
+    });
+
+    await act(async () => {
+      triggerAuth(getByTestId);
+      await new Promise((r) => setImmediate(r));
+    });
+
+    await waitFor(() => {
+      const status = getByTestId('status').props.children;
+      expect(status).toMatch(/last=error/);
+      // `error` is the user-facing reason, not the raw code.
+      expect(status).toMatch(/err=Biometrics are locked after too many failed attempts/);
+      expect(status).toMatch(/code=lockout/);
+    });
+  });
+
+  it('surfaces a cancellation message on user cancel (#1050)', async () => {
+    LA.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
+
+    const { getByTestId } = await act(async () => render(<Probe />));
+    await waitFor(() => {
+      expect(getByTestId('status').props.children).toMatch(/available=true/);
+    });
+
+    await act(async () => {
+      triggerAuth(getByTestId);
+      await new Promise((r) => setImmediate(r));
+    });
+
+    await waitFor(() => {
+      const status = getByTestId('status').props.children;
+      expect(status).toMatch(/last=cancel/);
+      expect(status).toMatch(/err=Authentication was cancelled/);
+      expect(status).toMatch(/code=user_cancel/);
+    });
   });
 
   it('blocks Soroban submission when authentication fails — outcome=error surfaces', async () => {

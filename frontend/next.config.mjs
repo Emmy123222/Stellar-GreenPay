@@ -66,6 +66,9 @@ function buildStaticCsp(allowFraming = false) {
 
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    useTypeScriptCli: true,
+  },
   webpack: (config) => {
     config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false }
     return config

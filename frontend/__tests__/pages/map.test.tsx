@@ -78,7 +78,6 @@ function makeProject(overrides: Partial<ClimateProject> = {}): ClimateProject {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 // We import MapPage AFTER the mocks are in place.
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const MapPage = require("@/pages/map").default;
 
 describe("MapPage", () => {

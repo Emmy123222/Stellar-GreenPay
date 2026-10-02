@@ -18,20 +18,35 @@ is violated.
 
 ## Running the test
 
+Use a dedicated test instance with an existing project and comma-separated
+transaction hashes for donations already stored in that project. The test
+replays those donations to exercise the API's idempotent path. Raise the
+per-minute limit only on this test instance; production defaults to 10.
+
 ```bash
 # Install k6: https://k6.io/docs/get-started/installation/
 # brew install k6  (macOS)
 
-# Against local dev server (default port 4000)
+# Start a dedicated local test server in one terminal
+DONATIONS_RATE_LIMIT_PER_MINUTE=100000 npm --prefix backend start
+
+# Against that server in another terminal
+PROJECT_ID=<existing-project-uuid> \
+TX_HASHES=<existing-donation-hash>[,<another-existing-hash>] \
 k6 run scripts/load-test.js
 
-# Against a staging environment
-BASE_URL=https://staging.greenpay.app k6 run scripts/load-test.js
+# Against an isolated staging instance configured with the higher test limit
+BASE_URL=https://staging.greenpay.app \
+PROJECT_ID=<existing-project-uuid> \
+TX_HASHES=<existing-donation-hash> \
+k6 run scripts/load-test.js
 
 # Ramp-up scenario (0 → 100 VUs over 30 s, hold 60 s, ramp down)
+PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> \
 SCENARIO=ramp-up k6 run scripts/load-test.js
 
 # Save raw metrics as JSON for later analysis
+PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> \
 k6 run --out json=results.json scripts/load-test.js
 ```
 
@@ -39,9 +54,9 @@ k6 run --out json=results.json scripts/load-test.js
 
 ```bash
 cd backend
-npm run load-test                                     # sustained (default)
-BASE_URL=https://staging.greenpay.app npm run load-test
-SCENARIO=ramp-up npm run load-test
+PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> npm run load-test
+BASE_URL=https://staging.greenpay.app PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> npm run load-test
+PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> SCENARIO=ramp-up npm run load-test
 ```
 
 ## Understanding the thresholds
@@ -102,4 +117,10 @@ short smoke profile on every PR that touches `backend/src/routes/donations.js`:
   run: k6 run --vus 10 --duration 10s scripts/load-test.js
   env:
     BASE_URL: http://localhost:4000
+    PROJECT_ID: ${{ vars.LOAD_TEST_PROJECT_ID }}
+    TX_HASHES: ${{ vars.LOAD_TEST_TX_HASHES }}
 ```
+
+Start the CI API process with `DONATIONS_RATE_LIMIT_PER_MINUTE` set above the
+smoke-test request count and seed `LOAD_TEST_PROJECT_ID` plus its persisted
+transaction hashes before running k6.

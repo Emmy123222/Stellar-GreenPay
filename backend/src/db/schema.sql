@@ -89,6 +89,52 @@ CREATE TABLE IF NOT EXISTS project_updates (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- update_images: content-moderation audit log + admin review queue for images
+-- attached to project updates (issue #1101, migration
+-- 008_update_images_moderation.js). One row per AWS Rekognition
+-- DetectModerationLabels verdict. update_id/project_id are nullable because an
+-- image is scanned when it reaches storage, i.e. before any update references
+-- it. max_confidence is a percentage (0–100), matching Rekognition's units.
+-- moderation_labels holds the normalised label summary as JSONB.
+CREATE TABLE IF NOT EXISTS update_images (
+  id UUID PRIMARY KEY,
+  update_id UUID REFERENCES project_updates(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  storage_key TEXT,
+  image_url TEXT NOT NULL,
+  storage_backend TEXT NOT NULL DEFAULT 's3',
+  status TEXT NOT NULL DEFAULT 'pending_review',
+  flagged_for_review BOOLEAN NOT NULL DEFAULT FALSE,
+  provider TEXT NOT NULL DEFAULT 'aws_rekognition',
+  max_confidence NUMERIC(5, 2),
+  moderation_labels JSONB NOT NULL DEFAULT '[]'::JSONB,
+  reason TEXT,
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT update_images_status_check
+    CHECK (status IN ('approved', 'rejected', 'pending_review')),
+  CONSTRAINT update_images_max_confidence_range
+    CHECK (
+      max_confidence IS NULL
+      OR (max_confidence >= 0 AND max_confidence <= 100)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_update_images_storage_key
+  ON update_images (storage_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_update_images_image_url
+  ON update_images (image_url, created_at DESC);
+-- Admin review queue: unreviewed rows, newest first.
+CREATE INDEX IF NOT EXISTS idx_update_images_pending_review
+  ON update_images (created_at DESC)
+  WHERE status = 'pending_review';
+CREATE INDEX IF NOT EXISTS idx_update_images_update_id
+  ON update_images (update_id);
+CREATE INDEX IF NOT EXISTS idx_update_images_project_created
+  ON update_images (project_id, created_at DESC);
+
 -- project_subscriptions: email-based subscriptions to project updates.
 -- UNIQUE(project_id, email) prevents duplicate sign-ups.
 CREATE TABLE IF NOT EXISTS project_subscriptions (
@@ -224,112 +270,22 @@ CREATE TABLE IF NOT EXISTS recurring_donations (
   next_due_date TIMESTAMPTZ NOT NULL,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'cancelled')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  updated_at TIMESTAMPTZ
 );
-CREATE INDEX IF NOT EXISTS idx_recurring_donations_next_due
-  ON recurring_donations (next_due_date)
-  WHERE status = 'active';
 
--- project_follows: project follow relationships for push devices and/or wallets.
--- - Mobile push: device_token_id set (UNIQUE with project_id); wallet_address optional.
--- - Web Follow button: device_token_id NULL, wallet_address required; uniqueness
---   enforced by partial unique index (see migration 003_wallet_project_follows).
-CREATE TABLE IF NOT EXISTS project_follows (
-  id UUID PRIMARY KEY,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  device_token_id UUID REFERENCES device_tokens(id) ON DELETE CASCADE,
-  wallet_address TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(project_id, device_token_id)
-);
-CREATE UNIQUE INDEX IF NOT EXISTS project_follows_project_wallet_uidx
-  ON project_follows (project_id, wallet_address)
-  WHERE device_token_id IS NULL AND wallet_address IS NOT NULL;
-CREATE INDEX IF NOT EXISTS project_follows_wallet_lookup_idx
-  ON project_follows (project_id, wallet_address)
-  WHERE wallet_address IS NOT NULL;
-
--- Verification requests submitted via the /apply form on the frontend.
--- Each row represents an organisation asking the GreenPay admin team to
--- verify their climate project. Mirrors the columns of migration 002.
-CREATE TABLE IF NOT EXISTS verification_requests (
-  id UUID PRIMARY KEY,
-  organization_name TEXT NOT NULL,
-  organization_website TEXT,
-  organization_country TEXT,
-  contact_email TEXT NOT NULL,
-  wallet_address TEXT NOT NULL,
-  project_name TEXT NOT NULL,
-  project_category TEXT NOT NULL,
-  project_location TEXT NOT NULL,
-  project_description TEXT,
-  co2_per_xlm NUMERIC(20, 7) NOT NULL,
-  expected_annual_tonnes_co2 NUMERIC(20, 7),
-  supporting_documents JSONB NOT NULL DEFAULT '[]'::JSONB,
-  storage_backend TEXT NOT NULL DEFAULT 'local',
-  notes TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  reviewer_notes TEXT,
-  reviewed_by TEXT,
-  submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  reviewed_at TIMESTAMPTZ,
-  CONSTRAINT verification_requests_status_check
-    CHECK (status IN ('pending', 'in_review', 'approved', 'rejected')),
-  CONSTRAINT verification_requests_co2_positive
-    CHECK (co2_per_xlm >= 0)
-);
-CREATE INDEX IF NOT EXISTS verification_requests_status_idx
-  ON verification_requests (status, submitted_at DESC);
-CREATE INDEX IF NOT EXISTS verification_requests_wallet_idx
-  ON verification_requests (wallet_address);
-
--- webhook_deliveries: history of outbound webhook delivery attempts.
--- Populated when milestone.reached (and similar) events are sent to a
--- project's webhook_url. Used by GET /api/webhooks/:projectId/history.
-CREATE TABLE IF NOT EXISTS webhook_deliveries (
-  id UUID PRIMARY KEY,
-  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  url TEXT NOT NULL,
-  payload JSONB NOT NULL,
-  event TEXT,
-  payload_hash TEXT,
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'delivered', 'failed')),
-  attempt_count INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
-  last_attempt_at TIMESTAMPTZ,
-  next_attempt_at TIMESTAMPTZ,
-  response_status INTEGER,
-  delivered_at TIMESTAMPTZ,
+-- impact_certificates: shareable impact certificates. Each row is a public
+-- certificate identified by a unique slug, rendered at /certificate/:slug
+-- and served as JSON by GET /api/impact/certificate/:slug.
+CREATE TABLE IF NOT EXISTS impact_certificates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug TEXT NOT NULL UNIQUE,
+  donor_address TEXT NOT NULL,
+  donor_name TEXT,
+  total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
+  co2_offset_kg INTEGER NOT NULL DEFAULT 0,
+  badge_tier TEXT NOT NULL DEFAULT 'Supporter',
+  projects_supported JSONB NOT NULL DEFAULT '[]'::JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
-  ON webhook_deliveries (status);
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_id
-  ON webhook_deliveries (project_id);
-CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_created
-  ON webhook_deliveries (project_id, created_at DESC);
-
--- global_stats_mv: pre-aggregated landing-page totals refreshed by pg-boss.
-CREATE MATERIALIZED VIEW IF NOT EXISTS global_stats_mv AS
-SELECT
-  1 AS id,
-  COALESCE(SUM(raised_xlm), 0) AS total_xlm_raised,
-  COALESCE(SUM(co2_offset_kg), 0)::int AS total_co2_offset_kg,
-  COUNT(*)::int AS total_projects,
-  COALESCE(SUM(donor_count), 0)::int AS total_donors,
-  (SELECT COUNT(*)::int FROM donations) AS total_donations
-FROM projects;
-CREATE UNIQUE INDEX IF NOT EXISTS global_stats_mv_id_uidx ON global_stats_mv (id);
-
--- dead_letter: failed background jobs that have exhausted all retries
-CREATE TABLE IF NOT EXISTS dead_letter (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  queue_name TEXT NOT NULL,
-  job_id TEXT,
-  payload JSONB,
-  error TEXT,
-  failed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_dead_letter_queue_name ON dead_letter (queue_name);
-CREATE INDEX IF NOT EXISTS idx_dead_letter_failed_at ON dead_letter (failed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_impact_certificates_donor
+  ON impact_certificates (donor_address, created_at DESC);
