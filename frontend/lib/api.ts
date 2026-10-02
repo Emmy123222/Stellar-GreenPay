@@ -16,7 +16,11 @@ import type {
   EscrowJob,
   ProjectCampaign,
   VerificationRequest,
+  ProjectReview,
+  Team,
+  TeamLeaderboardEntry,
 } from "@/utils/types";
+import { getWalletAuthToken } from "./auth";
 
 const api = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000",
@@ -237,6 +241,29 @@ export async function fetchProjectMatches(projectId: string) {
   return data.data;
 }
 
+export async function createAdminMatchPledge(
+  projectId: string,
+  payload: { matcherAddress: string; capXLM: string | number; multiplier?: number; expiresAt: string },
+  adminToken?: string,
+) {
+  const headers = adminToken ? { Authorization: `Bearer ${adminToken}` } : undefined;
+  const { data } = await api.post<{ success: boolean; data: any }>(
+    `/api/admin/projects/${projectId}/match-pledges`,
+    payload,
+    { headers },
+  );
+  return data.data;
+}
+
+export async function cancelAdminMatchPledge(id: string, adminToken?: string) {
+  const headers = adminToken ? { Authorization: `Bearer ${adminToken}` } : undefined;
+  const { data } = await api.delete<{ success: boolean; data: any }>(
+    `/api/admin/match-pledges/${id}`,
+    { headers },
+  );
+  return data.data;
+}
+
 // ── Donations ─────────────────────────────────────────────────────────────────
 /**
  * Persist a completed donation in the backend after the on-chain transaction succeeds.
@@ -356,6 +383,87 @@ export async function fetchDonorHistory(publicKey: string) {
   return data.data;
 }
 
+// ── Donation history export ──────────────────────────────────────────────────
+/**
+ * Download the authenticated donor's full donation history as a CSV file.
+ *
+ * Fetches the export from GET /api/donations/export (which requires a
+ * wallet-authentication JWT) and triggers a browser download of the
+ * resulting `donation-history.csv`.
+ *
+ * @throws If the request fails (including 401 unauthenticated).
+ */
+export async function exportDonationHistoryCsv(): Promise<void> {
+  const token = await getWalletAuthToken();
+  const base = process.env.NEXT_PUBLIC_API_URL || "";
+  const res = await fetch(`${base}/api/v1/donations/export?format=csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to export donation history");
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "donation-history.csv";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ── Ratings ──────────────────────────────────────────────────────────────────
+/**
+ * Submit (or update) the authenticated donor's rating for a project.
+ *
+ * Requires a wallet-authentication JWT — the backend verifies the donor's
+ * signature and that the donor has actually donated to the project.
+ *
+ * @param payload - Project id, 1–5 stars, and an optional review.
+ * @returns The stored rating.
+ * @throws If the request fails (including 401 unauthenticated or 403 when
+ *   the donor has not donated to the project).
+ */
+export async function submitProjectRating(payload: {
+  projectId: string;
+  stars: number;
+  reviewText?: string;
+}): Promise<ProjectReview> {
+  const token = await getWalletAuthToken();
+  const { data } = await api.post<{ success: boolean; data: ProjectReview }>(
+    "/api/ratings",
+    {
+      project_id: payload.projectId,
+      stars: payload.stars,
+      review_text: payload.reviewText ?? null,
+    },
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
+  return data.data;
+}
+
+/**
+ * Fetch one page of individual reviews for a project (newest first).
+ *
+ * @param projectId - Project id.
+ * @param options - Page size (default 5) and offset (default 0).
+ * @returns The page plus pagination metadata.
+ * @throws If the request fails (including 404 for a missing project).
+ */
+export async function fetchProjectReviews(
+  projectId: string,
+  { limit = 5, offset = 0 }: { limit?: number; offset?: number } = {},
+) {
+  const { data } = await api.get<{
+    success: boolean;
+    data: ProjectReview[];
+    pagination: { total: number; limit: number; offset: number; has_more: boolean };
+  }>(`/api/ratings/project/${projectId}`, { params: { limit, offset } });
+  return data;
+}
+
 // ── Profiles ──────────────────────────────────────────────────────────────────
 /**
  * Fetch a donor profile by public key.
@@ -420,6 +528,87 @@ export async function fetchLeaderboard(
     data: LeaderboardEntry[];
   }>("/api/leaderboard", { params: { limit, period } });
   return data.data;
+}
+
+// ── Teams ───────────────────────────────────────────────────────────────────
+/**
+ * Create a team. The authenticated wallet becomes the team's first member.
+ *
+ * @param payload - Team name, optional logo URL, and optional invite code
+ *   (generated by the backend when omitted).
+ * @returns The created team with its combined stats.
+ * @throws If the request fails (including 401 unauthenticated or 409 when
+ *   the wallet is already on a team or the invite code is taken).
+ */
+export async function createTeam(payload: {
+  name: string;
+  logoUrl?: string;
+  inviteCode?: string;
+}): Promise<Team> {
+  const token = await getWalletAuthToken();
+  const { data } = await api.post<{ success: boolean; data: Team }>(
+    "/api/teams",
+    {
+      name: payload.name,
+      ...(payload.logoUrl ? { logoUrl: payload.logoUrl } : {}),
+      ...(payload.inviteCode ? { inviteCode: payload.inviteCode } : {}),
+    },
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
+  return data.data;
+}
+
+/**
+ * Join a team with its invite code. Idempotent for existing members.
+ *
+ * @param teamId - Team id.
+ * @param inviteCode - The team's invite code.
+ * @returns The team with combined stats and `isMember: true`.
+ * @throws If the request fails (including 403 for a wrong invite code or
+ *   409 when the wallet is already on another team).
+ */
+export async function joinTeam(teamId: string, inviteCode: string): Promise<Team> {
+  const token = await getWalletAuthToken();
+  const { data } = await api.post<{ success: boolean; data: Team }>(
+    `/api/teams/${teamId}/join`,
+    { inviteCode },
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
+  return data.data;
+}
+
+/**
+ * Fetch the authenticated wallet's team (with combined stats), or null when
+ * the wallet is not a member of any team.
+ *
+ * @throws If the request fails (including 401 unauthenticated).
+ */
+export async function fetchMyTeam(): Promise<Team | null> {
+  const token = await getWalletAuthToken();
+  const { data } = await api.get<{ success: boolean; data: Team | null }>(
+    "/api/teams/my",
+    token ? { headers: { Authorization: `Bearer ${token}` } } : undefined,
+  );
+  return data.data;
+}
+
+/**
+ * Fetch one page of the team leaderboard, ranked by combined total donated.
+ *
+ * @param params - Page size, offset, and optional period filter.
+ * @returns The page plus `has_more` / `next_offset` pagination cursors.
+ * @throws If the request fails.
+ */
+export async function fetchTeamLeaderboard(
+  params: { limit?: number; offset?: number; period?: "all" | "week" | "month" | "year" } = {},
+) {
+  const { data } = await api.get<{
+    success: boolean;
+    data: TeamLeaderboardEntry[];
+    has_more: boolean;
+    next_offset: number | null;
+  }>("/api/leaderboard/teams", { params });
+  return data;
 }
 
 // ── Jobs (escrow) ───────────────────────────────────────────────────────────
@@ -529,6 +718,28 @@ export async function fetchSubscriberCount(projectId: string) {
     `/api/subscriptions/${projectId}/count`,
   );
   return data.count;
+}
+
+export interface ProjectNotificationSubscription {
+  id: string;
+  projectId: string;
+  projectName: string;
+  email: string;
+  subscribed: boolean;
+}
+
+export async function fetchNotificationSubscriptions(email: string) {
+  const { data } = await api.get<{ success: boolean; data: ProjectNotificationSubscription[] }>(
+    "/api/subscriptions", { params: { email } },
+  );
+  return data.data;
+}
+
+export async function updateNotificationSubscription(id: string, email: string, subscribed: boolean) {
+  const { data } = await api.patch<{ success: boolean; data: ProjectNotificationSubscription }>(
+    `/api/subscriptions/${id}`, { email, subscribed },
+  );
+  return data.data;
 }
 
 // ── Global Stats ─────────────────────────────────────────────────
@@ -1004,6 +1215,28 @@ export async function updateVerificationRequestStatus(
     `/api/verification-requests/${id}/status`,
     { status, ...(reviewerNotes !== undefined ? { reviewerNotes } : {}) },
     { headers: { Authorization: `Bearer ${adminToken}` } },
+  );
+  return data.data;
+}
+
+// ── Referrals ─────────────────────────────────────────────────────────────────
+export interface ReferralStats {
+  referralCount: number;
+  referralBonusXLM: string;
+  referredBy: string | null;
+}
+
+export async function fetchReferralStats(publicKey: string): Promise<ReferralStats> {
+  const { data } = await api.get<{ success: boolean; data: ReferralStats }>(
+    `/api/referrals/${publicKey}`,
+  );
+  return data.data;
+}
+
+export async function createReferral(referrerAddress: string, referredAddress: string) {
+  const { data } = await api.post<{ success: boolean; data: any }>(
+    "/api/referrals",
+    { referrerAddress, referredAddress },
   );
   return data.data;
 }

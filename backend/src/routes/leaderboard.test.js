@@ -56,7 +56,7 @@ function createApp() {
   const app = express();
   app.use("/api/leaderboard", leaderboardRouter);
   // Catch-all error handler so errors don't crash tests
-  app.use((err, req, res, next) => {
+  app.use((err, req, res, _next) => {
     res.status(500).json({ success: false, error: err.message });
   });
   return app;
@@ -83,6 +83,7 @@ const SORTED_DONORS = [
   {
     public_key: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     display_name: "Alice",
+    avatar_url: "https://example.com/alice.png",
     badges: [{ tier: "earth", earnedAt: "2026-01-01T00:00:00.000Z" }],
     total_donated_xlm: "5000",
     total_co2_offset_kg: "1250.5",
@@ -92,6 +93,7 @@ const SORTED_DONORS = [
   {
     public_key: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     display_name: "Bob",
+    avatar_url: null,
     badges: [{ tier: "forest", earnedAt: "2026-01-02T00:00:00.000Z" }],
     total_donated_xlm: "750",
     total_co2_offset_kg: "180",
@@ -101,6 +103,7 @@ const SORTED_DONORS = [
   {
     public_key: "GCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
     display_name: null,
+    avatar_url: null,
     badges: [],
     total_donated_xlm: "12",
     total_co2_offset_kg: "0",
@@ -113,7 +116,7 @@ const SORTED_DONORS = [
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("GET /api/leaderboard — ranking assignment", () => {
+describe("GET /api/leaderboard — ranking assignment & profile fields", () => {
   beforeEach(resetQueries);
 
   test("assigns rank 1 to the highest donor and increments for each subsequent entry", async () => {
@@ -129,6 +132,27 @@ describe("GET /api/leaderboard — ranking assignment", () => {
     res.body.data.forEach((entry, i) => {
       expect(entry.rank).toBe(i + 1);
     });
+  });
+
+  test("includes display_name/displayName and avatar_url/avatarUrl per entry", async () => {
+    pool.query.mockResolvedValue({ rows: SORTED_DONORS });
+
+    const app = createApp();
+    const res = await request(app).get("/api/leaderboard").expect(200);
+
+    expect(res.body.data[0].displayName).toBe("Alice");
+    expect(res.body.data[0].display_name).toBe("Alice");
+    expect(res.body.data[0].avatarUrl).toBe("https://example.com/alice.png");
+    expect(res.body.data[0].avatar_url).toBe("https://example.com/alice.png");
+
+    expect(res.body.data[1].displayName).toBe("Bob");
+    expect(res.body.data[1].avatarUrl).toBeNull();
+    expect(res.body.data[1].avatar_url).toBeNull();
+
+    expect(res.body.data[2].displayName).toBeNull();
+    expect(res.body.data[2].display_name).toBeNull();
+    expect(res.body.data[2].avatarUrl).toBeNull();
+    expect(res.body.data[2].avatar_url).toBeNull();
   });
 });
 

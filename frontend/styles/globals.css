@@ -1,8 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Nunito:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.ts";
 
 @layer base {
   /* ── Light theme (default) ───────────────────────────────────────── */
@@ -73,13 +72,13 @@
 }
 
 @layer components {
-  .card {
-    @apply bg-white dark:bg-[#102214] border border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)]
+  .card, .card-hover {
+    @apply bg-[#ffffff] dark:bg-[#102214] border border-[rgba(34,114,57,0.12)] dark:border-[rgba(96,208,123,0.18)]
            rounded-2xl p-6 shadow-sm dark:shadow-none;
   }
 
   .card-hover {
-    @apply card hover:border-[rgba(34,114,57,0.30)] dark:hover:border-[rgba(96,208,123,0.40)]
+    @apply hover:border-[rgba(34,114,57,0.30)] dark:hover:border-[rgba(96,208,123,0.40)]
            hover:shadow-md dark:hover:bg-[#15291a] transition-all duration-200 cursor-pointer;
   }
 
@@ -107,7 +106,7 @@
            dark:hover:bg-[rgba(96,208,123,0.10)];
   }
 
-  .input-field {
+  .input-field, .textarea-field {
     @apply w-full bg-[#f0f7f0] dark:bg-[#0e1f13] border border-[rgba(34,114,57,0.18)] dark:border-[rgba(96,208,123,0.20)]
            rounded-xl px-4 py-3 text-[#1a2e1a] dark:text-[#e6f5e9] placeholder-[#8aaa8a] dark:placeholder-[#7a9b80]
            focus:outline-none focus:border-[rgba(34,114,57,0.50)] dark:focus:border-[rgba(96,208,123,0.55)]
@@ -116,31 +115,31 @@
   }
 
   .textarea-field {
-    @apply input-field resize-none leading-relaxed;
+    @apply resize-none leading-relaxed;
   }
 
   .label {
     @apply block text-xs font-semibold text-[#4e6c4e] dark:text-[#b2d5b5] uppercase tracking-widest mb-2;
   }
 
-  .badge {
+  .badge, .badge-active, .badge-complete, .badge-paused, .badge-verified {
     @apply text-xs font-semibold px-2.5 py-1 rounded-full border;
   }
 
   .badge-active {
-    @apply badge bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/40;
+    @apply bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-700/40;
   }
 
   .badge-complete {
-    @apply badge bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/40;
+    @apply bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-700/40;
   }
 
   .badge-paused {
-    @apply badge bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700/40;
+    @apply bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-700/40;
   }
 
   .badge-verified {
-    @apply badge bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/40;
+    @apply bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-700/40;
   }
 
   .progress-bar {
@@ -165,104 +164,6 @@
   }
   .dark .stat-card {
     @apply bg-[#162816] border-[rgba(76,175,112,0.12)];
-  }
-
-  .card {
-    @apply bg-white border border-[rgba(34,114,57,0.12)] rounded-2xl p-6 shadow-sm;
-  }
-  .dark .card {
-    @apply border-[rgba(76,175,112,0.15)];
-  }
-
-  .card-hover {
-    @apply card hover:border-[rgba(34,114,57,0.30)] hover:shadow-md transition-all duration-200 cursor-pointer;
-  }
-  .dark .card-hover:hover {
-    @apply border-[rgba(76,175,112,0.35)];
-  }
-
-  .btn-primary {
-    @apply bg-[#227239] hover:bg-[#1a5a2c] text-white font-semibold px-6 py-3 rounded-xl
-           transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed
-           focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
-  }
-  .dark .btn-primary {
-    @apply bg-[#2d8a47] hover:bg-[#3a9e55];
-  }
-
-  .btn-secondary {
-    @apply border border-[rgba(34,114,57,0.35)] hover:border-[rgba(34,114,57,0.65)]
-           text-[#165327] font-medium px-6 py-3 rounded-xl transition-all duration-200
-           bg-[rgba(34,114,57,0.04)] hover:bg-[rgba(34,114,57,0.08)]
-           focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2;
-  }
-  .dark .btn-secondary {
-    @apply border-[rgba(76,175,112,0.40)] text-[#4caf70] bg-[rgba(76,175,112,0.06)] hover:bg-[rgba(76,175,112,0.12)] hover:border-[rgba(76,175,112,0.65)];
-  }
-
-  .btn-ghost {
-    @apply text-[#5a7a5a] hover:text-[#227239] font-medium px-4 py-2 rounded-lg
-           transition-colors hover:bg-[rgba(34,114,57,0.06)];
-  }
-  .dark .btn-ghost {
-    @apply text-[#8aaa8a] hover:text-[#4caf70] hover:bg-[rgba(76,175,112,0.08)];
-  }
-
-  .input-field {
-    @apply w-full bg-[#f0f7f0] border border-[rgba(34,114,57,0.18)] rounded-xl px-4 py-3
-           text-[#1a2e1a] placeholder-[#8aaa8a]
-           focus:outline-none focus:border-[rgba(34,114,57,0.50)] focus:ring-1 focus:ring-[rgba(34,114,57,0.25)]
-           transition-all duration-200 text-sm font-body;
-  }
-  .dark .input-field {
-    @apply bg-[#162816] border-[rgba(76,175,112,0.20)] text-[#c8dfc8] placeholder-[#6a8a6a]
-           focus:border-[rgba(76,175,112,0.50)] focus:ring-[rgba(76,175,112,0.25)];
-  }
-
-  .textarea-field {
-    @apply input-field resize-none leading-relaxed;
-  }
-
-  .label {
-    @apply block text-xs font-semibold text-[#4e6c4e] uppercase tracking-widest mb-2;
-  }
-
-  .badge {
-    @apply text-xs font-semibold px-2.5 py-1 rounded-full border;
-  }
-
-  .badge-active {
-    @apply badge bg-emerald-50 text-emerald-700 border-emerald-200;
-  }
-
-  .badge-complete {
-    @apply badge bg-blue-50 text-blue-700 border-blue-200;
-  }
-
-  .badge-paused {
-    @apply badge bg-amber-50 text-amber-700 border-amber-200;
-  }
-
-  .badge-verified {
-    @apply badge bg-green-50 text-green-700 border-green-200;
-  }
-
-  .progress-bar {
-    @apply h-2 bg-[#c8dfc8] rounded-full overflow-hidden;
-  }
-  .dark .progress-bar {
-    @apply bg-[#1a2e1a];
-  }
-
-  .progress-fill {
-    @apply h-full bg-gradient-to-r from-[#227239] to-[#4caf70] rounded-full transition-all duration-500;
-  }
-
-  .divider {
-    @apply border-t border-[rgba(34,114,57,0.08)] my-6;
-  }
-  .dark .divider {
-    @apply border-[rgba(76,175,112,0.10)];
   }
 
   .divider {

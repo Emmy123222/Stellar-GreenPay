@@ -864,14 +864,21 @@ mod tests {
 
     // ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
 
-    #[contract]
-    pub struct MockPausedGreenPayContract;
+// Test-only. `#[contractimpl]` emits one exported WASM symbol per function, so a
+// non-test build would define `initialize` here as well as on EscrowContract
+// and the release wasm32 build fails with "symbol `initialize` is already
+// defined". Host `cargo check`/`cargo test` do not export symbols, which is why
+// only the wasm build catches it.
+#[cfg(test)]
+#[contract]
+pub struct MockPausedGreenPayContract;
 
-    #[contractimpl]
-    impl MockPausedGreenPayContract {
-        pub fn initialize(env: Env, paused: bool) {
-            env.storage().instance().set(&symbol_short!("paused"), &paused);
-        }
+#[cfg(test)]
+#[contractimpl]
+impl MockPausedGreenPayContract {
+    pub fn initialize(env: Env, paused: bool) {
+        env.storage().instance().set(&symbol_short!("paused"), &paused);
+    }
 
         pub fn is_paused(env: Env) -> bool {
             env.storage()

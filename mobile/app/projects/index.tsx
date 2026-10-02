@@ -1,14 +1,19 @@
 /**
  * app/projects/index.tsx
  * Projects browse screen — with offline cache support (#482)
+ *
+ * Search is debounced (300ms) and every in-flight request is aborted when a
+ * newer one starts, so typing a query fires a single API call instead of one
+ * per keystroke (#1129).
  */
-import { FlatList, View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { ActivityIndicator, FlatList, View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ListRenderItemInfo } from 'react-native';
 import axios from 'axios';
 import { useTheme } from '../theme';
 import { getCachedData, setCachedData } from '../../utils/cache';
+import { useDebounce } from '../../hooks/useDebounce';
 
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
@@ -33,6 +38,12 @@ const getProjectItemLayout = (_: ArrayLike<ClimateProject> | null | undefined, i
   index,
 });
 
+/** Axios throws this when a request is cancelled through its AbortSignal. */
+const isCanceled = (error: unknown) => {
+  const err = error as { code?: string; name?: string } | null;
+  return err?.code === 'ERR_CANCELED' || err?.name === 'CanceledError' || err?.name === 'AbortError';
+};
+
 const progressPercent = (raised: string, goal: string) => {
   const raisedAmount = parseFloat(raised);
   const goalAmount = parseFloat(goal);
@@ -44,49 +55,64 @@ export default function ProjectsScreen() {
   const router = useRouter();
   const { colors } = useTheme();
   const [projects, setProjects] = useState<ClimateProject[]>([]);
-  const [filteredProjects, setFilteredProjects] = useState<ClimateProject[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedQuery = useDebounce(searchQuery);
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
+  // Full unfiltered list, used to filter locally when a search fails offline.
+  const allProjectsRef = useRef<ClimateProject[]>([]);
 
-  useEffect(() => {
-    loadProjects();
+  const loadProjects = useCallback(async (query: string, signal: AbortSignal) => {
+    const isInitialLoad = query === '';
+    if (isInitialLoad) setLoading(true);
+    else setSearching(true);
+
+    try {
+      const url = query
+        ? `${API_URL}/api/projects?search=${encodeURIComponent(query)}`
+        : `${API_URL}/api/projects`;
+      const res = await axios.get(url, { signal });
+      const data = res.data.data as ClimateProject[];
+      if (isInitialLoad) {
+        allProjectsRef.current = data;
+        setIsOffline(false);
+        await setCachedData(CACHE_KEY_PROJECTS, data);
+      }
+      setProjects(data);
+    } catch (error) {
+      if (isCanceled(error)) return;
+      if (isInitialLoad) {
+        const cached = await getCachedData<ClimateProject[]>(CACHE_KEY_PROJECTS);
+        if (cached) {
+          allProjectsRef.current = cached.data;
+          setProjects(cached.data);
+          setIsOffline(true);
+        } else {
+          console.error('Error loading projects:', error);
+        }
+      } else {
+        // Search failed (e.g. offline) — filter the already-loaded list locally.
+        const needle = query.toLowerCase();
+        setProjects(
+          allProjectsRef.current.filter(p =>
+            p.name.toLowerCase().includes(needle) || p.category.toLowerCase().includes(needle)
+          )
+        );
+      }
+    } finally {
+      if (isInitialLoad) setLoading(false);
+      else setSearching(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (searchQuery) {
-      setFilteredProjects(
-        projects.filter(p =>
-          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          p.category.toLowerCase().includes(searchQuery.toLowerCase())
-        )
-      );
-    } else {
-      setFilteredProjects(projects);
-    }
-  }, [searchQuery, projects]);
-
-  const loadProjects = async () => {
-    try {
-      const res = await axios.get(`${API_URL}/api/projects`);
-      const data = res.data.data;
-      setProjects(data);
-      setFilteredProjects(data);
-      setIsOffline(false);
-      await setCachedData(CACHE_KEY_PROJECTS, data);
-    } catch (error) {
-      const cached = await getCachedData<ClimateProject[]>(CACHE_KEY_PROJECTS);
-      if (cached) {
-        setProjects(cached.data);
-        setFilteredProjects(cached.data);
-        setIsOffline(true);
-      } else {
-        console.error('Error loading projects:', error);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+    const controller = new AbortController();
+    loadProjects(debouncedQuery, controller.signal);
+    // Abort the in-flight request when the query changes or on unmount so a
+    // stale response can never overwrite a newer one.
+    return () => controller.abort();
+  }, [debouncedQuery, loadProjects]);
 
   const renderProject = useCallback(({ item: project }: ListRenderItemInfo<ClimateProject>) => (
     <TouchableOpacity
@@ -148,9 +174,15 @@ export default function ProjectsScreen() {
         accessibilityLabel="Search projects"
         accessibilityRole="search"
       />
+      {searching && (
+        <View style={styles.searchStatus} accessibilityRole="alert" accessibilityLabel="Searching projects">
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[styles.searchStatusText, { color: colors.secondaryText }]}>Searching…</Text>
+        </View>
+      )}
       <FlatList
         style={[styles.scroll, { borderColor: colors.background }]}
-        data={filteredProjects}
+        data={projects}
         renderItem={renderProject}
         keyExtractor={(item) => item.id}
         getItemLayout={getProjectItemLayout}
@@ -173,6 +205,17 @@ const styles = StyleSheet.create({
   scroll: {
     flex: 1,
     paddingHorizontal: 16,
+  },
+  searchStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: -4,
+    marginBottom: 8,
+    marginHorizontal: 16,
+  },
+  searchStatusText: {
+    fontSize: 13,
   },
   loadingText: {
     fontSize: 18,

@@ -91,6 +91,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       } catch {
         return res.status(400).json({ error: "Invalid cursor" });
       }
+      // eslint-disable-next-line security/detect-object-injection
       const sortValue = cursorData[sortBy];
       const publicKey = cursorData.publicKey;
       if (sortValue === undefined || !publicKey) {
@@ -121,7 +122,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       : "";
 
     const query = `
-      SELECT p.public_key, p.display_name, p.badges,
+      SELECT p.public_key, p.display_name, p.avatar_url, p.badges,
              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
              COUNT(DISTINCT d.project_id)::INTEGER AS projects_supported,
              COALESCE(
@@ -151,7 +152,7 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       LEFT JOIN donations d ON p.public_key = d.donor_address
       LEFT JOIN projects pr ON pr.id = d.project_id
       ${whereClause}
-      GROUP BY p.public_key, p.display_name, p.badges
+      GROUP BY p.public_key, p.display_name, p.avatar_url, p.badges
       ORDER BY ${sortBy} DESC, p.public_key DESC
       LIMIT $${limitIdx}
     `;
@@ -174,6 +175,9 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
       rank: i + 1,
       publicKey: p.public_key,
       displayName: p.display_name || null,
+      display_name: p.display_name || null,
+      avatarUrl: p.avatar_url || null,
+      avatar_url: p.avatar_url || null,
       totalDonatedXLM: p.total_donated_xlm?.toString() || "0",
       projectsSupported: p.projects_supported,
       topBadge: p.badges?.[0]?.tier || null,
@@ -184,7 +188,13 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
     let nextCursor = null;
     if (hasMore) {
       const last = pageRows[pageRows.length - 1];
+      const lastSortVal = sortBy === "total_donated_xlm"
+        ? last.total_donated_xlm
+        : sortBy === "total_co2_offset_kg"
+          ? last.total_co2_offset_kg
+          : last.donor_count;
       nextCursor = Buffer.from(
+        // eslint-disable-next-line security/detect-object-injection
         JSON.stringify({ [sortBy]: last[sortBy], publicKey: last.public_key }),
       ).toString("base64");
     }
@@ -208,6 +218,81 @@ router.get("/", leaderboardLimiter, async (req, res, next) => {
 });
 
 /**
+ * GET /api/leaderboard/teams
+ * Teams ranked by combined total_donated_xlm across their members — the
+ * team-giving counterpart to the donor leaderboard. A wallet's donations
+ * count toward exactly one team (enforced by a unique index on
+ * team_members.wallet_address), so combined totals never double-count.
+ *
+ * Query params:
+ *   - limit (default 50, max 200)
+ *   - offset (default 0)
+ *   - period (week | month | year | all; default all)
+ */
+router.get("/teams", leaderboardLimiter, async (req, res, next) => {
+  try {
+    const limit = Math.min(
+      Math.max(Number.parseInt(req.query.limit, 10) || 50, 1),
+      200,
+    );
+    const offset = Math.max(Number.parseInt(req.query.offset, 10) || 0, 0);
+    const period = req.query.period || "all";
+
+    let donationWindow = "";
+    if (period === "week") donationWindow = "AND d.created_at >= NOW() - INTERVAL '7 days'";
+    else if (period === "month") donationWindow = "AND d.created_at >= NOW() - INTERVAL '30 days'";
+    else if (period === "year") donationWindow = "AND d.created_at >= NOW() - INTERVAL '1 year'";
+
+    const result = await pool.query(
+      `SELECT t.id, t.name, t.logo_url,
+              COUNT(DISTINCT tm.wallet_address)::int AS member_count,
+              COALESCE(SUM(d.amount_xlm), 0)::NUMERIC AS total_donated_xlm,
+              COALESCE(
+                SUM(
+                  CASE
+                    WHEN pr.raised_xlm > 0 THEN (d.amount_xlm * (pr.co2_offset_kg::numeric / pr.raised_xlm))
+                    ELSE 0
+                  END
+                ),
+                0
+              )::NUMERIC AS total_co2_offset_kg
+       FROM teams t
+       JOIN team_members tm ON tm.team_id = t.id
+       LEFT JOIN donations d ON d.donor_address = tm.wallet_address ${donationWindow}
+       LEFT JOIN projects pr ON pr.id = d.project_id
+       GROUP BY t.id, t.name, t.logo_url
+       HAVING COALESCE(SUM(d.amount_xlm), 0) > 0
+       ORDER BY total_donated_xlm DESC, t.id DESC
+       LIMIT $1 OFFSET $2`,
+      [limit + 1, offset],
+    );
+
+    const rows = result.rows;
+    const hasMore = rows.length > limit;
+    const pageRows = rows.slice(0, limit);
+
+    const entries = pageRows.map((row, i) => ({
+      rank: offset + i + 1,
+      id: row.id,
+      name: row.name,
+      logoUrl: row.logo_url || null,
+      memberCount: row.member_count,
+      totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
+      totalCO2OffsetKg: row.total_co2_offset_kg?.toString() || "0",
+    }));
+
+    res.json({
+      success: true,
+      data: entries,
+      has_more: hasMore,
+      next_offset: hasMore ? offset + limit : null,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * GET /api/leaderboard/history
  * Returns the monthly leaderboard snapshots, grouped by month descending.
  * Query params:
@@ -224,12 +309,13 @@ router.get("/history", leaderboardLimiter, async (req, res, next) => {
       [months]
     );
 
-    // Group rows by month
-    const grouped = {};
+    // Group rows by month using a Map to avoid object injection
+    const grouped = new Map();
     for (const row of result.rows) {
       const key = row.month.toISOString().slice(0, 7); // "YYYY-MM"
-      if (!grouped[key]) grouped[key] = [];
-      grouped[key].push({
+      if (!grouped.has(key)) grouped.set(key, []);
+      // eslint-disable-next-line security/detect-object-injection
+      grouped.get(key).push({
         rank: row.rank,
         donorAddress: row.donor_address,
         displayName: row.display_name || null,
@@ -238,7 +324,7 @@ router.get("/history", leaderboardLimiter, async (req, res, next) => {
       });
     }
 
-    const history = Object.entries(grouped).map(([month, entries]) => ({ month, entries }));
+    const history = Array.from(grouped.entries()).map(([month, entries]) => ({ month, entries }));
     res.json({ success: true, data: history });
   } catch (e) {
     next(e);
@@ -289,8 +375,7 @@ router.post("/snapshot", async (req, res, next) => {
     try {
       await client.query("BEGIN");
       let inserted = 0;
-      for (let i = 0; i < topResult.rows.length; i++) {
-        const row = topResult.rows[i];
+      for (const [i, row] of topResult.rows.entries()) {
         const badge = row.badges?.[0]?.tier || null;
         await client.query(
           `INSERT INTO monthly_leaderboard
