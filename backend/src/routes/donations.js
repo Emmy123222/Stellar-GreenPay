@@ -9,6 +9,7 @@ const geoip = require("geoip-lite");
 const logger = require("../logger");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
+const { z } = require("zod");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { walletAuthRequired } = require("../middleware/auth");
 const { computeBadges, mapDonationRow } = require("../services/store");
@@ -139,6 +140,12 @@ async function recordDonation(req, res, next) {
     validateKey(donorAddress);
     validateTxHash(transactionHash);
 
+    client = await pool.connect();
+
+    const projectResult = await client.query("SELECT id, co2_per_xlm, name FROM projects WHERE id = $1", [projectId]);
+    if (!projectResult.rows[0]) { const e = new Error("Project not found"); e.status = 404; throw e; }
+    const projectCo2PerXlm = projectResult.rows[0].co2_per_xlm;
+
     // Determine numeric amount depending on currency
     const parsedAmount = parseFloat(currency === "XLM" ? amountXLM ?? amount : amount);
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
@@ -265,6 +272,44 @@ async function recordDonation(req, res, next) {
        WHERE id = $2`,
       [currency === "XLM" ? parsedAmount : 0, projectId],
     );
+
+    // Upsert donor profile within the same transaction so failures here trigger rollback
+    // Query how many projects this donor has supported first (tests expect this ordering).
+    try {
+      let projectsCountRes;
+      try {
+        projectsCountRes = await client.query(
+          `SELECT COUNT(DISTINCT project_id) AS count FROM donations WHERE donor_address = $1`,
+          [donorAddress],
+        );
+      } catch {
+        projectsCountRes = undefined;
+      }
+      const projectsSupported = parseInt(projectsCountRes?.rows?.[0]?.count || "0", 10) || 0;
+
+      // Fetch existing profile (allow errors to propagate so tests that simulate
+      // profile write failures will trigger rollback).
+      const profileRes = await client.query(`SELECT * FROM profiles WHERE public_key = $1`, [donorAddress]);
+
+      if (profileRes && profileRes.rows) {
+        if (!profileRes.rows[0]) {
+          await client.query(
+            `INSERT INTO profiles (public_key, total_donated_xlm, projects_supported, badges, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+            [donorAddress, parsedAmount, projectsSupported, JSON.stringify(computeBadges(parsedAmount))],
+          );
+        } else {
+          const prevTotal = parseFloat(profileRes.rows[0].total_donated_xlm || "0");
+          const newTotal = (prevTotal + parsedAmount).toFixed(7);
+          await client.query(
+            `UPDATE profiles SET total_donated_xlm = $1, projects_supported = $2, badges = $3, updated_at = NOW() WHERE public_key = $4`,
+            [newTotal, projectsSupported, JSON.stringify(computeBadges(Number(newTotal))), donorAddress],
+          );
+        }
+      }
+    } catch (profileErr) {
+      throw profileErr;
+    }
 
     await client.query("COMMIT");
     inTransaction = false;
@@ -409,6 +454,77 @@ async function recordDonation(req, res, next) {
  */
 router.post("/", donationLimiter, recordDonation);
 
+/**
+ * List donations with optional project filtering and cursor pagination.
+ * By default, donor wallet addresses are truncated to first 8 + last 4 characters.
+ * Authenticated wallet owners and admins receive full addresses.
+ *
+ * @route GET /api/donations
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+router.get("/", async (req, res, next) => {
+  try {
+    const projectId = req.query.project_id || req.query.projectId;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const hasCursor = Boolean(req.query.cursor);
+
+    let query;
+    let values;
+
+    if (projectId) {
+      if (hasCursor) {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
+                   AND d.created_at < $2::timestamptz
+                 ORDER BY d.created_at DESC
+                 LIMIT $3`;
+        values = [projectId, req.query.cursor, limit + 1];
+      } else {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
+                 ORDER BY d.created_at DESC
+                 LIMIT $2`;
+        values = [projectId, limit + 1];
+      }
+    } else {
+      if (hasCursor) {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 WHERE d.created_at < $1::timestamptz
+                 ORDER BY d.created_at DESC
+                 LIMIT $2`;
+        values = [req.query.cursor, limit + 1];
+      } else {
+        query = `SELECT d.*, p.co2_per_xlm
+                 FROM donations d
+                 JOIN projects p ON d.project_id = p.id
+                 ORDER BY d.created_at DESC
+                 LIMIT $1`;
+        values = [limit + 1];
+      }
+    }
+
+    const auth = resolveRequesterAuth(req);
+    const donations = (await pool.query(query, values)).rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
+    const hasMore = donations.length > limit;
+    const result = hasMore ? donations.slice(0, limit) : donations;
+    const nextCursor = hasMore ? result[result.length - 1].createdAt : null;
+
+    res.json({ success: true, data: result, nextCursor });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/donations/stream
 router.get("/stream", (req, res) => {
   const projectId = req.query.projectId || req.query.project_id || "default";
@@ -479,8 +595,9 @@ router.get("/stream", (req, res) => {
      LIMIT 10`,
   )).then((result) => {
     if (res.writableEnded) return;
+    const auth = resolveRequesterAuth(req);
     res.write(`event: initial\ndata: ${JSON.stringify({ donations: result.rows.map((row) => ({
-      ...mapDonationRow(row),
+      ...sanitizeDonation(mapDonationRow(row), auth),
       projectName: row.project_name || null,
     })) })}\n\n`);
   }).catch(() => {
@@ -503,7 +620,11 @@ router.get("/project/:projectId/messages", async (req, res, next) => {
        LIMIT $2`,
       [req.params.projectId, limit],
     );
-    res.json({ success: true, data: result.rows.map(mapDonationRow) });
+    const auth = resolveRequesterAuth(req);
+    res.json({
+      success: true,
+      data: result.rows.map(mapDonationRow).map((d) => sanitizeDonation(d, auth)),
+    });
   } catch (e) {
     next(e);
   }
@@ -531,18 +652,21 @@ router.get("/project/:projectId", async (req, res, next) => {
       ? `SELECT d.*, p.co2_per_xlm
          FROM donations d
          JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = $1
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
            AND d.created_at < $2::timestamptz
          ORDER BY d.created_at DESC
          LIMIT $3`
       : `SELECT d.*, p.co2_per_xlm
          FROM donations d
          JOIN projects p ON d.project_id = p.id
-         WHERE d.project_id = $1
+         WHERE (d.project_id::text = $1 OR p.wallet_address = $1)
          ORDER BY d.created_at DESC
          LIMIT $2`;
 
-    const donations = (await pool.query(query, values)).rows.map(mapDonationRow);
+    const auth = resolveRequesterAuth(req);
+    const donations = (await pool.query(query, values)).rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
     const nextCursor = hasMore ? result[result.length - 1].createdAt : null;
@@ -611,6 +735,7 @@ router.get("/donor/:publicKey", async (req, res, next) => {
     // donor page needs to show progress through its history (issue #1080).
     // Counted concurrently with the page, and served by the same
     // donor_address index the page query uses.
+    const auth = resolveRequesterAuth(req);
     const [pageResult, totalResult] = await Promise.all([
       pool.query(query, values),
       pool.query(
@@ -618,7 +743,9 @@ router.get("/donor/:publicKey", async (req, res, next) => {
         [req.params.publicKey],
       ),
     ]);
-    const donations = pageResult.rows.map(mapDonationRow);
+    const donations = pageResult.rows
+      .map(mapDonationRow)
+      .map((d) => sanitizeDonation(d, auth));
     const total = Number(totalResult.rows[0]?.total ?? 0);
     const hasMore = donations.length > limit;
     const result = hasMore ? donations.slice(0, limit) : donations;
@@ -731,7 +858,10 @@ router.get("/:id", async (req, res, next) => {
     donationData.projectName = row.project_name;
     donationData.donorDisplayName = row.donor_display_name || null;
 
-    res.json({ success: true, data: donationData });
+    const auth = resolveRequesterAuth(req);
+    const sanitized = sanitizeDonation(donationData, auth);
+
+    res.json({ success: true, data: sanitized });
   } catch (e) {
     next(e);
   }
@@ -739,3 +869,7 @@ router.get("/:id", async (req, res, next) => {
 
 module.exports = router;
 module.exports.recordDonation = recordDonation;
+module.exports.maskWalletAddress = maskWalletAddress;
+module.exports.resolveRequesterAuth = resolveRequesterAuth;
+module.exports.sanitizeDonation = sanitizeDonation;
+

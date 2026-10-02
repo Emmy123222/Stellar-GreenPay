@@ -34,6 +34,10 @@ jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn().mockResolvedValue(null),
   getProjectDonationEvents: jest.fn(),
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+  getProjectDonationEvents: jest.fn(),
+  getOnChainProject: jest.fn().mockResolvedValue(null),
+  CONTRACT_ID: null,
+  NETWORK_PASSPHRASE: "Test",
 }));
 
 jest.mock("../services/webhook", () => ({
@@ -46,6 +50,43 @@ const http = require("http");
 const request = require("supertest");
 const donationsRouter = require("./donations");
 const projectsRouter = require("./projects");
+const donationsRouter = require("./donations");
+
+// Test helpers used across donation tests
+function makePublicKey(char = "A") {
+  return `G${char.repeat(55)}`;
+}
+
+function makeTxHash(char = "a") {
+  return char.repeat(64);
+}
+
+function queryResult(rows = []) {
+  return { rows };
+}
+
+function createMockClient(...responses) {
+  const client = { query: jest.fn(), release: jest.fn() };
+  responses.forEach((r) => {
+    if (r instanceof Error) {
+      client.query.mockRejectedValueOnce(r);
+    } else {
+      client.query.mockResolvedValueOnce(r);
+    }
+  });
+  pool.connect.mockResolvedValue(client);
+  return client;
+}
+
+const MOCK_PROJECT = { id: "proj-1", name: "Test Project" };
+
+const MOCK_DONATION_ROW = {
+  id: "don-1",
+  amount_xlm: "250.0000000",
+  message: "Keep it up!",
+  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
+};
 
 function buildApp() {
   const app = express();

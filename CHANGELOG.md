@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Kubernetes manifests now pin container images to immutable git-SHA tags instead of the mutable `latest` tag, with CI injecting the short SHA at deploy time (#1212).
 
+### Fixed
+
+- `deploy.yml` now gates every release on a 120-second `/api/readiness` poll and automatically runs `helm rollback greenpay --wait` while notifying Slack `#deployments` when the check fails (#1214).
+
 ## [1.0.0] - 2025-01-01
 
 ### Added

@@ -361,7 +361,6 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)} disabled={isProcessing}
             placeholder="Leave a message of support..." maxLength={100}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
-        </div>
 
         {/*  Helper text */}
           <p className="text-xs text-[var(--text-secondary)] mt-1">
@@ -437,6 +436,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           </p>
         )}
       </div>
+    </div>
   );
 }
 

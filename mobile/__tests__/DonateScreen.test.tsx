@@ -124,31 +124,44 @@ jest.mock('expo-linking', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-jest.mock('../app/theme', () => ({
-  useTheme: () => ({
-    colors: {
-      background: '#ffffff',
-      surface: '#ffffff',
-      primary: '#000000',
-      accent: '#000000',
-      header: '#000000',
-      headerText: '#ffffff',
-      buttonBackground: '#000000',
-      buttonText: '#ffffff',
-      cardBorder: '#eeeeee',
-      cardShadow: '#000000',
-      primaryText: '#000000',
-      secondaryText: '#555555',
-      muted: '#888888',
-      inputBackground: '#ffffff',
-      inputBorder: '#eeeeee',
-      placeholder: '#888888',
-      border: '#dddddd',
-      statusBarStyle: 'dark',
+// `@stellar/stellar-sdk` v16 ships as ESM and pulls a chain of ESM-only
+// dependencies (@noble/hashes, uint8array-extras, …) that jest-expo cannot
+// execute under the CommonJS transform. The screen only reaches those
+// exports on the signed-transaction path, which these UI tests never enter
+// (every case stops at an earlier precondition), so a structural stub is
+// enough to let the module load. Mirrors the SDK stub in useWallet.test.ts.
+jest.mock('@stellar/stellar-sdk', () => {
+  class FakeServer {
+    loadAccount = jest.fn(() => Promise.resolve({}));
+    submitTransaction = jest.fn(() => Promise.resolve({ hash: 'fake-hash' }));
+  }
+  const chainable = () => {
+    const builder: Record<string, jest.Mock> = {
+      addOperation: jest.fn().mockImplementation(chainable),
+      addMemo: jest.fn().mockImplementation(chainable),
+      setTimeout: jest.fn().mockImplementation(chainable),
+      build: jest.fn(() => ({ sign: jest.fn(), toXDR: jest.fn(() => 'xdr') })),
+    };
+    return builder;
+  };
+  return {
+    __esModule: true,
+    Keypair: {
+      fromSecret: (seed: string) => ({
+        publicKey: () => `G${String(seed).slice(1, 55)}`,
+        sign: jest.fn(),
+      }),
+      random: () => ({ publicKey: () => 'GRANDOM' }),
     },
-  }),
-}));
-
+    Horizon: { Server: FakeServer },
+    TransactionBuilder: jest.fn(() => chainable()),
+    Networks: { TESTNET: 'Test SDF Network ; September 2015' },
+    Operation: { payment: jest.fn(() => ({})) },
+    Asset: { native: jest.fn(() => ({})) },
+    Memo: { text: jest.fn(() => ({})) },
+    StrKey: { isValidEd25519PublicKey: (key: string) => typeof key === 'string' && key.startsWith('G') },
+  };
+});
 
 const MOCK_PROJECT = {
   id: 'proj-1',
@@ -257,7 +270,6 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
   });
 
   it('exposes the biometric gate via the lock icon hint', async () => {
-
     // The lock glyph in the hint row is decorative, so the screen hides it
     // from assistive technology (`accessibilityElementsHidden`). Assert the
     // accessible hint text that screen readers actually announce instead.
@@ -272,11 +284,10 @@ describe('DonateScreen – biometric auth gate (issue #481)', () => {
     await waitFor(() =>
       expect(getByText('Donate to Amazon Reforestation')).toBeTruthy()
     );
-    // The lock emoji is rendered inside a Text element with
-    // `accessibilityElementsHidden={true}` so screen-reader focus stays
-    // on the explanatory copy. RNTL@14's default text queries exclude
-    // accessibility-hidden nodes — opt back in via `{ hidden: true }`.
+    // Hint advertises the upcoming biometric prompt
+    expect(getByText(/authenticate with Biometrics before signing/i)).toBeTruthy();
+    // RNTL@14's default text queries exclude accessibility-hidden nodes —
+    // opt back in via `{ hidden: true }`.
     expect(await findByText('🔒', { hidden: true })).toBeTruthy();
-
   });
 });

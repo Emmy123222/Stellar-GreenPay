@@ -861,9 +861,8 @@ mod tests {
         let job = client.get_job(&job_id).expect("Job should exist");
         assert_eq!(job.status, JobStatus::Escrowed);
     }
-}
 
-// ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
+    // ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
 
 // Test-only. `#[contractimpl]` emits one exported WASM symbol per function, so a
 // non-test build would define `initialize` here as well as on EscrowContract
@@ -881,12 +880,11 @@ impl MockPausedGreenPayContract {
         env.storage().instance().set(&symbol_short!("paused"), &paused);
     }
 
-    pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&symbol_short!("paused"))
-            .unwrap_or(false)
+        pub fn is_paused(env: Env) -> bool {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("paused"))
+                .unwrap_or(false)
+        }
     }
 }
-
-

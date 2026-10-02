@@ -42,6 +42,7 @@ describe("ImpactCertificate", () => {
     expect(container).toMatchSnapshot();
   });
 
+ feat/widget-iframe-csp
   it.each(["seedling", "tree", "forest", "earth"] as const)(
     "renders the %s badge tier",
     (badgeTier) => {
@@ -58,4 +59,5 @@ describe("ImpactCertificate", () => {
     render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
+ main
 });
