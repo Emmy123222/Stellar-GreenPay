@@ -763,8 +763,8 @@ export default function DonateScreen() {
           <Text style={styles.offlineBannerText}>
             You're offline. Connect to the internet to donate.
           </Text>
-          <TouchableOpacity 
-            style={styles.retryButton} 
+          <TouchableOpacity
+            style={styles.retryButton}
             onPress={handleDonate}
           >
             <Text style={styles.retryButtonText}>Retry</Text>

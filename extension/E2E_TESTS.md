@@ -162,9 +162,9 @@ Test results and artifacts are uploaded after each run:
      });
      const context = await browser.createContext();
      const page = await context.newPage();
-     
+
      // Test logic here
-     
+
      await browser.close();
    });
    ```

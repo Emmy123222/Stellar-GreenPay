@@ -349,4 +349,3 @@ describe("POST /api/jobs/trigger — authentication and authorization", () => {
     expect(res.body.error).toMatch(/Invalid jobType/i);
   });
 });
-

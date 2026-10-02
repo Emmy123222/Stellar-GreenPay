@@ -30,74 +30,9 @@ All widget styles are now bundled inline during the webpack build process using 
 ## How It Works
 
 ### Build Time
-```
+```text
 webpack build
 ├── Encounters: import './widget.css'
 ├── style-loader converts CSS to JS
 ├── CSS is injected into content-script.js bundle
 └── <style> tag injected at runtime
-```
-
-### Runtime
-```
-Content Script Loads
-├── CSS already embedded in JS bundle
-├── style-loader injects <style> tag into document
-├── Styles apply via CSS classes (not inline style attributes)
-└── CSP 'style-src self' allows inline <style> tags
-```
-
-## CSP Compliance
-
-### Allowed by `style-src 'self'`:
-✓ Inline `<style>` tags  
-✓ CSS classes  
-✓ CSS animations  
-
-### Blocked by `style-src 'self'`:
-✗ External stylesheets (cdn.example.com)  
-✗ `style` attribute with external URLs  
-
-## Testing
-
-### Manual Test
-1. Open `test-csp.html` in Chrome
-2. Open DevTools Console (F12)
-3. Verify no CSP violations
-4. Check that Stellar addresses are highlighted
-5. Hover to see tooltip appear
-
-### Automated Test
-Run: `npm run build`
-
-Then inspect the generated `dist/content-script.js`:
-- Should contain embedded CSS
-- No external stylesheet references
-- Should NOT contain `<link>` tags to external CDNs
-
-## Dependencies
-- `style-loader@^3.3.3` - Injects CSS as inline `<style>` tags
-- `css-loader@^6.8.1` - Parses and transforms CSS
-
-## Verification Commands
-
-```bash
-# Build the extension
-npm run build
-
-# Check that content-script bundle includes inline styles
-grep -o 'greenpay-address' dist/content-script.js
-
-# Should contain CSS, not <link> tags
-file dist/content-script.js
-```
-
-## Browser Support
-- Chrome/Chromium: ✓ Full support
-- Firefox: ✓ Full support (with content_scripts)
-- Safari: ✓ Full support (with inline styles)
-
-## Future Considerations
-- Consider shadow DOM if dynamic widget injection is needed
-- Shadow DOM with `adoptedStyleSheets` for encapsulation
-- Service Worker style bundling if required
