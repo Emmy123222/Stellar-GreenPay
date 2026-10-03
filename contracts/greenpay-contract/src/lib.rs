@@ -25,7 +25,6 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contracterror, contractimpl, contracttype,
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
