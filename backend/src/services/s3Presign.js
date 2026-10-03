@@ -25,8 +25,8 @@
 "use strict";
 
 const crypto = require("crypto");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { S3Client } = require("@aws-sdk/client-s3");
+const { createPresignedPost } = require("@aws-sdk/s3-presigned-post");
 const logger = require("../logger");
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -35,18 +35,10 @@ const DEFAULT_EXPIRY_SECONDS = 300; // 5 minutes
 
 /** MIME types accepted by the presign endpoint (mirrors the multipart uploader). */
 const ALLOWED_MIME = new Set([
-  "application/pdf",
-  "image/png",
   "image/jpeg",
+  "image/png",
   "image/webp",
-  "image/gif",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain",
-  "text/csv",
-  "application/zip",
+  "application/pdf",
 ]);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,12 +93,13 @@ function createS3Client() {
 /**
  * @typedef {Object} PresignResult
  * @property {string} key       - S3 object key the client must PUT to.
- * @property {string} url       - Presigned PUT URL (short-lived).
+ * @property {string} url       - Presigned POST URL.
+ * @property {Object} fields    - Required form fields.
  * @property {number} expiry    - Unix timestamp (seconds) when the URL expires.
  */
 
 /**
- * Generate a presigned S3 PUT URL for direct client-to-S3 upload.
+ * Generate a presigned S3 POST URL for direct client-to-S3 upload.
  *
  * @param {object}  opts
  * @param {string}  opts.originalName  - Original filename from the client.
@@ -122,7 +115,7 @@ async function generatePresignedPutUrl({ originalName, contentType, size }) {
   if (!contentType || !ALLOWED_MIME.has(contentType)) {
     const err = new Error(
       `Unsupported content type: ${contentType}. ` +
-        "Allowed: PDF, images, Office docs, CSV, plain text, ZIP."
+        "Allowed: image/jpeg, image/png, image/webp, application/pdf."
     );
     err.statusCode = 400;
     throw err;
@@ -176,15 +169,24 @@ async function generatePresignedPutUrl({ originalName, contentType, size }) {
   );
 
   const client = createS3Client();
-  const command = new PutObjectCommand({
-    Bucket: process.env.S3_BUCKET,
-    Key: key,
-    ContentType: contentType,
-  });
 
   let signedUrl;
+  let fields;
   try {
-    signedUrl = await getSignedUrl(client, command, { expiresIn: expirySeconds });
+    const presigned = await createPresignedPost(client, {
+      Bucket: process.env.S3_BUCKET,
+      Key: key,
+      Conditions: [
+        ["content-length-range", 0, 5242880],
+        ["eq", "$Content-Type", contentType]
+      ],
+      Fields: {
+        "Content-Type": contentType
+      },
+      Expires: expirySeconds
+    });
+    signedUrl = presigned.url;
+    fields = presigned.fields;
   } catch (sdkErr) {
     logger.error(
       { event: "presign_sdk_error", err: sdkErr.message },
@@ -199,10 +201,10 @@ async function generatePresignedPutUrl({ originalName, contentType, size }) {
 
   logger.info(
     { event: "presign_url_generated", key, expirySeconds },
-    "Presigned PUT URL issued"
+    "Presigned POST URL issued"
   );
 
-  return { key, url: signedUrl, expiry };
+  return { key, url: signedUrl, fields, expiry };
 }
 
 module.exports = {

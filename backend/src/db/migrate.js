@@ -1,8 +1,10 @@
+
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 const pool = require("./pool");
+const { withMigrationLock } = require("./migrationLock");
 const { seedProjects, seedProjectUpdates, seedJobs } = require("../services/store");
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations");
@@ -41,7 +43,7 @@ async function getAppliedVersions(client) {
   return result.rows.map((r) => r.version);
 }
 
-async function runMigrations() {
+async function applyPendingMigrations() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -53,6 +55,7 @@ async function runMigrations() {
 
     for (const { version, file } of files) {
       if (applied.includes(version)) continue;
+      // eslint-disable-next-line security/detect-non-literal-require
       const migration = require(file);
       console.log(`[DB] Applying migration: ${version}`);
       await migration.up(client);
@@ -80,12 +83,20 @@ async function runMigrations() {
 }
 
 /**
+ * Apply all pending migrations while holding the cross-process migration lock,
+ * so concurrent runs (rolling deploys, CI, a manual trigger) cannot interleave.
+ */
+async function runMigrations(options) {
+  return withMigrationLock(async () => {
+    await applyPendingMigrations();
+  }, options);
+}
+
+/**
  * Roll back the last `steps` applied migrations (default: 1).
  * Each migration's `down()` function is called in reverse-applied order.
  */
-async function rollbackMigrations(steps = 1) {
-  if (steps < 1) throw new Error("steps must be >= 1");
-
+async function applyRollbackMigrations(steps) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -104,9 +115,11 @@ async function rollbackMigrations(steps = 1) {
 
     for (const row of result.rows) {
       const file = path.join(MIGRATIONS_DIR, `${row.version}.js`);
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
       if (!fs.existsSync(file)) {
         throw new Error(`Migration file not found for rollback: ${file}`);
       }
+      // eslint-disable-next-line security/detect-non-literal-require
       const migration = require(file);
       if (typeof migration.down !== "function") {
         throw new Error(`Migration ${row.version} does not export a down() function`);
@@ -127,6 +140,14 @@ async function rollbackMigrations(steps = 1) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * Roll back applied migrations while holding the cross-process migration lock.
+ */
+async function rollbackMigrations(steps = 1, options) {
+  if (steps < 1) throw new Error("steps must be >= 1");
+  return withMigrationLock(() => applyRollbackMigrations(steps), options);
 }
 
 async function seedDatabase() {

@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import ImpactCertificate from "../ImpactCertificate";
+import { badgeLabel } from "@/utils/format";
 
 const baseProps = {
   donorAddress: "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST",
@@ -40,7 +41,14 @@ describe("ImpactCertificate", () => {
     const { container } = render(<ImpactCertificate {...baseProps} />);
     expect(container).toMatchSnapshot();
   });
-
+ feat/project-share-buttons
+  it.each(["seedling", "tree", "forest", "earth"] as const)(
+    "renders the %s badge tier",
+    (badgeTier) => {
+      render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
+      expect(screen.getByText(badgeLabel(badgeTier))).toBeInTheDocument();
+    }
+  );
   it.each([
     ["seedling", "Seedling"],
     ["tree", "Tree"],
@@ -50,4 +58,5 @@ describe("ImpactCertificate", () => {
     render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
+ main
 });

@@ -8,6 +8,7 @@ import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
 import ProjectProgressBar from "./ProjectProgressBar";
+import ProjectImage from "./ProjectImage";
 
 export default function ProjectCard({ project }: { project: ClimateProject }) {
   const pct = progressPercent(project.raisedXLM, project.goalXLM);
@@ -22,7 +23,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
         <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
           {project.imageUrl ? (
             <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
-              <img
+              <ProjectImage
                 src={project.imageUrl}
                 alt={project.name}
                 className="h-40 w-full object-cover"
@@ -37,10 +38,10 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 {CATEGORY_ICONS[project.category] || "🌿"}
               </div>
               <div>
-                <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+                <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
                   {project.category}
                 </p>
-                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
                   {project.location}
                 </p>
               </div>
@@ -73,6 +74,16 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           <h3 className="font-display font-semibold text-forest-900 text-base leading-snug mb-2 group-hover:text-forest-600 transition-colors line-clamp-2">
             {project.name}
           </h3>
+
+          {/* Active 2x Donation Match Badge */}
+          {project.activeMatch && Number(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM) > 0 && new Date(project.activeMatch.expiresAt).getTime() > Date.now() ? (
+            <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold tracking-tight shadow-sm">
+              <span>
+                🔥 Matched: {project.activeMatch.multiplier || 2}x up to {formatXLM(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM)} until {new Date(project.activeMatch.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+            </div>
+          ) : null}
+
           <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
             {project.description}
           </p>
@@ -90,7 +101,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 goalXLM={project.goalXLM}
                 className="w-full"
               />
-              <div className="flex items-center justify-between text-[11px] text-[#8aaa8a] font-body">
+              <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)] font-body">
                 <span>{formatXLM(project.raisedXLM)} raised</span>
                 <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM)}` : "No goal set"}</span>
               </div>
@@ -100,7 +111,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
 
 	        {/* Stats row */}
 	        <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]">
-	          <div className="flex items-center gap-3 text-xs text-[#5a7a5a] font-body">
+	          <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] font-body">
 	            <span>👥 {project.donorCount} donors</span>
             <span className="flex items-center gap-1">
               ♻️ {formatCO2(project.co2OffsetKg)}
@@ -136,7 +147,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           ${
             isWishlisted
               ? "bg-red-50 text-red-500 border-red-200 opacity-100"
-              : "bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
+              : "bg-white/90 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
           }`}
         aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
       >

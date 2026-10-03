@@ -61,7 +61,7 @@ export default function MilestoneTracker({
       <div className="card text-center py-12">
         <p className="text-4xl mb-3">🎯</p>
         <p className="font-display text-lg text-forest-900 mb-1">No milestones yet</p>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
           Milestones will appear here as the project sets goals.
         </p>
       </div>
@@ -75,7 +75,7 @@ export default function MilestoneTracker({
           <h3 className="font-display text-lg font-semibold text-forest-900">
             Project Milestones
           </h3>
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+          <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
             {completedCount} of {sorted.length} completed
           </p>
         </div>
@@ -108,7 +108,7 @@ export default function MilestoneTracker({
                     "relative z-10 flex items-center justify-center w-10 h-10 rounded-full border-2 flex-shrink-0",
                     isCompleted
                       ? "bg-forest-500 border-forest-500 text-white"
-                      : "bg-white border-forest-300 text-forest-400"
+                      : "bg-white border-forest-300 text-[var(--text-secondary)] dark:text-forest-400"
                   )}
                 >
                   {isCompleted ? (
@@ -138,7 +138,7 @@ export default function MilestoneTracker({
                         {milestone.title}
                       </h4>
                       {milestone.description && (
-                        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mt-1">
+                        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mt-1">
                           {milestone.description}
                         </p>
                       )}
@@ -169,7 +169,7 @@ export default function MilestoneTracker({
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3 mt-2 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                  <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
                     <span>
                       📅 Target: {new Date(milestone.targetDate).toLocaleDateString()}
                     </span>

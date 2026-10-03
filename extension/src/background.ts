@@ -1,3 +1,8 @@
+import {
+  checkPendingDonations,
+  PENDING_STORAGE_KEY,
+} from './pendingTransactions';
+
 const tabProjects = new Map<number, string>();
 
 export const LIGHT_ICONS = {
@@ -44,17 +49,10 @@ export function initDarkModeIconListener() {
 // Set initial icon and listen for prefers-color-scheme change events
 initDarkModeIconListener();
 
-if (typeof chrome !== 'undefined') {
-  // Clear scheduled work when the extension is suspended or removed so a stale
-  // recurring donation check cannot run against an invalid extension context.
-  if (chrome.runtime?.onSuspend) {
-    chrome.runtime.onSuspend.addListener(() => {
-      if (chrome.alarms?.clearAll) {
-        chrome.alarms.clearAll();
-      }
-    });
-  }
+const PENDING_ALARM = 'greenpay-check-pending-transactions';
+const PENDING_POLL_MINUTES = 0.5;
 
+if (typeof chrome !== 'undefined') {
   if (chrome.runtime?.onInstalled) {
     chrome.runtime.onInstalled.addListener(() => {
       if (chrome.contextMenus?.create) {
@@ -66,6 +64,61 @@ if (typeof chrome !== 'undefined') {
           documentUrlPatterns: ['*://*/*']
         });
       }
+      resumePendingTransactions();
+    });
+  }
+
+  if (chrome.runtime?.onStartup) {
+    chrome.runtime.onStartup.addListener(() => {
+      resumePendingTransactions();
+    });
+  }
+
+  if (chrome.runtime?.onSuspend) {
+    chrome.runtime.onSuspend.addListener(() => {
+      if (chrome.alarms?.clearAll) {
+        chrome.alarms.clearAll();
+      }
+    });
+  }
+}
+
+// Polling only runs while something is actually in flight, so the badge clears
+// itself once every donation has confirmed or failed.
+function syncPendingAlarm(pendingCount: number) {
+  if (typeof chrome !== 'undefined' && chrome.alarms) {
+    if (pendingCount === 0) {
+      chrome.alarms.clear(PENDING_ALARM, () => {
+        if (chrome.runtime?.lastError) {
+          // Nothing scheduled to clear
+        }
+      });
+      return;
+    }
+    chrome.alarms.create(PENDING_ALARM, { periodInMinutes: PENDING_POLL_MINUTES });
+  }
+}
+
+function resumePendingTransactions() {
+  checkPendingDonations()
+    .then((remaining) => syncPendingAlarm(remaining.length))
+    .catch((err) => console.error('Pending transaction check failed:', err));
+}
+
+if (typeof chrome !== 'undefined') {
+  if (chrome.alarms?.onAlarm) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+      if (alarm.name === PENDING_ALARM) {
+        resumePendingTransactions();
+      }
+    });
+  }
+
+  if (chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !(PENDING_STORAGE_KEY in changes)) return;
+      const pending = changes[PENDING_STORAGE_KEY].newValue;
+      syncPendingAlarm(Array.isArray(pending) ? pending.length : 0);
     });
   }
 
@@ -126,10 +179,10 @@ if (typeof chrome !== 'undefined') {
 }
 
 function updateContextMenu(tabId: number) {
-  if (typeof chrome !== 'undefined' && chrome.contextMenus && chrome.contextMenus.update) {
+  if (typeof chrome !== 'undefined' && chrome.contextMenus?.update) {
     const projectId = tabProjects.get(tabId);
     chrome.contextMenus.update('donate-project', { visible: !!projectId }, () => {
-      if (chrome.runtime.lastError) {
+      if (chrome.runtime?.lastError) {
         // Ignore error if menu item doesn't exist yet
       }
     });
@@ -137,7 +190,7 @@ function updateContextMenu(tabId: number) {
 }
 
 function openPopup() {
-  if (chrome.action && chrome.action.openPopup) {
+  if (typeof chrome !== 'undefined' && chrome.action?.openPopup) {
     chrome.action.openPopup().catch(console.error);
   } else if ((globalThis as any).browser?.action?.openPopup) {
     (globalThis as any).browser.action.openPopup().catch(console.error);
@@ -147,4 +200,3 @@ function openPopup() {
     console.error('Cannot programmatically open popup in this browser environment.');
   }
 }
-

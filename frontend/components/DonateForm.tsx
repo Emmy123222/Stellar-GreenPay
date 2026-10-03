@@ -280,7 +280,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
       <div className="card text-center animate-slide-up">
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-4 font-body">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
           Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>. Thank you!
         </p>
         {donorBadge && (
@@ -301,7 +301,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   return (
     <div className="card animate-fade-in">
       <h3 className="font-display text-lg font-semibold text-forest-900 mb-1">Make a Donation</h3>
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
+          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
 
       <div className="space-y-4">
         {/* Currency selector */}
@@ -335,6 +335,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           </div>
           <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={isProcessing}
             placeholder="Or enter custom amount..." min="1" step="1"
+            aria-label={`Donation amount in ${currency}`}
+            id={`donation-amount-${currency}`}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
           {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
           
@@ -355,14 +357,13 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 
         {/* Message */}
         <div>
-          <label className="label">Message <span className="normal-case text-[#8aaa8a] dark:text-forest-300 font-normal">(optional)</span></label>
+          <label className="label">Message <span className="normal-case text-[var(--text-tertiary)] dark:text-forest-300 font-normal">(optional)</span></label>
           <input type="text" value={message} onChange={(e) => setMessage(e.target.value)} disabled={isProcessing}
             placeholder="Leave a message of support..." maxLength={100}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
-        </div>
 
         {/*  Helper text */}
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-[var(--text-secondary)] mt-1">
             Your message will appear in the public donation feed
           </p>
 
@@ -377,7 +378,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         )}
 
         {currency === "USDC" && (
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-[var(--text-secondary)]">
             <p>Balances:</p>
             <p>XLM: <span className="font-medium">{xlmBalance ?? "—"}</span></p>
             <p>USDC: <span className="font-medium">{usdcBalance === null ? "No trustline" : usdcBalance}</span></p>
@@ -417,24 +418,25 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <button
             type="button"
             onClick={handleCancel}
-            className="w-full text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body underline"
+            className="w-full text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body underline"
           >
             Cancel
           </button>
         )}
 
         {(step === "building" || step === "signing") && (
-          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
+          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse font-body">
             Signing with Freighter… Please confirm in your Freighter wallet.
           </p>
         )}
 
         {(step === "submitting" || step === "recording") && (
-          <p className="text-center text-xs text-[#5a7a5a] dark:text-[#8aaa8a] animate-pulse font-body">
+          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse font-body">
             Submitting to Stellar network…
           </p>
         )}
       </div>
+    </div>
   );
 }
 

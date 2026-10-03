@@ -66,6 +66,9 @@ function buildStaticCsp(allowFraming = false) {
 
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    useTypeScriptCli: true,
+  },
   webpack: (config) => {
     config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false }
     return config
@@ -91,9 +94,13 @@ const nextConfig = {
         source: '/widget/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: buildStaticCsp(true) },
-          // X-Frame-Options has no "allow all" value; rely on CSP frame-ancestors
-          // for modern browsers and omit the legacy header for widget routes.
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          // "ALLOWALL" is a non-standard value not defined by RFC 7034; modern
+          // browsers ignore it in favour of the CSP frame-ancestors directive
+          // above.  It is set here per issue acceptance criteria and as a
+          // signal to any legacy middleware or CDN that this route permits
+          // cross-origin framing.  The authoritative control is
+          // frame-ancestors * in the CSP header.
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
         ],
       },
     ]

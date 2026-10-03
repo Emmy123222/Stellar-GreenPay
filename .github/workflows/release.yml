@@ -1,30 +1,141 @@
-name: Release
+name: Release and Changelog
 
 on:
   push:
-    branches: [main]
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   release:
-    name: Semantic Release
+    name: Create Release with Changelog
     runs-on: ubuntu-latest
-    if: contains(github.event.head_commit.message, '[release]')
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          # Get the tag that triggered this workflow
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          echo "current_tag=$CURRENT_TAG" >> $GITHUB_OUTPUT
+          
+          # Get the previous tag
+          PREVIOUS_TAG=$(git tag --sort=-v:refname | grep -A1 "^${CURRENT_TAG}$" | tail -n1)
+          if [ -z "$PREVIOUS_TAG" ]; then
+            # If no previous tag, get first commit
+            PREVIOUS_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "previous_tag=$PREVIOUS_TAG" >> $GITHUB_OUTPUT
+          echo "Current tag: $CURRENT_TAG"
+          echo "Previous tag: $PREVIOUS_TAG"
+
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          CURRENT_TAG="${{ steps.previoustag.outputs.current_tag }}"
+          PREVIOUS_TAG="${{ steps.previoustag.outputs.previous_tag }}"
+          
+          echo "## What's Changed" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          
+          # Get commits between tags and categorize by conventional commit type
+          ADDED=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --grep="^feat" --grep="^feature" -E)
+          CHANGED=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --grep="^refactor" --grep="^perf" --grep="^chore" -E)
+          FIXED=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --grep="^fix" --grep="^bug" -E)
+          SECURITY=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --grep="^security" --grep="^sec" -E)
+          DOCS=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --grep="^docs" --grep="^doc" -E)
+          OTHER=$(git log ${PREVIOUS_TAG}..${CURRENT_TAG} --pretty=format:"- %s (%h)" --invert-grep --grep="^feat" --grep="^fix" --grep="^refactor" --grep="^perf" --grep="^chore" --grep="^security" --grep="^docs" -E)
+          
+          if [ ! -z "$ADDED" ]; then
+            echo "### ✨ Added" >> RELEASE_NOTES.md
+            echo "$ADDED" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          if [ ! -z "$CHANGED" ]; then
+            echo "### 🔄 Changed" >> RELEASE_NOTES.md
+            echo "$CHANGED" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          if [ ! -z "$FIXED" ]; then
+            echo "### 🐛 Fixed" >> RELEASE_NOTES.md
+            echo "$FIXED" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          if [ ! -z "$SECURITY" ]; then
+            echo "### 🔒 Security" >> RELEASE_NOTES.md
+            echo "$SECURITY" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          if [ ! -z "$DOCS" ]; then
+            echo "### 📚 Documentation" >> RELEASE_NOTES.md
+            echo "$DOCS" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          if [ ! -z "$OTHER" ]; then
+            echo "### 📦 Other Changes" >> RELEASE_NOTES.md
+            echo "$OTHER" >> RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+          fi
+          
+          # Add full changelog link
+          echo "---" >> RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${CURRENT_TAG}" >> RELEASE_NOTES.md
+          
+          cat RELEASE_NOTES.md
+
+      - name: Update CHANGELOG.md
+        run: |
+          CURRENT_TAG="${{ steps.previoustag.outputs.current_tag }}"
+          RELEASE_DATE=$(date +%Y-%m-%d)
+          
+          # Create new version entry
+          echo "" > NEW_ENTRY.md
+          echo "## [${CURRENT_TAG}] - ${RELEASE_DATE}" >> NEW_ENTRY.md
+          echo "" >> NEW_ENTRY.md
+          
+          # Extract content from release notes (skip header)
+          tail -n +3 RELEASE_NOTES.md >> NEW_ENTRY.md
+          
+          # Insert new entry after [Unreleased] section
+          sed -i "/## \[Unreleased\]/r NEW_ENTRY.md" CHANGELOG.md
+          
+          # Update links section
+          echo "" >> CHANGELOG.md
+          echo "[${CURRENT_TAG}]: https://github.com/${{ github.repository }}/releases/tag/${CURRENT_TAG}" >> CHANGELOG.md
+
+      - name: Commit updated CHANGELOG.md
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: update CHANGELOG.md for ${{ steps.previoustag.outputs.current_tag }}" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Could not push to main"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
         with:
-          node-version: "20"
-
-      - run: npm install --no-save semantic-release @semantic-release/changelog @semantic-release/git
-
-      - run: npx semantic-release
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify release created
+        run: |
+          echo "✅ Release ${{ steps.previoustag.outputs.current_tag }} created successfully!"
+          echo "📝 Changelog automatically generated from conventional commits"
+          echo "🔗 Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.previoustag.outputs.current_tag }}"

@@ -127,13 +127,22 @@ describe("GET /api/projects", () => {
     expect(query).toContain("status =");
   });
 
-  test("handles search query", async () => {
+  test("handles search query 'reforest' matches 'Reforestation'", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
 
-    await request(app).get("/api/projects?search=amazon").expect(200);
+    await request(app).get("/api/projects?q=reforest").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("websearch_to_tsquery");
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
+  });
+
+  test("handles search query 'ecologie' matches 'Écologie'", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app).get("/api/projects?q=ecologie").expect(200);
+
+    const query = pool.query.mock.calls[1][0];
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
   });
 
   test("rejects invalid cursor", async () => {
@@ -223,6 +232,44 @@ describe("GET /api/projects/featured", () => {
   });
 });
 
+describe("GET /api/projects/:id/donors", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+  });
+
+  test("returns unique donor addresses for an existing project", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          { donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
+          { donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
+        ],
+      });
+
+    const res = await request(app).get("/api/projects/proj-1/donors").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    ]);
+    expect(pool.query.mock.calls[1][0]).toMatch(/SELECT DISTINCT donor_address/i);
+  });
+
+  test("returns 404 when the project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).get("/api/projects/missing/donors").expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GET /api/projects/:id", () => {
   let app;
 
@@ -238,6 +285,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
     pool.query.mockResolvedValueOnce({
@@ -250,12 +298,14 @@ describe("GET /api/projects/:id", () => {
     expect(res.body.data.name).toBe("Test Project");
     expect(res.body.data.followCount).toBe(7);
     expect(res.body.data.isFollowing).toBe(false);
+    expect(res.body.data.recentReviews).toEqual([]);
   });
 
   test("returns followCount zero when project has no followers", async () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -625,7 +675,8 @@ const MOCK_DONATION_ROW = {
   id: "don-1",
   amount_xlm: "250.0000000",
   message: "Keep it up!",
-  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  transaction_hash:
+    "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
   created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
 };
 
@@ -654,7 +705,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // 1. project found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_CERT_PROJECT_ROW] });
     // 2. profile found (donor has a display name)
-    pool.query.mockResolvedValueOnce({ rows: [{ display_name: "Alice Donor" }] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ display_name: "Alice Donor" }],
+    });
     // 3. donations found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
 
@@ -679,7 +732,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // Donations
     expect(d.donationCount).toBe(1);
     expect(d.donations).toHaveLength(1);
-    expect(d.donations[0].transactionHash).toBe(MOCK_DONATION_ROW.transaction_hash);
+    expect(d.donations[0].transactionHash).toBe(
+      MOCK_DONATION_ROW.transaction_hash,
+    );
     // QR code
     expect(typeof d.qrCode).toBe("string");
     expect(d.qrCode).toMatch(/^data:image\/png;base64,/);
@@ -713,7 +768,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -727,7 +784,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when on_chain_verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -741,7 +800,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is false when both verified flags are false", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -783,7 +844,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns gold badge tier when donor gave >= 1000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "2000", co2_offset_kg: "10000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "2000",
+          co2_offset_kg: "10000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -799,7 +866,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns platinum badge tier when donor gave >= 10000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "20000", co2_offset_kg: "100000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "20000",
+          co2_offset_kg: "100000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -831,7 +904,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("returns 400 when donorAddress starts with wrong letter", async () => {
     const res = await request(app)
-      .get("/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J")
+      .get(
+        "/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J",
+      )
       .expect(400);
 
     expect(res.body.error).toMatch(/donorAddress/i);
@@ -841,7 +916,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // project not found
 
     const res = await request(app)
-      .get(`/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .get(
+        `/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`,
+      )
       .expect(404);
 
     expect(res.body.error).toMatch(/project not found/i);
@@ -877,7 +954,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("co2OffsetKg is 0 when project has raised_xlm = 0", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({

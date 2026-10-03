@@ -9,11 +9,38 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { ThemeProvider, themes } from './theme';
 import { useDeepLink } from '../hooks/useDeepLink';
+import { setupNotificationListener, setupNotificationResponseListener, navigateFromInitialNotification } from '../utils/notifications';
 import { setupNotificationListener, setupNotificationResponseListener } from '../utils/notifications';
 import { loadKnownTestnetAddresses } from '../utils/stellarValidation';
+import { hasCompletedOnboarding } from '../utils/onboarding';
 
 function DeepLinkHandler() {
   useDeepLink();
+  return null;
+}
+
+/**
+ * Sends first-time users to the onboarding flow (issue #1292). Runs once on
+ * mount; the flag is written by the onboarding screen so subsequent launches
+ * go straight to Home.
+ */
+function FirstLaunchRedirect() {
+  const router = useRouter();
+
+  useEffect(() => {
+    let active = true;
+
+    void hasCompletedOnboarding().then((done) => {
+      if (active && !done) {
+        router.replace('/onboarding' as `${string}`);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
+
   return null;
 }
 
@@ -21,11 +48,16 @@ function NotificationHandler() {
   const router = useRouter();
 
   useEffect(() => {
+    const push = (path: string) => router.push(path as any);
+
     // Foreground notification display listener
     const receivedSub = setupNotificationListener();
 
-    // Tap-on-notification → navigate to project detail (#483)
-    const responseSub = setupNotificationResponseListener((path) => router.push(path as any));
+    // Warm-start: tap while app is backgrounded → navigate (#1121)
+    const responseSub = setupNotificationResponseListener(push);
+
+    // Cold-start: tap while app was closed → launch on the right screen (#1121)
+    navigateFromInitialNotification(push);
 
     return () => {
       receivedSub.remove();
@@ -52,6 +84,7 @@ export default function RootLayout() {
     <ThemeProvider>
       <DeepLinkHandler />
       <NotificationHandler />
+      <FirstLaunchRedirect />
       <StatusBar style={theme.statusBarStyle} />
       <Stack screenOptions={{
         headerStyle: { backgroundColor: theme.header },
@@ -67,6 +100,7 @@ export default function RootLayout() {
         <Stack.Screen name="leaderboard" options={{ title: 'Leaderboard' }} />
         <Stack.Screen name="recurring" options={{ title: 'Monthly Giving' }} />
         <Stack.Screen name="scan" options={{ title: 'Scan to Donate', headerShown: false }} />
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       </Stack>
     </ThemeProvider>
   );

@@ -27,6 +27,7 @@ export default function MonthlyGivingSetup({
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [duration, setDuration] = useState("3");
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   // Reading localStorage synchronously and filtering by projectId is pure
   // derivation, not a synchronization with an external system that changes
@@ -50,6 +51,10 @@ export default function MonthlyGivingSetup({
       return;
     }
     setError(null);
+    setConfirming(true);
+  };
+
+  const confirmCreate = () => {
     const durationMonths = duration === "indefinite" ? null : Number.parseInt(duration, 10);
     const created = createMonthlySubscription({
       projectId,
@@ -70,14 +75,15 @@ export default function MonthlyGivingSetup({
           <button onClick={onClose} className="btn-secondary text-xs py-1.5 px-3">Close</button>
         </div>
 
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-5">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-5">
           Schedule recurring monthly donations for <strong>{projectName}</strong>.
         </p>
 
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="label">Amount (XLM)</label>
+            <label className="label" htmlFor="monthly-giving-amount">Amount (XLM)</label>
             <input
+              id="monthly-giving-amount"
               type="number"
               min="1"
               step="1"
@@ -127,10 +133,32 @@ export default function MonthlyGivingSetup({
           Save Monthly Giving
         </button>
 
+        {confirming && (
+          <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="monthly-giving-confirmation-title">
+            <div className="w-full max-w-md card bg-white p-6">
+              <h4 id="monthly-giving-confirmation-title" className="font-display text-lg font-semibold text-forest-900">
+                Confirm monthly giving
+              </h4>
+              <p className="mt-3 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+                You are setting up a monthly donation of <strong>{formatXLM(Number.parseFloat(amountXLM) || 0)} XLM</strong> to <strong>{projectName}</strong>.
+              </p>
+              <dl className="mt-4 space-y-2 text-sm font-body text-forest-800">
+                <div className="flex justify-between"><dt>Next charge</dt><dd>{new Date(startDate).toLocaleDateString()}</dd></div>
+                <div className="flex justify-between"><dt>Estimated annual total</dt><dd>{formatXLM((Number.parseFloat(amountXLM) || 0) * 12)} XLM</dd></div>
+                <div className="flex justify-between"><dt>Duration</dt><dd>{DURATION_OPTIONS.find((option) => option.value === duration)?.label}</dd></div>
+              </dl>
+              <div className="mt-6 flex justify-end gap-3">
+                <button type="button" className="btn-secondary" onClick={() => setConfirming(false)}>Cancel</button>
+                <button type="button" className="btn-primary" onClick={confirmCreate}>Continue</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="mt-8 border-t border-forest-100 pt-5">
           <h4 className="font-display text-lg font-semibold text-forest-900 mb-3">Subscription History</h4>
           {subscriptions.length === 0 ? (
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No subscriptions created for this project yet.</p>
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">No subscriptions created for this project yet.</p>
           ) : (
             <div className="space-y-3">
               {subscriptions.map((sub) => (
@@ -138,19 +166,19 @@ export default function MonthlyGivingSetup({
                   <p className="text-sm font-semibold text-forest-900 font-body">
                     {formatXLM(sub.amountXLM)} monthly · {sub.status}
                   </p>
-                  <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-1">
+                  <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body mt-1">
                     Next due: {new Date(sub.nextDueDate).toLocaleDateString()}
                   </p>
                   {sub.history.length > 0 ? (
                     <div className="mt-2 space-y-1">
                       {sub.history.slice(0, 5).map((entry) => (
-                        <p key={entry.paidAt} className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+                        <p key={entry.paidAt} className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
                           Paid {formatXLM(entry.amountXLM)} · {timeAgo(entry.paidAt)}
                         </p>
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No paid months yet.</p>
+                    <p className="mt-2 text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">No paid months yet.</p>
                   )}
                 </div>
               ))}

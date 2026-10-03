@@ -16,6 +16,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const workerThreads = require("worker_threads");
 if (typeof workerThreads.markAsUncloneable !== "function") {

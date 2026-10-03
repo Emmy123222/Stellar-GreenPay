@@ -42,6 +42,72 @@ function createMockClient(...responses) {
   return client;
 }
 
+/**
+ * Issue a GET request to an SSE stream and accumulate the response body.
+ *
+ * Resolves with `{ statusCode, headers, body }` as soon as the `until(body, res)`
+ * predicate returns true, when the underlying response ends, or rejects on
+ * timeout/error. Consistent with the raw `http.get` style used by the
+ * neighbouring stream tests.
+ *
+ * @param {string} baseUrl - e.g. "http://localhost:1234".
+ * @param {object} options - { path, headers?, until? }.
+ */
+function collectSSE(baseUrl, { path, headers = {}, until = null } = {}) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, baseUrl);
+    let settled = false;
+    const req = http.request(
+      {
+        host: url.hostname,
+        port: Number(url.port),
+        method: "GET",
+        path: `${url.pathname}${url.search}`,
+        headers,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          req.destroy();
+          resolve({ statusCode: res.statusCode, headers: res.headers, body });
+        };
+        res.on("data", (chunk) => {
+          body += chunk;
+          if (until && until(body, res)) settle();
+        });
+        res.on("end", settle);
+        res.on("error", (err) => {
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
+        });
+      },
+    );
+    req.on("error", (err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+    req.setTimeout(2000, () => {
+      if (!settled) {
+        settled = true;
+        req.destroy();
+        reject(new Error("SSE collection timed out"));
+      }
+    });
+    req.end();
+  });
+}
+
+function idLines(body) {
+  return (body.match(/id: \d+/g) || []).map((s) => Number(s.replace("id: ", "")));
+}
+
 describe("GET /api/donations/stream", () => {
   let httpServer;
   let baseUrl;
@@ -210,7 +276,6 @@ describe("GET /api/donations/stream", () => {
 describe("POST /api/donations → SSE emission", () => {
   let httpServer;
   let request;
-  let baseUrl;
 
   beforeAll((done) => {
     const app = express();
@@ -218,7 +283,6 @@ describe("POST /api/donations → SSE emission", () => {
     httpServer = http.createServer(app);
     app.use("/api/donations", require("./donations"));
     httpServer.listen(0, () => {
-      baseUrl = `http://localhost:${httpServer.address().port}`;
       request = supertest(httpServer);
       done();
     });
@@ -361,4 +425,102 @@ describe("POST /api/donations → SSE emission", () => {
     },
     2000,
   );
+});
+
+describe("GET /api/donations/stream Last-Event-ID reconnection", () => {
+  let httpServer;
+  let baseUrl;
+
+  beforeAll((done) => {
+    const app = express();
+    app.use(express.json());
+    httpServer = http.createServer(app);
+    app.use("/api/donations", require("./donations"));
+    httpServer.listen(0, () => {
+      baseUrl = `http://localhost:${httpServer.address().port}`;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    donationEvents.removeAllListeners();
+    donationEvents.clearEvents();
+    httpServer.close(done);
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    donationEvents.removeAllListeners();
+    donationEvents.clearEvents();
+  });
+
+  afterEach(() => {
+    donationEvents.removeAllListeners();
+    donationEvents.clearEvents();
+  });
+
+  test("replays only events with an id strictly greater than the Last-Event-ID", async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      donationEvents.emit("new_donation", {
+        projectId: "project-a",
+        projectName: `Project A ${i}`,
+        amountXLM: `${i * 10}.0`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const { statusCode, body } = await collectSSE(baseUrl, {
+      path: "/api/donations/stream?projectId=project-a",
+      headers: { "last-event-id": "3" },
+      until: (b) => /\bid: 4\b/.test(b) && /\bid: 5\b/.test(b),
+    });
+
+    expect(statusCode).toBe(200);
+    const ids = idLines(body);
+    expect(ids).toEqual([4, 5]);
+    expect(ids.every((n) => n > 3)).toBe(true);
+  });
+
+  test("replays all stored events when the Last-Event-ID is unknown", async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      donationEvents.emit("new_donation", {
+        projectId: "project-a",
+        projectName: `Project A ${i}`,
+        amountXLM: `${i * 10}.0`,
+        donorBadge: "Seedling",
+      });
+    }
+
+    const { statusCode, body } = await collectSSE(baseUrl, {
+      path: "/api/donations/stream?projectId=project-a",
+      headers: { "last-event-id": "9999" },
+      until: (b) => idLines(b).length >= 5,
+    });
+
+    expect(statusCode).toBe(200);
+    expect(idLines(body)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  test("rejects a Last-Event-ID from a different project with 400", async () => {
+    donationEvents.emit("new_donation", {
+      projectId: "project-a",
+      projectName: "Project A",
+      amountXLM: "10.0",
+      donorBadge: "Seedling",
+    });
+    donationEvents.emit("new_donation", {
+      projectId: "project-b",
+      projectName: "Project B",
+      amountXLM: "20.0",
+      donorBadge: "Tree",
+    });
+
+    const { statusCode, body } = await collectSSE(baseUrl, {
+      path: "/api/donations/stream?projectId=project-a",
+      headers: { "last-event-id": "2" },
+    });
+
+    expect(statusCode).toBe(400);
+    expect(body).toMatch(/does not belong/i);
+  });
 });

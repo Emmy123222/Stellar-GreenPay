@@ -34,6 +34,10 @@ jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn().mockResolvedValue(null),
   getProjectDonationEvents: jest.fn(),
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
+  getProjectDonationEvents: jest.fn(),
+  getOnChainProject: jest.fn().mockResolvedValue(null),
+  CONTRACT_ID: null,
+  NETWORK_PASSPHRASE: "Test",
 }));
 
 jest.mock("../services/webhook", () => ({
@@ -46,6 +50,43 @@ const http = require("http");
 const request = require("supertest");
 const donationsRouter = require("./donations");
 const projectsRouter = require("./projects");
+const donationsRouter = require("./donations");
+
+// Test helpers used across donation tests
+function makePublicKey(char = "A") {
+  return `G${char.repeat(55)}`;
+}
+
+function makeTxHash(char = "a") {
+  return char.repeat(64);
+}
+
+function queryResult(rows = []) {
+  return { rows };
+}
+
+function createMockClient(...responses) {
+  const client = { query: jest.fn(), release: jest.fn() };
+  responses.forEach((r) => {
+    if (r instanceof Error) {
+      client.query.mockRejectedValueOnce(r);
+    } else {
+      client.query.mockResolvedValueOnce(r);
+    }
+  });
+  pool.connect.mockResolvedValue(client);
+  return client;
+}
+
+const MOCK_PROJECT = { id: "proj-1", name: "Test Project" };
+
+const MOCK_DONATION_ROW = {
+  id: "don-1",
+  amount_xlm: "250.0000000",
+  message: "Keep it up!",
+  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
+};
 
 function buildApp() {
   const app = express();
@@ -56,6 +97,7 @@ function buildApp() {
   app.use("/api/projects", projectsRouter);
 
 
+  // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     res.status(err.status || 500).json({ error: err.message || "Internal server error" });
   });
@@ -167,6 +209,25 @@ describe("POST /api/donations", () => {
     expect(res.body.data.projectId).toBe("proj-1");
     expect(res.body.data.donorAddress).toBe(donorAddress);
   });
+
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+  ])("returns 400 with a friendly error for a %s amount", async (_label, amountXLM) => {
+    const res = await request(app)
+      .post("/api/donations")
+      .send({
+        projectId: "proj-1",
+        donorAddress: makePublicKey("A"),
+        amountXLM,
+        currency: "XLM",
+        transactionHash: makeTxHash("a"),
+      })
+      .expect(400);
+
+    expect(res.body).toEqual({ error: "Donation amount must be a positive number" });
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/projects/:id", () => {
@@ -184,6 +245,7 @@ describe("GET /api/projects/:id", () => {
     });
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: "4.5", count: "10" }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
     pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats

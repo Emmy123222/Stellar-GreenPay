@@ -22,6 +22,12 @@
  */
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import axios from 'axios';
+import {
+  useBiometricAuth,
+  type BiometricAuthOutcome,
+} from '../../hooks/useBiometricAuth';
 import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
@@ -186,9 +192,11 @@ export default function DonateScreen() {
   const [isOffline, setIsOffline] = useState(false);
 
   const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
-  const surfaceAuthFailure = (outcome: string) => {
+  // Surfaces the hook's human-readable failure reason (issue #1050) instead of
+  // the raw outcome enum, so the banner explains *why* nothing was sent.
+  const surfaceAuthFailure = (message: string) => {
     setStatusType('error');
-    setStatusMessage(outcome || 'Authentication was cancelled. Your donation was not sent.');
+    setStatusMessage(message || 'Authentication was cancelled. Your donation was not sent.');
   };
 
   /**
@@ -244,6 +252,31 @@ export default function DonateScreen() {
   };
 
   const selectedProject = projects.find((project: ClimateProject) => project.id === selectedProjectId) || projects[0] || null;
+
+  /**
+   * Map a biometric auth outcome to a user-facing status message.
+   */
+  const surfaceAuthFailure = (outcome: BiometricAuthOutcome) => {
+    switch (outcome) {
+      case 'cancel':
+        setStatusType('info');
+        setStatusMessage('Authentication cancelled — donation not sent.');
+        return;
+      case 'fallback':
+        setStatusType('info');
+        setStatusMessage('Use your device PIN to confirm the donation next time.');
+        return;
+      case 'error':
+        setStatusType('error');
+        setStatusMessage(
+          'Biometric authentication failed. Please try again or tap "Use Passcode" / "Cancel" and retry.'
+        );
+        return;
+      default:
+        setStatusType('error');
+        setStatusMessage('Authentication required to send a donation.');
+    }
+  };
 
   const handleDonate = async () => {
     setStatusMessage(null);
@@ -332,7 +365,7 @@ export default function DonateScreen() {
     if (!isMountedRef.current) return;
 
     if (!authResult.success) {
-      surfaceAuthFailure(authResult.outcome);
+      surfaceAuthFailure(authResult.error);
       return;
     }
 
@@ -378,6 +411,39 @@ export default function DonateScreen() {
       setAmount('1');
       setMessage('');
       setSecretKey('');
+
+      try {
+        if (await shouldShowNotificationRationale()) {
+          Alert.alert(
+            'Stay updated',
+            'Get notified when your donations are confirmed and when supported projects share updates.',
+            [
+              {
+                text: 'Not now',
+                style: 'cancel',
+                onPress: () => { void dismissNotificationRationale(); },
+              },
+              {
+                text: 'Enable notifications',
+                onPress: () => {
+                  void (async () => {
+                    try {
+                      const permissionStatus = await requestNotificationPermissions();
+                      if (!permissionStatus) return;
+                      const token = await getPushToken();
+                      if (token) await registerDeviceToken(token, publicKey);
+                    } catch (error) {
+                      console.error('Unable to enable notifications:', error);
+                    }
+                  })();
+                },
+              },
+            ]
+          );
+        }
+      } catch (error) {
+        console.error('Unable to prepare notification permission prompt:', error);
+      }
     } catch (error: any) {
       console.error('Donation failed:', error);
       setStatusType('error');
@@ -442,13 +508,14 @@ export default function DonateScreen() {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" color="#227239" />
-        <Text style={styles.loadingText}>Loading donation details...</Text>
-        <Text style={{ opacity: 0, position: 'absolute', width: 0, height: 0 }}>Loading project...</Text>
+        <Text style={styles.loadingText}>Loading project...</Text>
       </View>
     );
   }
 
 
+
+  const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
 
   return (
     // Issue #1127: the form used to render straight into a bare
@@ -617,32 +684,7 @@ export default function DonateScreen() {
           accessibilityLabel="Custom donation amount in XLM"
         />
 
-        <View style={styles.presetsRow}>
-          {['5', '10', '50', '100'].map((preset) => (
-            <TouchableOpacity
-              key={preset}
-              style={[
-                styles.presetButton,
-                { borderColor: colors.border, backgroundColor: colors.surface },
-                amount === preset && { backgroundColor: colors.primary, borderColor: colors.primary }
-              ]}
-              onPress={() => setAmount(preset)}
-            >
-              <Text
-                style={[
-                  styles.presetText,
-                  { color: colors.primaryText },
-                  amount === preset && { color: colors.buttonText, fontWeight: 'bold' }
-                ]}
-              >
-                {preset} XLM
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-
-        <Text style={styles.label}>Secret Key</Text>
+        <Text style={[styles.label, { color: colors.primaryText }]}>Secret Key</Text>
         <TextInput
           ref={secretInputRef}
           style={[
@@ -738,9 +780,19 @@ export default function DonateScreen() {
       ) : null}
 
       <TouchableOpacity
-        style={[styles.donateButton, submitting && styles.donateButtonDisabled]}
+        style={[
+          styles.donateButton,
+          {
+            backgroundColor:
+              submitting || !publicKey || bio.isAuthenticating
+                ? colors.muted
+                : colors.buttonBackground,
+          },
+        ]}
         onPress={handleDonate}
         disabled={submitting}
+        accessibilityRole="button"
+        accessibilityLabel={`Confirm donation of ${amount || '1'} XLM`}
       >
         {bio.isAuthenticating ? (
           <ActivityIndicator color={colors.buttonText} />
@@ -874,23 +926,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 16,
   },
-  presetsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 8,
-    marginBottom: 12,
-  },
-  presetButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  presetText: {
-    fontSize: 13,
-  },
   statusBox: {
 
     marginHorizontal: 16,
@@ -941,6 +976,19 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  bioHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  bioHintIcon: {
+    fontSize: 14,
+    marginRight: 6,
+  },
+  bioHintText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
   offlineBanner: {
     marginHorizontal: 16,
     marginTop: 8,
