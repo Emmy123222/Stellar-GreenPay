@@ -4,7 +4,7 @@
 //! Client locks funds with `create_job`, then releases them per milestone.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 #[contracttype]
@@ -51,6 +51,7 @@ pub enum DataKey {
     Job(String),
     Admin,
     ProposedAdmin,
+    GreenPayContractId,
 }
 
 pub const RELEASE_AFTER_LEDGERS: u32 = 10;
@@ -66,6 +67,50 @@ impl EscrowContract {
             panic!("Already initialized");
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+    }
+
+    /// Set the GreenPay contract ID for pause checking.
+    /// Only the admin can set this.
+    pub fn set_greenpay_contract(env: Env, admin: Address, greenpay_contract_id: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set GreenPay contract");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::GreenPayContractId, &greenpay_contract_id);
+    }
+
+    /// Get the configured GreenPay contract ID.
+    pub fn get_greenpay_contract(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get(&DataKey::GreenPayContractId)
+    }
+
+    /// Internal helper to check if the main GreenPay contract is paused.
+    /// If no GreenPay contract is configured, returns false (allows operations).
+    fn check_pause_state(env: &Env) {
+        if let Some(greenpay_addr) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::GreenPayContractId)
+        {
+            // Call is_paused() on the GreenPay contract using invoke_contract
+            let is_paused: bool = env.invoke_contract(
+                &greenpay_addr,
+                &Symbol::new(env, "is_paused"),
+                soroban_sdk::vec![env],
+            );
+            if is_paused {
+                panic!("GreenPay contract is paused");
+            }
+        }
     }
 
     /// Propose a new admin address. Only the current admin can propose.
@@ -129,6 +174,8 @@ impl EscrowContract {
         milestones: Vec<Milestone>,
     ) {
         client.require_auth();
+        Self::check_pause_state(&env);
+        
         if amount <= 0 {
             panic!("Amount must be positive");
         }
@@ -167,6 +214,8 @@ impl EscrowContract {
     /// Client releases a specific milestone. Pays proportional XLM to freelancer.
     pub fn release_milestone(env: Env, client: Address, job_id: String, milestone_index: u32) {
         client.require_auth();
+        Self::check_pause_state(&env);
+        
         let mut job: Job = env
             .storage()
             .instance()
@@ -227,6 +276,7 @@ impl EscrowContract {
     /// Client or freelancer: Mark a job as disputed, freezing remaining releases.
     pub fn raise_dispute(env: Env, client: Address, job_id: String) {
         client.require_auth();
+        Self::check_pause_state(&env);
 
         let mut job: Job = env
             .storage()
@@ -245,6 +295,8 @@ impl EscrowContract {
     /// Admin-only: Resolve a dispute and release remaining funds.
     pub fn resolve_dispute(env: Env, admin: Address, job_id: String, release_to_freelancer: bool) {
         admin.require_auth();
+        Self::check_pause_state(&env);
+        
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
         if stored_admin != admin {
@@ -308,6 +360,8 @@ impl EscrowContract {
     /// Freelancer can claim a milestone after release_after ledgers if not disputed.
     pub fn claim_milestone(env: Env, freelancer: Address, job_id: String, milestone_index: u32) {
         freelancer.require_auth();
+        Self::check_pause_state(&env);
+        
         let mut job: Job = env.storage().instance().get(&DataKey::Job(job_id.clone())).expect("Job not found");
 
         if job.disputed {
@@ -362,6 +416,7 @@ impl EscrowContract {
         project_report_hash: BytesN<32>,
     ) -> i128 {
         caller.require_auth();
+        Self::check_pause_state(&env);
 
         let stored_admin: Address = env
             .storage()
@@ -431,7 +486,7 @@ impl EscrowContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env, String, Vec};
 
     fn setup(env: &Env) -> (Address, EscrowContractClient) {
@@ -577,7 +632,7 @@ mod tests {
     fn test_dispute_freezes_release() {
         let env = Env::default();
         env.mock_all_auths();
-        let (admin, client) = setup(&env);
+        let (_admin, client) = setup(&env);
 
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
@@ -665,5 +720,171 @@ mod tests {
         let report_hash = BytesN::from_array(&env, &[0xcd; 32]);
         client.release_funds(&unauthorized, &job_id, &report_hash);
     }
-}
 
+    #[test]
+    fn test_set_greenpay_contract() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+        let greenpay_addr = Address::generate(&env);
+
+        assert_eq!(client.get_greenpay_contract(), None);
+
+        client.set_greenpay_contract(&admin, &greenpay_addr);
+        assert_eq!(client.get_greenpay_contract(), Some(greenpay_addr.clone()));
+    }
+
+    #[test]
+    #[should_panic(expected = "Only admin can set GreenPay contract")]
+    fn test_set_greenpay_contract_unauthorized_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_admin, client) = setup(&env);
+        let unauthorized = Address::generate(&env);
+        let greenpay_addr = Address::generate(&env);
+
+        client.set_greenpay_contract(&unauthorized, &greenpay_addr);
+    }
+
+    #[test]
+    #[should_panic(expected = "GreenPay contract is paused")]
+    fn test_create_job_fails_when_greenpay_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+
+        // Register a mock GreenPay contract that returns is_paused = true
+        let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
+        
+        // Initialize the mock contract to return paused = true
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            soroban_sdk::vec![&env, true.into()],
+        );
+
+        client.set_greenpay_contract(&admin, &greenpay_cid);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
+        let job_id = String::from_str(&env, "job-paused");
+
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        // This should panic with "GreenPay contract is paused"
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+    }
+
+    #[test]
+    #[should_panic(expected = "GreenPay contract is paused")]
+    fn test_release_milestone_fails_when_greenpay_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
+        let job_id = String::from_str(&env, "job-pause-release");
+
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        // Create job first (without pause)
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+
+        // Now set up paused GreenPay contract
+        let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
+        
+        // Initialize the mock contract to return paused = true
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            soroban_sdk::vec![&env, true.into()],
+        );
+        
+        client.set_greenpay_contract(&admin, &greenpay_cid);
+
+        // This should panic with "GreenPay contract is paused"
+        client.release_milestone(&client_addr, &job_id, &0u32);
+    }
+
+    #[test]
+    fn test_operations_succeed_when_greenpay_not_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, client) = setup(&env);
+
+        // Register a mock GreenPay contract that returns is_paused = false
+        let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
+        
+        // Initialize the mock contract to return paused = false
+        env.invoke_contract::<()>(
+            &greenpay_cid,
+            &Symbol::new(&env, "initialize"),
+            soroban_sdk::vec![&env, false.into()],
+        );
+
+        client.set_greenpay_contract(&admin, &greenpay_cid);
+
+        let client_addr = Address::generate(&env);
+        let freelancer = Address::generate(&env);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
+        let job_id = String::from_str(&env, "job-not-paused");
+
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(Milestone {
+            name: String::from_str(&env, "M1"),
+            percentage: 100,
+            released: false,
+        });
+
+        // This should succeed
+        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+
+        let job = client.get_job(&job_id).expect("Job should exist");
+        assert_eq!(job.status, JobStatus::Escrowed);
+    }
+
+    // ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
+
+// Test-only. `#[contractimpl]` emits one exported WASM symbol per function, so a
+// non-test build would define `initialize` here as well as on EscrowContract
+// and the release wasm32 build fails with "symbol `initialize` is already
+// defined". Host `cargo check`/`cargo test` do not export symbols, which is why
+// only the wasm build catches it.
+#[cfg(test)]
+#[contract]
+pub struct MockPausedGreenPayContract;
+
+#[cfg(test)]
+#[contractimpl]
+impl MockPausedGreenPayContract {
+    pub fn initialize(env: Env, paused: bool) {
+        env.storage().instance().set(&symbol_short!("paused"), &paused);
+    }
+
+        pub fn is_paused(env: Env) -> bool {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("paused"))
+                .unwrap_or(false)
+        }
+    }
+}

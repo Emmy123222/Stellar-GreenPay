@@ -6,5 +6,7 @@ module.exports = {
   moduleNameMapper: {
     // uuid v14 is pure ESM; map to a CJS shim so Jest can require() it.
     "^uuid$": path.resolve(__dirname, "__mocks__/uuid.js"),
+    // expo-server-sdk v6 is pure ESM; same treatment.
+    "^expo-server-sdk$": path.resolve(__dirname, "__mocks__/expo-server-sdk.js"),
   },
 };

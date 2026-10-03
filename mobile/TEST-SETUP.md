@@ -5,7 +5,7 @@
 The mobile Jest rig is a non-obvious five-piece system that bridges three
 incompatible packages in our dependency tree:
 
-- `jest-expo@~57` (preset, expects `expo-modules-core`)
+- `jest-expo@~51` (preset for the pinned `expo@~51`; expects `expo-modules-core`). `jest-expo@~57` cannot be used here — it requires `expo/src/async-require/messageSocket`, which only exists in SDK 54+.
 - `@testing-library/react-native@14` (a.k.a. RNTL@14 — imports a non-existent `test-renderer` package and uses React 18.3-style `act`)
 - `react@18.2.0` (older than what RNTL@14 expects)
 - `expo-notifications`, `expo-secure-store`, etc. (downstream deps importing named classes from `expo-modules-core`)

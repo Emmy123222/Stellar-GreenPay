@@ -17,15 +17,23 @@ export interface Milestone {
 interface MilestoneTrackerProps {
   milestones: Milestone[];
   isAdmin?: boolean;
-  onComplete?: (milestoneId: string) => void;
+  onComplete?: (milestoneId: string) => void | Promise<void>;
+  /**
+   * Re-read the confirmed on-chain project state after a completion is
+   * submitted, so milestone status reflects the contract rather than local
+   * optimistic state.
+   */
+  onRefresh?: () => void | Promise<void>;
 }
 
 export default function MilestoneTracker({
   milestones,
   isAdmin = false,
   onComplete,
+  onRefresh,
 }: MilestoneTrackerProps) {
   const [completing, setCompleting] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const sorted = [...milestones].sort((a, b) => a.order - b.order);
   const completedCount = sorted.filter((m) => m.completedAt).length;
@@ -34,8 +42,15 @@ export default function MilestoneTracker({
   const handleComplete = async (milestoneId: string) => {
     if (!onComplete) return;
     setCompleting(milestoneId);
+    setFailed(null);
     try {
       await onComplete(milestoneId);
+      // Re-sync from the confirmed contract state; the milestone only shows as
+      // completed once the transaction is settled.
+      await onRefresh?.();
+    } catch {
+      // Revert to the previous (not completed) state and let the admin retry.
+      setFailed(milestoneId);
     } finally {
       setCompleting(null);
     }
@@ -46,7 +61,7 @@ export default function MilestoneTracker({
       <div className="card text-center py-12">
         <p className="text-4xl mb-3">🎯</p>
         <p className="font-display text-lg text-forest-900 mb-1">No milestones yet</p>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
           Milestones will appear here as the project sets goals.
         </p>
       </div>
@@ -60,7 +75,7 @@ export default function MilestoneTracker({
           <h3 className="font-display text-lg font-semibold text-forest-900">
             Project Milestones
           </h3>
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+          <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
             {completedCount} of {sorted.length} completed
           </p>
         </div>
@@ -93,7 +108,7 @@ export default function MilestoneTracker({
                     "relative z-10 flex items-center justify-center w-10 h-10 rounded-full border-2 flex-shrink-0",
                     isCompleted
                       ? "bg-forest-500 border-forest-500 text-white"
-                      : "bg-white border-forest-300 text-forest-400"
+                      : "bg-white border-forest-300 text-[var(--text-secondary)] dark:text-forest-400"
                   )}
                 >
                   {isCompleted ? (
@@ -123,23 +138,38 @@ export default function MilestoneTracker({
                         {milestone.title}
                       </h4>
                       {milestone.description && (
-                        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mt-1">
+                        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mt-1">
                           {milestone.description}
                         </p>
                       )}
                     </div>
                     {isAdmin && !isCompleted && (
-                      <button
-                        onClick={() => handleComplete(milestone.id)}
-                        disabled={completing === milestone.id}
-                        className="btn-primary text-xs py-1.5 px-3 flex-shrink-0"
-                      >
-                        {completing === milestone.id ? "..." : "Mark Complete"}
-                      </button>
+                      <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                        {completing === milestone.id ? (
+                          <span
+                            role="status"
+                            className="text-xs font-body text-amber-600 px-3 py-1.5"
+                          >
+                            Pending confirmation…
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleComplete(milestone.id)}
+                            className="btn-primary text-xs py-1.5 px-3"
+                          >
+                            Mark Complete
+                          </button>
+                        )}
+                        {failed === milestone.id && (
+                          <span className="text-xs text-red-600 font-body">
+                            Transaction failed — please retry
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3 mt-2 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                  <div className="flex items-center gap-3 mt-2 text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
                     <span>
                       📅 Target: {new Date(milestone.targetDate).toLocaleDateString()}
                     </span>

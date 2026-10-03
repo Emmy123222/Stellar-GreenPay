@@ -18,6 +18,10 @@ const { z }  = require("zod");
 const pool   = require("../db/pool");
 const logger = require("../logger");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const {
+  scheduleRecurringDonationJob,
+  cancelRecurringDonationJob,
+} = require("../services/recurringDonationQueue");
 
 const recurringLimiter = createRateLimiter(20, 1, "recurring-donations"); // 20 req/min
 
@@ -27,20 +31,61 @@ const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const SKEY_RE   = /^G[A-Z0-9]{55}$/;
 const DATE_RE   = /^\d{4}-\d{2}-\d{2}$/;
 
+const DEFAULT_MAX_RECURRING_AMOUNT_XLM = 10000;
+
+let runtimeMaxOverride = null;
+
+function getDefaultMaxFromEnv() {
+  const parsed = parseFloat(process.env.RECURRING_MAX_AMOUNT_XLM);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return DEFAULT_MAX_RECURRING_AMOUNT_XLM;
+}
+
+function getMaxRecurringAmount() {
+  if (runtimeMaxOverride !== null && runtimeMaxOverride !== undefined) {
+    return runtimeMaxOverride;
+  }
+  return getDefaultMaxFromEnv();
+}
+
+function setMaxRecurringAmount(value) {
+  const parsed = typeof value === "string" ? parseFloat(String(value)) : Number(value);
+  runtimeMaxOverride = parsed;
+  return runtimeMaxOverride;
+}
+
+function _resetMaxRecurringAmountForTests() {
+  runtimeMaxOverride = null;
+  delete process.env.RECURRING_MAX_AMOUNT_XLM;
+}
+
 function isValidUuid(v) { return UUID_RE.test(v); }
 
-const createSchema = z.object({
-  donorAddress:   z.string().regex(SKEY_RE,  "Invalid Stellar public key"),
-  projectId:      z.string().regex(UUID_RE,  "Invalid project UUID"),
-  amountXlm:      z.union([z.string(), z.number()])
-    .transform((v) => parseFloat(String(v)))
-    .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number"),
-  currency:       z.string().min(1).max(10).optional().default("XLM"),
-  durationMonths: z.number().int().min(1).max(120),
-  startDate:      z.string()
-    .regex(DATE_RE, "startDate must be YYYY-MM-DD")
-    .optional(),
-});
+function buildCreateSchema() {
+  const maxAtBuild = getMaxRecurringAmount();
+  return z.object({
+    donorAddress:   z.string().regex(SKEY_RE,  "Invalid Stellar public key"),
+    projectId:      z.string().regex(UUID_RE,  "Invalid project UUID"),
+    amountXlm:      z.union([z.string(), z.number()])
+      .transform((v) => parseFloat(String(v)))
+      .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number")
+      .refine(
+        (v) => v <= getMaxRecurringAmount(),
+        `amountXlm exceeds maximum of ${maxAtBuild} XLM per recurring donation`
+      ),
+    currency:       z.string().min(1).max(10).optional().default("XLM"),
+    durationMonths: z.number().int().min(1).max(120),
+    startDate:      z.string()
+      .regex(DATE_RE, "startDate must be YYYY-MM-DD")
+      .optional(),
+  });
+}
+
+// Backwards-compatible alias: always returns a fresh schema so runtime
+// limit updates are reflected immediately.
+function getCreateSchema() {
+  return buildCreateSchema();
+}
 
 // ── POST /api/recurring-donations ─────────────────────────────────────────────
 
@@ -57,11 +102,17 @@ const createSchema = z.object({
  */
 router.post("/", recurringLimiter, async (req, res, next) => {
   try {
-    const parsed = createSchema.safeParse(req.body);
+    const parsed = buildCreateSchema().safeParse(req.body);
     if (!parsed.success) {
+      const liveMax = getMaxRecurringAmount();
+      const messages = parsed.error.issues.map((i) => i.message).map((m) =>
+        m.startsWith("amountXlm exceeds maximum of")
+          ? `amountXlm exceeds maximum of ${liveMax} XLM per recurring donation`
+          : m
+      );
       return res.status(400).json({
         success: false,
-        error: parsed.error.issues.map((i) => i.message).join("; "),
+        error: messages.join("; "),
       });
     }
 
@@ -94,6 +145,20 @@ router.post("/", recurringLimiter, async (req, res, next) => {
     );
 
     const pledge = result.rows[0];
+
+    // Register the per-pledge pg-boss job so it can be cancelled when the
+    // pledge is. Non-fatal: the daily reminder cron still covers reminders.
+    try {
+      await scheduleRecurringDonationJob({
+        pledgeId: pledge.id,
+        nextDueDate: pledge.next_due_date,
+      });
+    } catch (err) {
+      logger.error(
+        { event: "recurring_donation_job_schedule_error", pledgeId: pledge.id, err: err.message },
+        "[recurringDonations] Failed to schedule pledge job"
+      );
+    }
 
     logger.info(
       {
@@ -211,6 +276,18 @@ router.delete("/:id", async (req, res, next) => {
       });
     }
 
+    // Stop the pledge's pending pg-boss job so it no longer fires for a
+    // cancelled pledge. Non-fatal: cancellation of the DB record already
+    // stops reminder delivery via the active flag.
+    try {
+      await cancelRecurringDonationJob(id);
+    } catch (err) {
+      logger.error(
+        { event: "recurring_donation_job_cancel_error", pledgeId: id, err: err.message },
+        "[recurringDonations] Failed to cancel pledge job"
+      );
+    }
+
     logger.info(
       { event: "recurring_donation_cancelled", pledgeId: id },
       "[recurringDonations] Pledge cancelled"
@@ -251,3 +328,14 @@ function mapPledgeRow(row) {
 }
 
 module.exports = router;
+module.exports.getMaxRecurringAmount = getMaxRecurringAmount;
+module.exports.setMaxRecurringAmount = setMaxRecurringAmount;
+module.exports.buildCreateSchema = buildCreateSchema;
+module.exports.getCreateSchema = getCreateSchema;
+module.exports.DEFAULT_MAX_RECURRING_AMOUNT_XLM = DEFAULT_MAX_RECURRING_AMOUNT_XLM;
+module.exports._resetMaxRecurringAmountForTests = _resetMaxRecurringAmountForTests;
+Object.defineProperty(module.exports, "createSchema", {
+  get: () => buildCreateSchema(),
+  enumerable: true,
+  configurable: true,
+});
