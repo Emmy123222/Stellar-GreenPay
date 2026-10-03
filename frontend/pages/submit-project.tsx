@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
+import { toast } from "sonner";
 import { notifyAdmin, submitProject } from "@/lib/api";
+import { getConnectedPublicKey } from "@/lib/wallet";
 import { PROJECT_CATEGORIES } from "@/utils/format";
 
 type Step = "org" | "project" | "wallet" | "methodology" | "done";
@@ -68,6 +70,13 @@ export default function SubmitProjectPage() {
   const [serverError, setServerError] = useState("");
   const [reviewTimeline, setReviewTimeline] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+
+  // Wallet connection state — null means no Freighter wallet is connected.
+  const [publicKey, setPublicKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    getConnectedPublicKey().then((pk) => setPublicKey(pk));
+  }, []);
 
   const [form, setForm] = useState<FormData>({
     orgName: "",
@@ -147,6 +156,10 @@ export default function SubmitProjectPage() {
   }
 
   async function handleSubmit() {
+    if (publicKey === null) {
+      toast.error("Connect your Freighter wallet to submit a project");
+      return;
+    }
     if (!validateStep()) return;
     setSubmitting(true);
     setServerError("");
@@ -205,10 +218,10 @@ export default function SubmitProjectPage() {
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">
           Project Submitted!
         </h1>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-2">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-2">
           Thank you for submitting <strong>{form.projectName}</strong>.
         </p>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-8">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-8">
           Our team will review your submission within{" "}
           <strong>{reviewTimeline || "5–10 business days"}</strong>. We&apos;ll contact you at{" "}
           <strong>{form.contactEmail}</strong> with the outcome.
@@ -225,7 +238,7 @@ export default function SubmitProjectPage() {
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         Submit Your Project
       </h1>
-      <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-8 text-sm">
+      <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-8 text-sm">
         Organizations can submit climate projects for verification and funding on Stellar GreenPay.
       </p>
 
@@ -239,14 +252,14 @@ export default function SubmitProjectPage() {
                   ? "bg-emerald-600 border-emerald-600 text-white"
                   : i === stepIndex
                   ? "border-emerald-600 text-emerald-700 bg-white"
-                  : "border-forest-200 text-[#8aaa8a] dark:text-forest-300 bg-white"
+                  : "border-forest-200 text-[var(--text-tertiary)] dark:text-forest-300 bg-white"
               }`}
             >
               {i < stepIndex ? "✓" : i + 1}
             </div>
             <span
               className={`text-xs font-body hidden sm:block ${
-                i === stepIndex ? "text-forest-900 font-semibold" : "text-[#8aaa8a] dark:text-forest-300"
+                i === stepIndex ? "text-forest-900 font-semibold" : "text-[var(--text-tertiary)] dark:text-forest-300"
               }`}
             >
               {STEP_LABELS[s]}
@@ -313,7 +326,7 @@ export default function SubmitProjectPage() {
         {step === "wallet" && (
           <>
             <h2 className="font-display text-xl font-bold text-forest-900">Stellar Wallet</h2>
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
               Donations will be sent directly to this Stellar address. Make sure you control it.
             </p>
             <Field label="Stellar Wallet Address *" error={fieldErrors.walletAddress}>
@@ -325,7 +338,7 @@ export default function SubmitProjectPage() {
                 spellCheck={false}
               />
             </Field>
-            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+            <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
               Starts with G and is 56 characters long. Testnet and mainnet addresses are both accepted.
             </p>
           </>
@@ -335,7 +348,7 @@ export default function SubmitProjectPage() {
         {step === "methodology" && (
           <>
             <h2 className="font-display text-xl font-bold text-forest-900">CO₂ Methodology</h2>
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
               Tell us how your project measures and verifies carbon reduction.
             </p>
             <Field label="Methodology Name *" error={fieldErrors.co2MethodologyName}>
@@ -354,7 +367,7 @@ export default function SubmitProjectPage() {
             <Field label="Impact Metrics">
               <div className="flex flex-col gap-2 rounded-xl border border-[rgba(34,114,57,0.12)] bg-[#f8fcf8] p-3">
                 {IMPACT_METRICS.map((metric) => (
-                  <label key={metric.value} className="flex items-center gap-2 text-sm text-[#5a7a5a]">
+                  <label key={metric.value} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded border-[#8aaa8a] text-emerald-600 focus:ring-emerald-500"
@@ -387,14 +400,21 @@ export default function SubmitProjectPage() {
         </button>
 
         {step === "methodology" ? (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {submitting ? "Submitting…" : "Submit Project"}
-          </button>
+          <span className="tooltip">
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || publicKey === null}
+              className="btn-primary disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {submitting ? "Submitting…" : "Submit Project"}
+            </button>
+            {publicKey === null && (
+              <span className="tooltip-text" role="tooltip">
+                Connect your Freighter wallet to submit a project
+              </span>
+            )}
+          </span>
         ) : (
           <button type="button" onClick={nextStep} className="btn-primary">
             Next

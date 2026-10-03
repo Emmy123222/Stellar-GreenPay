@@ -494,11 +494,17 @@ describe("recordAndDeliver", () => {
 // Retry scheduling (issue #1178)
 // ---------------------------------------------------------------------------
 describe("retryDelaySeconds", () => {
-  test("follows the documented 1m / 5m / 30m / 2h backoff", () => {
+  test("follows the documented 1m / 5m / 30m / 2h / 8h backoff", () => {
     expect(retryDelaySeconds(1)).toBe(60);
     expect(retryDelaySeconds(2)).toBe(300);
     expect(retryDelaySeconds(3)).toBe(1800);
     expect(retryDelaySeconds(4)).toBe(7200);
+    expect(retryDelaySeconds(5)).toBe(28800);
+  });
+
+  test("allows one initial attempt plus five retries", () => {
+    expect(MAX_ATTEMPTS).toBe(6);
+    expect(RETRY_DELAYS_SECONDS).toHaveLength(MAX_ATTEMPTS - 1);
   });
 
   test("returns null once MAX_ATTEMPTS attempts have been made", () => {
@@ -880,11 +886,21 @@ describe("Webhook delivery integration (testcontainers)", () => {
       `);
 
       process.env.DATABASE_URL = connectionString;
-      delete require.cache[require.resolve("../db/pool")];
-      delete require.cache[require.resolve("./webhook")];
+
+      // `delete require.cache[...]` is a no-op under Jest's module registry,
+      // and this file imports `../db/pool` and `./webhook` at the top level for
+      // the unit tests above. Reset the registry so the integration tests'
+      // `require("./webhook")` resolves to a fresh webhook bound to a pool that
+      // points at the testcontainer (with a fresh SSRF mock).
+      jest.resetModules();
 
       const appPool = require("../db/pool");
       await appPool.query("SELECT 1");
+
+      // Re-apply the `../utils/ssrf` mock to the freshly-registered instance
+      // so the loopback capture server is allowed through.
+      const ssrf = require("../utils/ssrf");
+      ssrf.assertPublicHttpUrl.mockResolvedValue(undefined);
 
       serverContainerReady = true;
       console.log(`Testcontainers PostgreSQL ready at ${host}:${port}`);
@@ -936,6 +952,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       console.warn("Skipping – testcontainer not available");
       return expect(true).toBe(true);
     }
+
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
 
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
@@ -991,7 +1010,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 2) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(2);
@@ -1042,6 +1064,9 @@ describe("Webhook delivery integration (testcontainers)", () => {
       console.warn("Skipping – testcontainer not available");
       return expect(true).toBe(true);
     }
+
+    assertPublicHttpUrl.mockReset();
+    assertPublicHttpUrl.mockResolvedValue(undefined);
 
     await testPool.query("TRUNCATE projects, project_milestones, donations, webhook_deliveries RESTART IDENTITY CASCADE");
 
@@ -1120,7 +1145,10 @@ describe("Webhook delivery integration (testcontainers)", () => {
     );
 
     await checkAndDeliverMilestones(projectId);
-    await new Promise((r) => setTimeout(r, 2000));
+    for (let i = 0; i < 50; i++) {
+      if (received.length >= 1) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await closeServer(server);
 
     expect(received.length).toBe(1);

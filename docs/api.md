@@ -28,6 +28,127 @@ existing clients.
 
 ---
 
+## Authentication
+
+### Token format
+
+Authenticated requests carry a **JWT** (HS256, signed with the server's
+`JWT_SECRET`) in the standard authorization header:
+
+```
+Authorization: Bearer <token>
+```
+
+The token is opaque to clients — send it verbatim. A missing, malformed, or
+expired token is answered with `401`:
+
+| Response | Cause |
+|----------|-------|
+| `Missing or malformed Authorization header` | No `Authorization` header, or it does not start with `Bearer ` |
+| `Token expired` | The JWT passed its `exp` claim |
+| `Invalid token` | Signature verification failed (wrong secret, tampered token) |
+
+### How to obtain a token
+
+Admin sessions start with a username/password exchange:
+
+```
+POST /api/admin/login
+Content-Type: application/json
+
+{ "username": "admin", "password": "..." }
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "expiresIn": 3600
+  }
+}
+```
+
+- **Access token (`token`)** — expires in **1 hour** (`expiresIn: 3600`).
+- **Refresh token (`refreshToken`)** — expires in **24 hours**.
+- Login is rate-limited (10 requests / 15 minutes / IP) and returns `503` if
+  `ADMIN_PASSWORD` is not configured on the server.
+
+### Refreshing an expired access token
+
+When the access token expires, exchange the refresh token for a new one — no
+need to re-enter credentials until the refresh token itself expires (24 h):
+
+```
+POST /api/admin/refresh
+Content-Type: application/json
+
+{ "refreshToken": "eyJhbGciOiJIUzI1NiIs..." }
+```
+
+```json
+{ "success": true, "data": { "token": "eyJ...", "expiresIn": 3600 } }
+```
+
+The endpoint only accepts tokens minted as refresh tokens (`type: "refresh"`);
+an access token sent here is rejected with `401 Invalid refresh token`, and an
+expired one with `401 Invalid or expired refresh token`.
+
+### Example request (curl)
+
+```bash
+# 1. Log in and extract the access token
+TOKEN=$(curl -s -X POST http://localhost:4000/api/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"your-password"}' \
+  | jq -r '.data.token')
+
+# 2. Call an authenticated endpoint
+curl -s http://localhost:4000/api/admin/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{ "success": true, "data": { "username": "admin", "role": "admin" } }
+```
+
+### Alternative admin credential: `X-Admin-Key`
+
+Machine-to-machine admin callers may send `X-Admin-Key: <key>` instead of a
+JWT. The header is compared in constant time against `ADMIN_API_KEY` /
+`ADMIN_API_KEYS`. Admin routes that accept a Bearer token accept this header
+too; if no admin key is configured the endpoint answers `503`.
+
+> **Note:** `Authorization: Bearer` is reserved for JWTs — never put an admin
+> API key there.
+
+### Wallet-signed requests (project owners)
+
+Project-owner routes (e.g. project webhooks) authenticate the caller's Stellar
+wallet instead of a JWT, using a signed-challenge scheme in the spirit of
+SEP-10:
+
+| Header | Value |
+|--------|-------|
+| `X-Wallet-Address` | The project's `G...` public key |
+| `X-Wallet-Challenge` | Arbitrary challenge string to sign |
+| `X-Wallet-Signature` | Base64-encoded Ed25519 signature over the challenge |
+
+When either challenge header is present, both must be present and must verify
+against `X-Wallet-Address`; otherwise the request is rejected with `403
+Forbidden`.
+
+### Public vs. authenticated endpoints
+
+| Access | Endpoints |
+|--------|-----------|
+| **Public** (no credentials) | `GET /health`, `GET /api/readiness`, `GET /metrics`, `GET /api/csrf-token`, `GET /api/projects*`, `GET /api/stats*`, `GET /api/impact*`, `GET /api/leaderboard*`, `GET /api/v1/profiles/:publicKey`, `POST /api/v1/donations`, `GET /api/v1/donations*`, `GET /api/v1/updates/:projectId`, `POST /api/verification-requests`, `GET /api/verification-requests/me`, `GET /api/verification-requests/:id` (with a matching `?wallet=G...`) |
+| **Public** (credentials in body) | `POST /api/admin/login`, `POST /api/admin/refresh` |
+| **Admin** (Bearer JWT or `X-Admin-Key`) | `/api/admin/*` (except `login`/`refresh`), `GET /api/verification-requests`, `GET /api/verification-requests/stats`, `PATCH /api/verification-requests/:id/status`, `DELETE /api/verification-requests/:id`, `POST /api/updates` (project updates), `POST /api/jobs/trigger`, `POST /api/projects/admin/register`, `POST /api/projects/admin/confirm`, `PATCH /api/projects/:id/webhook` |
+| **Wallet owner** (`X-Wallet-*`) | `GET /api/webhooks/:projectId`, `GET /api/webhooks/:projectId/history` |
+
+---
 ## Health
 `GET /health` — Server status check.
 

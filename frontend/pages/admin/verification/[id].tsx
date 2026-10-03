@@ -67,7 +67,7 @@ function getServerAdminToken(): string | null {
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-start gap-1 py-2.5 border-b border-forest-100 last:border-0">
-      <dt className="text-xs font-medium text-[#8aaa8a] uppercase tracking-wide w-48 flex-shrink-0 font-body">
+      <dt className="text-xs font-medium text-[var(--text-tertiary)] uppercase tracking-wide w-48 flex-shrink-0 font-body">
         {label}
       </dt>
       <dd className="text-sm text-forest-900 font-body break-words min-w-0">{value ?? "—"}</dd>
@@ -225,7 +225,7 @@ export default function AdminVerificationDetail({
     return (
       <div className="max-w-lg mx-auto px-4 py-16 text-center">
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">Admin</h1>
-        <p className="text-[#5a7a5a] font-body mb-8">Connect your wallet to continue.</p>
+        <p className="text-[var(--text-secondary)] font-body mb-8">Connect your wallet to continue.</p>
         <WalletConnect onConnect={onConnect} />
       </div>
     );
@@ -262,7 +262,7 @@ export default function AdminVerificationDetail({
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
 
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-xs text-[#8aaa8a] font-body mb-6">
+      <nav className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] font-body mb-6">
         <Link href="/admin" className="hover:text-forest-700 transition-colors">Admin</Link>
         <span>/</span>
         <span className="text-forest-900">Verification #{request.id.slice(0, 8)}</span>
@@ -271,11 +271,11 @@ export default function AdminVerificationDetail({
       {/* Header */}
       <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] font-body">Verification Request</p>
+          <p className="text-xs tracking-[0.22em] uppercase text-[var(--text-tertiary)] font-body">Verification Request</p>
           <h1 className="font-display text-2xl font-bold text-forest-900 mt-0.5">
             {request.projectName}
           </h1>
-          <p className="text-sm text-[#5a7a5a] font-body mt-0.5">{request.organizationName}</p>
+          <p className="text-sm text-[var(--text-secondary)] font-body mt-0.5">{request.organizationName}</p>
         </div>
         <span
           className={`badge text-sm px-3 py-1 self-start sm:self-center border rounded-full font-medium ${STATUS_CLASSES[request.status] ?? "bg-gray-50 text-gray-700 border-gray-200"}`}
@@ -335,7 +335,7 @@ export default function AdminVerificationDetail({
             value={
               <span>
                 <strong>{Number(request.co2PerXLM).toFixed(4)}</strong>{" "}
-                <span className="text-xs text-[#8aaa8a]">kg CO₂ / XLM</span>
+                <span className="text-xs text-[var(--text-tertiary)]">kg CO₂ / XLM</span>
               </span>
             }
           />
@@ -371,7 +371,7 @@ export default function AdminVerificationDetail({
         <h2 className="font-display text-base font-semibold text-forest-900 mb-3">
           Supporting Documents
           {(request.documentCount ?? request.supportingDocuments.length) > 0 && (
-            <span className="ml-2 text-xs font-normal text-[#8aaa8a]">
+            <span className="ml-2 text-xs font-normal text-[var(--text-tertiary)]">
               ({(request.documentCount ?? request.supportingDocuments.length)})
             </span>
           )}
@@ -382,14 +382,14 @@ export default function AdminVerificationDetail({
 
           if (docCount === 0) {
             return (
-              <p className="text-sm text-[#8aaa8a] font-body italic">No documents uploaded.</p>
+              <p className="text-sm text-[var(--text-tertiary)] font-body italic">No documents uploaded.</p>
             );
           }
 
           if (documents === null) {
             return (
               <div className="animate-fade-in">
-                <p className="text-sm text-[#8aaa8a] font-body mb-3">
+                <p className="text-sm text-[var(--text-tertiary)] font-body mb-3">
                   {docCount} supporting document{docCount === 1 ? "" : "s"} attached to this
                   submission.
                 </p>
@@ -427,7 +427,7 @@ export default function AdminVerificationDetail({
                     className="flex items-center gap-3 p-3 rounded-lg border border-forest-100 hover:border-forest-300 hover:bg-forest-50/50 transition-colors group"
                   >
                     {/* File icon */}
-                    <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
+                    <span className="text-[var(--text-secondary)] dark:text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
                         className="h-5 w-5"
@@ -449,7 +449,7 @@ export default function AdminVerificationDetail({
                         {doc.name}
                       </span>
                       {doc.size !== undefined && (
-                        <span className="text-xs text-[#8aaa8a]">
+                        <span className="text-xs text-[var(--text-tertiary)]">
                           {doc.size < 1024 * 1024
                             ? `${(doc.size / 1024).toFixed(1)} KB`
                             : `${(doc.size / (1024 * 1024)).toFixed(1)} MB`}
@@ -458,7 +458,7 @@ export default function AdminVerificationDetail({
                     </span>
 
                     {/* Download arrow */}
-                    <span className="text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
+                    <span className="text-[var(--text-secondary)] dark:text-forest-400 group-hover:text-forest-600 transition-colors flex-shrink-0">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
                         className="h-4 w-4"
@@ -495,7 +495,7 @@ export default function AdminVerificationDetail({
                 value={
                   <>
                     {new Date(request.reviewedAt).toLocaleString()}{" "}
-                    <span className="text-xs text-[#8aaa8a]">({timeAgo(request.reviewedAt)})</span>
+                    <span className="text-xs text-[var(--text-tertiary)]">({timeAgo(request.reviewedAt)})</span>
                   </>
                 }
               />
@@ -525,9 +525,9 @@ export default function AdminVerificationDetail({
           <div className="mb-4">
             <label
               htmlFor="reviewer-notes"
-              className="block text-xs font-medium text-[#5a7a5a] uppercase tracking-wide mb-1.5 font-body"
+              className="block text-xs font-medium text-[var(--text-secondary)] uppercase tracking-wide mb-1.5 font-body"
             >
-              Reviewer notes <span className="normal-case text-[#8aaa8a]">(optional)</span>
+              Reviewer notes <span className="normal-case text-[var(--text-tertiary)]">(optional)</span>
             </label>
             <textarea
               id="reviewer-notes"
@@ -539,7 +539,7 @@ export default function AdminVerificationDetail({
               className="w-full rounded-lg border border-forest-200 bg-white px-3 py-2 text-sm text-forest-900 placeholder-[#8aaa8a] focus:outline-none focus:ring-2 focus:ring-forest-400 font-body resize-none"
               disabled={actionState === "loading"}
             />
-            <p className="text-right text-xs text-[#8aaa8a] mt-1 font-body">
+            <p className="text-right text-xs text-[var(--text-tertiary)] mt-1 font-body">
               {reviewerNotes.length}/2000
             </p>
           </div>
@@ -606,7 +606,7 @@ export default function AdminVerificationDetail({
       )}
 
       {/* Submission metadata footer */}
-      <p className="mt-6 text-xs text-[#8aaa8a] font-body text-center">
+      <p className="mt-6 text-xs text-[var(--text-tertiary)] font-body text-center">
         Submitted {request.submittedAt ? timeAgo(request.submittedAt) : "—"}
         {request.storageBackend && (
           <span className="ml-2 opacity-60">· storage: {request.storageBackend}</span>

@@ -7,8 +7,8 @@
 import Head from "next/head";
 import Link from "next/link";
 import { useRouter } from "next/router";
-import { useEffect, useState, useCallback } from "react";
-import { fetchProfile, fetchDonorHistory } from "@/lib/api";
+import { useEffect, useRef, useState, useCallback } from "react";
+import { fetchProfile, fetchDonorHistoryPage } from "@/lib/api";
 import { connectWallet, signTransactionWithWallet, getConnectedPublicKey } from "@/lib/wallet";
 import { CONTRACT_ID, buildMintImpactNftTransaction, submitSorobanTransaction, explorerUrl } from "@/lib/stellar";
 import type { DonorProfile, Donation, BadgeTier } from "@/utils/types";
@@ -95,7 +95,7 @@ function StatCard({
       <p className="font-display text-2xl font-semibold text-[#227239]">
         {value}
       </p>
-      {sub && <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body">{sub}</p>}
+      {sub && <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">{sub}</p>}
     </div>
   );
 }
@@ -112,7 +112,7 @@ function DonationRow({ donation }: { donation: Donation }) {
           Project {shortenKey(donation.projectId)}
         </span>
         {donation.message && (
-          <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] italic truncate max-w-[200px] sm:max-w-sm">
+          <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] italic truncate max-w-[200px] sm:max-w-sm">
             &quot;{donation.message}&quot;
           </p>
         )}
@@ -121,7 +121,7 @@ function DonationRow({ donation }: { donation: Donation }) {
         <span className="font-semibold text-[#227239] font-body text-sm">
           {currency === "XLM" ? formatXLM(amount) : `${parseFloat(amount).toFixed(2)} ${currency}`}
         </span>
-        <span className="text-[10px] text-[#5a7a5a] dark:text-[#8aaa8a]">
+        <span className="text-[10px] text-[var(--text-secondary)] dark:text-[#8aaa8a]">
           {formatDate(donation.createdAt)}
         </span>
       </div>
@@ -139,7 +139,7 @@ function ProfileNotFound({ publicKey }: { publicKey: string }) {
         <h1 className="font-display text-2xl font-semibold text-[#1a2e1a] mb-2">
           Profile not set up yet
         </h1>
-        <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body max-w-sm mx-auto text-sm leading-relaxed">
+        <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body max-w-sm mx-auto text-sm leading-relaxed">
           The donor at{" "}
           <span className="address-tag">{shortenKey(publicKey)}</span> hasn&apos;t
           created a public profile yet.
@@ -370,7 +370,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
             <p className={`font-display text-lg font-semibold ${meta.color}`}>
               {meta.label} Impact NFT
             </p>
-            <p className="text-xs text-[#5a7a5a] font-body">
+            <p className="text-xs text-[var(--text-secondary)] font-body">
               Minted at ledger{" "}
               <span className="font-semibold text-[#227239]">
                 #{minted.ledger.toLocaleString()}
@@ -398,7 +398,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
   return (
     <div className="card">
       <h2 className="label mb-1">Claim your Impact NFT</h2>
-      <p className="text-sm text-[#5a7a5a] font-body mb-4">
+      <p className="text-sm text-[var(--text-secondary)] font-body mb-4">
         Mint an on-chain{" "}
         <span className={`font-semibold ${meta.color}`}>
           {meta.emoji} {meta.label}
@@ -420,7 +420,7 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
           🔗 Connect Freighter to claim
         </button>
       ) : !isOwner ? (
-        <p className="text-xs text-[#8aaa8a] font-body">
+        <p className="text-xs text-[var(--text-tertiary)] font-body">
           Connect the wallet that owns this profile ({shortenKey(profile.publicKey)})
           to claim its Impact NFT.
         </p>
@@ -445,6 +445,9 @@ function ClaimNftCard({ profile }: { profile: DonorProfile }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+/** Rows per request; the donor history endpoint is keyset-paginated (#1080). */
+const HISTORY_PAGE_SIZE = 20;
+
 export default function DonorProfilePage() {
   const router = useRouter();
   const { publicKey } = router.query as { publicKey?: string };
@@ -452,28 +455,41 @@ export default function DonorProfilePage() {
   const [profile, setProfile] = useState<DonorProfile | null>(null);
   const [donations, setDonations] = useState<Donation[]>([]);
   const [notFound, setNotFound] = useState(false);
+  const [totalDonations, setTotalDonations] = useState(0);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMoreDonations, setHasMoreDonations] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   // `loading` is derived by comparing the wallet the profile was loaded for
   // to the current one, rather than toggled synchronously inside the effect
   // (which triggers a cascading render).
   const [loadedForKey, setLoadedForKey] = useState<string | null>(null);
   const loading = !publicKey || loadedForKey !== publicKey;
 
+  // Pages are appended asynchronously, so each response is checked against the
+  // key that was active when the list was loaded — navigating to another donor
+  // mid-request must not splice the old donor's rows into the new list.
+  const listKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!publicKey) return;
 
     let cancelled = false;
+    listKeyRef.current = publicKey;
 
     // Deferred via a microtask (rather than invoked synchronously) so this
     // effect doesn't itself perform a synchronous setState.
     queueMicrotask(async () => {
       try {
-        const [prof, hist] = await Promise.all([
+        const [prof, page] = await Promise.all([
           fetchProfile(publicKey),
-          fetchDonorHistory(publicKey),
+          fetchDonorHistoryPage(publicKey, { limit: HISTORY_PAGE_SIZE }),
         ]);
         if (!cancelled) {
           setProfile(prof);
-          setDonations(hist.slice(0, 10));
+          setDonations(page.donations);
+          setTotalDonations(page.total);
+          setNextCursor(page.nextCursor);
+          setHasMoreDonations(page.hasMore);
           setNotFound(false);
         }
       } catch {
@@ -490,6 +506,33 @@ export default function DonorProfilePage() {
       cancelled = true;
     };
   }, [publicKey]);
+
+  /**
+   * Fetch the next page of this donor's history and append it to the list.
+   *
+   * On failure the list is left as-is and the button stays enabled so the
+   * donor can retry without reloading the page.
+   */
+  const loadMoreDonations = useCallback(async () => {
+    if (!publicKey || !nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchDonorHistoryPage(publicKey, {
+        limit: HISTORY_PAGE_SIZE,
+        cursor: nextCursor,
+      });
+      if (listKeyRef.current === publicKey) {
+        setDonations((prev) => [...prev, ...page.donations]);
+        setTotalDonations(page.total);
+        setNextCursor(page.nextCursor);
+        setHasMoreDonations(page.hasMore);
+      }
+    } catch {
+      // Nothing to undo — the first page is still rendered.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [publicKey, nextCursor, loadingMore]);
 
   // ── Derived values ───────────────────────────────────────────────────────
 
@@ -551,7 +594,7 @@ export default function DonorProfilePage() {
             </div>
 
             {profile.bio && (
-              <p className="mt-4 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4">
+              <p className="mt-4 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed border-t border-[rgba(34,114,57,0.08)] pt-4">
                 {profile.bio}
               </p>
             )}
@@ -590,9 +633,16 @@ export default function DonorProfilePage() {
 
           {/* ── Donation history ────────────────────────────────────────── */}
           <div className="card">
-            <h2 className="label mb-1">Recent Donations</h2>
+            <div className="flex items-baseline justify-between gap-3 mb-1">
+              <h2 className="label">Recent Donations</h2>
+              {totalDonations > 0 && (
+                <span className="text-xs font-body text-[#5a7a5a] dark:text-[#8aaa8a]">
+                  Showing {donations.length} of {totalDonations} donations
+                </span>
+              )}
+            </div>
             {donations.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] py-4 text-center font-body">
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] py-4 text-center font-body">
                 No donations recorded yet.
               </p>
             ) : (
@@ -600,6 +650,19 @@ export default function DonorProfilePage() {
                 {donations.map((d) => (
                   <DonationRow key={d.id} donation={d} />
                 ))}
+                {hasMoreDonations && (
+                  <button
+                    type="button"
+                    onClick={loadMoreDonations}
+                    disabled={loadingMore}
+                    aria-busy={loadingMore}
+                    className="btn-ghost w-full text-sm mt-2 disabled:opacity-60"
+                  >
+                    {loadingMore
+                      ? "Loading…"
+                      : `Load ${Math.min(HISTORY_PAGE_SIZE, totalDonations - donations.length)} more`}
+                  </button>
+                )}
               </div>
             )}
           </div>

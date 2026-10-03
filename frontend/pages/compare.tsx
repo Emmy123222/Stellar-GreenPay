@@ -73,7 +73,7 @@ export default function ComparePage() {
           <h2 className="font-display text-xl font-semibold text-forest-900 mb-2">
             Could not load projects
           </h2>
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body mb-6">
+          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm font-body mb-6">
             {error}
           </p>
           <Link
@@ -98,10 +98,10 @@ export default function ComparePage() {
           <h2 className="font-display text-xl font-semibold text-forest-900 mb-2">
             Compare Projects
           </h2>
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm font-body mb-4">
+          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm font-body mb-4">
             Add project IDs to the URL to compare them side by side.
           </p>
-          <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-mono bg-forest-50 rounded-lg p-3 inline-block">
+          <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-mono bg-forest-50 rounded-lg p-3 inline-block">
             /compare?ids=uuid1,uuid2,uuid3
           </p>
         </div>
@@ -119,11 +119,40 @@ export default function ComparePage() {
           name="description"
           content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
         />
+        <meta
+          property="og:title"
+          content={`Compare ${projects.map((p) => p.name).join(" vs ")} — Stellar GreenPay`}
+        />
+        <meta
+          property="og:description"
+          content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
+        />
+        <meta
+          property="og:url"
+          content={typeof window !== 'undefined' ? window.location.href : ''}
+        />
+        <meta
+          property="og:image"
+          content={projects[0]?.imageUrl || '/api/og/default'}
+        />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta
+          name="twitter:title"
+          content={`Compare ${projects.map((p) => p.name).join(" vs ")} — Stellar GreenPay`}
+        />
+        <meta
+          name="twitter:description"
+          content={`Side-by-side comparison of ${projects.map((p) => p.name).join(", ")}`}
+        />
+        <meta
+          name="twitter:image"
+          content={projects[0]?.imageUrl || '/api/og/default'}
+        />
       </Head>
 
       <Link
         href="/projects"
-        className="inline-flex items-center gap-1 text-sm text-[#5a7a5a] dark:text-[#8aaa8a] hover:text-forest-700 transition-colors mb-6 font-body"
+        className="inline-flex items-center gap-1 text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] hover:text-forest-700 transition-colors mb-6 font-body"
       >
         ← Back to Projects
       </Link>
