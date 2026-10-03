@@ -17,6 +17,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.stellargreenpay.app",
+      "buildNumber": "1",
       "associatedDomains": [
         "applinks:greenpay.example.com"
       ]
@@ -28,6 +29,7 @@
       },
       "package": "com.stellargreenpay.app",
       "softwareKeyboardLayoutMode": "resize",
+      "versionCode": 1,
       "intentFilters": [
         {
           "action": "VIEW",
