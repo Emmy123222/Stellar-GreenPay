@@ -278,6 +278,8 @@ pub struct ActiveMatchStatus {
 pub enum DataKey {
     Admin,
     Project(String),
+    ProjectGoal(String),
+    ProjectMilestoneReached(String, u32),
     ProjectIds,
     ProjectCount,
     DonorStats(Address),
@@ -457,6 +459,29 @@ fn update_global_stats(
     }
 
     env.storage().instance().set(&DataKey::GlobalStats, &stats);
+}
+
+fn emit_funding_milestones(env: &Env, project_id: &String, previous_raised: i128, total_raised: i128) {
+    if let Some(goal_stroops) = env.storage().instance().get::<_, i128>(
+        &DataKey::ProjectGoal(project_id.clone()),
+    ) {
+        for milestone_pct in [25u32, 50, 75, 100] {
+            let pct = milestone_pct as i128;
+            let threshold = (goal_stroops / 100) * pct
+                + ((goal_stroops % 100) * pct + 99) / 100;
+            let reached_key = DataKey::ProjectMilestoneReached(project_id.clone(), milestone_pct);
+            if previous_raised < threshold
+                && total_raised >= threshold
+                && !env.storage().instance().has(&reached_key)
+            {
+                env.storage().instance().set(&reached_key, &true);
+                env.events().publish(
+                    (Symbol::new(env, "MilestoneReached"), project_id.clone(), milestone_pct),
+                    total_raised,
+                );
+            }
+        }
+    }
 }
 
 fn update_top_donors(env: &Env, donor: &Address, total_donated: i128) {
@@ -721,6 +746,23 @@ impl GreenPayContract {
         update_global_stats(&env, 0, 0, 0, projects.len(), false);
     }
 
+    /// Set the fundraising goal used to emit one on-chain event per reached
+    /// funding milestone. The goal is stored separately so older Project
+    /// records remain readable after upgrading the contract.
+    pub fn set_project_goal(env: Env, admin: Address, project_id: String, goal_stroops: i128) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can set project goals"); }
+        if goal_stroops <= 0 || goal_stroops > i128::MAX / 100 {
+            panic!("Project goal must be positive and within the supported range");
+        }
+        if !env.storage().instance().has(&DataKey::Project(project_id.clone())) {
+            panic!("Project not found");
+        }
+        env.storage().instance().set(&DataKey::ProjectGoal(project_id), &goal_stroops);
+    }
+
     pub fn deactivate_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
         let stored_admin: Address = env
@@ -957,6 +999,7 @@ impl GreenPayContract {
         if amount < project.min_donation_amount {
             panic!("Donation below minimum");
         }
+        let previous_raised = project.total_raised;
 
         // Delegate CO2 arithmetic to the shared helper that enforces the
         // MAX_DONATION cap and uses checked_mul to return ContractError::Overflow
@@ -994,6 +1037,8 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
+
+        emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
         donor_stats.total_donated = donor_stats
             .total_donated
@@ -1216,6 +1261,7 @@ impl GreenPayContract {
                 .checked_mul(project.co2_per_xlm as i128)
                 .expect("CO2 calculation overflow");
 
+            let previous_raised = project.total_raised;
             project.total_raised = project
                 .total_raised
                 .checked_add(amount)
@@ -1231,6 +1277,7 @@ impl GreenPayContract {
             env.storage()
                 .instance()
                 .set(&DataKey::Project(project_id.clone()), &project);
+            emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
             total_amount = total_amount.checked_add(amount).expect("Total amount overflow");
             total_co2 = total_co2.checked_add(co2_increment).expect("Total CO2 overflow");
@@ -2176,6 +2223,7 @@ impl GreenPayContract {
         let prev_badge = donor_stats.badge.clone();
 
         // Update project and donor stats using XLM-equivalent
+        let previous_raised = project.total_raised;
         project.total_raised = project
             .total_raised
             .checked_add(xlm_equivalent)
@@ -2191,6 +2239,7 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
+        emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
         donor_stats.total_donated = donor_stats
             .total_donated
@@ -3964,6 +4013,44 @@ mod tests {
         (env, client, token, pid, donor, wallet)
     }
 
+    #[test]
+    fn test_donate_emits_each_funding_milestone_once() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        let pid = String::from_str(&env, "milestone-project");
+        let wallet = Address::generate(&env);
+        client.register_project(&admin, &pid, &String::from_str(&env, "Milestone Project"), &wallet, &100u32, &1i128);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let donor = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&donor, &(101 * STROOP));
+        client.set_project_goal(&admin, &pid, &(100 * STROOP));
+
+        let milestone_topic = soroban_sdk::xdr::ScVal::Symbol(
+            soroban_sdk::xdr::ScSymbol::try_from(std::vec::Vec::from("MilestoneReached")).unwrap(),
+        );
+        for expected_pct in [25u32, 50, 75, 100] {
+            client.donate(&token, &donor, &pid, &(25 * STROOP), &0u32);
+            let emitted = env.events().all().events().iter().filter(|event| {
+                let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+                body.topics.first() == Some(&milestone_topic)
+                    && body.topics.get(2) == Some(&soroban_sdk::xdr::ScVal::U32(expected_pct))
+            }).count();
+            assert_eq!(emitted, 1, "expected one {expected_pct}% milestone event");
+        }
+
+        client.donate(&token, &donor, &pid, &STROOP, &0u32);
+        let repeated = env.events().all().events().iter().filter(|event| {
+            let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+            body.topics.first() == Some(&milestone_topic)
+        }).count();
+        assert_eq!(repeated, 0, "milestones must not emit more than once");
+    }
+
     /// The exact scenario from #1043: a single stroop sent to a project that
     /// configured a 10 XLM minimum must not be accepted.
     #[test]
@@ -4163,5 +4250,3 @@ mod tests {
         assert_eq!(top_10.get(9).unwrap().total_donated, 110 * STROOP);
     }
 }
-
-

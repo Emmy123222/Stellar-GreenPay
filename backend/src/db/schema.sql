@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS profiles (
   total_donated_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0,
   projects_supported INTEGER NOT NULL DEFAULT 0,
   badges JSONB NOT NULL DEFAULT '[]'::JSONB,
+  milestone_notifications_enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ
 );
@@ -185,6 +186,14 @@ CREATE TABLE IF NOT EXISTS project_milestones (
   reached_at TIMESTAMPTZ,
   transaction_hash TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS project_milestone_notifications (
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  percentage INTEGER NOT NULL CHECK (percentage IN (25, 50, 75, 100)),
+  total_raised_xlm NUMERIC(20, 7) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (project_id, percentage)
 );
 
 -- project_ratings: 1-5 star ratings with optional review from donors.
