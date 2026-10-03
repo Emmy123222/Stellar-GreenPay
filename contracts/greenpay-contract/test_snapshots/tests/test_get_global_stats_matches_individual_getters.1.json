@@ -642,9 +642,6 @@
                         "vec": [
                           {
                             "string": "proj-stats"
-                          },
-                          {
-                            "string": "proj-stats"
                           }
                         ]
                       }

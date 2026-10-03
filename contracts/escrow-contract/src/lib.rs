@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(deprecated)]
 
 //! Escrow contract with milestone-based fund release.
 //! Client locks funds with `create_job`, then releases them per milestone.
@@ -489,7 +490,7 @@ mod tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{Address, Env, String, Vec};
 
-    fn setup(env: &Env) -> (Address, EscrowContractClient) {
+    fn setup(env: &Env) -> (Address, EscrowContractClient<'_>) {
         let cid = env.register_contract(None, EscrowContract);
         let client = EscrowContractClient::new(env, &cid);
         let admin = Address::generate(env);

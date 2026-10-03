@@ -75,16 +75,21 @@ async function isUrlSafeFromSsrf(urlString) {
     return false;
   }
 
-  if (hostname.startsWith("[") && hostname.endsWith("]")) {
-    hostname = hostname.slice(1, -1);
-  }
+  const cleanHost =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+  const cleanHostname = hostname.replace(/^\[|\]$/g, "");
 
-  if (net.isIP(hostname)) {
-    return !isPrivateIp(hostname);
+  if (net.isIP(cleanHost)) {
+    return !isPrivateIp(cleanHost);
+  }
+  if (net.isIP(cleanHostname)) {
+    return !isPrivateIp(cleanHostname);
   }
 
   try {
-    const records = await dns.lookup(hostname, { all: true });
+    const records = await dns.lookup(cleanHost, { all: true });
     if (!records.length) return false;
     return records.every((record) => !isPrivateIp(record.address));
   } catch {
