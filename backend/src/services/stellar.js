@@ -444,6 +444,38 @@ async function getProjectDeactivatedEvents(startLedger) {
   return results;
 }
 
+async function getFundingMilestoneEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+  const request = {
+    filters: [{
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      topics: [[xdr.ScVal.scvSymbol("MilestoneReached").toXDR("base64"), "*", "*"]],
+    }],
+    limit: 100,
+  };
+  if (startLedger) request.startLedger = startLedger;
+  let response;
+  try { response = await rpcServer.getEvents(request); }
+  catch { return []; }
+  const events = [];
+  for (const event of response?.events || []) {
+    try {
+      const decode = (value) => scValToNative(
+        typeof value === "string" ? xdr.ScVal.fromXDR(value, "base64") : value,
+      );
+      const topics = event.topic || event.topics || [];
+      const projectId = decode(topics[1]);
+      const percentage = Number(decode(topics[2]));
+      const totalRaisedStroops = BigInt(decode(event.value));
+      if (typeof projectId === "string" && [25, 50, 75, 100].includes(percentage)) {
+        events.push({ projectId, percentage, totalRaisedXLM: Number(totalRaisedStroops) / 10_000_000, ledger: event.ledger });
+      }
+    } catch { /* Ignore malformed or unrelated events. */ }
+  }
+  return events;
+}
+
 module.exports = {
   server,
   rpcServer,
@@ -455,4 +487,5 @@ module.exports = {
   getProjectDonationEvents,
   getRegisteredProjectIdFromTransaction,
   getProjectDeactivatedEvents,
+  getFundingMilestoneEvents,
 };

@@ -357,6 +357,23 @@ async function sendDonationPushNotification({ projectId, projectName, amountXLM,
   }
 }
 
+async function sendFundingMilestonePush({ projectId, projectName, percentage, totalRaisedXLM }) {
+  const result = await pool.query(
+    `SELECT DISTINCT dt.token
+       FROM device_tokens dt
+       LEFT JOIN profiles pr ON pr.public_key = dt.wallet_address
+       WHERE COALESCE(pr.milestone_notifications_enabled, TRUE) = TRUE
+         AND (dt.wallet_address = (SELECT wallet_address FROM projects WHERE id = $1)
+           OR dt.wallet_address IN (SELECT donor_address FROM donations WHERE project_id = $1))`,
+    [projectId],
+  );
+  const title = `${projectName} reached ${percentage}%`;
+  const body = `Great news! ${projectName} just hit ${percentage}% of its goal (${totalRaisedXLM} XLM raised).`;
+  await Promise.all(result.rows.map(({ token }) =>
+    sendPushToToken(token, title, body, { type: "funding_milestone", projectId, percentage }),
+  ));
+}
+
 /**
  * Send a push notification reminder for an upcoming recurring donation.
  *
@@ -404,5 +421,6 @@ module.exports = {
   sendUpdatePushNotifications,
   sendRecurringDonationReminder,
   sendDonationPushNotification,
+  sendFundingMilestonePush,
   processTickets,
 };

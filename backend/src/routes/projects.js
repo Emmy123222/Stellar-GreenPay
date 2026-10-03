@@ -944,6 +944,14 @@ router.post("/admin/register", adminTokenRequired, async (req, res) => {
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
+    const projectGoalResult = await pool.query(
+      "SELECT goal_xlm FROM projects WHERE id = $1",
+      [projectId],
+    );
+    const goalStroops = BigInt(Math.round(Number(projectGoalResult.rows[0]?.goal_xlm || 0) * 10_000_000));
+    if (goalStroops <= 0n) {
+      return res.status(400).json({ success: false, error: "Project must have a positive funding goal before on-chain registration" });
+    }
 
     const tx = new TransactionBuilder(sourceAccount, {
       fee: "1000",
@@ -957,8 +965,10 @@ router.post("/admin/register", adminTokenRequired, async (req, res) => {
           name,
           wallet,
           parseInt(co2PerXLM),
+          1n,
         ),
       )
+      .addOperation(contract.call("set_project_goal", adminAddress, projectId, goalStroops))
       .setTimeout(30)
       .build();
 

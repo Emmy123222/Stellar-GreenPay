@@ -161,6 +161,7 @@ export interface DonorProfile {
   projectsSupported: number;
   badges: DonorBadge[];
   createdAt: string;
+  milestoneNotificationsEnabled?: boolean;
 }
 
 /**
