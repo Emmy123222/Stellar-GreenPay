@@ -63,6 +63,7 @@ describe('Background Script Dark Mode Icon', () => {
 
     updateExtensionIcon(true);
     expect(setIconMock).toHaveBeenCalledWith({ path: DARK_ICONS });
+    (global as any).chrome.action = { setIcon: jest.fn() };
   });
 
   test('sets correct icon on initial load and on prefers-color-scheme change event', () => {
@@ -73,14 +74,12 @@ describe('Background Script Dark Mode Icon', () => {
       }
     });
 
-    (global as any).window = {
-      matchMedia: jest.fn().mockImplementation((query: string) => ({
-        matches: matchesValue,
-        media: query,
-        addEventListener: addEventListenerMock,
-        removeEventListener: jest.fn()
-      }))
-    };
+    (window as any).matchMedia = jest.fn().mockImplementation((query: string) => ({
+      matches: matchesValue,
+      media: query,
+      addEventListener: addEventListenerMock,
+      removeEventListener: jest.fn()
+    }));
 
     initDarkModeIconListener();
 

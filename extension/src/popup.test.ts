@@ -1,3 +1,5 @@
+import './popup';
+
 /**
  * Tests for popup.ts Freighter wallet integration
  */
