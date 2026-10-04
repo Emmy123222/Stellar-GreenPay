@@ -671,18 +671,7 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::ProjectCount, &next_count);
-        
-        // Append project ID to the ProjectIds vector for enumeration
-        let mut project_ids: Vec<String> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProjectIds)
-            .unwrap_or(Vec::new(&env));
-        project_ids.push_back(project_id.clone());
-        env.storage()
-            .instance()
-            .set(&DataKey::ProjectIds, &project_ids);
-        
+
         env.events()
             .publish((symbol_short!("proj_reg"), admin), project_id);
         update_global_stats(&env, 0, 0, 0, 1, false);
@@ -722,22 +711,16 @@ impl GreenPayContract {
             };
             env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
 
-            // Track project ID for listing / bulk operations
-            let mut ids: Vec<String> = env.storage().instance()
-                .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-            ids.push_back(project_id.clone());
-            env.storage().instance().set(&DataKey::ProjectIds, &ids);
-
             let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
             env.storage().instance().set(&DataKey::ProjectCount, &next_count);
-            
+
             // Append project ID to the ProjectIds vector for enumeration
             project_ids.push_back(project_id.clone());
-            
+
             env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
         }
-        
+
         // Store the updated ProjectIds vector
         env.storage()
             .instance()
@@ -2531,6 +2514,9 @@ impl GreenPayContract {
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         let admin: Address = env
             .storage()
+              pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
+            .storage()
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized");
@@ -3245,6 +3231,7 @@ mod tests {
         client.batch_register_projects(&admin, &projects);
 
         assert_eq!(client.get_project_count(), 3);
+        assert_eq!(client.get_all_projects_paginated(&0, &10).len(), 3);
         let p1 = client.get_project(&String::from_str(&env, "proj-001"));
         assert_eq!(p1.name, String::from_str(&env, "Forest Restore"));
         assert_eq!(p1.wallet, wallet1);

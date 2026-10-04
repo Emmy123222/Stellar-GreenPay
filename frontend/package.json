@@ -6,8 +6,10 @@
     "node": ">=20.0.0"
   },
   "scripts": {
+    "predev": "node scripts/set-contract-env.js",
     "dev": "next dev",
     "dev:docker": "next dev --hostname 0.0.0.0",
+    "prebuild": "node scripts/set-contract-env.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",

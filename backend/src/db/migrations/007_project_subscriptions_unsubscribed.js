@@ -14,7 +14,6 @@ module.exports = {
       ALTER TABLE project_subscriptions
       ADD COLUMN IF NOT EXISTS unsubscribed BOOLEAN NOT NULL DEFAULT FALSE
     `);
-    
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_project_subscriptions_active
       ON project_subscriptions (project_id, email)
@@ -26,7 +25,7 @@ module.exports = {
     await client.query(`
       DROP INDEX IF EXISTS idx_project_subscriptions_active
     `);
-    
+
     await client.query(`
       ALTER TABLE project_subscriptions
       DROP COLUMN IF EXISTS unsubscribed
