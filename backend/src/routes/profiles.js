@@ -32,9 +32,10 @@ const profilePatchSchema = z.object({
   displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
   bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
   avatarUrl: avatarUrlField,
+  milestoneNotificationsEnabled: z.boolean().optional(),
 }).refine(
-  (body) => body.displayName !== undefined || body.bio !== undefined || body.avatarUrl !== undefined,
-  { message: "At least one of displayName, bio, or avatarUrl is required" },
+  (body) => body.displayName !== undefined || body.bio !== undefined || body.avatarUrl !== undefined || body.milestoneNotificationsEnabled !== undefined,
+  { message: "At least one profile setting is required" },
 );
 
 router.get("/:publicKey", async (req, res, next) => {
@@ -131,6 +132,10 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
       newAvatarUrl = avatar;
       values.push(avatar);
       sets.push(`avatar_url = $${values.length}`);
+    }
+    if (req.body.milestoneNotificationsEnabled !== undefined) {
+      values.push(req.body.milestoneNotificationsEnabled);
+      sets.push(`milestone_notifications_enabled = $${values.length}`);
     }
 
     sets.push("updated_at = NOW()");

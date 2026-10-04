@@ -510,6 +510,14 @@ export async function upsertProfile(
   return data.data;
 }
 
+export async function updateProfileMilestoneNotifications(publicKey: string, enabled: boolean) {
+  const { data } = await api.patch<{ success: boolean; data: DonorProfile }>(
+    `/api/profiles/${publicKey}`,
+    { milestoneNotificationsEnabled: enabled },
+  );
+  return data.data;
+}
+
 // ── Leaderboard ───────────────────────────────────────────────────────────────
 /**
  * Fetch top donors.

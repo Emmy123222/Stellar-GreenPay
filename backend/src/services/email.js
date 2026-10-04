@@ -397,7 +397,6 @@ function buildStatusChangeText({ request, newStatus, adminUrl }) {
 }
 
 /**
-<<<<<<< HEAD
  * Notify a donor that their recurring donation was cancelled because the project was deactivated.
  *
  * @param {object} opts
@@ -471,9 +470,26 @@ async function sendRecurringDonationCancelledEmail({ email, projectName, donatio
   }
 }
 
+async function sendFundingMilestoneEmail({ emails, projectName, percentage, totalRaisedXLM }) {
+  if (!RESEND_API_KEY || !emails?.length) return;
+  const safeName = sanitizeHeader(projectName || "Project");
+  const subject = `Great news! ${safeName} just hit ${percentage}% of its goal`;
+  const text = `Great news! ${safeName} just hit ${percentage}% of its funding goal, with ${totalRaisedXLM} XLM raised.`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [...new Set(emails)],
+      subject,
+      text,
+      html: `<p>${escHtml(text)}</p>`,
+    }),
+  });
+  if (!res.ok) throw new Error(`Milestone email delivery failed (${res.status})`);
+}
+
 /**
-=======
->>>>>>> ibrahim/fix/1148-deactivate-project-cancel-recurring
  * Alert platform admins that a webhook delivery has been abandoned after all
  * retries were exhausted, so the dropped event can be investigated and the
  * project owner can be told to reconcile manually.
@@ -532,5 +548,6 @@ module.exports = {
   sendAdminVerificationNotification,
   sendVerificationStatusNotification,
   sendRecurringDonationCancelledEmail,
+  sendFundingMilestoneEmail,
   sendWebhookFailureNotification,
 };

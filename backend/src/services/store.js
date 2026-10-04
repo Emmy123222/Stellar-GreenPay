@@ -245,6 +245,7 @@ function mapProfileRow(row) {
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],
+    milestoneNotificationsEnabled: row.milestone_notifications_enabled !== false,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };
