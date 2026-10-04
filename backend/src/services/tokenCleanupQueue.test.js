@@ -24,33 +24,43 @@ describe("runCleanup", () => {
     runCleanup = queue.runCleanup;
   });
 
-  test("removes stale tokens and logs count", async () => {
-    pool.query.mockResolvedValue({
-      rowCount: 5,
-      rows: [
-        { id: "1", token: "ExpoPushToken[aaa]", platform: "ios" },
-        { id: "2", token: "ExpoPushToken[bbb]", platform: "android" },
-        { id: "3", token: "ExpoPushToken[ccc]", platform: "ios" },
-        { id: "4", token: "ExpoPushToken[ddd]", platform: "android" },
-        { id: "5", token: "ExpoPushToken[eee]", platform: "ios" },
-      ],
-    });
+  test("removes stale tokens and logs total count", async () => {
+    // Single batch — rowCount < BATCH_SIZE so the loop exits after one iteration.
+    pool.query.mockResolvedValue({ rowCount: 5 });
 
     await runCleanup();
 
-    expect(pool.query).toHaveBeenCalledWith(
-      expect.stringContaining("DELETE FROM device_tokens")
-    );
-    expect(pool.query.mock.calls[0][0]).toContain("last_delivered_at IS NOT NULL");
-    expect(pool.query.mock.calls[0][0]).toContain("90 days");
+    expect(pool.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = pool.query.mock.calls[0];
+    expect(sql).toContain("DELETE FROM device_tokens");
+    expect(sql).toContain("last_delivered_at IS NOT NULL");
+    expect(sql).toContain("90 days");
+    expect(sql).toContain("LIMIT $1");
+    expect(params).toEqual([1000]);
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ event: "tokens_pruned", count: 5 }),
       expect.any(String)
     );
   });
 
+  test("loops until a batch returns fewer than BATCH_SIZE rows", async () => {
+    // Simulate two full batches (1000 each) then a partial batch that ends the loop.
+    pool.query
+      .mockResolvedValueOnce({ rowCount: 1000 })
+      .mockResolvedValueOnce({ rowCount: 1000 })
+      .mockResolvedValueOnce({ rowCount: 42 });
+
+    await runCleanup();
+
+    expect(pool.query).toHaveBeenCalledTimes(3);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "tokens_pruned", count: 2042 }),
+      expect.any(String)
+    );
+  });
+
   test("logs zero when no stale tokens found", async () => {
-    pool.query.mockResolvedValue({ rowCount: 0, rows: [] });
+    pool.query.mockResolvedValue({ rowCount: 0 });
 
     await runCleanup();
 
@@ -60,14 +70,14 @@ describe("runCleanup", () => {
     );
   });
 
-  test("leaves recently-delivered tokens untouched", async () => {
-    pool.query.mockResolvedValue({ rowCount: 0, rows: [] });
+  test("leaves recently-delivered tokens untouched (query shape)", async () => {
+    pool.query.mockResolvedValue({ rowCount: 0 });
 
     await runCleanup();
 
-    const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("last_delivered_at < NOW() - INTERVAL '90 days'");
-    expect(query).toContain("last_delivered_at IS NOT NULL");
+    const [sql] = pool.query.mock.calls[0];
+    expect(sql).toContain("last_delivered_at < NOW() - INTERVAL '90 days'");
+    expect(sql).toContain("last_delivered_at IS NOT NULL");
   });
 
   test("logs error on query failure", async () => {
