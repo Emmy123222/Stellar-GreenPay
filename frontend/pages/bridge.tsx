@@ -250,7 +250,7 @@ export default function BridgePage() {
             <h1 className="font-display text-3xl font-bold text-forest-900 dark:text-[#e6f5e9] mb-2">
               {t("bridge.pageTitle")}
             </h1>
-            <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+            <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
               {t("bridge.pageIntro")}
             </p>
           </div>
@@ -274,10 +274,10 @@ export default function BridgePage() {
           {/* What this bridge does for GreenPay */}
           <section className="card mb-6" aria-labelledby="bridge-what-is">
             <h2 id="bridge-what-is" className="label">{t("bridge.whatIsTitle")}</h2>
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed mb-4">
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed mb-4">
               {t("bridge.whatIsBody")}
             </p>
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body leading-relaxed mb-6">
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body leading-relaxed mb-6">
               {t("bridge.howIsBody")}
             </p>
 
@@ -288,7 +288,7 @@ export default function BridgePage() {
                 </h3>
                 <ul className="space-y-2">
                   {doesList.map((item) => (
-                    <li key={item} className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] flex gap-2">
+                    <li key={item} className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] flex gap-2">
                       <span aria-hidden="true">✅</span>
                       <span>{item}</span>
                     </li>
@@ -301,7 +301,7 @@ export default function BridgePage() {
                 </h3>
                 <ul className="space-y-2">
                   {doesNotList.map((item) => (
-                    <li key={item} className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] flex gap-2">
+                    <li key={item} className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] flex gap-2">
                       <span aria-hidden="true">🚫</span>
                       <span>{item}</span>
                     </li>
@@ -310,7 +310,7 @@ export default function BridgePage() {
               </div>
             </div>
 
-            <p className="mt-4 text-xs text-[#5a7a5a] dark:text-[#8aaa8a] leading-relaxed">
+            <p className="mt-4 text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] leading-relaxed">
               {t("bridge.fiatNote")}
             </p>
           </section>
@@ -437,7 +437,7 @@ export default function BridgePage() {
                   </span>
                   <div className="flex-1">
                     <h3 className="font-semibold text-forest-900 dark:text-[#e6f5e9] mb-1">{s.title}</h3>
-                    <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a]">{s.description}</p>
+                    <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a]">{s.description}</p>
                   </div>
                 </li>
               ))}
@@ -464,7 +464,7 @@ export default function BridgePage() {
           {stellarAddress && projects.length > 0 && (
             <div className="card mb-6">
               <h2 className="label mb-4">{t("bridge.recordTitle")}</h2>
-              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
                 {t("bridge.recordDesc")}
               </p>
 
@@ -531,7 +531,7 @@ export default function BridgePage() {
                       <p className="text-sm font-semibold text-forest-900 dark:text-[#e6f5e9]">
                         {t("bridge.historyRoute").replace("{source}", entry.sourceChain)}
                       </p>
-                      <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a]">
+                      <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a]">
                         {new Date(entry.timestamp).toLocaleString()}
                       </p>
                     </div>

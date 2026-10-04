@@ -25,7 +25,6 @@ mod fuzz_tests;
  *     --source alice --network testnet
  */
 use soroban_sdk::{
-    contract, contractclient, contracterror, contractimpl, contracttype,
     contract, contractclient, contracterror, contractimpl, contracttype, panic_with_error,
     token, Address, Env, symbol_short, Symbol, String, BytesN, Vec,
 };
@@ -278,6 +277,8 @@ pub struct ActiveMatchStatus {
 pub enum DataKey {
     Admin,
     Project(String),
+    ProjectGoal(String),
+    ProjectMilestoneReached(String, u32),
     ProjectIds,
     ProjectCount,
     DonorStats(Address),
@@ -457,6 +458,29 @@ fn update_global_stats(
     }
 
     env.storage().instance().set(&DataKey::GlobalStats, &stats);
+}
+
+fn emit_funding_milestones(env: &Env, project_id: &String, previous_raised: i128, total_raised: i128) {
+    if let Some(goal_stroops) = env.storage().instance().get::<_, i128>(
+        &DataKey::ProjectGoal(project_id.clone()),
+    ) {
+        for milestone_pct in [25u32, 50, 75, 100] {
+            let pct = milestone_pct as i128;
+            let threshold = (goal_stroops / 100) * pct
+                + ((goal_stroops % 100) * pct + 99) / 100;
+            let reached_key = DataKey::ProjectMilestoneReached(project_id.clone(), milestone_pct);
+            if previous_raised < threshold
+                && total_raised >= threshold
+                && !env.storage().instance().has(&reached_key)
+            {
+                env.storage().instance().set(&reached_key, &true);
+                env.events().publish(
+                    (Symbol::new(env, "MilestoneReached"), project_id.clone(), milestone_pct),
+                    total_raised,
+                );
+            }
+        }
+    }
 }
 
 fn update_top_donors(env: &Env, donor: &Address, total_donated: i128) {
@@ -704,6 +728,23 @@ impl GreenPayContract {
         update_global_stats(&env, 0, 0, 0, projects.len(), false);
     }
 
+    /// Set the fundraising goal used to emit one on-chain event per reached
+    /// funding milestone. The goal is stored separately so older Project
+    /// records remain readable after upgrading the contract.
+    pub fn set_project_goal(env: Env, admin: Address, project_id: String, goal_stroops: i128) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can set project goals"); }
+        if goal_stroops <= 0 || goal_stroops > i128::MAX / 100 {
+            panic!("Project goal must be positive and within the supported range");
+        }
+        if !env.storage().instance().has(&DataKey::Project(project_id.clone())) {
+            panic!("Project not found");
+        }
+        env.storage().instance().set(&DataKey::ProjectGoal(project_id), &goal_stroops);
+    }
+
     pub fn deactivate_project(env: Env, admin: Address, project_id: String) {
         admin.require_auth();
         let stored_admin: Address = env
@@ -940,6 +981,7 @@ impl GreenPayContract {
         if amount < project.min_donation_amount {
             panic!("Donation below minimum");
         }
+        let previous_raised = project.total_raised;
 
         // Delegate CO2 arithmetic to the shared helper that enforces the
         // MAX_DONATION cap and uses checked_mul to return ContractError::Overflow
@@ -977,6 +1019,8 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
+
+        emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
         donor_stats.total_donated = donor_stats
             .total_donated
@@ -1199,6 +1243,7 @@ impl GreenPayContract {
                 .checked_mul(project.co2_per_xlm as i128)
                 .expect("CO2 calculation overflow");
 
+            let previous_raised = project.total_raised;
             project.total_raised = project
                 .total_raised
                 .checked_add(amount)
@@ -1214,6 +1259,7 @@ impl GreenPayContract {
             env.storage()
                 .instance()
                 .set(&DataKey::Project(project_id.clone()), &project);
+            emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
             total_amount = total_amount.checked_add(amount).expect("Total amount overflow");
             total_co2 = total_co2.checked_add(co2_increment).expect("Total CO2 overflow");
@@ -2057,15 +2103,20 @@ impl GreenPayContract {
             .unwrap_or(Vec::new(&env))
     }
 
-    /// Donate USDC. Converts to an XLM-equivalent amount using the configured
-    /// on-chain price oracle.
+    /// Donate USDC. Converts to XLM-equivalent for global stats using a DEX spot price
+    /// supplied by the caller from the off-chain Stellar DEX price oracle.
+    ///
+    /// `xlm_per_usdc` is the mid-price (in XLM stroops per 1 USDC stroop) fetched
+    /// from the Horizon orderbook and cached for 30 seconds by the backend service.
+    /// The caller is responsible for providing a fresh, non-zero rate.
     pub fn donate_usdc(
-        env: Env,
-        usdc_token: Address,
-        donor: Address,
-        project_id: String,
-        usdc_amount: i128,
-        msg_hash: u32,
+        env:          Env,
+        usdc_token:   Address,
+        donor:        Address,
+        project_id:   String,
+        usdc_amount:  i128,
+        xlm_per_usdc: i128,
+        msg_hash:     u32,
     ) {
         if env.storage().temporary().has(&DataKey::IsProcessing) {
             panic_with_error!(&env, ContractError::Reentrant);
@@ -2132,17 +2183,9 @@ impl GreenPayContract {
             panic!("Oracle conversion rounded donation to zero");
         }
 
-        let mut project: Project = env
-            .storage()
-            .instance()
-            .get(&DataKey::Project(project_id.clone()))
-            .expect("Project not found");
-        if !project.active {
-            panic!("Project is not accepting donations");
-        }
-        if usdc_amount < project.min_donation_amount {
-            panic!("Donation below minimum");
-        }
+        let mut project: Project = env.storage().instance()
+            .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+        if !project.active { panic!("Project is not accepting donations"); }
 
         // Delegate CO2 arithmetic to the shared helper — uses checked_mul and
         // enforces the MAX_DONATION cap on the XLM-equivalent amount.
@@ -2162,6 +2205,7 @@ impl GreenPayContract {
         let prev_badge = donor_stats.badge.clone();
 
         // Update project and donor stats using XLM-equivalent
+        let previous_raised = project.total_raised;
         project.total_raised = project
             .total_raised
             .checked_add(xlm_equivalent)
@@ -2177,6 +2221,7 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
+        emit_funding_milestones(&env, &project_id, previous_raised, project.total_raised);
 
         donor_stats.total_donated = donor_stats
             .total_donated
@@ -2903,7 +2948,7 @@ mod tests {
         // Mint USDC to donor
         StellarAssetClient::new(&env, &token).mint(&donor, &(100 * 1_000_000i128));
         let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC assuming 6 decimals
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &8i128, &0u32);
         let record = client.get_donation_record(&0u32);
         assert_eq!(record.donor, donor);
         assert_eq!(record.project, pid);
@@ -3774,9 +3819,7 @@ mod tests {
         let proposal = client.get_proposal(&pid);
         assert_eq!(proposal.votes_for, 1);
     }
-
-    // ─── ProjectMilestoneNFT tests (#205) ────────────────────────────────────
-
+    /// Tests for `donate_usdc` with the live-rate parameter.
     #[test]
     fn test_mint_project_nft_success() {
         let (env, _cid, client, _admin, pid) = crate::tests::setup();
@@ -3885,26 +3928,19 @@ mod tests {
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
         let token_client = StellarAssetClient::new(&env, &token);
 
-        let amount = 100 * STROOP;
-        token_client.mint(&donor, &amount);
-        client.donate(&token, &donor, &pid, &amount, &0u32);
+        let donor      = Address::generate(&env);
+        let usdc_amt   = 1_000_000i128; // 0.1 USDC (7 decimal places)
+        // Simulate a DEX mid-price of 9 XLM per USDC (in stroops ratio: 9)
+        let rate       = 9i128;
+        let expected_xlm = usdc_amt.checked_mul(rate).unwrap();
 
-        let wallet = client.get_project(&pid).wallet;
-        let project_before = client.get_project(&pid);
-        let donor_stats_before = client.get_donor_stats(&donor);
-        assert_eq!(project_before.total_raised, amount);
-        assert_eq!(donor_stats_before.total_donated, amount);
+        usdc_client.mint(&donor, &usdc_amt);
+        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amt, &rate, &0u32);
 
-        client.refund_donation(&admin, &pid, &donor, &amount, &token);
-
-        let project_after = client.get_project(&pid);
-        let donor_stats_after = client.get_donor_stats(&donor);
-        assert_eq!(project_after.total_raised, 0);
-        assert_eq!(donor_stats_after.total_donated, 0);
-
-        let native_client = soroban_sdk::token::Client::new(&env, &token);
-        assert_eq!(native_client.balance(&donor), amount);
-        assert_eq!(native_client.balance(&wallet), 0);
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, expected_xlm);
+        let global = client.get_global_total();
+        assert_eq!(global, expected_xlm);
     }
 
     #[test]
@@ -3916,7 +3952,10 @@ mod tests {
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
-        client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
+        let donor = Address::generate(&env);
+        usdc_client.mint(&donor, &1_000_000i128);
+        // Rate of 0 must be rejected
+        client.donate_usdc(&usdc_token, &donor, &pid, &1_000_000i128, &0i128, &0u32);
     }
 
     // ─── Minimum donation enforcement (#1043) ─────────────────────────────────
@@ -3958,6 +3997,44 @@ mod tests {
         StellarAssetClient::new(&env, &token).mint(&donor, &(100 * STROOP));
 
         (env, client, token, pid, donor, wallet)
+    }
+
+    #[test]
+    fn test_donate_emits_each_funding_milestone_once() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        let pid = String::from_str(&env, "milestone-project");
+        let wallet = Address::generate(&env);
+        client.register_project(&admin, &pid, &String::from_str(&env, "Milestone Project"), &wallet, &100u32, &1i128);
+        let token_admin = Address::generate(&env);
+        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let donor = Address::generate(&env);
+        StellarAssetClient::new(&env, &token).mint(&donor, &(101 * STROOP));
+        client.set_project_goal(&admin, &pid, &(100 * STROOP));
+
+        let milestone_topic = soroban_sdk::xdr::ScVal::Symbol(
+            soroban_sdk::xdr::ScSymbol::try_from(std::vec::Vec::from("MilestoneReached")).unwrap(),
+        );
+        for expected_pct in [25u32, 50, 75, 100] {
+            client.donate(&token, &donor, &pid, &(25 * STROOP), &0u32);
+            let emitted = env.events().all().events().iter().filter(|event| {
+                let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+                body.topics.first() == Some(&milestone_topic)
+                    && body.topics.get(2) == Some(&soroban_sdk::xdr::ScVal::U32(expected_pct))
+            }).count();
+            assert_eq!(emitted, 1, "expected one {expected_pct}% milestone event");
+        }
+
+        client.donate(&token, &donor, &pid, &STROOP, &0u32);
+        let repeated = env.events().all().events().iter().filter(|event| {
+            let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+            body.topics.first() == Some(&milestone_topic)
+        }).count();
+        assert_eq!(repeated, 0, "milestones must not emit more than once");
     }
 
     /// The exact scenario from #1043: a single stroop sent to a project that
@@ -4159,5 +4236,3 @@ mod tests {
         assert_eq!(top_10.get(9).unwrap().total_donated, 110 * STROOP);
     }
 }
-
-

@@ -365,7 +365,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-16">
         <div className="text-center mb-10">
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">Project Admin</h1>
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Connect the project wallet to access analytics and post updates.</p>
+          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">Connect the project wallet to access analytics and post updates.</p>
         </div>
         <WalletConnect onConnect={onConnect} />
       </div>
@@ -400,10 +400,10 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12">
         <div className="card">
           <h1 className="font-display text-xl font-bold text-forest-900 mb-2">Access denied</h1>
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">
+          <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
             This admin dashboard is only accessible to the connected wallet that matches the project wallet address.
           </p>
-          <div className="mt-4 text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+          <div className="mt-4 text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
             Connected: {shortenAddress(publicKey)} • Project wallet: {shortenAddress(project.walletAddress)}
           </div>
           <div className="mt-5">
@@ -420,9 +420,9 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
-          <p className="text-xs tracking-[0.22em] uppercase text-[#8aaa8a] dark:text-forest-300 font-body">Project Admin</p>
+          <p className="text-xs tracking-[0.22em] uppercase text-[var(--text-tertiary)] dark:text-forest-300 font-body">Project Admin</p>
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">{project.name}</h1>
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">Wallet: {shortenAddress(project.walletAddress, 10)}</p>
+          <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">Wallet: {shortenAddress(project.walletAddress, 10)}</p>
         </div>
         <Link href={`/projects/${project.id}`} className="btn-primary text-sm py-2.5 px-5 flex-shrink-0">
           View Project
@@ -439,7 +439,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           <div key={stat.label} className="card text-center shadow-sm border border-forest-100/50">
             <p className="text-2xl mb-2">{stat.icon}</p>
             <p className="font-display font-bold text-forest-900 text-lg leading-tight">{stat.value}</p>
-            <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
+            <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">{stat.label}</p>
           </div>
         ))}
       </div>
@@ -457,7 +457,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           /* eslint-disable-next-line @next/next/no-img-element */
           <img src={project.imageUrl} alt={`${project.name} banner`} className="h-48 w-full rounded-2xl object-cover" />
         ) : (
-          <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-forest-200 bg-forest-50 text-sm text-[#5a7a5a]">No banner image yet. Upload one to personalize the project page.</div>
+          <div className="flex h-48 items-center justify-center rounded-2xl border border-dashed border-forest-200 bg-forest-50 text-sm text-[var(--text-secondary)]">No banner image yet. Upload one to personalize the project page.</div>
         )}
       </div>
 
@@ -474,7 +474,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="h-64">
           <DonationGrowthChartNoSSR projectId={typeof projectId === "string" ? projectId : undefined} />
         </div>
-        <p className="text-xs text-[#8aaa8a] dark:text-forest-300 mt-3 font-body">
+        <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 mt-3 font-body">
           Weekly totals based on recent donation history (up to 200 donations loaded).
         </p>
       </div>
@@ -484,7 +484,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             {milestones.length === 0 ? (
-              <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No milestones defined yet.</p>
+              <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">No milestones defined yet.</p>
             ) : (
               milestones.map((m) => {
                 const reached = parseFloat(project.raisedXLM) >= (parseFloat(project.goalXLM) * m.percentage / 100);
@@ -570,7 +570,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
         <div className="card">
           <h2 className="font-display text-xl font-bold text-forest-900 mb-4">Recent Donations</h2>
           {donations.length === 0 ? (
-            <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body">No donations yet.</p>
+            <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">No donations yet.</p>
           ) : (
             <div className="space-y-3">
               {donations.slice(0, 10).map((d) => (
@@ -579,10 +579,10 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">
                       {shortenAddress(d.donorAddress)} • {formatXLM(d.amountXLM || d.amount || "0", 2)}
                     </p>
-                    <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</p>
+                    <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">{timeAgo(d.createdAt)}</p>
                   </div>
                   {d.message && (
-                    <p className="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body max-w-[220px] text-right">
+                    <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body max-w-[220px] text-right">
                       “{d.message.slice(0, 60)}{d.message.length > 60 ? "…" : ""}”
                     </p>
                   )}
@@ -594,7 +594,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
         <div className="card">
           <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Post Update</h2>
-          <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+          <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
             Publish a project update to notify subscribers.
           </p>
           <div className="space-y-3">
@@ -636,7 +636,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Approval Workflow */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Approval Workflow</h2>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
           Manage project status. Current status:{" "}
           <span className={`font-semibold ${project.status === "active" ? "text-emerald-600" : project.status === "rejected" ? "text-red-600" : "text-amber-600"}`}>
             {project.status}
@@ -690,7 +690,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* On-Chain Registration */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">On-Chain Registration</h2>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
           Register this project on the Stellar blockchain via Soroban smart contract.
         </p>
 
@@ -718,7 +718,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Donation Match Funds */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Donation Match Funds</h2>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
           View and manage donation matching for this project.
         </p>
 
@@ -733,7 +733,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">
                       {m.multiplier}x matching
                     </p>
-                    <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                    <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
                       Matcher: {shortenAddress(m.matcherAddress)}
                     </p>
                   </div>
@@ -772,7 +772,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     <p className="text-sm font-semibold text-forest-900 font-body">{formatXLM(m.remainingXLM)}</p>
                   </div>
                 </div>
-                <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-2">
+                <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body mt-2">
                   Expires: {new Date(m.expiresAt).toLocaleDateString()}
                 </p>
               </div>
@@ -856,7 +856,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Widget Builder */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Widget Builder</h2>
-        <p className="text-sm text-[#5a7a5a] font-body mb-4">
+        <p className="text-sm text-[var(--text-secondary)] font-body mb-4">
           Customise the embeddable widget for this project and copy the embed code to paste on external sites.
         </p>
 
@@ -886,7 +886,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                   onChange={(e) => setWidgetAccent(e.target.value)}
                   className="w-10 h-10 rounded cursor-pointer border border-forest-200 p-0.5"
                 />
-                <span className="text-xs font-mono text-[#5a7a5a]">{widgetAccent}</span>
+                <span className="text-xs font-mono text-[var(--text-secondary)]">{widgetAccent}</span>
               </div>
             </div>
 
@@ -917,7 +917,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     className={`px-5 py-2 rounded-xl text-sm font-semibold border transition-all ${
                       widgetCurrency === c
                         ? "bg-forest-600 text-white border-forest-600"
-                        : "bg-white text-[#5a7a5a] border-forest-200 hover:bg-forest-50"
+                        : "bg-white text-[var(--text-secondary)] border-forest-200 hover:bg-forest-50"
                     }`}
                   >
                     {c}
@@ -928,7 +928,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
 
             {/* Live preview hint */}
             <div className="p-3 rounded-xl bg-forest-50 border border-forest-100">
-              <p className="text-xs text-[#5a7a5a] font-body">
+              <p className="text-xs text-[var(--text-secondary)] font-body">
                 <span className="font-semibold">Tip:</span> The widget will display {widgetCurrency} amounts with the accent colour shown above.
               </p>
             </div>
@@ -960,7 +960,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
       {/* Webhooks */}
       <div className="card mt-6">
         <h2 className="font-display text-xl font-bold text-forest-900 mb-2">Webhooks</h2>
-        <p className="text-sm text-[#5a7a5a] dark:text-[#8aaa8a] font-body mb-4">
+        <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
           Configure a webhook URL to receive signed POST notifications when milestones are reached.
         </p>
 

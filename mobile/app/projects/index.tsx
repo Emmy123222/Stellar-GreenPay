@@ -160,7 +160,11 @@ export default function ProjectsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}> 
       {isOffline && (
-        <View style={styles.offlineBanner}>
+        <View
+          style={styles.offlineBanner}
+          accessibilityRole="alert"
+          accessibilityLabel="Offline — showing cached data"
+        >
           <Text style={styles.offlineBannerText}>Offline — showing cached data</Text>
         </View>
       )}

@@ -25,12 +25,16 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-
+// The screen only touches these four exports, so they are listed explicitly:
+// a factory-less `jest.mock('../utils/notifications')` would make Jest load
+// the real module (whose top level calls
+// `Notifications.setNotificationHandler`) just to introspect its shape.
 jest.mock('../utils/notifications', () => ({
   getPushToken: jest.fn().mockResolvedValue(null),
   getUnreadNotificationCount: jest.fn().mockResolvedValue(0),
   setupNotificationListener: jest.fn(() => ({ remove: jest.fn() })),
   setupNotificationResponseListener: jest.fn(() => ({ remove: jest.fn() })),
+  navigateFromInitialNotification: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('expo-notifications', () => ({
@@ -116,19 +120,26 @@ describe('HomeScreen', () => {
   it('renders the app title', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
   it('renders project cards with progress after data loads', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => {
       expect(getByText('Amazon Reforestation Initiative')).toBeTruthy();
       expect(getByText('18420 / 50000 XLM')).toBeTruthy();
       expect(getByText('147 donors')).toBeTruthy();
     });
+  });
+
+  it('renders the project name after data loads', async () => {
+    (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
+
+    const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
   it('renders the header chrome while projects are loading', async () => {
@@ -159,7 +170,7 @@ describe('HomeScreen', () => {
   it('renders project cards with an accessible label', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByLabelText } = render(wrap(<HomeScreen />));
+    const { getByLabelText } = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() =>
       expect(getByLabelText('View Amazon Reforestation Initiative project')).toBeTruthy()
     );
@@ -182,6 +193,10 @@ describe('HomeScreen', () => {
 
     const view = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() => expect(view.getByText(MOCK_PROJECT.name)).toBeTruthy());
+
+
+    const { getByText } = await render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
 
     expect(() => view.unmount()).not.toThrow();
   });

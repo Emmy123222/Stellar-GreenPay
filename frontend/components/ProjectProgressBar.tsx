@@ -25,11 +25,11 @@ export default function ProjectProgressBar({
           {hasGoal ? `${percentage}%` : "No goal set"}
         </span>
         {hasGoal ? (
-          <span className="text-xs text-[#5a7a5a] dark:text-[#a8c2a8]">
+          <span className="text-xs text-[var(--text-secondary)] dark:text-[#a8c2a8]">
             {parsedRaised.toLocaleString()} / {parsedGoal.toLocaleString()} XLM
           </span>
         ) : (
-          <span className="text-xs text-[#8aaa8a] dark:text-[#a8c2a8]">
+          <span className="text-xs text-[var(--text-tertiary)] dark:text-[#a8c2a8]">
             Raised: {parsedRaised.toLocaleString()} XLM
           </span>
         )}

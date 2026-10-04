@@ -9,7 +9,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { ThemeProvider, themes } from './theme';
 import { useDeepLink } from '../hooks/useDeepLink';
-import { setupNotificationListener, setupNotificationResponseListener } from '../utils/notifications';
+import { setupNotificationListener, setupNotificationResponseListener, navigateFromInitialNotification } from '../utils/notifications';
 import { loadKnownTestnetAddresses } from '../utils/stellarValidation';
 import { hasCompletedOnboarding } from '../utils/onboarding';
 
@@ -47,11 +47,16 @@ function NotificationHandler() {
   const router = useRouter();
 
   useEffect(() => {
+    const push = (path: string) => router.push(path as any);
+
     // Foreground notification display listener
     const receivedSub = setupNotificationListener();
 
-    // Tap-on-notification → navigate to project detail (#483)
-    const responseSub = setupNotificationResponseListener((path) => router.push(path as any));
+    // Warm-start: tap while app is backgrounded → navigate (#1121)
+    const responseSub = setupNotificationResponseListener(push);
+
+    // Cold-start: tap while app was closed → launch on the right screen (#1121)
+    navigateFromInitialNotification(push);
 
     return () => {
       receivedSub.remove();
@@ -93,6 +98,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile/[address]" options={{ title: 'Donor Profile' }} />
         <Stack.Screen name="leaderboard" options={{ title: 'Leaderboard' }} />
         <Stack.Screen name="recurring" options={{ title: 'Monthly Giving' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="scan" options={{ title: 'Scan to Donate', headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       </Stack>

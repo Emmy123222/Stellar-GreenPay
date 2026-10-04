@@ -129,7 +129,11 @@ describe('useBiometricAuth (React hook)', () => {
     );
   }
 
-  function triggerAuth(getByTestId: ReturnType<typeof render>['getByTestId']) {
+  // RNTL@14's `render` resolves asynchronously, so the queries live on the
+  // awaited result rather than on the return type directly.
+  function triggerAuth(
+    getByTestId: Awaited<ReturnType<typeof render>>['getByTestId']
+  ) {
     fireEvent.press(getByTestId('trigger'));
   }
 

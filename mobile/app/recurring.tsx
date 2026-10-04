@@ -190,6 +190,21 @@ export default function RecurringScreen() {
   }, [loadProjects]);
 
 
+  useEffect(() => {
+    if (showForm && projects.length === 0) {
+      axios
+        .get(`${API_URL}/api/projects`)
+        .then((res) => {
+          const list: ClimateProject[] = Array.isArray(res.data?.data) ? res.data.data : [];
+          setProjects(list);
+          if (list.length > 0 && !selectedProjectId) {
+            setSelectedProjectId(list[0].id);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [showForm]);
+
   const handleCancel = async (id: string) => {
     setCancellingId(id);
     try {
@@ -439,6 +454,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     elevation: 2,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
     shadowRadius: 3,

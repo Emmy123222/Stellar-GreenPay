@@ -149,3 +149,73 @@ Response:
 ---
 
 > Total time: **≈ 6 minutes** for a brand-new Stellar user.
+
+---
+
+## Embedding the Donation Widget
+
+The `/widget/[projectId]` page is designed to be iframed on any third-party site.
+
+### Security headers
+
+Every response from `/widget/*` includes:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `Content-Security-Policy` | `frame-ancestors *` | Permits framing by any origin (CSP3, all modern browsers) |
+| `X-Frame-Options` | `ALLOWALL` | Legacy signal for older middleware / CDNs |
+
+All other routes continue to send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+
+### Basic embed
+
+Replace `PROJECT_ID` with the project's numeric or slug identifier:
+
+```html
+<iframe
+  src="https://greenpay.app/widget/PROJECT_ID"
+  width="360"
+  height="420"
+  style="border:none;border-radius:12px;"
+  title="Donate to a climate project on GreenPay"
+  loading="lazy"
+></iframe>
+```
+
+### Customisation parameters
+
+Append query parameters to tailor the widget appearance:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `theme` | `light` | `light` or `dark` colour scheme |
+| `accent` | `#059669` | Hex colour for the header, progress bar, and button |
+| `buttonText` | `Donate on GreenPay` | Label on the call-to-action button |
+| `currency` | `XLM` | Display currency: `XLM` or `USDC` |
+
+**Example — dark theme with custom accent:**
+
+```html
+<iframe
+  src="https://greenpay.app/widget/PROJECT_ID?theme=dark&accent=%232563EB&buttonText=Support+This+Project&currency=XLM"
+  width="360"
+  height="420"
+  style="border:none;border-radius:12px;"
+  title="Donate to a climate project on GreenPay"
+  loading="lazy"
+></iframe>
+```
+
+> **Note:** URL-encode the `#` in hex colours as `%23` (e.g. `#2563EB` → `%232563EB`).
+
+### Recommended `sandbox` attributes
+
+If your host page already applies a `sandbox` attribute to its iframes, include at least the following permissions so the widget can function correctly:
+
+```html
+sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+```
+
+- `allow-scripts` — required for React to hydrate the widget.
+- `allow-same-origin` — required for the widget to call the GreenPay API.
+- `allow-popups` + `allow-popups-to-escape-sandbox` — the **Donate** button opens the full project page in a new tab; without these the popup is silently blocked.

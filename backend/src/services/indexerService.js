@@ -3,21 +3,90 @@
  */
 "use strict";
 
-const { server: stellarServer, getProjectDeactivatedEvents } = require("./stellar");
-const { sendRecurringDonationCancelledEmail } = require("./email");
+const { server: stellarServer, getProjectDeactivatedEvents, getFundingMilestoneEvents } = require("./stellar");
+const { sendRecurringDonationCancelledEmail, sendFundingMilestoneEmail } = require("./email");
 const pool = require("../db/pool");
 const { v4: uuid } = require("uuid");
 const { computeBadges } = require("./store");
 const { checkAndDeliverMilestones } = require("./webhook");
 const donationEvents = require("./donationEvents");
 const logger = require("../logger");
+const { sendFundingMilestonePush } = require("./push");
 
 let lastProcessedLedger = 0;
 let lastDeactivationLedger = 0;
+let lastMilestoneLedger = 0;
 let isRunning = false;
 let io = null;
 let projectWallets = new Map(); // wallet_address -> project_id
 let deactivationPollTimer = null;
+let streamClose = null;
+let walletRefreshTimer = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 60 * 1000;
+
+function isAuthError(err) {
+  const status = err?.status ?? err?.response?.status;
+  return status === 401 || status === 403 || /unauthori[sz]ed|forbidden|auth/i.test(String(err?.message || err));
+}
+
+function reconnectDelay() {
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * (2 ** reconnectAttempt));
+  reconnectAttempt += 1;
+  return Math.round(delay * (0.8 + Math.random() * 0.4));
+}
+
+function scheduleStreamReconnect() {
+  if (!isRunning || reconnectTimer) return;
+  const delay = reconnectDelay();
+  logger.warn(
+    { event: "indexer_horizon_stream_reconnect_scheduled", delay, attempt: reconnectAttempt },
+    "Scheduling Horizon stream reconnect"
+  );
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    openOperationsStream();
+  }, delay);
+}
+
+function openOperationsStream() {
+  if (!isRunning) return;
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+
+  logger.info({ event: "indexer_stream_connecting", attempt: reconnectAttempt }, "Opening Horizon operations stream");
+  streamClose = stellarServer.operations().cursor("now").stream({
+    onmessage: async (op) => {
+      reconnectAttempt = 0;
+      try {
+        lastProcessedLedger = op.ledger_attr;
+        if (op.type === "payment" && op.asset_type === "native") {
+          const projectId = projectWallets.get(op.to);
+          if (projectId) await handleDonation(projectId, op);
+        }
+      } catch (err) {
+        logger.error({ event: "indexer_op_error", err }, err.message);
+      }
+    },
+    onerror: (err) => {
+      const authError = isAuthError(err);
+      logger.error(
+        { event: "indexer_horizon_stream_error", err, authError },
+        "Horizon stream error"
+      );
+      if (streamClose) {
+        streamClose();
+        streamClose = null;
+      }
+      scheduleStreamReconnect();
+    },
+  });
+}
 
 /**
  * Fetch all active project wallets and cache them.
@@ -53,7 +122,7 @@ async function startIndexer(socketIo) {
 
   await updateProjectWallets();
   // Refresh cache every 10 minutes
-  setInterval(updateProjectWallets, 10 * 60 * 1000);
+  walletRefreshTimer = setInterval(updateProjectWallets, 10 * 60 * 1000);
 
   logger.info({ event: "indexer_started" }, "Starting Horizon operations stream");
 
@@ -63,29 +132,7 @@ async function startIndexer(socketIo) {
     deactivationPollTimer = setInterval(pollDeactivationEvents, 30 * 1000);
   }
 
-  // Start streaming operations from 'now'
-  stellarServer.operations()
-    .cursor("now")
-    .stream({
-      onmessage: async (op) => {
-        try {
-          lastProcessedLedger = op.ledger_attr;
-
-          // We only care about XLM payments
-          if (op.type === "payment" && op.asset_type === "native") {
-            const projectId = projectWallets.get(op.to);
-            if (projectId) {
-              await handleDonation(projectId, op);
-            }
-          }
-        } catch (err) {
-          logger.error({ event: "indexer_op_error", err }, err.message);
-        }
-      },
-      onerror: (err) => {
-        logger.error({ event: "indexer_horizon_stream_error", err }, "Horizon stream error");
-      }
-    });
+  openOperationsStream();
 }
 
 /**
@@ -356,8 +403,48 @@ async function pollDeactivationEvents() {
         await handleProjectDeactivated(evt.projectId);
       }
     }
+    const milestoneEvents = await getFundingMilestoneEvents(lastMilestoneLedger || undefined);
+    for (const evt of milestoneEvents) {
+      if (evt.ledger && evt.ledger > lastMilestoneLedger) lastMilestoneLedger = evt.ledger;
+      await handleFundingMilestone(evt);
+    }
   } catch (err) {
     logger.error({ event: "poll_deactivation_events_error", err }, err.message);
+  }
+}
+
+async function handleFundingMilestone({ projectId, percentage, totalRaisedXLM }) {
+  try {
+    const projectResult = await pool.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
+    const project = projectResult.rows[0];
+    if (!project) return;
+    const recorded = await pool.query(
+      `INSERT INTO project_milestone_notifications (project_id, percentage, total_raised_xlm)
+       VALUES ($1, $2, $3) ON CONFLICT (project_id, percentage) DO NOTHING RETURNING project_id`,
+      [projectId, percentage, totalRaisedXLM],
+    );
+    if (!recorded.rowCount) return;
+
+    const recipients = await pool.query(
+      `SELECT DISTINCT ps.email
+         FROM project_subscriptions ps
+         LEFT JOIN profiles pr ON pr.public_key = ps.donor_address
+        WHERE ps.project_id = $1 AND COALESCE(ps.unsubscribed, FALSE) = FALSE
+          AND ps.donor_address IN (SELECT donor_address FROM donations WHERE project_id = $1)
+          AND COALESCE(pr.milestone_notifications_enabled, TRUE) = TRUE`,
+      [projectId],
+    );
+    await Promise.all([
+      sendFundingMilestoneEmail({
+        emails: recipients.rows.map((row) => row.email),
+        projectName: project.name,
+        percentage,
+        totalRaisedXLM: Number(totalRaisedXLM).toFixed(7),
+      }),
+      sendFundingMilestonePush({ projectId, projectName: project.name, percentage, totalRaisedXLM }),
+    ]);
+  } catch (err) {
+    logger.error({ event: "funding_milestone_notification_error", projectId, percentage, err }, err.message);
   }
 }
 
@@ -365,11 +452,24 @@ async function pollDeactivationEvents() {
  * Stop the indexer and timers.
  */
 function stopIndexer() {
+  isRunning = false;
+  if (walletRefreshTimer) {
+    clearInterval(walletRefreshTimer);
+    walletRefreshTimer = null;
+  }
   if (deactivationPollTimer) {
     clearInterval(deactivationPollTimer);
     deactivationPollTimer = null;
   }
-  isRunning = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+  reconnectAttempt = 0;
 }
 
 module.exports = {
@@ -378,4 +478,5 @@ module.exports = {
   getStatus,
   handleProjectDeactivated,
   pollDeactivationEvents,
+  handleFundingMilestone,
 };
