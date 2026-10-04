@@ -48,6 +48,9 @@ describe("indexerService - ProjectDeactivated", () => {
 
     jest.doMock("../db/pool", () => mockPool);
     jest.doMock("./email", () => mockEmail);
+    jest.doMock("./store", () => ({ computeBadges: jest.fn(() => []) }));
+    jest.doMock("./webhook", () => ({ checkAndDeliverMilestones: jest.fn() }));
+    jest.doMock("./donationEvents", () => ({ emit: jest.fn() }));
     jest.doMock("./stellar", () => mockStellar);
 
     indexerService = require("./indexerService");
@@ -177,5 +180,50 @@ describe("indexerService - ProjectDeactivated", () => {
         ["proj-event-2"]
       );
     });
+  });
+});
+
+describe("indexer Horizon stream recovery", () => {
+  let mockStream;
+  let indexer;
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.useFakeTimers();
+    jest.spyOn(Math, "random").mockReturnValue(0.5);
+    mockStream = jest.fn().mockReturnValue(jest.fn());
+    jest.doMock("../db/pool", () => ({
+      query: jest.fn().mockResolvedValue({ rows: [] }),
+    }));
+    jest.doMock("./stellar", () => ({
+      server: {
+        operations: () => ({ cursor: () => ({ stream: mockStream }) }),
+      },
+      getProjectDeactivatedEvents: jest.fn().mockResolvedValue([]),
+    }));
+    jest.doMock("./email", () => ({ sendRecurringDonationCancelledEmail: jest.fn() }));
+    jest.doMock("./store", () => ({ computeBadges: jest.fn(() => []) }));
+    jest.doMock("./webhook", () => ({ checkAndDeliverMilestones: jest.fn() }));
+    jest.doMock("./donationEvents", () => ({ emit: jest.fn() }));
+    indexer = require("./indexerService");
+  });
+
+  afterEach(() => {
+    indexer.stopIndexer();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it("backs off after an authorization error instead of reconnecting immediately", async () => {
+    await indexer.startIndexer({ emit: jest.fn() });
+    const handlers = mockStream.mock.calls[0][0];
+
+    handlers.onerror({ status: 401, message: "unauthorized" });
+    expect(mockStream).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(900);
+    expect(mockStream).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(500);
+    expect(mockStream).toHaveBeenCalledTimes(2);
   });
 });

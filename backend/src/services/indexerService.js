@@ -20,6 +20,73 @@ let isRunning = false;
 let io = null;
 let projectWallets = new Map(); // wallet_address -> project_id
 let deactivationPollTimer = null;
+let streamClose = null;
+let walletRefreshTimer = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 60 * 1000;
+
+function isAuthError(err) {
+  const status = err?.status ?? err?.response?.status;
+  return status === 401 || status === 403 || /unauthori[sz]ed|forbidden|auth/i.test(String(err?.message || err));
+}
+
+function reconnectDelay() {
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * (2 ** reconnectAttempt));
+  reconnectAttempt += 1;
+  return Math.round(delay * (0.8 + Math.random() * 0.4));
+}
+
+function scheduleStreamReconnect() {
+  if (!isRunning || reconnectTimer) return;
+  const delay = reconnectDelay();
+  logger.warn(
+    { event: "indexer_horizon_stream_reconnect_scheduled", delay, attempt: reconnectAttempt },
+    "Scheduling Horizon stream reconnect"
+  );
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    openOperationsStream();
+  }, delay);
+}
+
+function openOperationsStream() {
+  if (!isRunning) return;
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+
+  logger.info({ event: "indexer_stream_connecting", attempt: reconnectAttempt }, "Opening Horizon operations stream");
+  streamClose = stellarServer.operations().cursor("now").stream({
+    onmessage: async (op) => {
+      reconnectAttempt = 0;
+      try {
+        lastProcessedLedger = op.ledger_attr;
+        if (op.type === "payment" && op.asset_type === "native") {
+          const projectId = projectWallets.get(op.to);
+          if (projectId) await handleDonation(projectId, op);
+        }
+      } catch (err) {
+        logger.error({ event: "indexer_op_error", err }, err.message);
+      }
+    },
+    onerror: (err) => {
+      const authError = isAuthError(err);
+      logger.error(
+        { event: "indexer_horizon_stream_error", err, authError },
+        "Horizon stream error"
+      );
+      if (streamClose) {
+        streamClose();
+        streamClose = null;
+      }
+      scheduleStreamReconnect();
+    },
+  });
+}
 
 /**
  * Fetch all active project wallets and cache them.
@@ -55,7 +122,7 @@ async function startIndexer(socketIo) {
 
   await updateProjectWallets();
   // Refresh cache every 10 minutes
-  setInterval(updateProjectWallets, 10 * 60 * 1000);
+  walletRefreshTimer = setInterval(updateProjectWallets, 10 * 60 * 1000);
 
   logger.info({ event: "indexer_started" }, "Starting Horizon operations stream");
 
@@ -65,29 +132,7 @@ async function startIndexer(socketIo) {
     deactivationPollTimer = setInterval(pollDeactivationEvents, 30 * 1000);
   }
 
-  // Start streaming operations from 'now'
-  stellarServer.operations()
-    .cursor("now")
-    .stream({
-      onmessage: async (op) => {
-        try {
-          lastProcessedLedger = op.ledger_attr;
-
-          // We only care about XLM payments
-          if (op.type === "payment" && op.asset_type === "native") {
-            const projectId = projectWallets.get(op.to);
-            if (projectId) {
-              await handleDonation(projectId, op);
-            }
-          }
-        } catch (err) {
-          logger.error({ event: "indexer_op_error", err }, err.message);
-        }
-      },
-      onerror: (err) => {
-        logger.error({ event: "indexer_horizon_stream_error", err }, "Horizon stream error");
-      }
-    });
+  openOperationsStream();
 }
 
 /**
@@ -407,11 +452,24 @@ async function handleFundingMilestone({ projectId, percentage, totalRaisedXLM })
  * Stop the indexer and timers.
  */
 function stopIndexer() {
+  isRunning = false;
+  if (walletRefreshTimer) {
+    clearInterval(walletRefreshTimer);
+    walletRefreshTimer = null;
+  }
   if (deactivationPollTimer) {
     clearInterval(deactivationPollTimer);
     deactivationPollTimer = null;
   }
-  isRunning = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+  reconnectAttempt = 0;
 }
 
 module.exports = {
