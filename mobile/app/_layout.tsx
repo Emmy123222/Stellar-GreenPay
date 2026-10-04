@@ -10,7 +10,6 @@ import { useRouter } from 'expo-router';
 import { ThemeProvider, themes } from './theme';
 import { useDeepLink } from '../hooks/useDeepLink';
 import { setupNotificationListener, setupNotificationResponseListener, navigateFromInitialNotification } from '../utils/notifications';
-import { setupNotificationListener, setupNotificationResponseListener } from '../utils/notifications';
 import { loadKnownTestnetAddresses } from '../utils/stellarValidation';
 import { hasCompletedOnboarding } from '../utils/onboarding';
 
@@ -99,6 +98,7 @@ export default function RootLayout() {
         <Stack.Screen name="profile/[address]" options={{ title: 'Donor Profile' }} />
         <Stack.Screen name="leaderboard" options={{ title: 'Leaderboard' }} />
         <Stack.Screen name="recurring" options={{ title: 'Monthly Giving' }} />
+        <Stack.Screen name="settings" options={{ title: 'Settings' }} />
         <Stack.Screen name="scan" options={{ title: 'Scan to Donate', headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false }} />
       </Stack>
