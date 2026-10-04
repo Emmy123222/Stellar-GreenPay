@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(deprecated)]
 #[cfg(all(test, feature = "testutils"))]
 mod fuzz_tests;
 
@@ -244,6 +245,20 @@ pub struct ImpactSummary {
     pub donor_stats: DonorStats,
 }
 
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    ProposalExpired = 1,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingAdmin {
+    pub address: Address,
+    pub proposal_expires_at: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectMetadataUrls {
@@ -313,6 +328,7 @@ pub enum DataKey {
     // Contract-wide emergency pause status
     Paused,
     PendingAdmin,
+    AdminProposalTTL,
     // Configurable staleness bound for oracle price quotes (issue #1146)
     MaxPriceAgeSecs,
     // Reentrancy guard
@@ -331,6 +347,8 @@ pub enum ContractError {
 const STROOP: i128 = 10_000_000;
 /// USDC uses six decimal places.
 const USDC_SCALE: i128 = 1_000_000;
+/// Default admin proposal expiration window: 7 days in seconds.
+const DEFAULT_ADMIN_PROPOSAL_TTL: u64 = 604_800;
 /// Reject quotes older than three oracle update intervals.
 const ORACLE_MAX_AGE_MULTIPLIER: u64 = 3;
 /// Default ceiling on oracle price age, in seconds, used unless the admin
@@ -655,12 +673,6 @@ impl GreenPayContract {
         env.storage()
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
-
-        // Track project ID for listing / bulk operations
-        let mut ids: Vec<String> = env.storage().instance()
-            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-        ids.push_back(project_id.clone());
-        env.storage().instance().set(&DataKey::ProjectIds, &ids);
 
         let count: u32 = env
             .storage()
@@ -1682,6 +1694,31 @@ impl GreenPayContract {
             .expect("Not initialized")
     }
 
+    pub fn set_admin_proposal_ttl(env: Env, admin: Address, ttl_seconds: u64) {
+        admin.require_auth();
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Not initialized");
+        if stored_admin != admin {
+            panic!("Only admin can set admin proposal TTL");
+        }
+        if ttl_seconds == 0 {
+            panic!("TTL must be greater than zero");
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminProposalTTL, &ttl_seconds);
+    }
+
+    pub fn get_admin_proposal_ttl(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AdminProposalTTL)
+            .unwrap_or(DEFAULT_ADMIN_PROPOSAL_TTL)
+    }
+
     /// Propose a new admin. The current admin keeps control until the
     /// proposed address explicitly accepts the role.
     pub fn propose_new_admin(
@@ -1705,7 +1742,19 @@ impl GreenPayContract {
             return Err(ContractError::PendingAdminExists);
         }
 
-        env.storage().instance().set(&DataKey::PendingAdmin, &new_admin);
+        let ttl = Self::get_admin_proposal_ttl(env.clone());
+        let proposal_expires_at = env
+            .ledger()
+            .timestamp()
+            .checked_add(ttl)
+            .expect("Timestamp overflow");
+
+        let pending = PendingAdmin {
+            address: new_admin.clone(),
+            proposal_expires_at,
+        };
+
+        env.storage().instance().set(&DataKey::PendingAdmin, &pending);
         env.events()
             .publish((symbol_short!("adm_prop"), admin), new_admin);
         Ok(())
@@ -1730,13 +1779,16 @@ impl GreenPayContract {
     /// Accept a pending admin proposal and finalize the admin rotation.
     pub fn accept_admin(env: Env, new_admin: Address) {
         new_admin.require_auth();
-        let pending_admin: Address = env
+        let pending: PendingAdmin = env
             .storage()
             .instance()
             .get(&DataKey::PendingAdmin)
             .expect("No pending admin proposal");
-        if pending_admin != new_admin {
+        if pending.address != new_admin {
             panic!("Only pending admin can accept admin role");
+        }
+        if env.ledger().timestamp() > pending.proposal_expires_at {
+            soroban_sdk::panic_with_error!(&env, ContractError::ProposalExpired);
         }
 
         let previous_admin: Address = env
@@ -1752,6 +1804,14 @@ impl GreenPayContract {
 
     /// Read the current pending admin proposal, if any.
     pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage()
+            .instance()
+            .get::<_, PendingAdmin>(&DataKey::PendingAdmin)
+            .map(|p| p.address)
+    }
+
+    /// Read full pending admin proposal details (address & expiration timestamp), if any.
+    pub fn get_pending_admin_details(env: Env) -> Option<PendingAdmin> {
         env.storage().instance().get(&DataKey::PendingAdmin)
     }
 
@@ -2936,6 +2996,102 @@ mod tests {
         client.propose_new_admin(&attacker, &new_admin);
     }
 
+    #[test]
+    fn test_proposal_accepted_within_7_days_succeeds() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+
+        // Advance ledger timestamp by 3 days (259,200 seconds)
+        env.ledger().set_timestamp(env.ledger().timestamp() + 259_200);
+
+        client.accept_admin(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    #[test]
+    fn test_proposal_accepted_after_expiry_fails() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.propose_new_admin(&admin, &new_admin);
+
+        // Advance ledger timestamp past 7 days (604,801 seconds)
+        env.ledger().set_timestamp(env.ledger().timestamp() + 604_801);
+
+        let res = client.try_accept_admin(&new_admin);
+        assert_eq!(
+            res,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                ContractError::ProposalExpired as u32
+            )))
+        );
+    }
+
+    #[test]
+    fn test_admin_configures_custom_ttl_and_respected() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        // Admin configures custom TTL to 3600 seconds (1 hour)
+        client.set_admin_proposal_ttl(&admin, &3600);
+        assert_eq!(client.get_admin_proposal_ttl(), 3600);
+
+        client.propose_new_admin(&admin, &new_admin);
+
+        // Advance by 1800 seconds (30 mins) -> still valid
+        env.ledger().set_timestamp(env.ledger().timestamp() + 1800);
+        assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+        // Advance past 3600 seconds
+        env.ledger().set_timestamp(env.ledger().timestamp() + 1801);
+
+        let res = client.try_accept_admin(&new_admin);
+        assert_eq!(
+            res,
+            Err(Ok(soroban_sdk::Error::from_contract_error(
+                ContractError::ProposalExpired as u32
+            )))
+        );
+    }
+
+    #[test]
+    fn test_proposal_accepted_at_expiry_boundary() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register_contract(None, GreenPayContract);
+        let client = GreenPayContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.initialize(&admin);
+        let start_time = env.ledger().timestamp();
+        client.propose_new_admin(&admin, &new_admin);
+
+        // Advance to exact expiry boundary: start_time + 604,800
+        env.ledger().set_timestamp(start_time + 604_800);
+
+        client.accept_admin(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+    }
+
         #[test]
     fn test_get_donation_record() {
         let (env, _cid, client, admin, pid) = crate::tests::setup();
@@ -3039,7 +3195,7 @@ mod tests {
 
     #[test]
     fn test_get_donor_history() {
-        let (env, cid, client, admin, pid) = crate::tests::setup();
+        let (env, _cid, client, _admin, pid) = crate::tests::setup();
         env.mock_all_auths();
         let donor = Address::generate(&env);
         let wallet = Address::generate(&env);
@@ -3280,7 +3436,7 @@ mod tests {
         projects.push_back(ProjectInit {
             id:          pid,
             name:        String::from_str(&env, "Duplicate"),
-            wallet:      wallet,
+            wallet,
             co2_per_xlm: 50,
             min_donation_amount: 1,
         });
@@ -3546,7 +3702,7 @@ mod tests {
 
         // Capture events BEFORE any other contract calls — env.events().all()
         // returns events from the most recent call only.
-        let rejection_events = env.events().all().events().len();
+        let _rejection_events = env.events().all().events().len();
 
         let p = client.get_proposal(&pid);
         assert!(p.resolved);
