@@ -17,7 +17,10 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.stellargreenpay.app",
-      "associatedDomains": ["applinks:greenpay.example.com"]
+      "buildNumber": "1",
+      "associatedDomains": [
+        "applinks:greenpay.example.com"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -25,15 +28,26 @@
         "backgroundColor": "#227239"
       },
       "package": "com.stellargreenpay.app",
+      "softwareKeyboardLayoutMode": "resize",
+      "versionCode": 1,
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "greenpay" },
-            { "scheme": "https", "host": "greenpay.example.com", "pathPrefix": "/project/" }
+            {
+              "scheme": "greenpay"
+            },
+            {
+              "scheme": "https",
+              "host": "greenpay.example.com",
+              "pathPrefix": "/project/"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -49,7 +63,8 @@
           "color": "#227239",
           "sounds": []
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "scheme": "greenpay"
   }

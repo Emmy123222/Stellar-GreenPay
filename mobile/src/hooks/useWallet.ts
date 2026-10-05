@@ -10,22 +10,13 @@ export function useWallet() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // `finally` alone does not consume the rejection — without `.catch`,
+    // any storage error (e.g. Keychain unavailable on a stale device)
+    // would surface as an `UnhandledPromiseRejection`, which Jest treats
+    // as a test failure even when we set `loading=false` correctly.
     SecureStore.getItemAsync(WALLET_KEY)
-
       .then((stored) => setPublicKey(stored))
-      .catch(() => {
-        // Non-critical — default to a disconnected wallet if storage fails.
-      })
-
-      .then((stored: string | null) => setPublicKey(stored))
-      // `finally` alone does not consume the rejection — without `.catch`,
-      // any storage error (e.g. Keychain unavailable on a stale device)
-      // would surface as an `UnhandledPromiseRejection`, which Jest treats
-      // as a test failure even when we set `loading=false` correctly. Swallow
-      // the error here; production code still sees the next render cycle
-      // with `loading=false` and can fall back to "Connect wallet" UI.
       .catch(() => undefined)
-
       .finally(() => setLoading(false));
   }, []);
 

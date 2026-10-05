@@ -86,12 +86,12 @@ const WalletAddressQRCode: React.FC<WalletAddressQRCodeProps> = ({
             />
           </div>
 
-          <p className="text-[11px] text-[#5a7a5a] font-body text-center leading-snug max-w-[200px]">
+          <p className="text-[11px] text-[var(--text-secondary)] font-body text-center leading-snug max-w-[200px]">
             Open <strong>Freighter</strong> or any Stellar wallet and scan to
             send XLM directly on-chain.
           </p>
 
-          <p className="text-[10px] text-[#8aaa8a] font-body font-mono break-all text-center max-w-[200px]">
+          <p className="text-[10px] text-[var(--text-tertiary)] font-body font-mono break-all text-center max-w-[200px]">
             {walletAddress}
           </p>
         </div>

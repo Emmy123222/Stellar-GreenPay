@@ -111,6 +111,7 @@ const SETTINGS = {
   backendUrl: 'https://api.example.org',
   network: 'mainnet' as const,
   defaultDonationAmount: '42',
+  allowlist: ['custom.example/*'],
 };
 
 beforeEach(() => {

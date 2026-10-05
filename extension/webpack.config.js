@@ -1,21 +1,34 @@
+const fs = require('fs');
 const path = require('path');
+const webpack = require('webpack');
+
+function contractDefines() {
+  const p = path.resolve(__dirname, '../contracts/addresses.json');
+  if (!fs.existsSync(p)) return {};
+  const addresses = JSON.parse(fs.readFileSync(p, 'utf8'));
+  const net = addresses.testnet || {};
+  return {
+    __GREENPAY_CONTRACT_ID__: JSON.stringify(net.greenpay || ''),
+    __ESCROW_CONTRACT_ID__: JSON.stringify(net.escrow || ''),
+  };
+}
 
 module.exports = {
-  mode: 'production',
-  devtool: 'source-map',
+  mode: "production",
+  devtool: "source-map",
   entry: {
-    popup: './src/popup.ts',
-    settings: './src/settings.ts',
-    'content-script': './src/content-script.ts',
-    background: './src/background.ts',
+    popup: "./src/popup.ts",
+    settings: "./src/settings.ts",
+    "content-script": "./src/content-script.ts",
+    background: "./src/background.ts",
   },
   output: {
-    filename: '[name].js',
-    path: path.resolve(__dirname, 'dist'),
+    filename: "[name].js",
+    path: path.resolve(__dirname, "dist"),
     clean: true,
   },
   resolve: {
-    extensions: ['.ts', '.js'],
+    extensions: [".ts", ".js", ".css"],
     fallback: {
       buffer: false,
       crypto: false,
@@ -33,10 +46,17 @@ module.exports = {
     rules: [
       {
         test: /\.ts$/,
-        use: 'ts-loader',
-        exclude: /node_modules/,
+        use: "ts-loader",
+        exclude: [/node_modules/, /\.test\.ts$/, /\.spec\.ts$/],
+      },
+      {
+        test: /\.css$/i,
+        use: ["style-loader", "css-loader"],
       },
     ],
+  },
+  performance: {
+    hints: false,
   },
   optimization: {
     minimize: true,

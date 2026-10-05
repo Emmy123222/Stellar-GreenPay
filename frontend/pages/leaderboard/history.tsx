@@ -105,7 +105,7 @@ export default function LeaderboardHistoryPage() {
         <h1 className="font-display text-3xl sm:text-4xl font-bold text-forest-900 mb-3">
           Donor of the Month — History
         </h1>
-        <p className="text-[#5a7a5a] max-w-xl mx-auto font-body leading-relaxed">
+        <p className="text-[var(--text-secondary)] max-w-xl mx-auto font-body leading-relaxed">
           Each month&apos;s top climate donors, permanently recorded on the Stellar blockchain.
         </p>
         <Link href="/leaderboard" className="text-forest-600 text-sm underline mt-2 inline-block">
@@ -114,7 +114,7 @@ export default function LeaderboardHistoryPage() {
       </div>
 
       {loading && (
-        <div className="text-center text-[#5a7a5a] py-16">Loading…</div>
+        <div className="text-center text-[var(--text-secondary)] py-16">Loading…</div>
       )}
 
       {error && (
@@ -129,7 +129,7 @@ export default function LeaderboardHistoryPage() {
               <h2 className="font-display text-2xl font-bold text-forest-900 mb-1">
                 📈 Top Donor's 6-Month Trend
               </h2>
-              <p className="text-sm text-[#5a7a5a] mb-6">
+              <p className="text-sm text-[var(--text-secondary)] mb-6">
                 {chartData[0]?.donorName}'s XLM donations over the past 6 months
               </p>
               <div style={{ width: "100%", height: 350 }}>
@@ -164,7 +164,7 @@ export default function LeaderboardHistoryPage() {
 
           {/* Monthly Snapshots */}
           {history.length === 0 ? (
-            <div className="text-center text-[#5a7a5a] py-16">
+            <div className="text-center text-[var(--text-secondary)] py-16">
               No monthly snapshots yet. Check back after the first snapshot is taken.
             </div>
           ) : (
@@ -176,7 +176,7 @@ export default function LeaderboardHistoryPage() {
                   </h2>
 
                   {snapshot.entries.length === 0 ? (
-                    <p className="text-[#5a7a5a] text-sm">No donations recorded this month.</p>
+                    <p className="text-[var(--text-secondary)] text-sm">No donations recorded this month.</p>
                   ) : (
                     <div className="space-y-3">
                       {snapshot.entries.slice(0, 10).map((entry) => (

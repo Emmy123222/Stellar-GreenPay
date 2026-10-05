@@ -3,18 +3,90 @@
  */
 "use strict";
 
-const { server: stellarServer } = require("./stellar");
+const { server: stellarServer, getProjectDeactivatedEvents, getFundingMilestoneEvents } = require("./stellar");
+const { sendRecurringDonationCancelledEmail, sendFundingMilestoneEmail } = require("./email");
 const pool = require("../db/pool");
 const { v4: uuid } = require("uuid");
 const { computeBadges } = require("./store");
 const { checkAndDeliverMilestones } = require("./webhook");
 const donationEvents = require("./donationEvents");
 const logger = require("../logger");
+const { sendFundingMilestonePush } = require("./push");
 
 let lastProcessedLedger = 0;
+let lastDeactivationLedger = 0;
+let lastMilestoneLedger = 0;
 let isRunning = false;
 let io = null;
 let projectWallets = new Map(); // wallet_address -> project_id
+let deactivationPollTimer = null;
+let streamClose = null;
+let walletRefreshTimer = null;
+let reconnectTimer = null;
+let reconnectAttempt = 0;
+
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 60 * 1000;
+
+function isAuthError(err) {
+  const status = err?.status ?? err?.response?.status;
+  return status === 401 || status === 403 || /unauthori[sz]ed|forbidden|auth/i.test(String(err?.message || err));
+}
+
+function reconnectDelay() {
+  const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * (2 ** reconnectAttempt));
+  reconnectAttempt += 1;
+  return Math.round(delay * (0.8 + Math.random() * 0.4));
+}
+
+function scheduleStreamReconnect() {
+  if (!isRunning || reconnectTimer) return;
+  const delay = reconnectDelay();
+  logger.warn(
+    { event: "indexer_horizon_stream_reconnect_scheduled", delay, attempt: reconnectAttempt },
+    "Scheduling Horizon stream reconnect"
+  );
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    openOperationsStream();
+  }, delay);
+}
+
+function openOperationsStream() {
+  if (!isRunning) return;
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+
+  logger.info({ event: "indexer_stream_connecting", attempt: reconnectAttempt }, "Opening Horizon operations stream");
+  streamClose = stellarServer.operations().cursor("now").stream({
+    onmessage: async (op) => {
+      reconnectAttempt = 0;
+      try {
+        lastProcessedLedger = op.ledger_attr;
+        if (op.type === "payment" && op.asset_type === "native") {
+          const projectId = projectWallets.get(op.to);
+          if (projectId) await handleDonation(projectId, op);
+        }
+      } catch (err) {
+        logger.error({ event: "indexer_op_error", err }, err.message);
+      }
+    },
+    onerror: (err) => {
+      const authError = isAuthError(err);
+      logger.error(
+        { event: "indexer_horizon_stream_error", err, authError },
+        "Horizon stream error"
+      );
+      if (streamClose) {
+        streamClose();
+        streamClose = null;
+      }
+      scheduleStreamReconnect();
+    },
+  });
+}
 
 /**
  * Fetch all active project wallets and cache them.
@@ -50,33 +122,17 @@ async function startIndexer(socketIo) {
 
   await updateProjectWallets();
   // Refresh cache every 10 minutes
-  setInterval(updateProjectWallets, 10 * 60 * 1000);
+  walletRefreshTimer = setInterval(updateProjectWallets, 10 * 60 * 1000);
 
   logger.info({ event: "indexer_started" }, "Starting Horizon operations stream");
 
-  // Start streaming operations from 'now'
-  stellarServer.operations()
-    .cursor("now")
-    .stream({
-      onmessage: async (op) => {
-        try {
-          lastProcessedLedger = op.ledger_attr;
+  // Poll Soroban contract events for ProjectDeactivated
+  pollDeactivationEvents().catch(() => {});
+  if (!deactivationPollTimer) {
+    deactivationPollTimer = setInterval(pollDeactivationEvents, 30 * 1000);
+  }
 
-          // We only care about XLM payments
-          if (op.type === "payment" && op.asset_type === "native") {
-            const projectId = projectWallets.get(op.to);
-            if (projectId) {
-              await handleDonation(projectId, op);
-            }
-          }
-        } catch (err) {
-          logger.error({ event: "indexer_op_error", err }, err.message);
-        }
-      },
-      onerror: (err) => {
-        logger.error({ event: "indexer_horizon_stream_error", err }, "Horizon stream error");
-      }
-    });
+  openOperationsStream();
 }
 
 /**
@@ -230,19 +286,197 @@ function getStatus() {
   return {
     isRunning,
     lastProcessedLedger,
+    lastDeactivationLedger,
     projectWalletsCount: projectWallets.size,
     timestamp: new Date().toISOString()
   };
 }
 
 /**
- * Get the current indexer status used by the health endpoint.
+ * Handle a project deactivation event.
+ * Cancels all recurring donations for the project and notifies donors via email.
  *
- * @returns {{isRunning:boolean,lastProcessedLedger:number,projectWalletsCount:number,timestamp:string}}
+ * @param {string} projectId - Project identifier (UUID or wallet address).
+ * @returns {Promise<{ cancelledCount: number }>}
  */
-// exported as `getStatus`
+async function handleProjectDeactivated(projectId) {
+  if (!projectId) return { cancelledCount: 0 };
+
+  const client = await pool.connect();
+  let inTransaction = false;
+
+  try {
+    // 1. Find all active/pending recurring donations for this project
+    const donationsResult = await client.query(
+      `SELECT rd.id, rd.donor_address, p.name AS project_name
+       FROM recurring_donations rd
+       JOIN projects p ON rd.project_id = p.id
+       WHERE (p.id::text = $1 OR p.wallet_address = $1)
+         AND (rd.status IS NULL OR rd.status NOT IN ('cancelled', 'completed'))`,
+      [projectId]
+    );
+
+    const activeDonations = donationsResult.rows;
+
+    await client.query("BEGIN");
+    inTransaction = true;
+
+    // 2. Cancel recurring donations for the project
+    try {
+      await client.query(
+        `UPDATE recurring_donations
+         SET status = 'cancelled', active = false, updated_at = NOW()
+         WHERE project_id IN (
+           SELECT id FROM projects WHERE id::text = $1 OR wallet_address = $1
+         )
+         AND (status IS NULL OR status NOT IN ('cancelled', 'completed'))`,
+        [projectId]
+      );
+    } catch {
+      await client.query(
+        `UPDATE recurring_donations
+         SET status = 'cancelled'
+         WHERE project_id IN (
+           SELECT id FROM projects WHERE id::text = $1 OR wallet_address = $1
+         )
+         AND (status IS NULL OR status NOT IN ('cancelled', 'completed'))`,
+        [projectId]
+      );
+    }
+
+    await client.query("COMMIT");
+    inTransaction = false;
+
+    logger.info(
+      { event: "project_deactivated_recurring_cancelled", projectId, count: activeDonations.length },
+      `Cancelled ${activeDonations.length} recurring donations for deactivated project ${projectId}`
+    );
+
+    // 3. Notify donors by email
+    for (const donation of activeDonations) {
+      try {
+        const subResult = await pool.query(
+          `SELECT email FROM project_subscriptions
+           WHERE donor_address = $1 AND (unsubscribed = false OR unsubscribed IS NULL)
+           ORDER BY (project_id IN (SELECT id FROM projects WHERE id::text = $2 OR wallet_address = $2)) DESC, created_at DESC
+           LIMIT 1`,
+          [donation.donor_address, projectId]
+        );
+
+        const email = subResult.rows[0]?.email;
+        if (email) {
+          await sendRecurringDonationCancelledEmail({
+            email,
+            projectName: donation.project_name,
+            donationId: donation.id,
+          });
+        }
+      } catch (emailErr) {
+        logger.error(
+          { event: "recurring_cancellation_email_error", donationId: donation.id, err: emailErr },
+          emailErr.message
+        );
+      }
+    }
+
+    return { cancelledCount: activeDonations.length };
+  } catch (err) {
+    if (inTransaction) await client.query("ROLLBACK");
+    logger.error({ event: "handle_project_deactivated_error", projectId, err }, err.message);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Poll Soroban RPC for ProjectDeactivated contract events and process them.
+ */
+async function pollDeactivationEvents() {
+  try {
+    const events = await getProjectDeactivatedEvents(lastDeactivationLedger || undefined);
+    for (const evt of events) {
+      if (evt.ledger && evt.ledger > lastDeactivationLedger) {
+        lastDeactivationLedger = evt.ledger;
+      }
+      if (evt.projectId) {
+        await handleProjectDeactivated(evt.projectId);
+      }
+    }
+    const milestoneEvents = await getFundingMilestoneEvents(lastMilestoneLedger || undefined);
+    for (const evt of milestoneEvents) {
+      if (evt.ledger && evt.ledger > lastMilestoneLedger) lastMilestoneLedger = evt.ledger;
+      await handleFundingMilestone(evt);
+    }
+  } catch (err) {
+    logger.error({ event: "poll_deactivation_events_error", err }, err.message);
+  }
+}
+
+async function handleFundingMilestone({ projectId, percentage, totalRaisedXLM }) {
+  try {
+    const projectResult = await pool.query("SELECT id, name FROM projects WHERE id = $1", [projectId]);
+    const project = projectResult.rows[0];
+    if (!project) return;
+    const recorded = await pool.query(
+      `INSERT INTO project_milestone_notifications (project_id, percentage, total_raised_xlm)
+       VALUES ($1, $2, $3) ON CONFLICT (project_id, percentage) DO NOTHING RETURNING project_id`,
+      [projectId, percentage, totalRaisedXLM],
+    );
+    if (!recorded.rowCount) return;
+
+    const recipients = await pool.query(
+      `SELECT DISTINCT ps.email
+         FROM project_subscriptions ps
+         LEFT JOIN profiles pr ON pr.public_key = ps.donor_address
+        WHERE ps.project_id = $1 AND COALESCE(ps.unsubscribed, FALSE) = FALSE
+          AND ps.donor_address IN (SELECT donor_address FROM donations WHERE project_id = $1)
+          AND COALESCE(pr.milestone_notifications_enabled, TRUE) = TRUE`,
+      [projectId],
+    );
+    await Promise.all([
+      sendFundingMilestoneEmail({
+        emails: recipients.rows.map((row) => row.email),
+        projectName: project.name,
+        percentage,
+        totalRaisedXLM: Number(totalRaisedXLM).toFixed(7),
+      }),
+      sendFundingMilestonePush({ projectId, projectName: project.name, percentage, totalRaisedXLM }),
+    ]);
+  } catch (err) {
+    logger.error({ event: "funding_milestone_notification_error", projectId, percentage, err }, err.message);
+  }
+}
+
+/**
+ * Stop the indexer and timers.
+ */
+function stopIndexer() {
+  isRunning = false;
+  if (walletRefreshTimer) {
+    clearInterval(walletRefreshTimer);
+    walletRefreshTimer = null;
+  }
+  if (deactivationPollTimer) {
+    clearInterval(deactivationPollTimer);
+    deactivationPollTimer = null;
+  }
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (streamClose) {
+    streamClose();
+    streamClose = null;
+  }
+  reconnectAttempt = 0;
+}
 
 module.exports = {
   startIndexer,
-  getStatus
+  stopIndexer,
+  getStatus,
+  handleProjectDeactivated,
+  pollDeactivationEvents,
+  handleFundingMilestone,
 };

@@ -2,6 +2,11 @@
 
 A step-by-step guide to making your first climate donation on Stellar Testnet in under 10 minutes.
 
+> **Last verified against API v1.3 — 2026-09-30**
+>
+> The code examples below were audited against the current API spec
+> (`docs/openapi.yml`). If an example looks out of date, please open an issue.
+
 ---
 
 ## Video Walkthrough
@@ -63,4 +68,154 @@ Paste the transaction hash into [Stellar Expert (testnet)](https://stellar.exper
 
 ---
 
+## Verify via the API (optional)
+
+The examples below use the current API response shapes. All endpoints are
+served under the `/api/v1` prefix (issue #204).
+
+### Record a donation
+
+`POST /api/donations`
+
+Request:
+
+```json
+{
+  "projectId": "c4ac10b-58cc-4372-a567-0e02b2c3d479",
+  "donorAddress": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+  "amountXLM": "100",
+  "currency": "XLM",
+  "message": "For the planet!",
+  "transactionHash": "abc123…"
+}
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "8d9ac19b-52eb-42f7-80d9-19a88ba59e43",
+    "projectId": "c4ac10b-58cc-4372-a567-0e02b2c3d479",
+    "donorAddress": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+    "amount": "100",
+    "currency": "XLM",
+    "message": "For the planet!",
+    "transactionHash": "abc123…",
+    "amountXLM": "100.0000000",
+    "co2OffsetKg": 500,
+    "createdAt": "2026-09-30T12:00:00.000Z"
+  }
+}
+```
+
+> **Note:** the donation id is `data.id` (not `donation_id`), and the
+> amount in XLM is `data.amountXLM` (not `amount_xlm`).
+
+### Fetch a donor's history
+
+`GET /api/donations/donor/:publicKey`
+
+```bash
+curl "http://localhost:4000/api/v1/donations/donor/GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN?limit=20"
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "8d9ac19b-52eb-42f7-80d9-19a88ba59e43",
+      "projectId": "c4ac10b-58cc-4372-a567-0e02b2c3d479",
+      "donorAddress": "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+      "amountXLM": "100.0000000",
+      "co2OffsetKg": 500,
+      "transactionHash": "abc123…",
+      "createdAt": "2026-09-30T12:00:00.000Z"
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null,
+  "total": 1
+}
+```
+
+> **Note:** pagination uses `has_more` / `next_cursor` (not `hasNext` /
+> `nextPage`), and the total count is `total` (not `count`).
+
+---
+
 > Total time: **≈ 6 minutes** for a brand-new Stellar user.
+
+---
+
+## Embedding the Donation Widget
+
+The `/widget/[projectId]` page is designed to be iframed on any third-party site.
+
+### Security headers
+
+Every response from `/widget/*` includes:
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `Content-Security-Policy` | `frame-ancestors *` | Permits framing by any origin (CSP3, all modern browsers) |
+| `X-Frame-Options` | `ALLOWALL` | Legacy signal for older middleware / CDNs |
+
+All other routes continue to send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+
+### Basic embed
+
+Replace `PROJECT_ID` with the project's numeric or slug identifier:
+
+```html
+<iframe
+  src="https://greenpay.app/widget/PROJECT_ID"
+  width="360"
+  height="420"
+  style="border:none;border-radius:12px;"
+  title="Donate to a climate project on GreenPay"
+  loading="lazy"
+></iframe>
+```
+
+### Customisation parameters
+
+Append query parameters to tailor the widget appearance:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `theme` | `light` | `light` or `dark` colour scheme |
+| `accent` | `#059669` | Hex colour for the header, progress bar, and button |
+| `buttonText` | `Donate on GreenPay` | Label on the call-to-action button |
+| `currency` | `XLM` | Display currency: `XLM` or `USDC` |
+
+**Example — dark theme with custom accent:**
+
+```html
+<iframe
+  src="https://greenpay.app/widget/PROJECT_ID?theme=dark&accent=%232563EB&buttonText=Support+This+Project&currency=XLM"
+  width="360"
+  height="420"
+  style="border:none;border-radius:12px;"
+  title="Donate to a climate project on GreenPay"
+  loading="lazy"
+></iframe>
+```
+
+> **Note:** URL-encode the `#` in hex colours as `%23` (e.g. `#2563EB` → `%232563EB`).
+
+### Recommended `sandbox` attributes
+
+If your host page already applies a `sandbox` attribute to its iframes, include at least the following permissions so the widget can function correctly:
+
+```html
+sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+```
+
+- `allow-scripts` — required for React to hydrate the widget.
+- `allow-same-origin` — required for the widget to call the GreenPay API.
+- `allow-popups` + `allow-popups-to-escape-sandbox` — the **Donate** button opens the full project page in a new tab; without these the popup is silently blocked.

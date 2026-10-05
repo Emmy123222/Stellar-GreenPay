@@ -4,11 +4,43 @@
  */
 "use strict";
 
-const { Horizon, Networks, rpc, Contract, TransactionBuilder, scValToNative, xdr, Address, StrKey, Account } = require("@stellar/stellar-sdk");
+const { Horizon, Networks, rpc, Contract, TransactionBuilder, scValToNative, xdr, Address, StrKey, Account, Config } = require("@stellar/stellar-sdk");
 
 const NETWORK     = process.env.STELLAR_NETWORK || "testnet";
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 const RPC_URL     = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+
+// Bounded HTTP timeout for every outbound Stellar call (issue #1097). Without
+// one a hung Horizon/RPC connection parks the request that awaits it forever.
+const STELLAR_TIMEOUT_MS = Number.parseInt(process.env.STELLAR_TIMEOUT_MS, 10) || 15000;
+
+// Three separate switches are needed, and only the first two are obvious:
+// `Config.setTimeout` is documented as global but in @stellar/stellar-sdk v13
+// it is read only by the Federation and stellar.toml clients. Horizon and
+// Soroban RPC each talk through their own module-level axios instance, so each
+// has to be bounded explicitly.
+Config.setTimeout(STELLAR_TIMEOUT_MS);
+Horizon.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+rpc.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+
+/**
+ * True when `err` is an aborted/expired outbound request rather than a genuine
+ * Horizon/RPC error response.
+ *
+ * The SDK exposes no `TimeoutError` class in v13, and the two axios clients
+ * surface a timeout as `code: "ECONNABORTED"` (or `"ETIMEDOUT"` further down
+ * the socket stack), so callers should not be taught to match one shape.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isStellarTimeoutError(err) {
+  if (!err || typeof err !== "object") return false;
+  const { name, code, message } = /** @type {{ name?: string, code?: string, message?: string }} */ (err);
+  if (name === "TimeoutError") return true;
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return true;
+  return typeof message === "string" && /timeout of \d+ms exceeded|timed? ?out/i.test(message);
+}
 
 const NETWORK_PASSPHRASE = NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 const server = new Horizon.Server(HORIZON_URL);
@@ -354,12 +386,106 @@ function getProjectIdFromProjRegEvent(tx) {
   return null;
 }
 
+/**
+ * Query Soroban RPC for ProjectDeactivated events.
+ *
+ * @param {number} [startLedger] - Ledger sequence to start querying from.
+ * @returns {Promise<Array<{ projectId: string, ledger: number }>>}
+ */
+async function getProjectDeactivatedEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+
+  const request = {
+    filters: [
+      {
+        type: "contract",
+        contractIds: [CONTRACT_ID],
+        topics: [
+          [
+            xdr.ScVal.scvSymbol("ProjectDeactivated").toXDR("base64"),
+            "*",
+          ],
+        ],
+      },
+    ],
+    limit: 50,
+  };
+  if (startLedger) {
+    request.startLedger = startLedger;
+  }
+
+  let response;
+  try {
+    response = await rpcServer.getEvents(request);
+  } catch (err) {
+    return [];
+  }
+
+  if (!response || !response.events) return [];
+
+  const results = [];
+  for (const evt of response.events) {
+    try {
+      let projectId = null;
+      if (evt.value) {
+        if (typeof evt.value === "string") {
+          projectId = scValToNative(xdr.ScVal.fromXDR(evt.value, "base64"));
+        } else {
+          projectId = scValToNative(evt.value);
+        }
+      }
+      if (typeof projectId === "string" && projectId.length > 0) {
+        results.push({ projectId, ledger: evt.ledger });
+      }
+    } catch {
+      // skip unparseable
+    }
+  }
+  return results;
+}
+
+async function getFundingMilestoneEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+  const request = {
+    filters: [{
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      topics: [[xdr.ScVal.scvSymbol("MilestoneReached").toXDR("base64"), "*", "*"]],
+    }],
+    limit: 100,
+  };
+  if (startLedger) request.startLedger = startLedger;
+  let response;
+  try { response = await rpcServer.getEvents(request); }
+  catch { return []; }
+  const events = [];
+  for (const event of response?.events || []) {
+    try {
+      const decode = (value) => scValToNative(
+        typeof value === "string" ? xdr.ScVal.fromXDR(value, "base64") : value,
+      );
+      const topics = event.topic || event.topics || [];
+      const projectId = decode(topics[1]);
+      const percentage = Number(decode(topics[2]));
+      const totalRaisedStroops = BigInt(decode(event.value));
+      if (typeof projectId === "string" && [25, 50, 75, 100].includes(percentage)) {
+        events.push({ projectId, percentage, totalRaisedXLM: Number(totalRaisedStroops) / 10_000_000, ledger: event.ledger });
+      }
+    } catch { /* Ignore malformed or unrelated events. */ }
+  }
+  return events;
+}
+
 module.exports = {
   server,
   rpcServer,
   CONTRACT_ID,
   NETWORK_PASSPHRASE,
+  STELLAR_TIMEOUT_MS,
+  isStellarTimeoutError,
   getOnChainProject,
   getProjectDonationEvents,
-  getRegisteredProjectIdFromTransaction
+  getRegisteredProjectIdFromTransaction,
+  getProjectDeactivatedEvents,
+  getFundingMilestoneEvents,
 };

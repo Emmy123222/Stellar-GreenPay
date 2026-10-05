@@ -10,9 +10,55 @@ on:
 # SENTRY_DSN  — Sentry DSN for error tracking (optional). Builds pass without it.
 #               Configure as a GitHub Actions secret when deploying to production
 #               to enable error reporting in CI builds.
+# CODECOV_TOKEN — Codecov token for uploading test coverage (optional).
+#                 Configured as a repository secret.
 # ──────────────────────────────────────────────────────────────────────────────
 
 jobs:
+  frontend-coverage:
+    name: Frontend Unit Tests & Coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check locale key parity
+        run: node ../scripts/check-locale-keys.js
+
+      - name: Run unit tests with coverage
+        run: npm test -- --coverage --ci
+
+      - name: Upload coverage report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-coverage-report
+          path: frontend/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+
   frontend-build-and-e2e:
     name: Frontend Build and Playwright E2E
     runs-on: ubuntu-latest
@@ -39,7 +85,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: |
             frontend/package-lock.json

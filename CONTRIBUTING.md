@@ -138,6 +138,94 @@ pnpm test          # unit + integration
 pnpm test:e2e      # end-to-end (requires running backend + Horizon testnet)
 ```
 
+## Smart Contracts (Soroban)
+
+The on-chain layer lives in [`contracts/`](contracts/) — a Cargo workspace with
+`greenpay-contract` and `escrow-contract`. The full developer guide is
+[`contracts/README.md`](contracts/README.md).
+
+### Prerequisites
+
+```bash
+# Rust toolchain (stable)
+curl https://sh.rustup.rs -sSf | sh
+
+# WebAssembly target used by this repo
+rustup target add wasm32v1-none
+```
+
+### Run the contract tests
+
+```bash
+cd contracts
+
+# Everything CI runs (both contracts, unit + integration tests)
+cargo test --workspace
+
+# Unit tests with the soroban-sdk testutils feature enabled
+cargo test --features testutils
+
+# Fuzz tests only
+cargo test --features testutils fuzz
+
+# A single integration test (example: upgrade regression test)
+cargo test -p greenpay-contract --lib test_upgrade_preserves_donation_state_and_storage_keys
+```
+
+Contract tests execute inside the Soroban test host — no testnet account or
+network access is needed. Snapshot fixtures live in
+`contracts/greenpay-contract/test_snapshots/` and are compared on every run, so
+an intentional behavior change requires updating them (`cargo insta review`).
+
+Lint before pushing:
+
+```bash
+cargo clippy --workspace -- -D warnings
+```
+
+### Build the WASM
+
+```bash
+cd contracts
+cargo build --workspace --target wasm32v1-none --release
+```
+
+Artifacts are written to `contracts/<crate>/target/wasm32v1-none/release/*.wasm`.
+
+> **Note on targets:** this workspace builds for `wasm32v1-none`. The older
+> `cargo build --target wasm32-unknown-unknown` command found in some legacy
+> docs no longer compiles with `soroban-sdk` 26 on Rust ≥ 1.82 (the build script
+> rejects `reference-types`/`multi-value` on that target), so always use
+> `wasm32v1-none` — it is also the target Contracts CI uses.
+
+### Deploy to testnet
+
+```bash
+# From the repo root — builds and deploys in one step
+./scripts/deploy-contract.sh testnet alice
+
+# Or deploy an already-built WASM with the Stellar CLI directly
+cd contracts
+stellar contract deploy \
+  --wasm greenpay-contract/target/wasm32v1-none/release/greenpay_contract.wasm \
+  --source alice \
+  --network testnet
+```
+
+`alice` is a [Stellar CLI](https://developers.stellar.org/docs/tools/cli)
+identity that must be funded on the target network (Friendbot for testnet).
+See [`scripts/deploy-contract.sh`](scripts/deploy-contract.sh) for the full
+flow, including post-deploy configuration.
+
+### Further reading
+
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — registering the contract on
+  mainnet and updating the app configuration with the new contract ID.
+- [`docs/contract-integration.md`](docs/contract-integration.md) — how the
+  backend and frontend call the contract.
+- [`contracts/greenpay-contract/UPGRADE.md`](contracts/greenpay-contract/UPGRADE.md)
+  — state-migration test requirements for contract upgrades.
+
 ## Sentry (Error monitoring)
 
 We use Sentry to capture unhandled exceptions and performance traces.

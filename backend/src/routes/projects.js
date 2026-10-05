@@ -12,8 +12,9 @@ const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow, updateWebhook, computeBadges } = require("../services/store");
 const {
   getOnChainProject,
-  getProjectDonationEvents,
+getProjectDonationEvents,
   getRegisteredProjectIdFromTransaction,
+  buildSetFundingDeadlineTx,
   CONTRACT_ID,
   server,
   NETWORK_PASSPHRASE,
@@ -21,7 +22,7 @@ const {
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
@@ -33,6 +34,8 @@ const PROJECT_DETAIL_CACHE_PREFIX = "projects:detail:";
 const PROJECT_MILESTONES_CACHE_TTL = 300; // seconds (5 minutes)
 const PROJECT_MILESTONES_CACHE_PREFIX = "projects:milestones:";
 
+const FUNDING_DEADLINE_CACHE_PREFIX = "projects:funding-deadline:";
+
 function getProjectMilestonesCacheKey(projectId) {
   return PROJECT_MILESTONES_CACHE_PREFIX + projectId;
 }
@@ -41,6 +44,9 @@ function getProjectDetailCacheKey(projectId) {
   return PROJECT_DETAIL_CACHE_PREFIX + projectId;
 }
 
+function getFundingDeadlineCacheKey(projectId) {
+  return FUNDING_DEADLINE_CACHE_PREFIX + projectId;
+}
 const VALID_STATUSES = ["active", "completed", "paused"];
 const VALID_CATEGORIES = [
   "Reforestation",
@@ -102,6 +108,52 @@ function mapCampaignRow(row) {
     active: !completed,
     createdAt: new Date(row.created_at).toISOString(),
   };
+}
+
+/**
+ * Map a project_funding_deadlines row into the API shape.
+ *
+ * @param {object} row - Row from project_funding_deadlines.
+ * @returns {object|null} Normalized funding deadline payload, or null.
+ */
+function mapFundingDeadlineRow(row) {
+  if (!row) return null;
+  const goalXLM = Number.parseFloat(row.goal_amount?.toString() || "0");
+  const raisedXLM = Number.parseFloat(row.raised_xlm?.toString() || "0");
+  const deadlineMs = new Date(row.deadline_at).getTime();
+  const now = Date.now();
+  const past = now >= deadlineMs;
+  const met = goalXLM > 0 && raisedXLM >= goalXLM;
+  return {
+    projectId: row.project_id,
+    deadlineLedger: row.deadline_ledger != null ? Number(row.deadline_ledger) : null,
+    deadlineAt: new Date(row.deadline_at).toISOString(),
+    goalAmount: goalXLM.toFixed(7),
+    raisedXLM: raisedXLM.toFixed(7),
+    goalMet: met,
+    expired: past,
+    refundTriggered: Boolean(row.refund_triggered),
+    refundTriggeredAt: row.refund_triggered_at
+      ? new Date(row.refund_triggered_at).toISOString()
+      : null,
+  };
+}
+
+/**
+ * Fetch the funding deadline configuration for a project (may be null).
+ *
+ * @param {string} projectId - Project UUID.
+ * @returns {Promise<object|null>} Funding deadline payload or null.
+ */
+async function fetchFundingDeadline(projectId) {
+  const result = await pool.query(
+    `SELECT fd.*, COALESCE(p.raised_xlm, 0) AS raised_xlm
+       FROM project_funding_deadlines fd
+       LEFT JOIN projects p ON p.id = fd.project_id
+      WHERE fd.project_id = $1`,
+    [projectId],
+  );
+  return mapFundingDeadlineRow(result.rows[0]);
 }
 
 async function fetchCampaignsForProject(projectId) {
@@ -259,12 +311,29 @@ router.get("/", async (req, res, next) => {
       status,
       verified,
       search,
+      q,
       limit = 20,
       cursor,
       sort = "created_at",
+      include_inactive,
     } = req.query;
     const sortField = VALID_SORT_FIELDS.includes(sort) ? sort : "created_at";
     const pageSize = Math.min(Number.parseInt(limit, 10) || 20, 100);
+
+    const adminKey = req.get("X-Admin-Key");
+    const authHeader = req.headers.authorization;
+    const isAdminOverride =
+      include_inactive === "true" &&
+      ((typeof adminKey === "string" && isValidAdminKey(adminKey)) ||
+        (typeof authHeader === "string" &&
+          authHeader.startsWith("Bearer ") &&
+          (() => {
+            try {
+              return Boolean(verifyToken(authHeader.slice(7)));
+            } catch {
+              return false;
+            }
+          })()));
 
     const cacheKey =
       PROJECTS_LIST_CACHE_PREFIX +
@@ -272,7 +341,7 @@ router.get("/", async (req, res, next) => {
         category,
         status,
         verified,
-        search,
+search: search || q,
         sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
@@ -288,6 +357,8 @@ router.get("/", async (req, res, next) => {
     if (status && VALID_STATUSES.includes(status)) {
       values.push(status);
       where.push(`status = $${values.length}`);
+    } else if (!status && !isAdminOverride && include_inactive !== "true") {
+      where.push("status = 'active'");
     }
     if (category && VALID_CATEGORIES.includes(category)) {
       values.push(category);
@@ -296,8 +367,9 @@ router.get("/", async (req, res, next) => {
     if (verified === "true") {
       where.push("verified = true");
     }
-    if (search && typeof search === "string") {
-      values.push(search.trim());
+const searchTerm = q || search;
+    if (searchTerm && typeof searchTerm === "string") {
+      values.push(searchTerm.trim());
       where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
     }
 
@@ -316,7 +388,7 @@ router.get("/", async (req, res, next) => {
       values.push(sortValue, id);
       const sortValIdx = values.length - 1;
       const idIdx = values.length;
-      where.push(
+where.push(
         `(${sortField} < $${sortValIdx} OR (${sortField} = $${sortValIdx} AND id < $${idIdx}))`,
       );
     }
@@ -366,16 +438,14 @@ router.get("/", async (req, res, next) => {
  * POST /api/projects
  * Create a new project. Validates string lengths to prevent database bloat.
  */
-/**
- * Create a new project record.
- *
- * @route POST /api/projects
- * @param {import('express').Request} req - Express request with project creation payload.
- * @param {import('express').Response} res - Express response object.
- * @param {import('express').NextFunction} next - Express error middleware.
- * @returns {Promise<void>} Sends the created project payload.
- * @throws {Error} If validation or database insertion fails.
- */
+// Create a new project record.
+// @route POST /api/projects
+// @param {import('express').Request} req - Express request with project creation payload.
+// @param {import('express').Response} res - Express response object.
+// @param {import('express').NextFunction} next - Express error middleware.
+// @returns {Promise<void>} Sends the created project payload.
+// @throws {Error} If validation or database insertion fails.
+// */
 router.post("/", async (req, res, next) => {
   try {
     const {
@@ -419,11 +489,9 @@ router.post("/", async (req, res, next) => {
         .json({ error: "location must be between 2 and 200 characters" });
     }
     if (!category || !VALID_CATEGORIES.includes(category)) {
-      return res
-        .status(400)
-        .json({
-          error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
-        });
+      return res.status(400).json({
+        error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
+      });
     }
     if (!wallet_address || typeof wallet_address !== "string") {
       return res.status(400).json({ error: "wallet_address is required" });
@@ -450,6 +518,37 @@ router.post("/", async (req, res, next) => {
     res
       .status(201)
       .json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/donors
+ * Returns each donor address once for a project.
+ */
+router.get("/:id/donors", async (req, res, next) => {
+  try {
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ success: false, error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `SELECT DISTINCT donor_address
+         FROM donations
+        WHERE project_id = $1
+        ORDER BY donor_address ASC`,
+      [req.params.id],
+    );
+
+    res.json({
+      success: true,
+      data: result.rows.map((row) => row.donor_address),
+    });
   } catch (e) {
     next(e);
   }
@@ -806,7 +905,7 @@ router.get("/admin/pending", async (req, res, next) => {
     const offset = parseInt(req.query.offset, 10) || 0;
 
     const countResult = await pool.query(
-      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'"
+      "SELECT COUNT(*)::int AS total FROM projects WHERE verified = false AND status = 'active'",
     );
     const total = countResult.rows[0].total;
 
@@ -815,13 +914,13 @@ router.get("/admin/pending", async (req, res, next) => {
        WHERE verified = false AND status = 'active'
        ORDER BY created_at ASC
        LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      [limit, offset],
     );
 
     res.json({
       success: true,
       data: result.rows.map(mapProjectRow),
-      total
+      total,
     });
   } catch (e) {
     next(e);
@@ -833,15 +932,26 @@ router.get("/admin/pending", async (req, res, next) => {
  * Builds a Soroban transaction to register a project on-chain.
  * Returns the XDR for the admin to sign.
  */
-router.post("/admin/register", adminRequired, async (req, res) => {
+router.post("/admin/register", adminTokenRequired, async (req, res) => {
   try {
     const { projectId, name, wallet, co2PerXLM, adminAddress } = req.body;
 
     if (!CONTRACT_ID) throw new Error("CONTRACT_ID not configured");
-    if (!adminAddress) return res.status(401).json({ success: false, error: "adminAddress is required" });
+    if (!adminAddress)
+      return res
+        .status(401)
+        .json({ success: false, error: "adminAddress is required" });
 
     const contract = new Contract(CONTRACT_ID);
     const sourceAccount = await server.loadAccount(adminAddress);
+    const projectGoalResult = await pool.query(
+      "SELECT goal_xlm FROM projects WHERE id = $1",
+      [projectId],
+    );
+    const goalStroops = BigInt(Math.round(Number(projectGoalResult.rows[0]?.goal_xlm || 0) * 10_000_000));
+    if (goalStroops <= 0n) {
+      return res.status(400).json({ success: false, error: "Project must have a positive funding goal before on-chain registration" });
+    }
 
     const tx = new TransactionBuilder(sourceAccount, {
       fee: "1000",
@@ -855,8 +965,10 @@ router.post("/admin/register", adminRequired, async (req, res) => {
           name,
           wallet,
           parseInt(co2PerXLM),
+          1n,
         ),
       )
+      .addOperation(contract.call("set_project_goal", adminAddress, projectId, goalStroops))
       .setTimeout(30)
       .build();
 
@@ -884,7 +996,7 @@ router.post("/admin/register", adminRequired, async (req, res) => {
  * project as verified by replaying a registration transaction hash that
  * belongs to a different project.
  */
-router.post("/admin/confirm", adminRequired, async (req, res) => {
+router.post("/admin/confirm", adminTokenRequired, async (req, res) => {
   try {
     const { transactionHash, projectId } = req.body;
 
@@ -1036,6 +1148,22 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
+    // Fetch the most recent individual reviews for the project detail page.
+    const recentReviewsResult = await pool.query(
+      `SELECT donor_address, rating, review, created_at
+       FROM project_ratings
+       WHERE project_id = $1
+       ORDER BY created_at DESC
+       LIMIT 5`,
+      [req.params.id],
+    );
+    const recentReviews = recentReviewsResult.rows.map((row) => ({
+      donorAddress: row.donor_address,
+      rating: row.rating,
+      review: row.review,
+      createdAt: new Date(row.created_at).toISOString(),
+    }));
+
     // Fetch subscriber count
     const subscriberResult = await pool.query(
       "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
@@ -1047,6 +1175,9 @@ router.get("/:id", async (req, res, next) => {
       "SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY percentage ASC",
       [req.params.id],
     );
+
+// Funding deadline / auto-refund metadata (may be null if not configured).
+    const fundingDeadline = await fetchFundingDeadline(req.params.id);
 
     // Follower count + optional isFollowing from wallet-only project_follows rows.
     // When ?walletAddress=G... is passed, include whether that wallet follows.
@@ -1107,10 +1238,13 @@ router.get("/:id", async (req, res, next) => {
           : "0.0000000",
         campaigns,
         activeCampaign: campaigns.find((campaign) => campaign.active) || null,
+        fundingDeadline,
         averageRating: parseFloat(ratingResult.rows[0]?.avg_rating) || 0,
         ratingCount: parseInt(ratingResult.rows[0]?.count) || 0,
+        recentReviews,
         milestones: milestoneResult.rows.map(mapProjectMilestoneRow),
         followCount,
+        subscriberCount: parseInt(subscriberResult.rows[0]?.count || 0, 10) || 0,
         isFollowing,
       },
     };
@@ -1121,6 +1255,119 @@ router.get("/:id", async (req, res, next) => {
     }
 
     res.json(responseBody);
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/on-chain-donations
+ * Returns decoded on-chain donation events emitted by the Soroban contract.
+ */
+router.get("/:id/on-chain-donations", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const result = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    if (!result.rows[0]) return res.status(404).json({ error: "Project not found" });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const cursor = req.query.cursor;
+    const stellarService = require("../services/stellar");
+    const events = await stellarService.getProjectDonationEvents(projectId, { limit, cursor });
+
+    const data = events.map((e) => ({
+      donor: e.donor,
+      amount: e.amount,
+      ledger: e.ledger,
+      badge: e.badge,
+      msgHash: e.msgHash,
+    }));
+
+    const nextCursor = events.length ? events[events.length - 1].pagingToken : null;
+    res.json({ success: true, data, nextCursor });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/projects/:id/impact-certificate
+ * Returns a printable certificate payload for a donor's contributions to a project.
+ */
+router.get("/:id/impact-certificate", async (req, res, next) => {
+  try {
+    const donorAddress = req.query.donorAddress;
+    if (!donorAddress) {
+      const e = new Error("donorAddress is required");
+      e.status = 400;
+      throw e;
+    }
+    if (!/^G[A-Z0-9]{55}$/.test(donorAddress)) {
+      const e = new Error("Invalid donorAddress");
+      e.status = 400;
+      throw e;
+    }
+
+    const projectRes = await pool.query("SELECT id, name, category, verified, on_chain_verified, raised_xlm, co2_offset_kg FROM projects WHERE id = $1", [req.params.id]);
+    if (!projectRes.rows[0]) {
+      const e = new Error("Project not found");
+      e.status = 404;
+      throw e;
+    }
+
+    const project = projectRes.rows[0];
+    const profileRes = await pool.query("SELECT display_name FROM profiles WHERE public_key = $1", [donorAddress]);
+    const donationsRes = await pool.query("SELECT * FROM donations WHERE project_id = $1 AND donor_address = $2", [req.params.id, donorAddress]);
+
+    if (!donationsRes.rows || donationsRes.rows.length === 0) {
+      const e = new Error("No donations found for donor on this project");
+      e.status = 404;
+      throw e;
+    }
+
+    const totalDonated = donationsRes.rows.reduce((acc, r) => acc + Number.parseFloat(r.amount_xlm || r.amount || "0"), 0);
+    const totalDonatedStr = totalDonated.toFixed(7);
+    const raised = Number.parseFloat(project.raised_xlm || "0");
+    const projectCo2 = Number.parseFloat(project.co2_offset_kg || "0");
+    const kgPerXlm = raised > 0 ? projectCo2 / raised : 0;
+    const co2OffsetKg = Math.round(totalDonated * kgPerXlm);
+
+    // badge tiers: bronze <100, silver >=100, gold >=1000, platinum >=10000
+    let badgeTier = "bronze";
+    if (totalDonated >= 10000) badgeTier = "platinum";
+    else if (totalDonated >= 1000) badgeTier = "gold";
+    else if (totalDonated >= 100) badgeTier = "silver";
+    else badgeTier = "bronze";
+
+    const QR = require("qrcode");
+    const qrContent = JSON.stringify({ projectId: project.id, donor: donorAddress, donated: totalDonatedStr });
+    const qrCode = await QR.toDataURL(qrContent);
+
+    const treesEquivalent = (co2OffsetKg > 0) ? Number((co2OffsetKg / 21.77).toFixed(2)) : 0;
+
+    const data = {
+      projectId: project.id,
+      projectName: project.name,
+      donorAddress,
+      projectCategory: project.category,
+      projectVerified: Boolean(project.verified) || Boolean(project.on_chain_verified),
+      donorName: profileRes.rows[0]?.display_name ?? null,
+      totalDonatedXLM: totalDonatedStr,
+      co2OffsetKg,
+      treesEquivalent,
+      donationCount: donationsRes.rows.length,
+      donations: donationsRes.rows.map((r) => ({
+        id: r.id,
+        amountXLM: r.amount_xlm?.toString?.() || (r.amount ? r.amount.toString() : "0"),
+        transactionHash: r.transaction_hash,
+        createdAt: r.created_at,
+      })),
+      badgeTier,
+      qrCode,
+      issuedAt: new Date().toISOString(),
+    };
+
+    res.json({ success: true, data });
   } catch (e) {
     next(e);
   }
@@ -1143,7 +1390,10 @@ async function followProjectHandler(req, res, next) {
       return res.status(400).json({ error: "walletAddress must be a valid Stellar address" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1196,7 +1446,10 @@ async function unfollowProjectHandler(req, res, next) {
     }
     const normalizedWallet = walletAddress.trim();
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [req.params.id]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1486,7 +1739,157 @@ router.get("/:id/matching", async (req, res, next) => {
 });
 
 /**
+ * Update project details (including name, description, location, category, webhook_url, webhook_secret, tags).
+ * Enforces HTTPS-only, SSRF protection, and max length for webhook_url.
+ *
+ * @route PATCH /api/projects/:id
+ * @param {import('express').Request} req - Express request object.
+ * @param {import('express').Response} res - Express response object.
+ * @param {import('express').NextFunction} next - Express error middleware.
+ * @returns {Promise<void>} Sends updated project data.
+ */
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const projectId = req.params.id;
+    const {
+      name,
+      description,
+      location,
+      category,
+      webhook_url,
+      webhook_secret,
+      tags,
+    } = req.body || {};
+
+    if (
+      webhook_url !== undefined &&
+      webhook_url !== null &&
+      webhook_url !== ""
+    ) {
+      const validation = validateWebhookUrl(webhook_url);
+      if (!validation.valid) {
+        return res.status(400).json({ error: validation.error });
+      }
+    }
+
+    const projectResult = await pool.query(
+      "SELECT * FROM projects WHERE id = $1",
+      [projectId],
+    );
+    if (!projectResult || !projectResult.rows || !projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const updates = [];
+    const values = [];
+
+    if (name !== undefined) {
+      if (
+        typeof name !== "string" ||
+        name.trim().length < 3 ||
+        name.trim().length > 120
+      ) {
+        return res
+          .status(400)
+          .json({ error: "name must be between 3 and 120 characters" });
+      }
+      values.push(name.trim());
+      updates.push(`name = $${values.length}`);
+    }
+
+    if (description !== undefined) {
+      if (
+        typeof description !== "string" ||
+        description.trim().length < 10 ||
+        description.trim().length > 5000
+      ) {
+        return res
+          .status(400)
+          .json({
+            error: "description must be between 10 and 5000 characters",
+          });
+      }
+      values.push(description.trim());
+      updates.push(`description = $${values.length}`);
+    }
+
+    if (location !== undefined) {
+      if (
+        typeof location !== "string" ||
+        location.trim().length < 2 ||
+        location.trim().length > 200
+      ) {
+        return res
+          .status(400)
+          .json({ error: "location must be between 2 and 200 characters" });
+      }
+      values.push(location.trim());
+      updates.push(`location = $${values.length}`);
+    }
+
+    if (category !== undefined) {
+      if (!VALID_CATEGORIES.includes(category)) {
+        return res
+          .status(400)
+          .json({
+            error: `category must be one of: ${VALID_CATEGORIES.join(", ")}`,
+          });
+      }
+      values.push(category);
+      updates.push(`category = $${values.length}`);
+    }
+
+    if (webhook_url !== undefined) {
+      const val =
+        webhook_url && typeof webhook_url === "string"
+          ? webhook_url.trim()
+          : null;
+      values.push(val);
+      updates.push(`webhook_url = $${values.length}`);
+    }
+
+    if (webhook_secret !== undefined) {
+      values.push(webhook_secret || null);
+      updates.push(`webhook_secret = $${values.length}`);
+    }
+
+    if (tags !== undefined && Array.isArray(tags)) {
+      values.push(tags);
+      updates.push(`tags = $${values.length}`);
+    }
+
+    if (updates.length === 0) {
+      return res.json({
+        success: true,
+        data: mapProjectRow(projectResult.rows[0]),
+      });
+    }
+
+    updates.push("updated_at = NOW()");
+    values.push(projectId);
+    const idIdx = values.length;
+
+    const query = `UPDATE projects SET ${updates.join(", ")} WHERE id = $${idIdx} RETURNING *`;
+    // eslint-disable-next-line sql-injection/no-sql-injection
+    const result = await pool.query(query, values);
+
+    if (!result || !result.rows || !result.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    if (typeof redis.deletePattern === "function") {
+      await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+    }
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * PATCH /api/projects/:id/status
+
  * Approve or reject a project. Body: { status: "active" | "rejected", reason?: string }
  * `adminAddress` must match the project wallet (owner) or be a platform admin.
  */
@@ -1874,12 +2277,16 @@ router.get("/:id/social-card", async (req, res, next) => {
 router.get("/:id/badge-holders", async (req, res, next) => {
   try {
     const projectId = req.params.id;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(projectId)) {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    const projectResult = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [projectId],
+    );
     if (!projectResult.rows[0]) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -1894,10 +2301,10 @@ router.get("/:id/badge-holders", async (req, res, next) => {
        WHERE d.project_id = $1 AND p.badges != '[]'::jsonb
        GROUP BY d.donor_address, p.badges
        ORDER BY total_donated DESC`,
-      [projectId]
+      [projectId],
     );
 
-    const badgeHolders = result.rows.map(row => ({
+    const badgeHolders = result.rows.map((row) => ({
       donorAddress: row.donor_address,
       badgeTier: row.badge_tier || null,
       totalDonated: Number.parseFloat(row.total_donated || "0").toFixed(7),
@@ -1913,6 +2320,74 @@ const WEBHOOK_SECRET_MIN_LENGTH = 32;
 const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
 
 /**
+ * PATCH /api/projects/:id/co2-rate (admin only)
+ *
+ * Update the per-XLM CO₂ offset rate for a project. Body accepts any of:
+ *   { co2_per_xlm: number|string } | { co2PerXLM: number|string }
+ *   | { co2_rate: number|string } | { rate: number|string }
+ *
+ * The rate must be a finite, non-negative number (grams of CO₂ per 1 XLM).
+ * Responds with the updated project payload.
+ */
+router.patch("/:id/co2-rate", adminRequired, async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const raw =
+      body.co2_per_xlm ?? body.co2PerXLM ?? body.co2_rate ?? body.rate;
+
+    const rate =
+      typeof raw === "number"
+        ? raw
+        : typeof raw === "string" && raw.trim() !== ""
+          ? Number(raw)
+          : NaN;
+
+    if (!Number.isFinite(rate) || rate < 0) {
+      return res.status(400).json({
+        error: "co2_per_xlm must be a non-negative number",
+      });
+    }
+
+    const projectResult = await pool.query(
+      "SELECT id FROM projects WHERE id = $1",
+      [req.params.id],
+    );
+    if (!projectResult.rows[0]) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const result = await pool.query(
+      `UPDATE projects
+          SET co2_per_xlm = $1,
+              updated_at  = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [rate.toFixed(7), req.params.id],
+    );
+
+    logAdminAction({
+      actor: (req.admin && req.admin.sub) || "admin",
+      action: "project.co2-rate.updated",
+      targetType: "project",
+      targetId: req.params.id,
+      metadata: { co2_per_xlm: rate.toFixed(7) },
+      ipAddress: req.ip,
+    });
+
+    if (typeof redis.deletePattern === "function") {
+      await redis.deletePattern(PROJECTS_LIST_CACHE_PREFIX + "*");
+      await redis.deletePattern(getProjectDetailCacheKey(req.params.id));
+      await redis.deletePattern(`/api/impact/project/${req.params.id}*`);
+      await redis.deletePattern(`/api/impact/${req.params.id}*`);
+    }
+
+    res.json({ success: true, data: mapProjectRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
  * PATCH /api/projects/:id/webhook
  * Set or clear the webhook URL and secret for milestone notifications.
  * Requires the project's wallet_address as the Bearer token subject so that
@@ -1924,7 +2399,7 @@ const WEBHOOK_URL_RE = /^https:\/\/[^\s]{2,}$/i;
  *
  * Pass null / omit both to clear the existing webhook configuration.
  */
-router.patch("/:id/webhook", adminRequired, async (req, res, next) => {
+router.patch("/:id/webhook", adminTokenRequired, async (req, res, next) => {
   try {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(req.params.id)) {
@@ -1999,6 +2474,8 @@ module.exports = router;
 // Export internal functions for testing
 if (process.env.NODE_ENV === "test") {
   module.exports.mapCampaignRow = mapCampaignRow;
-  module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
+module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
   module.exports.fetchCampaignsForProject = fetchCampaignsForProject;
+  module.exports.mapFundingDeadlineRow = mapFundingDeadlineRow;
+  module.exports.fetchFundingDeadline = fetchFundingDeadline;
 }
