@@ -12,7 +12,7 @@
     "type": "module"
   },
   "host_permissions": [
-    "<all_urls>"
+    "<all_urls>",
     "https://api.stellar-greenpay.app/*",
     "https://horizon.stellar.org/*",
     "https://horizon-testnet.stellar.org/*",
@@ -23,22 +23,9 @@
     {
       "matches": ["<all_urls>"],
       "js": ["dist/content-script.js"],
-      "matches": [
-        "https://greenpay.app/*",
-        "https://staging.greenpay.app/*"
-      ],
-      "js": [
-        "dist/content-script.js"
-      ],
       "run_at": "document_end"
     }
   ],
   "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md",
-  "permissions": [
-    "storage",
-    "activeTab",
-    "scripting",
-    "contextMenus",
-    "alarms"
-  ]
+  "permissions": ["storage", "activeTab", "scripting", "contextMenus", "alarms"]
 }
