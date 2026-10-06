@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@react-leaflet/core": "^3.0.0",
-    "@sentry/nextjs": "^10.0.0",
+    "@sentry/nextjs": "^11.4.0",
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^16.2.0",
     "@tailwindcss/postcss": "^4.3.3",
