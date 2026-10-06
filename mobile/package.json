@@ -39,7 +39,7 @@
     "@testing-library/jest-native": "^5.4.3",
     "@testing-library/react-native": "^12.4.0",
     "@types/jest": "^30.0.0",
-    "@types/react": "^18.3.31",
+    "@types/react": "^19.3.0",
     "babel-plugin-jest-hoist": "^29.2.0",
     "babel-preset-expo": "~11.0.0",
     "jest": "^29.7.0",
