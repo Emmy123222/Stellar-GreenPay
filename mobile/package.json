@@ -21,7 +21,7 @@
     "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.19",
     "expo-linking": "~57.0.11",
-    "expo-local-authentication": "~14.0.0",
+    "expo-local-authentication": "~57.0.3",
     "expo-notifications": "~0.28.0",
     "expo-router": "~58.0.8",
     "expo-secure-store": "~13.0.2",
