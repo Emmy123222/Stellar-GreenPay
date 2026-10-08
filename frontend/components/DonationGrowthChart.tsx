@@ -11,6 +11,12 @@
 import { useEffect, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { fetchDonationGrowth, type DonationGrowthPoint } from "@/lib/api";
+import {
+  AccessibleChart,
+  formatChartValue,
+  lineChartAriaLabel,
+  type ChartPoint,
+} from "@/components/ChartA11y";
 
 export type { DonationGrowthPoint };
 
@@ -90,15 +96,26 @@ export default function DonationGrowthChart({ projectId, data: initialData }: Do
     );
   }
 
+  const points: ChartPoint[] = data.map((d) => ({ label: d.week, value: d.totalXLM }));
+
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <LineChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(34,114,57,0.15)" />
-        <XAxis dataKey="week" tick={{ fontSize: 12 }} />
-        <YAxis tick={{ fontSize: 12 }} />
-        <Tooltip />
-        <Line type="monotone" dataKey="totalXLM" stroke="#227239" strokeWidth={3} dot={false} />
-      </LineChart>
-    </ResponsiveContainer>
+    <AccessibleChart
+      label={lineChartAriaLabel("Weekly XLM donations over time", points, "XLM")}
+      table={{
+        caption: "Weekly XLM donations, the data shown in the donation growth chart",
+        headers: ["Week", "XLM donated"],
+        rows: data.map((d) => [d.week, formatChartValue(d.totalXLM)]),
+      }}
+    >
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" stroke="rgba(34,114,57,0.15)" />
+          <XAxis dataKey="week" tick={{ fontSize: 12 }} />
+          <YAxis tick={{ fontSize: 12 }} />
+          <Tooltip />
+          <Line type="monotone" dataKey="totalXLM" stroke="#227239" strokeWidth={3} dot={false} />
+        </LineChart>
+      </ResponsiveContainer>
+    </AccessibleChart>
   );
 }

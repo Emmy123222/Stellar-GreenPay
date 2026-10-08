@@ -4,6 +4,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import {
+  AccessibleChart,
+  formatChartValue,
+  lineChartAriaLabel,
+} from "@/components/ChartA11y";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -132,7 +137,19 @@ export default function LeaderboardHistoryPage() {
               <p className="text-sm text-[var(--text-secondary)] mb-6">
                 {chartData[0]?.donorName}'s XLM donations over the past 6 months
               </p>
-              <div style={{ width: "100%", height: 350 }}>
+              <AccessibleChart
+                className="w-full h-[350px]"
+                label={lineChartAriaLabel(
+                  `${chartData[0]?.donorName ?? "Top donor"}'s XLM donations over the past 6 months`,
+                  chartData.map((d) => ({ label: d.monthLabel, value: d.totalXLM })),
+                  "XLM",
+                )}
+                table={{
+                  caption: `${chartData[0]?.donorName ?? "Top donor"}'s monthly XLM donations over the past 6 months`,
+                  headers: ["Month", "XLM donated"],
+                  rows: chartData.map((d) => [d.monthLabel, formatChartValue(d.totalXLM)]),
+                }}
+              >
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={chartData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(34,114,57,0.15)" />
@@ -158,7 +175,7 @@ export default function LeaderboardHistoryPage() {
                     />
                   </LineChart>
                 </ResponsiveContainer>
-              </div>
+              </AccessibleChart>
             </div>
           )}
 
