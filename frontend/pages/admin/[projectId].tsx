@@ -5,7 +5,7 @@ import Link from "next/link";
 import WalletConnect from "@/components/WalletConnect";
 import { createProjectUpdate, fetchProject, fetchProjectDonations, updateProjectStatus, registerProjectOnChain, confirmProjectRegistration, fetchProjectMatches, createAdminMatchPledge, cancelAdminMatchPledge, csrfFetch, uploadSupportingDocument, updateProjectImage, updateProjectWebhook, testProjectWebhook } from "@/lib/api";
 import { buildMilestoneTransaction, submitTransaction } from "@/lib/stellar";
-import { formatCO2, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
+import { formatCO2, formatDate, formatXLM, shortenAddress, timeAgo } from "@/utils/format";
 import type { ClimateProject, Donation } from "@/utils/types";
 
 const DonationGrowthChartNoSSR = dynamic(
@@ -773,7 +773,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                   </div>
                 </div>
                 <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body mt-2">
-                  Expires: {new Date(m.expiresAt).toLocaleDateString()}
+                  Expires: {formatDate(m.expiresAt)}
                 </p>
               </div>
             ))}

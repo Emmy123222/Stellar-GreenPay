@@ -3,7 +3,7 @@
  */
 import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
-import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { formatDate, formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
 import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -79,7 +79,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           {project.activeMatch && Number(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM) > 0 && new Date(project.activeMatch.expiresAt).getTime() > Date.now() ? (
             <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold tracking-tight shadow-sm">
               <span>
-                🔥 Matched: {project.activeMatch.multiplier || 2}x up to {formatXLM(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM)} until {new Date(project.activeMatch.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                🔥 Matched: {project.activeMatch.multiplier || 2}x up to {formatXLM(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM)} until {formatDate(project.activeMatch.expiresAt, undefined, { month: "short", day: "numeric" })}
               </span>
             </div>
           ) : null}

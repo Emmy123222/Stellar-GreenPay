@@ -30,7 +30,7 @@ import {
   fetchProjectReviews,
 } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import { formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
+import { formatAmount, formatDate, formatXLM, formatCO2, progressPercent, timeAgo, statusClass, statusLabel, CATEGORY_ICONS, copyToClipboard, shortenAddress } from "@/utils/format";
 import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import type {
@@ -396,7 +396,7 @@ export default function ProjectDetail({
     if (!project) return;
 
     const pct = progressPercent(project.raisedXLM, project.goalXLM);
-    const reportDate = new Date().toLocaleDateString("en-US", {
+    const reportDate = formatDate(new Date(), undefined, {
       year: "numeric",
       month: "long",
       day: "numeric",
@@ -710,7 +710,7 @@ export default function ProjectDetail({
               </div>
               <div class="stat-card">
                 <div class="stat-icon">👥</div>
-                <div class="stat-value">${project.donorCount.toLocaleString()}</div>
+                <div class="stat-value">${formatAmount(project.donorCount, 0)}</div>
                 <div class="stat-label">Total Donors</div>
               </div>
               <div class="stat-card">
@@ -748,7 +748,7 @@ export default function ProjectDetail({
                   (update) => `
                 <li class="update-item">
                   <div class="update-title">${update.title}</div>
-                  <div class="update-date">${new Date(update.createdAt).toLocaleDateString()}</div>
+                  <div class="update-date">${formatDate(update.createdAt)}</div>
                   <div class="update-body">${update.body}</div>
                 </li>
               `,
@@ -941,7 +941,7 @@ export default function ProjectDetail({
             </h2>
             <p className="text-lg sm:text-xl text-white/90 max-w-2xl mx-auto font-body">
               This project has reached its funding goal! Thank you to all{" "}
-              {project.donorCount.toLocaleString()} donors who made this
+              {formatAmount(project.donorCount, 0)} donors who made this
               possible.
             </p>
             <div className="mt-6 inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-6 py-3 rounded-full border border-white/30">
@@ -1010,7 +1010,7 @@ export default function ProjectDetail({
               </p>
             </div>
             <p className="text-xs px-3 py-1 rounded-full bg-green-100 border border-green-200 text-green-800 font-body">
-              {new Date(matches[0].expiresAt).toLocaleDateString()}
+              {formatDate(matches[0].expiresAt)}
             </p>
           </div>
         </div>
@@ -1506,7 +1506,7 @@ export default function ProjectDetail({
                       </span>
                     </div>
                     <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-2">
-                      Ended {new Date(campaign.deadline).toLocaleDateString()}
+                      Ended {formatDate(campaign.deadline)}
                     </p>
                     <div className="flex justify-between text-xs mb-1 font-body">
                       <span>{formatXLM(campaign.raisedXLM)} raised</span>
@@ -1925,7 +1925,7 @@ export default function ProjectDetail({
             </p>
             {subscriberCount !== null && (
               <p className="text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body mb-3">
-                📬 {subscriberCount.toLocaleString()}{" "}
+                📬 {formatAmount(subscriberCount, 0)}{" "}
                 {subscriberCount === 1 ? "subscriber" : "subscribers"}
               </p>
             )}

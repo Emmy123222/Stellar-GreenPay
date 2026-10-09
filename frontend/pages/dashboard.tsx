@@ -13,7 +13,7 @@ import ReferralSection from "@/components/ReferralSection";
 import { fetchProfile, fetchDonorHistory, fetchProjects, fetchMyTeam, createTeam, joinTeam, exportDonationHistoryCsv } from "@/lib/api";
 import { getDueMonthlySubscriptions } from "@/lib/monthlyGiving";
 import { getXLMBalance, getFriendBotFunding, NETWORK } from "@/lib/stellar";
-import { formatXLM, formatCO2, timeAgo, shortenAddress, badgeEmoji, badgeLabel, calculateStreak } from "@/utils/format";
+import { formatAmount, formatXLM, formatCO2, timeAgo, shortenAddress, badgeEmoji, badgeLabel, calculateStreak } from "@/utils/format";
 import { explorerUrl } from "@/lib/stellar";
 import type { DonorProfile, Donation, ClimateProject, MonthlySubscription, Team } from "@/utils/types";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -719,7 +719,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="font-mono font-semibold text-forest-700 text-sm">
-                        {d.currency === "USDC" ? `$${parseFloat(d.amount || "0").toFixed(2)} USDC` : formatXLM(d.amountXLM || "0")}
+                        {d.currency === "USDC" ? `$${formatAmount(parseFloat(d.amount || "0"))} USDC` : formatXLM(d.amountXLM || "0")}
                       </p>
                       <a href={explorerUrl(d.transactionHash)} target="_blank" rel="noopener noreferrer"
                         className="text-[10px] text-forest-500 hover:text-forest-700 font-bold uppercase tracking-widest transition-colors">View tx ↗</a>

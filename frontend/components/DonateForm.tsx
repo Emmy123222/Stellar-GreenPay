@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { buildDonationTransaction, buildContractDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID } from "@/lib/stellar";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { recordDonation } from "@/lib/api";
-import { formatXLM, formatCO2 } from "@/utils/format";
+import { formatAmount, formatXLM, formatCO2 } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 interface DonateFormProps {
@@ -281,7 +281,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
         <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
-          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${amountNum.toFixed(2)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>. Thank you!
+          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${formatAmount(amountNum)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>. Thank you!
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
@@ -409,7 +409,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
             </>
           )}
           {step === "idle" && (
-            <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${amountNum.toFixed(2)} ${currency}`) : currency}</>
+            <>🌱 Donate {amount ? (currency === "XLM" ? formatXLM(amountNum) : `$${formatAmount(amountNum)} ${currency}`) : currency}</>
           )}
           {step === "error" && "Retry"}
         </button>

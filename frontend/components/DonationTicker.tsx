@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from "react";
 import { server } from "@/lib/stellar";
-import { shortenAddress, formatXLM } from "@/utils/format";
+import { formatAmount, formatTime, formatXLM, shortenAddress } from "@/utils/format";
 
 interface TickerItem {
   id: string;
@@ -29,7 +29,7 @@ export default function DonationTicker() {
           from: r.from || r.funder || r.account,
           amount: r.amount || "0",
           asset: r.asset_code || "XLM",
-          time: new Date(r.created_at).toLocaleTimeString(),
+          time: formatTime(r.created_at),
         }));
         setItems(initial);
       });
@@ -44,7 +44,7 @@ export default function DonationTicker() {
             from: payment.from || payment.funder || payment.account,
             amount: payment.amount || "0",
             asset: payment.asset_code || "XLM",
-            time: new Date(payment.created_at).toLocaleTimeString(),
+            time: formatTime(payment.created_at),
           };
           setItems((prev) => [newItem, ...prev.slice(0, 9)]);
         },
@@ -67,7 +67,7 @@ export default function DonationTicker() {
           <div key={item.id} className="flex items-center gap-2 text-sm">
             <span className="text-forest-300">{shortenAddress(item.from)}</span>
             <span className="font-mono text-emerald-400">
-              +{item.asset === "XLM" ? formatXLM(item.amount) : `${parseFloat(item.amount).toFixed(2)} ${item.asset}`}
+              +{item.asset === "XLM" ? formatXLM(item.amount) : `${formatAmount(parseFloat(item.amount))} ${item.asset}`}
             </span>
             <span className="text-forest-500 text-xs">{item.time}</span>
           </div>

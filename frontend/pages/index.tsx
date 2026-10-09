@@ -11,7 +11,7 @@ import {
   fetchProjects,
   fetchCategoryStats,
 } from "@/lib/api";
-import { formatCO2, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
+import { formatAmount, formatCO2, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
 
 import type { GlobalStats, CategoryStats } from "@/lib/api";
 import type { ClimateProject } from "@/utils/types";
@@ -546,7 +546,7 @@ function FeaturedProjectCard({ project }: { project: ClimateProject }) {
             </p>
             <div className="flex flex-wrap gap-4 text-sm mb-5">
               <span className="flex items-center gap-1 text-forest-700 font-body">
-                👥 <strong>{project.donorCount.toLocaleString()}</strong> donors
+                👥 <strong>{formatAmount(project.donorCount, 0)}</strong> donors
               </span>
               <span className="flex items-center gap-1 text-forest-700 font-body">
                 ♻️ <strong>{formatCO2(project.co2OffsetKg)}</strong> offset
@@ -612,8 +612,8 @@ function CO2OffsetTicker({ stats }: { stats: GlobalStats }) {
         Total CO₂ Offset Across All Donations
       </p>
       <p className="text-forest-300 text-xs font-body mt-2">
-        {stats.totalDonations.toLocaleString()} donations · {stats.totalDonors.toLocaleString()} donors ·{" "}
-        {parseFloat(stats.totalXLMRaised).toLocaleString()} XLM raised
+        {formatAmount(stats.totalDonations, 0)} donations · {formatAmount(stats.totalDonors, 0)} donors ·{" "}
+        {formatXLM(parseFloat(stats.totalXLMRaised))} raised
       </p>
     </div>
   );
@@ -625,7 +625,7 @@ function StatItem({ stat }: { stat: any }) {
     <div ref={elementRef} className="bg-white text-center py-10 px-4">
       <div className="font-display text-4xl font-bold text-gradient-green mb-1">
         {stat.prefix}
-        {count.toLocaleString()}
+        {formatAmount(count, 0)}
         {stat.suffix}
       </div>
       <div className="text-[#4a6a4a] text-sm font-body uppercase tracking-widest font-bold">

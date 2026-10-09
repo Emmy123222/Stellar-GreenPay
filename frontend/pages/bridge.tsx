@@ -16,7 +16,7 @@ import { useState, useEffect } from "react";
 import Head from "next/head";
 import Link from "next/link";
 import { getAddress as getPublicKey } from "@stellar/freighter-api";
-import { shortenAddress } from "@/utils/format";
+import { formatDateTime, shortenAddress } from "@/utils/format";
 import { fetchProjects, recordDonation } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import type { ClimateProject } from "@/utils/types";
@@ -532,7 +532,7 @@ export default function BridgePage() {
                         {t("bridge.historyRoute").replace("{source}", entry.sourceChain)}
                       </p>
                       <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a]">
-                        {new Date(entry.timestamp).toLocaleString()}
+                        {formatDateTime(entry.timestamp)}
                       </p>
                     </div>
                     <div className="text-right">

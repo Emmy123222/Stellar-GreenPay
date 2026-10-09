@@ -24,7 +24,7 @@ import {
   type VerificationDocument,
   type VerificationRequestResponse,
 } from "@/lib/api";
-import { timeAgo } from "@/utils/format";
+import { formatAmount, formatDateTime, timeAgo } from "@/utils/format";
 
 interface AdminVerificationDetailProps {
   publicKey: string | null;
@@ -343,7 +343,7 @@ export default function AdminVerificationDetail({
             label="Expected annual CO₂"
             value={
               request.expectedAnnualTonnesCO2
-                ? `${Number(request.expectedAnnualTonnesCO2).toLocaleString()} tonnes / year`
+                ? `${formatAmount(Number(request.expectedAnnualTonnesCO2), 0)} tonnes / year`
                 : null
             }
           />
@@ -494,7 +494,7 @@ export default function AdminVerificationDetail({
                 label="Reviewed at"
                 value={
                   <>
-                    {new Date(request.reviewedAt).toLocaleString()}{" "}
+                    {formatDateTime(request.reviewedAt)}{" "}
                     <span className="text-xs text-[var(--text-tertiary)]">({timeAgo(request.reviewedAt)})</span>
                   </>
                 }

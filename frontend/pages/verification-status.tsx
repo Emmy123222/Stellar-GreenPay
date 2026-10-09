@@ -7,6 +7,7 @@ import {
   fetchMyVerificationRequests,
   type VerificationRequestResponse,
 } from "@/lib/api";
+import { formatDateTime } from "@/utils/format";
 
 const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
 
@@ -42,7 +43,7 @@ function StatusSkeleton() {
 
 function StatusCard({ request }: { request: VerificationRequestResponse }) {
   const submitted = request.submittedAt
-    ? new Date(request.submittedAt).toLocaleString()
+    ? formatDateTime(request.submittedAt)
     : "—";
 
   return (

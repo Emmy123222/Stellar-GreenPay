@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { createMonthlySubscription, loadMonthlySubscriptions } from "@/lib/monthlyGiving";
-import { formatXLM, timeAgo } from "@/utils/format";
+import { formatDate, formatXLM, timeAgo } from "@/utils/format";
 import type { MonthlySubscription } from "@/utils/types";
 
 interface MonthlyGivingSetupProps {
@@ -143,7 +143,7 @@ export default function MonthlyGivingSetup({
                 You are setting up a monthly donation of <strong>{formatXLM(Number.parseFloat(amountXLM) || 0)} XLM</strong> to <strong>{projectName}</strong>.
               </p>
               <dl className="mt-4 space-y-2 text-sm font-body text-forest-800">
-                <div className="flex justify-between"><dt>Next charge</dt><dd>{new Date(startDate).toLocaleDateString()}</dd></div>
+                <div className="flex justify-between"><dt>Next charge</dt><dd>{formatDate(startDate)}</dd></div>
                 <div className="flex justify-between"><dt>Estimated annual total</dt><dd>{formatXLM((Number.parseFloat(amountXLM) || 0) * 12)} XLM</dd></div>
                 <div className="flex justify-between"><dt>Duration</dt><dd>{DURATION_OPTIONS.find((option) => option.value === duration)?.label}</dd></div>
               </dl>
@@ -167,7 +167,7 @@ export default function MonthlyGivingSetup({
                     {formatXLM(sub.amountXLM)} monthly · {sub.status}
                   </p>
                   <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body mt-1">
-                    Next due: {new Date(sub.nextDueDate).toLocaleDateString()}
+                    Next due: {formatDate(sub.nextDueDate)}
                   </p>
                   {sub.history.length > 0 ? (
                     <div className="mt-2 space-y-1">
