@@ -3,7 +3,7 @@
  * Renders the target during SSR/hydration, then animates to it after mount.
  */
 import { useEffect, useState, useRef } from "react";
-import { normalizeXLMAmount } from "@/utils/format";
+import { formatAmount, normalizeXLMAmount } from "@/utils/format";
 
 export { normalizeXLMAmount };
 
@@ -76,8 +76,8 @@ export default function AnimatedNumber({
 
   const formatDisplay = (val: number) => {
     if (formatter) return formatter(val);
-    if (decimalPlaces > 0) return val.toFixed(decimalPlaces);
-    return Math.floor(val).toLocaleString();
+    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces);
+    return formatAmount(Math.floor(val), 0);
   };
 
   const effectiveValue = duration <= 0 ? numericValue : displayValue;

@@ -6,7 +6,7 @@ import { useRouter } from "next/router";
 import Link from "next/link";
 import CircularProgress from "@/components/CircularProgress";
 import { fetchProject } from "@/lib/api";
-import { formatXLM, formatCO2, progressPercent } from "@/utils/format";
+import { formatAmount, formatXLM, formatCO2, progressPercent } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
 type Currency = "XLM" | "USDC";
@@ -62,7 +62,7 @@ export default function WidgetPage() {
   const formatAmount = (xlm: string) => {
     if (currency === "USDC") {
       const val = parseFloat(xlm);
-      return `$${val.toFixed(2)}`;
+      return `$${formatAmount(val)}`;
     }
     return formatXLM(xlm);
   };

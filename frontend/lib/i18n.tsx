@@ -31,6 +31,7 @@ import {
 import en from "@/locales/en.json";
 import es from "@/locales/es.json";
 import fr from "@/locales/fr.json";
+import { setFormattingLocale } from "./formatLocale";
 
 export const SUPPORTED_LOCALES = ["en", "es", "fr"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
@@ -155,7 +156,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
-    setLocaleState(resolveInitialLocale());
+    const initialLocale = resolveInitialLocale();
+    setFormattingLocale(initialLocale);
+    setLocaleState(initialLocale);
   }, []);
 
   useEffect(() => {
@@ -164,6 +167,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const setLocale = useCallback((next: Locale) => {
     if (!isLocale(next)) return;
+    setFormattingLocale(next);
     setLocaleState(next);
     if (typeof window !== "undefined") {
       safeSetItem(LOCALE_STORAGE_KEY, next);

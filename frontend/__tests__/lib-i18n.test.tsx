@@ -22,6 +22,7 @@ import {
   useI18n,
   type Locale,
 } from "@/lib/i18n";
+import { formatXLM } from "@/utils/format";
 
 function setNavigatorLocale(value: string | null, preferred?: string[]) {
   if (preferred) {
@@ -212,6 +213,7 @@ describe("I18nProvider", () => {
 
     expect(document.documentElement.lang).toBe("es");
     expect(screen.getByTestId("nav-home").textContent).toBe("Inicio");
+    expect(formatXLM(1234.56)).toContain(",56 XLM");
   });
 
   it("ignores an unsupported locale request", () => {
