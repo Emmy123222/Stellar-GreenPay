@@ -7,6 +7,7 @@
   "scripts": {
     "build": "webpack --config webpack.config.js",
     "dev": "webpack --watch --config webpack.config.js",
+    "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:e2e": "playwright test"
   },
@@ -15,19 +16,15 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",
-    "@types/chrome": "^0.2.2",
-    "@types/jest": "^29.5.11",
-    "css-loader": "^6.8.1",
-    "jest": "^30.5.2",
-    "jest-environment-jsdom": "^30.5.2",
-    "style-loader": "^3.3.3",
-    "ts-jest": "^29.4.14",
     "@types/chrome": "^0.3.0",
     "@types/jest": "^30.0.0",
     "css-loader": "^7.1.5",
+    "jest": "^30.5.2",
+    "jest-environment-jsdom": "^30.5.2",
     "style-loader": "^4.0.0",
+    "ts-jest": "^29.4.14",
     "ts-loader": "^9.5.1",
-    "typescript": "~7.0.2",
+    "typescript": "~6.0.3",
     "webpack": "^5.111.1",
     "webpack-cli": "^7.2.3"
   }
