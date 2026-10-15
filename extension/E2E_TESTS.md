@@ -7,9 +7,12 @@ End-to-end tests for the GreenPay Chrome extension using Playwright.
 ### Install Playwright Browsers
 
 ```bash
-npm ci
+npm install
 npx playwright install chromium
 ```
+
+The extension currently has no checked-in `package-lock.json`, so GitHub Actions
+uses `npm install --no-audit --no-fund` before running the unit and browser suites.
 
 ## Running Tests
 

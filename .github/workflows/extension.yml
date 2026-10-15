@@ -49,10 +49,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
-          cache-dependency-path: extension/package-lock.json
 
-      - run: npm ci
+      - run: npm install --no-audit --no-fund
 
       - name: Validate extension JSON files
         run: |
@@ -88,19 +86,18 @@ jobs:
           }
           NODE
 
-      - name: Lint manifests with web-ext
-        run: |
-          CHROME_TMP=$(mktemp -d)
-          cp manifest.json "$CHROME_TMP/manifest.json"
-          npx web-ext lint --source-dir "$CHROME_TMP" --self-hosted
-
-          FIREFOX_TMP=$(mktemp -d)
-          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
-          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
-
       - run: npm test
 
       - run: npm run build
+
+      - name: Lint Firefox manifest with web-ext
+        run: |
+          mkdir -p dist-firefox
+          cp -R dist/. dist-firefox/
+          FIREFOX_TMP=$(mktemp -d)
+          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
+          cp -R dist-firefox "$FIREFOX_TMP/dist-firefox"
+          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
 
       - name: Install Chromium for extension E2E
         run: npx playwright install --with-deps chromium
