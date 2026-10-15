@@ -13,6 +13,8 @@
  * Uses pg-boss for scheduling (already a project dependency).
  * Schedule: daily at 03:00 UTC (configurable via TOKEN_CLEANUP_CRON env).
  * Set TOKEN_CLEANUP_CRON="disabled" to turn it off entirely.
+ *
+ * Deletions run in batches of BATCH_SIZE to avoid long-held locks on large tables.
  */
 "use strict";
 
@@ -23,12 +25,16 @@ const logger = require("../logger");
 const QUEUE = "device-token-cleanup";
 const DEFAULT_CRON = "0 3 * * *";
 const STALE_INTERVAL = "90 days";
+const BATCH_SIZE = 1000;
 
 let boss = null;
 
 /**
  * Remove device tokens whose last successful delivery is older than 90 days.
  * Deleting a token cascades to project_follows (FK ON DELETE CASCADE).
+ *
+ * Runs in batches to avoid holding a table lock for the full duration on
+ * large datasets. Stops when a batch deletes fewer rows than BATCH_SIZE.
  */
 async function runCleanup() {
   logger.info(
@@ -36,28 +42,29 @@ async function runCleanup() {
     "[tokenCleanup] Starting stale token cleanup"
   );
 
+  let totalDeleted = 0;
+
   try {
-    const result = await pool.query(
-      `DELETE FROM device_tokens
-       WHERE last_delivered_at IS NOT NULL
-         AND last_delivered_at < NOW() - INTERVAL '${STALE_INTERVAL}'
-       RETURNING id, token, platform`
+    let batchDeleted;
+    do {
+      const result = await pool.query(
+        `DELETE FROM device_tokens
+         WHERE id IN (
+           SELECT id FROM device_tokens
+           WHERE last_delivered_at IS NOT NULL
+             AND last_delivered_at < NOW() - INTERVAL '${STALE_INTERVAL}'
+           LIMIT $1
+         )`,
+        [BATCH_SIZE]
+      );
+      batchDeleted = result.rowCount;
+      totalDeleted += batchDeleted;
+    } while (batchDeleted === BATCH_SIZE);
+
+    logger.info(
+      { event: "tokens_pruned", count: totalDeleted },
+      `[tokenCleanup] Removed ${totalDeleted} stale device token(s)`
     );
-
-    const count = result.rowCount;
-
-    if (count > 0) {
-      const tokenIds = result.rows.map((r) => r.id);
-      logger.info(
-        { event: "tokens_pruned", count, tokenIds },
-        `[tokenCleanup] Removed ${count} stale device token(s)`
-      );
-    } else {
-      logger.info(
-        { event: "tokens_pruned", count: 0 },
-        "[tokenCleanup] No stale tokens found"
-      );
-    }
   } catch (err) {
     logger.error({ event: "token_cleanup_error", err }, err.message);
   }
