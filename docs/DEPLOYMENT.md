@@ -289,3 +289,7 @@ This endpoint must be called **at the end of each calendar month** (or very shor
    ```
 
 2. **Extend `digestQueue.js`** — The monthly digest cron (`backend/src/services/digestQueue.js`) already runs on the 1st of every month via pg-boss. Import and call the snapshot logic from the same worker to colocate both month-end tasks. See the file for integration points.
+
+
+## Mobile App Release Process
+See the mobile app's release walkthrough in [mobile/README.md](../mobile/README.md#release-process).
