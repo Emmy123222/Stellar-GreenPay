@@ -44,7 +44,7 @@ module.exports = {
   },
   module: {
     rules: [
-      {
+      {        test: /\.(png|jpe?g|gif)$/i,        type: "asset/resource",        generator: {          filename: "icons/[name][ext]",        },      },      {
         test: /\.ts$/,
         use: "ts-loader",
         exclude: [/node_modules/, /\.test\.ts$/, /\.spec\.ts$/],
