@@ -48,6 +48,8 @@ pub enum ContractError {
     InvalidUrl = 5,
     /// Reentrant call detected.
     Reentrant = 6,
+    /// A pending admin transfer already exists.
+    PendingAdminExists = 7,
 }
 
 
@@ -317,13 +319,7 @@ pub enum DataKey {
     MaxPriceAgeSecs,
     // Reentrancy guard
     IsProcessing,
-}
-
-#[contracterror]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum ContractError {
-    PendingAdminExists = 1,
+    MatchPledge(String),
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -357,6 +353,23 @@ const MAX_CO2_PER_XLM: u32 = 100_000;
 pub const MIN_CO2_RATE: u64 = 1;
 pub const MAX_CO2_RATE: u64 = 1_000_000;
 pub const MAX_PAGE_SIZE: u32 = 100;
+/// Maximum number of project records a single `deactivate_*` invocation will
+/// touch. Chosen from the benchmark in `tests/deactivation.rs`: a 25-project
+/// batch costs well under 10% of the per-transaction CPU budget, leaving ample
+/// headroom while keeping the number of follow-up calls for a full registry
+/// small.
+pub const MAX_DEACTIVATION_BATCH: u32 = 25;
+/// The Soroban host rejects any single ledger entry larger than 64 KiB. Because
+/// projects, their ID vector and the counters all live in the contract instance
+/// entry, this bounds how large the registry can grow before even
+/// `register_project` fails. Measured at ~150 full `Project` records (see
+/// `contracts/README.md`).
+pub const MAX_INSTANCE_ENTRY_BYTES: u32 = 65_536;
+/// Empirical ceiling on the registry size, derived from
+/// `MAX_INSTANCE_ENTRY_BYTES` and the serialized size of a `Project` record.
+/// The exact value moves with the length of names/ids; treat it as an
+/// order-of-magnitude bound, not an invariant.
+pub const MAX_SAFE_REGISTRY_SIZE: u32 = 150;
 
 fn is_valid_metadata_url(url: &String) -> bool {
     const HTTPS_PREFIX: &[u8] = b"https://";
@@ -927,8 +940,18 @@ impl GreenPayContract {
             .expect("Project metadata URLs not found")
     }
 
-    /// Deactivate all active projects at once. Admin only.
-    /// Iterates the project ID list stored during `register_project`.
+    /// Deactivate every project in the registry in a single invocation. Admin only.
+    ///
+    /// This loops over the full `ProjectIds` vector, so it is only safe while the
+    /// registry fits in one ledger entry. The Soroban host caps a contract's
+    /// instance entry (where `ProjectIds`, `ProjectCount` and every `Project`
+    /// record live) at `MAX_INSTANCE_ENTRY_BYTES` (64 KiB), which works out to
+    /// roughly `MAX_SAFE_REGISTRY_SIZE` projects. Callers must not rely on this
+    /// for larger registries; use `deactivate_projects_range` to work through the
+    /// registry in bounded batches instead.
+    ///
+    /// For an *immediate* global emergency stop prefer `pause`, which is O(1) and
+    /// blocks donations/registration rather than rewriting every project record.
     pub fn deactivate_all_projects(env: Env, admin: Address) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
@@ -936,12 +959,74 @@ impl GreenPayContract {
         if stored_admin != admin { panic!("Only admin can deactivate projects"); }
         let ids: Vec<String> = env.storage().instance()
             .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
+        if ids.len() > MAX_DEACTIVATION_BATCH {
+            panic!("Project registry exceeds MAX_DEACTIVATION_BATCH; use deactivate_projects_range");
+        }
         for pid in ids.iter() {
             let mut project: Project = env.storage().instance()
                 .get(&DataKey::Project(pid.clone())).expect("Project not found");
             project.active = false;
             env.storage().instance().set(&DataKey::Project(pid), &project);
         }
+    }
+
+    /// Deactivate a bounded slice of the project registry. Admin only.
+    ///
+    /// `offset` is zero-based and `limit` cannot exceed `MAX_DEACTIVATION_BATCH`.
+    /// The return value is the number of projects that were still active and got
+    /// deactivated, so a caller can walk the whole registry with:
+    ///
+    /// ```ignore
+    /// let mut offset = 0;
+    /// loop {
+    ///     let n = client.deactivate_projects_range(&admin, &offset, &MAX_DEACTIVATION_BATCH);
+    ///     if n == 0 { break; }
+    ///     offset += n;
+    /// }
+    /// ```
+    ///
+    /// Every call re-reads the small `ProjectIds` vector, so each invocation costs
+    /// only one bounded batch worth of CPU/memory regardless of registry size.
+    /// Pause the contract first when an immediate global kill switch is needed.
+    pub fn deactivate_projects_range(
+        env: Env,
+        admin: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Result<u32, ContractError> {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance()
+            .get(&DataKey::Admin).expect("Not initialized");
+        if stored_admin != admin { panic!("Only admin can deactivate projects"); }
+        if limit > MAX_DEACTIVATION_BATCH {
+            return Err(ContractError::InvalidPageSize);
+        }
+        if limit == 0 {
+            return Ok(0);
+        }
+
+        let ids: Vec<String> = env.storage().instance()
+            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
+        let total_count = ids.len();
+        if offset >= total_count {
+            return Ok(0);
+        }
+        let end = ((offset as u64) + (limit as u64)).min(total_count as u64) as u32;
+        let mut deactivated = 0;
+        let mut index = offset;
+        while index < end {
+            if let Some(pid) = ids.get(index) {
+                let mut project: Project = env.storage().instance()
+                    .get(&DataKey::Project(pid.clone())).expect("Project not found");
+                if project.active {
+                    project.active = false;
+                    env.storage().instance().set(&DataKey::Project(pid), &project);
+                    deactivated += 1;
+                }
+            }
+            index += 1;
+        }
+        Ok(deactivated)
     }
 
     // ─── Donations ────────────────────────────────────────────────────────────
@@ -1637,23 +1722,19 @@ impl GreenPayContract {
             .instance()
             .get(&DataKey::ProjectIds)
             .unwrap_or(Vec::new(&env));
-        
+
         let total_count = project_ids.len();
-        
+
         // If offset is out of bounds, return empty vec
         if offset >= total_count {
             return Ok(Vec::new(&env));
         }
-        
+
         // Calculate the end bound: min(offset + limit, total_count).
         // The addition is done in u64 to avoid overflow when checking the
         // bound; once we know offset + limit <= total_count (a u32), the
         // u32 addition below is guaranteed not to overflow.
-        let end = if (offset as u64) + (limit as u64) > (total_count as u64) {
-            total_count
-        } else {
-            (offset + limit).min(total_count)
-        };
+        let end = ((offset as u64) + (limit as u64)).min(total_count as u64) as u32;
 
         // Collect projects from the slice
         let mut result = Vec::new(&env);
@@ -1670,7 +1751,6 @@ impl GreenPayContract {
             }
             idx += 1;
         }
-        
         Ok(result)
     }
 
@@ -2512,9 +2592,6 @@ impl GreenPayContract {
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        let admin: Address = env
-            .storage()
-              pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         let admin: Address = env
             .storage()
             .instance()
@@ -3738,11 +3815,43 @@ mod tests {
         assert!(client.get_project(&pid1).active);
         assert!(client.get_project(&pid2).active);
 
-        client.deactivate_project(&admin, &pid1);
-        client.deactivate_project(&admin, &pid2);
+        client.deactivate_all_projects(&admin);
 
         assert!(!client.get_project(&pid1).active);
         assert!(!client.get_project(&pid2).active);
+    }
+
+    #[test]
+    fn test_deactivate_projects_range_bounds_and_idempotence() {
+        let (env, _cid, client, admin, pid1) = setup();
+        let pid2 = String::from_str(&env, "proj-002");
+        let wallet = Address::generate(&env);
+        client.register_project(
+            &admin,
+            &pid2,
+            &String::from_str(&env, "Second Project"),
+            &wallet,
+            &100u32,
+            &1i128,
+        );
+
+        assert_eq!(client.deactivate_projects_range(&admin, &0, &1), 1);
+        assert!(!client.get_project(&pid1).active);
+        assert!(client.get_project(&pid2).active);
+        assert_eq!(
+            client.deactivate_projects_range(&admin, &1, &MAX_DEACTIVATION_BATCH),
+            1,
+        );
+        assert!(!client.get_project(&pid2).active);
+        assert_eq!(
+            client.deactivate_projects_range(&admin, &0, &MAX_DEACTIVATION_BATCH),
+            0,
+        );
+        assert_eq!(client.deactivate_projects_range(&admin, &u32::MAX, &1), 0);
+        assert_eq!(
+            client.try_deactivate_projects_range(&admin, &0, &(MAX_DEACTIVATION_BATCH + 1)),
+            Err(Ok(ContractError::InvalidPageSize)),
+        );
     }
 
     #[test]
