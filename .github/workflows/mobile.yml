@@ -3,6 +3,14 @@ name: Mobile Preview Build
 on:
   push:
     branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
 
 jobs:
   build:
@@ -15,12 +23,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version-file: '.nvmrc'
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci
+      - run: npx expo install --check
+      - run: npm test -- --runInBand
+      - run: npx expo export --platform ios
       - uses: expo/expo-github-action@v8
+        if: github.event_name == 'push'
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
       - run: eas build --platform all --profile preview --non-interactive
+        if: github.event_name == 'push'
