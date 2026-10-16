@@ -28,26 +28,26 @@ import {
   TouchableOpacity,
   Animated,
   Share,
-} from 'react-native';
-import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
-import { useEffect, useRef, useState, useCallback } from 'react';
-import axios from 'axios';
+} from "react-native";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
+import { useEffect, useRef, useState, useCallback } from "react";
+import axios from "axios";
 
-import * as Notifications from 'expo-notifications';
-import MapView, { Marker } from 'react-native-maps';
-import { useTheme } from '../theme';
+import * as Notifications from "expo-notifications";
+import MapView, { Marker } from "react-native-maps";
+import { useTheme } from "../theme";
 import {
   getPushToken,
   followProject,
   unfollowProject,
   markNotificationsSeen,
-} from '../../utils/notifications';
+} from "../../utils/notifications";
 import {
   loadRecurringDonations,
   type RecurringDonation,
-} from '../../utils/recurringDonations';
+} from "../../utils/recurringDonations";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
 
 /**
  * Format an ISO due date for the recurring-donation banner.
@@ -58,10 +58,10 @@ export function formatNextPaymentDate(isoDate: string): string {
   try {
     const date = new Date(isoDate);
     if (isNaN(date.getTime())) return isoDate;
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
     });
   } catch {
     return isoDate;
@@ -92,7 +92,7 @@ interface ClimateProject {
   longitude?: number | null;
 }
 
-type ToastVariant = 'success' | 'error';
+type ToastVariant = "success" | "error";
 
 interface ToastState {
   message: string;
@@ -171,8 +171,7 @@ function Toast({
     };
   }, [opacity]);
 
-
-  const bg = variant === 'success' ? '#227239' : '#b91c1c';
+  const bg = variant === "success" ? "#227239" : "#b91c1c";
 
   return (
     <Animated.View
@@ -181,7 +180,7 @@ function Toast({
       accessibilityLiveRegion="polite"
     >
       <Text style={toastStyles.text}>
-        {variant === 'success' ? '✓ ' : '✕ '}
+        {variant === "success" ? "✓ " : "✕ "}
         {message}
       </Text>
     </Animated.View>
@@ -190,7 +189,7 @@ function Toast({
 
 const toastStyles = StyleSheet.create({
   container: {
-    position: 'absolute',
+    position: "absolute",
     bottom: 96,
     left: 16,
     right: 16,
@@ -198,17 +197,17 @@ const toastStyles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 18,
     zIndex: 999,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 6,
     elevation: 8,
   },
   text: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 15,
-    fontWeight: '600',
-    textAlign: 'center',
+    fontWeight: "600",
+    textAlign: "center",
   },
 });
 
@@ -225,19 +224,23 @@ export default function ProjectDetailScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [followLoading, setFollowLoading] = useState(false);
-  const [activeDonation, setActiveDonation] = useState<RecurringDonation | null>(null);
+  const [activeDonation, setActiveDonation] =
+    useState<RecurringDonation | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const viewShotRef = useRef<View>(null);
 
-  const showToast = useCallback((message: string, variant: ToastVariant = 'success') => {
-    setToast({ message, variant });
-  }, []);
+  const showToast = useCallback(
+    (message: string, variant: ToastVariant = "success") => {
+      setToast({ message, variant });
+    },
+    [],
+  );
 
   const checkRecurringDonation = useCallback(async (projectId: string) => {
     try {
       const donations = await loadRecurringDonations();
       const active = donations.find(
-        (d) => d.projectId === projectId && d.status === 'active'
+        (d) => d.projectId === projectId && d.status === "active",
       );
       setActiveDonation(active || null);
     } catch {
@@ -250,7 +253,7 @@ export default function ProjectDetailScreen() {
       if (id) {
         checkRecurringDonation(id as string);
       }
-    }, [id, checkRecurringDonation])
+    }, [id, checkRecurringDonation]),
   );
 
   useEffect(() => {
@@ -274,7 +277,7 @@ export default function ProjectDetailScreen() {
       const res = await axios.get(`${API_URL}/api/updates/${projectId}`);
       setUpdates(res.data.data || []);
     } catch (error) {
-      console.error('Error loading updates:', error);
+      console.error("Error loading updates:", error);
     }
   };
 
@@ -293,11 +296,13 @@ export default function ProjectDetailScreen() {
   const checkFollowStatus = async (projectId: string, token: string) => {
     try {
       const response = await fetch(
-        `${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`
+        `${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`,
       );
       const data = await response.json();
       if (data.success) {
-        setIsFollowing(data.data.some((p: { id: string }) => p.id === projectId));
+        setIsFollowing(
+          data.data.some((p: { id: string }) => p.id === projectId),
+        );
       }
     } catch {
       // Silently ignore — follow state will default to false
@@ -321,7 +326,7 @@ export default function ProjectDetailScreen() {
     if (!project) return;
 
     if (!pushToken) {
-      showToast('Enable notifications to follow projects', 'error');
+      showToast("Enable notifications to follow projects", "error");
       return;
     }
 
@@ -335,25 +340,29 @@ export default function ProjectDetailScreen() {
         const ok = await unfollowProject(
           project.id,
           pushToken,
-          project.walletAddress
+          project.walletAddress,
         );
         if (ok) {
           setIsFollowing(false);
           showToast(`Unfollowed ${project.name}`);
         } else {
-          showToast('Could not unfollow. Please try again.', 'error');
+          showToast("Could not unfollow. Please try again.", "error");
         }
       } else {
-        const ok = await followProject(project.id, pushToken);
+        const ok = await followProject(
+          project.id,
+          pushToken,
+          project.walletAddress,
+        );
         if (ok) {
           setIsFollowing(true);
           showToast(`You're now following ${project.name}! 🔔`);
         } else {
-          showToast('Could not follow project. Please try again.', 'error');
+          showToast("Could not follow project. Please try again.", "error");
         }
       }
     } catch {
-      showToast('Something went wrong. Please try again.', 'error');
+      showToast("Something went wrong. Please try again.", "error");
     } finally {
       setFollowLoading(false);
     }
@@ -385,13 +394,12 @@ export default function ProjectDetailScreen() {
           `Category: ${project.category} · ${project.location}`,
       });
     } catch (error: unknown) {
-      const message =
-        error instanceof Error ? error.message : String(error);
-      if (message.includes('User did not share')) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("User did not share")) {
         // User dismissed the share sheet — a normal, non-error interaction.
         return;
       }
-      showToast('Could not open share dialog', 'error');
+      showToast("Could not open share dialog", "error");
     }
   };
 
@@ -410,10 +418,10 @@ export default function ProjectDetailScreen() {
   // `accessibilityLabel`. The pushToken check sits BEFORE isFollowing so the
   // a11y label and the rendered text can never disagree.
   const followButtonLabel = (() => {
-    if (followLoading) return '⏳ Loading…';
-    if (!pushToken) return '🔔 Follow for Updates';
-    if (isFollowing) return '✓ Following · Tap to unfollow';
-    return '🔔 Follow for Updates';
+    if (followLoading) return "⏳ Loading…";
+    if (!pushToken) return "🔔 Follow for Updates";
+    if (isFollowing) return "✓ Following · Tap to unfollow";
+    return "🔔 Follow for Updates";
   })();
 
   // ── render ────────────────────────────────────────────────────────────────
@@ -456,9 +464,7 @@ export default function ProjectDetailScreen() {
   // `!= null` (loose, not `!`) is deliberate: it rejects `null` *and*
   // `undefined` in one comparison, while still treating `0` as a legitimate
   // coordinate — a truthiness check would wrongly hide the map at lat/lng 0.
-  const hasCoordinates = (
-    project.latitude != null && project.longitude != null
-  );
+  const hasCoordinates = project.latitude != null && project.longitude != null;
 
   return (
     <View style={[styles.wrapper, { backgroundColor: colors.background }]}>
@@ -470,7 +476,10 @@ export default function ProjectDetailScreen() {
               <Text style={[styles.category, { color: colors.headerText }]}>
                 {project.category}
               </Text>
-              <Text style={[styles.name, { color: colors.headerText }]} accessibilityRole="header">
+              <Text
+                style={[styles.name, { color: colors.headerText }]}
+                accessibilityRole="header"
+              >
                 {project.name}
               </Text>
               <Text style={[styles.location, { color: colors.headerText }]}>
@@ -486,7 +495,13 @@ export default function ProjectDetailScreen() {
               accessibilityLabel={`Share ${project.name}`}
               accessibilityHint="Opens the system share sheet so you can send this project to others"
             >
-              <Text style={styles.shareIcon} accessibilityElementsHidden importantForAccessibility="no">↗</Text>
+              <Text
+                style={styles.shareIcon}
+                accessibilityElementsHidden
+                importantForAccessibility="no"
+              >
+                ↗
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -499,7 +514,7 @@ export default function ProjectDetailScreen() {
               styles.recurringBanner,
               {
                 backgroundColor: colors.surface,
-                borderColor: '#227239',
+                borderColor: "#227239",
                 shadowColor: colors.cardShadow,
               },
             ]}
@@ -508,11 +523,18 @@ export default function ProjectDetailScreen() {
           >
             <View style={styles.recurringBannerContent}>
               <Text
-                style={[styles.recurringBannerText, { color: colors.primaryText }]}
-                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || 'monthly'} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
+                style={[
+                  styles.recurringBannerText,
+                  { color: colors.primaryText },
+                ]}
+                accessibilityLabel={`You have an active ${(activeDonation as any).frequency || "monthly"} donation of ${activeDonation.amountXLM} XLM, next payment: ${formatNextPaymentDate(activeDonation.nextDueDate)}`}
               >
-                You have an active {(activeDonation as any).frequency || 'monthly'} donation of{' '}
-                <Text style={styles.recurringBannerBold}>{activeDonation.amountXLM} XLM</Text> — next payment:{' '}
+                You have an active{" "}
+                {(activeDonation as any).frequency || "monthly"} donation of{" "}
+                <Text style={styles.recurringBannerBold}>
+                  {activeDonation.amountXLM} XLM
+                </Text>{" "}
+                — next payment:{" "}
                 <Text style={styles.recurringBannerBold}>
                   {formatNextPaymentDate(activeDonation.nextDueDate)}
                 </Text>
@@ -521,7 +543,7 @@ export default function ProjectDetailScreen() {
             <TouchableOpacity
               testID="manage-recurring-button"
               style={styles.manageButton}
-              onPress={() => router.push('/recurring')}
+              onPress={() => router.push("/recurring")}
               accessibilityRole="button"
               accessibilityLabel="Manage recurring donations"
             >
@@ -554,13 +576,17 @@ export default function ProjectDetailScreen() {
               <Text style={[styles.statValue, { color: colors.accent }]}>
                 {project.donorCount}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.muted }]}>Donors</Text>
+              <Text style={[styles.statLabel, { color: colors.muted }]}>
+                Donors
+              </Text>
             </View>
             <View style={styles.stat}>
               <Text style={[styles.statValue, { color: colors.accent }]}>
                 {project.co2OffsetKg.toFixed(0)}
               </Text>
-              <Text style={[styles.statLabel, { color: colors.muted }]}>kg CO₂</Text>
+              <Text style={[styles.statLabel, { color: colors.muted }]}>
+                kg CO₂
+              </Text>
             </View>
           </View>
         </View>
@@ -576,10 +602,15 @@ export default function ProjectDetailScreen() {
             },
           ]}
         >
-          <Text style={[styles.progressTitle, { color: colors.primaryText }]} accessibilityRole="header">
+          <Text
+            style={[styles.progressTitle, { color: colors.primaryText }]}
+            accessibilityRole="header"
+          >
             Fundraising Progress
           </Text>
-          <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+          <View
+            style={[styles.progressBar, { backgroundColor: colors.border }]}
+          >
             <View
               style={[
                 styles.progressFill,
@@ -606,7 +637,10 @@ export default function ProjectDetailScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
+          <Text
+            style={[styles.sectionTitle, { color: colors.primaryText }]}
+            accessibilityRole="header"
+          >
             About this project
           </Text>
           <Text style={[styles.description, { color: colors.secondaryText }]}>
@@ -630,7 +664,10 @@ export default function ProjectDetailScreen() {
           accessibilityRole="summary"
           accessibilityLabel={`Updates for ${project.name}`}
         >
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
+          <Text
+            style={[styles.sectionTitle, { color: colors.primaryText }]}
+            accessibilityRole="header"
+          >
             📰 Updates
           </Text>
 
@@ -640,11 +677,19 @@ export default function ProjectDetailScreen() {
                 🎉
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
-                  {project.donorCount}{' '}
-                  {project.donorCount === 1 ? 'donor has' : 'donors have'} contributed
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
+                  {project.donorCount}{" "}
+                  {project.donorCount === 1 ? "donor has" : "donors have"}{" "}
+                  contributed
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
                   The project is actively receiving community support.
                 </Text>
               </View>
@@ -657,10 +702,17 @@ export default function ProjectDetailScreen() {
                 🌱
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   {project.co2OffsetKg.toLocaleString()} kg CO₂ offset
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
                   Estimated environmental impact to date.
                 </Text>
               </View>
@@ -673,11 +725,18 @@ export default function ProjectDetailScreen() {
                 ⭐
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   25% milestone reached
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{" "}
                   {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
                 </Text>
               </View>
@@ -690,11 +749,18 @@ export default function ProjectDetailScreen() {
                 ⭐⭐
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   50% milestone reached — halfway!
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{" "}
                   {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
                 </Text>
               </View>
@@ -707,11 +773,18 @@ export default function ProjectDetailScreen() {
                 🔥
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   75% milestone — almost there
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {parseFloat(project.raisedXLM).toFixed(0)} of{' '}
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
+                  {parseFloat(project.raisedXLM).toFixed(0)} of{" "}
                   {parseFloat(project.goalXLM).toFixed(0)} XLM raised to date.
                 </Text>
               </View>
@@ -724,13 +797,20 @@ export default function ProjectDetailScreen() {
                 🏆
               </Text>
               <View style={styles.updateText}>
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   Goal fully funded
                 </Text>
-                <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
-                  {project.donorCount}{' '}
-                  {project.donorCount === 1 ? 'donor has' : 'donors have'} hit the{' '}
-                  {parseFloat(project.goalXLM).toFixed(0)} XLM goal.
+                <Text
+                  style={[
+                    styles.updateSubtitle,
+                    { color: colors.secondaryText },
+                  ]}
+                >
+                  {project.donorCount}{" "}
+                  {project.donorCount === 1 ? "donor has" : "donors have"} hit
+                  the {parseFloat(project.goalXLM).toFixed(0)} XLM goal.
                 </Text>
               </View>
             </View>
@@ -738,11 +818,11 @@ export default function ProjectDetailScreen() {
 
           <View style={styles.updateRow}>
             <Text style={styles.updateBullet} accessibilityElementsHidden>
-              {project.status === 'active'
-                ? '✅'
-                : project.status === 'completed'
-                ? '🏁'
-                : '⏸️'}
+              {project.status === "active"
+                ? "✅"
+                : project.status === "completed"
+                  ? "🏁"
+                  : "⏸️"}
             </Text>
             <View style={styles.updateText}>
               <Text
@@ -751,7 +831,9 @@ export default function ProjectDetailScreen() {
               >
                 Project {project.status}
               </Text>
-              <Text style={[styles.updateSubtitle, { color: colors.secondaryText }]}>
+              <Text
+                style={[styles.updateSubtitle, { color: colors.secondaryText }]}
+              >
                 Verified {project.category.toLowerCase()} project.
               </Text>
             </View>
@@ -822,11 +904,19 @@ export default function ProjectDetailScreen() {
               accessibilityLabel={`Location not available for ${project.name}`}
               style={[
                 styles.mapPlaceholder,
-                { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                {
+                  backgroundColor: colors.inputBackground,
+                  borderColor: colors.border,
+                },
               ]}
             >
               <Text style={styles.mapPlaceholderIcon}>🌐</Text>
-              <Text style={[styles.mapPlaceholderText, { color: colors.secondaryText }]}>
+              <Text
+                style={[
+                  styles.mapPlaceholderText,
+                  { color: colors.secondaryText },
+                ]}
+              >
                 Location not available
               </Text>
             </View>
@@ -844,7 +934,10 @@ export default function ProjectDetailScreen() {
               },
             ]}
           >
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
+            <Text
+              style={[styles.sectionTitle, { color: colors.primaryText }]}
+              accessibilityRole="header"
+            >
               Latest Updates
             </Text>
             {updates.map((update) => (
@@ -852,13 +945,17 @@ export default function ProjectDetailScreen() {
                 key={update.id}
                 style={[styles.updateItem, { borderTopColor: colors.border }]}
               >
-                <Text style={[styles.updateTitle, { color: colors.primaryText }]}>
+                <Text
+                  style={[styles.updateTitle, { color: colors.primaryText }]}
+                >
                   {update.title}
                 </Text>
                 <Text style={[styles.updateDate, { color: colors.muted }]}>
                   {new Date(update.createdAt).toLocaleDateString()}
                 </Text>
-                <Text style={[styles.updateBody, { color: colors.secondaryText }]}>
+                <Text
+                  style={[styles.updateBody, { color: colors.secondaryText }]}
+                >
                   {update.body}
                 </Text>
               </View>
@@ -881,7 +978,11 @@ export default function ProjectDetailScreen() {
           disabled={followLoading}
           accessibilityRole="button"
           accessibilityLabel={followButtonLabel}
-          accessibilityState={{ selected: isFollowing, busy: followLoading, disabled: followLoading }}
+          accessibilityState={{
+            selected: isFollowing,
+            busy: followLoading,
+            disabled: followLoading,
+          }}
         >
           <Text
             style={[
@@ -898,7 +999,10 @@ export default function ProjectDetailScreen() {
 
         {/* Donate button */}
         <TouchableOpacity
-          style={[styles.donateButton, { backgroundColor: colors.buttonBackground }]}
+          style={[
+            styles.donateButton,
+            { backgroundColor: colors.buttonBackground },
+          ]}
           onPress={() => router.push(`/donate/${project.id}`)}
           accessibilityRole="button"
           accessibilityLabel={`Donate to ${project.name}`}
@@ -929,28 +1033,28 @@ export default function ProjectDetailScreen() {
 const styles = StyleSheet.create({
   wrapper: {
     flex: 1,
-    position: 'relative',
+    position: "relative",
   },
   container: {
     flex: 1,
   },
   loadingText: {
     fontSize: 18,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 40,
   },
   errorText: {
     fontSize: 18,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 40,
   },
   header: {
     padding: 24,
   },
   headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
   },
   headerTextGroup: {
     flex: 1,
@@ -961,9 +1065,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
     marginTop: 4,
   },
   shareIcon: {
@@ -971,12 +1075,12 @@ const styles = StyleSheet.create({
   },
   category: {
     fontSize: 14,
-    textTransform: 'uppercase',
-    fontWeight: '600',
+    textTransform: "uppercase",
+    fontWeight: "600",
   },
   name: {
     fontSize: 24,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginTop: 8,
   },
   location: {
@@ -994,15 +1098,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    flexDirection: "row",
+    justifyContent: "space-around",
   },
   stat: {
-    alignItems: 'center',
+    alignItems: "center",
   },
   statValue: {
     fontSize: 20,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   statLabel: {
     fontSize: 12,
@@ -1020,26 +1124,26 @@ const styles = StyleSheet.create({
   },
   progressTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 12,
   },
   progressBar: {
     height: 12,
     borderRadius: 6,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   progressFill: {
-    height: '100%',
+    height: "100%",
   },
   progressText: {
     fontSize: 14,
     marginTop: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   goalText: {
     fontSize: 12,
     marginTop: 4,
-    textAlign: 'center',
+    textAlign: "center",
   },
   descriptionCard: {
     margin: 16,
@@ -1053,7 +1157,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
     marginBottom: 8,
   },
   description: {
@@ -1061,32 +1165,32 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   followButton: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     paddingVertical: 14,
     paddingHorizontal: 16,
     marginHorizontal: 16,
     marginTop: 8,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
     borderWidth: 2,
-    borderColor: '#227239',
+    borderColor: "#227239",
   },
   followButtonActive: {
-    backgroundColor: '#227239',
+    backgroundColor: "#227239",
   },
   followButtonDisabled: {
     opacity: 0.6,
   },
   followButtonText: {
-    color: '#227239',
+    color: "#227239",
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   followButtonTextActive: {
-    color: '#fff',
+    color: "#fff",
   },
   unfollowHint: {
-    color: 'rgba(255,255,255,0.75)',
+    color: "rgba(255,255,255,0.75)",
     fontSize: 12,
     marginTop: 3,
   },
@@ -1095,11 +1199,11 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 12,
     borderRadius: 12,
-    alignItems: 'center',
+    alignItems: "center",
   },
   donateButtonText: {
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   recurringBanner: {
     marginHorizontal: 16,
@@ -1108,9 +1212,9 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: 12,
     borderWidth: 1.5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     elevation: 2,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -1125,20 +1229,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   recurringBannerBold: {
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   manageButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     minHeight: 44,
-    justifyContent: 'center',
+    justifyContent: "center",
     borderRadius: 8,
-    backgroundColor: '#227239',
+    backgroundColor: "#227239",
   },
   manageButtonText: {
-    color: '#ffffff',
+    color: "#ffffff",
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   mapCard: {
     margin: 16,
@@ -1151,19 +1255,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   map: {
-    width: '100%',
+    width: "100%",
     height: 200,
     borderRadius: 8,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   mapPlaceholder: {
-    width: '100%',
+    width: "100%",
     height: 200,
     borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderStyle: 'dashed',
+    borderStyle: "dashed",
   },
   mapPlaceholderIcon: {
     fontSize: 32,
@@ -1171,7 +1275,7 @@ const styles = StyleSheet.create({
   },
   mapPlaceholderText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   updatesCard: {
     margin: 16,
@@ -1190,7 +1294,7 @@ const styles = StyleSheet.create({
   },
   updateTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: "bold",
   },
   updateDate: {
     fontSize: 12,
@@ -1202,8 +1306,8 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   updateRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    alignItems: "flex-start",
     marginTop: 14,
   },
   updateBullet: {
@@ -1219,4 +1323,3 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
-

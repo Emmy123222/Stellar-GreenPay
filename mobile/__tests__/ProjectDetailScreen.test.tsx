@@ -25,7 +25,6 @@ const mockUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockRouterPush }),
   useLocalSearchParams: () => mockUseLocalSearchParams(),
-  useFocusEffect: (cb: () => void) => cb(),
   // The screen re-checks the active recurring donation whenever the route is
   // focused, so the mock has to invoke the callback on mount (matching
   // __tests__/accessibility.test.tsx).
@@ -150,7 +149,7 @@ describe('ProjectDetailScreen – Follow button', () => {
 
   // ── Follow action ────────────────────────────────────────────────────────────
 
-  it('calls followProject with the project id and push token on press', async () => {
+  it('calls followProject with the project id, push token, and wallet address on press', async () => {
     const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
@@ -160,7 +159,8 @@ describe('ProjectDetailScreen – Follow button', () => {
 
     expect(notifUtils.followProject).toHaveBeenCalledWith(
       'proj-1',
-      'expo-push-token-abc'
+      'expo-push-token-abc',
+      MOCK_PROJECT.walletAddress
     );
   });
 
@@ -486,10 +486,6 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
         ? Promise.resolve({ data: { data: updates } })
         : Promise.resolve({ data: { data: project } })
     );
-    const screen = await act(async () => renderWithTheme(<ProjectDetailScreen />));
-  // yield the result of assertions on the rendered tree.
-  async function renderProject(project: typeof MOCK_PROJECT) {
-    (axios.get as jest.Mock).mockResolvedValue({ data: { data: project } });
     const screen = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => expect(screen.getByText(project.name)).toBeTruthy());
     return screen;
@@ -515,7 +511,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     // The stats card renders the CO₂ figure and its unit label as two Text
     // nodes (`co2OffsetKg.toFixed(0)` + "kg CO₂").
     expect(renderer.getByText(`${p.co2OffsetKg.toFixed(0)}`)).toBeTruthy();
-    expect(renderer.getByText(/kg CO₂/)).toBeTruthy();
+    expect(renderer.getAllByText(/kg CO₂/i).length).toBeGreaterThan(0);
   });
 
   it('renders the donor stats and the Latest Updates card for any project', async () => {
@@ -530,7 +526,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     ]);
 
     expect(await renderer.findByText('Latest Updates')).toBeTruthy();
-    expect(await renderer.findByText(/147 donors have contributed/i)).toBeTruthy();
+    expect((await renderer.findAllByText(/147 donors have contributed/i)).length).toBeGreaterThan(0);
     // Donor count from the project payload is surfaced in the stats card.
     expect(await renderer.findByText(`${p.donorCount}`)).toBeTruthy();
   });
@@ -563,12 +559,11 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
       },
     ]);
 
-    const renderer = await renderWithTheme(<ProjectDetailScreen />);
     expect(await renderer.findByText(p.name)).toBeTruthy();
-    expect(await renderer.findByText(/Goal fully funded/i)).toBeTruthy();
+    expect((await renderer.findAllByText(/Goal fully funded/i)).length).toBeGreaterThan(0);
     expect(
-      await renderer.findByText(/312 donors have hit the 8000 XLM goal/i)
-    ).toBeTruthy();
+      (await renderer.findAllByText(/312 donors have hit the 8000 XLM goal/i)).length
+    ).toBeGreaterThan(0);
     // 100 % funded: the progress block reports the completed ratio.
     expect(await renderer.findByText(/100% complete/)).toBeTruthy();
   });

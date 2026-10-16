@@ -9,28 +9,39 @@ import { Platform } from 'react-native';
 // Configure notification behavior
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    // `shouldShowAlert` was replaced by the banner/list pair in SDK 53; the
-    // two flags below are what expo-notifications@57 actually reads.
+    shouldShowAlert: true,
+    // The newer SDK still honours the banner/list flags, but the current Expo
+    // type definitions still require `shouldShowAlert`.
     shouldShowBanner: true,
     shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
-  }),
+  } as any),
 });
 
 const LAST_SEEN_KEY = 'greenpay:notifications:lastSeen';
 const PERMISSION_CHOICE_KEY = 'greenpay:notifications:permissionChoice';
 
+type PermissionState = {
+  status?: 'granted' | 'denied' | 'undetermined' | 'limited';
+  canAskAgain?: boolean;
+};
+
+function asPermissionState(value: unknown): PermissionState {
+  return (value ?? {}) as PermissionState;
+}
+
 export async function shouldShowNotificationRationale(): Promise<boolean> {
   const choice = await AsyncStorage.getItem(PERMISSION_CHOICE_KEY);
   if (choice) return false;
 
-  const permission = await Notifications.getPermissionsAsync();
-  if (permission.status === 'granted') {
+  const permission = asPermissionState(await Notifications.getPermissionsAsync());
+  const status = permission.status ?? 'undetermined';
+  if (status === 'granted') {
     await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
     return false;
   }
-  if (permission.status === 'denied' || !permission.canAskAgain) {
+  if (status === 'denied' || permission.canAskAgain === false) {
     await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
     return false;
   }
@@ -46,18 +57,20 @@ export async function dismissNotificationRationale(): Promise<void> {
  * Request notification permissions
  */
 export async function requestNotificationPermissions(): Promise<string | null> {
-  const permission = await Notifications.getPermissionsAsync();
-  if (permission.status === 'granted') {
+  const permission = asPermissionState(await Notifications.getPermissionsAsync());
+  const currentStatus = permission.status ?? 'undetermined';
+  if (currentStatus === 'granted') {
     await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
-    return permission.status;
+    return currentStatus;
   }
-  if (permission.status === 'denied' || !permission.canAskAgain) {
+  if (currentStatus === 'denied' || permission.canAskAgain === false) {
     await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
     console.log('Failed to get push token for push notification!');
     return null;
   }
 
-  const { status } = await Notifications.requestPermissionsAsync();
+  const nextPermission = asPermissionState(await Notifications.requestPermissionsAsync());
+  const status = nextPermission.status ?? 'undetermined';
   await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, status === 'granted' ? 'granted' : 'denied');
   if (status !== 'granted') {
     console.log('Failed to get push token for push notification!');
@@ -72,14 +85,14 @@ export async function requestNotificationPermissions(): Promise<string | null> {
  */
 export async function getPushToken(): Promise<string | null> {
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') return null;
+    const permission = asPermissionState(await Notifications.getPermissionsAsync());
+    if ((permission.status ?? 'undetermined') !== 'granted') return null;
     await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
-    
+
     const token = await Notifications.getExpoPushTokenAsync({
       projectId: process.env.EXPO_PUBLIC_PROJECT_ID || '',
     });
-    
+
     return token.data;
   } catch (error) {
     console.error('Error getting push token:', error);
