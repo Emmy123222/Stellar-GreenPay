@@ -49,6 +49,7 @@ const fileType = require("file-type");
 const router = express.Router();
 const { uploadFile, backendName, UPLOAD_DIR } = require("../services/storage");
 const { generatePresignedPutUrl } = require("../services/s3Presign");
+const moderation = require("../services/moderation");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const logger = require("../logger");
 
@@ -96,7 +97,8 @@ const memory = multer({
 async function detectMimeType(buffer) {
   try {
     if (!buffer || buffer.length === 0) return null;
-    const type = await fileType.fromBuffer(buffer);
+    const detect = fileType.fileTypeFromBuffer || fileType.fromBuffer;
+    const type = typeof detect === "function" ? await detect(buffer) : null;
     return type ? type.mime : null;
   } catch (err) {
     logger.warn(

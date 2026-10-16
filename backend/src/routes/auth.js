@@ -64,9 +64,12 @@ function verifySignedChallenge(signedXdr, walletAddress, nonce) {
   if (!tx.memo || tx.memo.type !== "text") {
     return false;
   }
-  const memoValue = Buffer.isBuffer(tx.memo.value)
-    ? tx.memo.value.toString("utf8")
-    : tx.memo.value;
+  const memoValue =
+    Buffer.isBuffer(tx.memo.value) || tx.memo.value instanceof Uint8Array
+      ? Buffer.from(tx.memo.value).toString("utf8")
+      : typeof tx.memo.value === "string"
+        ? tx.memo.value
+        : String(tx.memo.value || "");
   if (memoValue !== nonce) {
     return false;
   }
@@ -76,7 +79,11 @@ function verifySignedChallenge(signedXdr, walletAddress, nonce) {
     const hash = tx.hash();
     return tx.signatures.some((sig) => {
       try {
-        return keypair.verify(hash, sig.signature());
+        const sigBytes =
+          typeof sig.signature === "function"
+            ? sig.signature()
+            : sig.signature?.value || sig.signature;
+        return keypair.verify(hash, sigBytes);
       } catch {
         return false;
       }
@@ -131,9 +138,12 @@ router.post("/token", authLimiter, async (req, res, next) => {
     try {
       const tx = new Transaction(signedXdr, getNetworkPassphrase());
       if (tx.memo && tx.memo.type === "text") {
-        nonce = Buffer.isBuffer(tx.memo.value)
-          ? tx.memo.value.toString("utf8")
-          : tx.memo.value;
+        nonce =
+          Buffer.isBuffer(tx.memo.value) || tx.memo.value instanceof Uint8Array
+            ? Buffer.from(tx.memo.value).toString("utf8")
+            : typeof tx.memo.value === "string"
+              ? tx.memo.value
+              : String(tx.memo.value || "");
       }
     } catch {
       return res.status(400).json({ error: "Invalid signed transaction" });

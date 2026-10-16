@@ -151,7 +151,7 @@ export default function ImpactScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <Text style={[styles.title, { color: colors.headerText }]}>My Impact</Text>
+        <Text style={[styles.title, { color: colors.headerText }]} accessibilityRole="header">My Impact</Text>
         <Text style={[styles.subtitle, { color: colors.headerText }]}>{publicKey.slice(0, 8)}...{publicKey.slice(-4)}</Text>
       </View>
 
@@ -180,7 +180,7 @@ export default function ImpactScreen() {
       </View>
 
       <View style={[styles.chartCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
-        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Monthly CO₂ offset</Text>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">Monthly CO₂ offset</Text>
         {monthlyImpact.length === 0 ? (
           <Text style={[styles.emptyText, { color: colors.secondaryText }]}>No monthly impact data available</Text>
         ) : (
@@ -235,7 +235,7 @@ export default function ImpactScreen() {
                         accessibilityLabel={`${point.label}: ${point.value} kg CO₂ offset`}
                         accessibilityState={{ selected: point.key === selectedImpactKey }}
                         onPress={() => setSelectedImpactKey(point.key)}
-                        style={[styles.chartPointHit, { left: point.x - 18, top: point.y - 18 }]}
+                        style={[styles.chartPointHit, { left: point.x - 22, top: point.y - 22 }]}
                       >
                         <View
                           style={[
@@ -285,7 +285,7 @@ export default function ImpactScreen() {
       </View>
 
       <View style={[styles.historyCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
-        <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>Donation History</Text>
+        <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">Donation History</Text>
         {donations.length === 0 ? (
           <Text style={[styles.emptyText, { color: colors.secondaryText }]}>No donations yet</Text>
         ) : (
@@ -337,6 +337,7 @@ export default function ImpactScreen() {
         style={[styles.shareButton, { backgroundColor: colors.buttonBackground }]}
         accessibilityLabel="Share your climate impact certificate"
         accessibilityRole="button"
+        accessibilityState={{ disabled: loading }}
       >
         <Text style={[styles.shareButtonText, { color: colors.buttonText }]}>Share Certificate</Text>
       </TouchableOpacity>
@@ -438,8 +439,9 @@ const styles = StyleSheet.create({
   },
   chartPointHit: {
     position: 'absolute',
-    width: 36,
-    height: 36,
+    // 44pt minimum touch target; positioned by its centre (x - 22, y - 22).
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -1,9 +1,14 @@
 # 🌱 Stellar GreenPay
 
+> **Prerequisite:** Node.js >= 20 (required by the Express 5 backend). Run `nvm use` and it picks up the version automatically — `.nvmrc` is the single source of truth.
+
 > Donate directly to verified climate projects using XLM — every transaction tracked on-chain.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Discord](https://img.shields.io/badge/Discord-%23greenpay-5865F2?logo=discord&logoColor=white)](https://discord.gg/greenpay)
+[![Telegram](https://img.shields.io/badge/Telegram-GreenPay%20Community-24A1DE?logo=telegram&logoColor=white)](https://t.me/greenpay_stellar)
+[![Hacktoberfest](https://img.shields.io/badge/Hacktoberfest-2026-orange?logo=hacktoberfest&logoColor=white)](https://hacktoberfest.com)
 [![Stellar](https://img.shields.io/badge/Stellar-Testnet-blue)](https://stellar.org)
 [![Soroban](https://img.shields.io/badge/Soroban-Smart%20Contracts-green)](https://soroban.stellar.org)
 [![Backend Coverage](https://codecov.io/gh/Emmy123222/Stellar-GreenPay/branch/main/graph/badge.svg?flag=backend)](https://codecov.io/gh/Emmy123222/Stellar-GreenPay)
@@ -46,16 +51,40 @@ Watch a complete walkthrough of the donation flow on **Stellar Testnet**:
 
 ```
 stellar-greenpay/
-├── frontend/          # Next.js + React + Tailwind CSS
+├── frontend/          # Next.js + React + Tailwind web app
 ├── backend/           # Node.js + Express API
 ├── contracts/         # Stellar Soroban smart contracts (Rust)
-├── docs/              # Architecture & API documentation
+├── mobile/            # Expo / React Native mobile app
+├── extension/         # MV3 browser extension (GreenPay Companion)
+├── docs/              # Architecture, API & operations documentation
 ├── scripts/           # Deployment & utility scripts
+├── helm/              # Helm chart for Kubernetes deployments
+├── k8s/               # Kubernetes manifests (Kustomize)
+├── monitoring/        # Grafana dashboards & Prometheus config
+├── load-tests/        # k6 load / performance test scripts
+├── infra/             # Infrastructure configs (nginx reverse proxy)
+├── pages/             # Standalone page routes (public impact certificate)
 ├── .github/           # CI/CD workflows & issue templates
 ├── CONTRIBUTING.md
 ├── ROADMAP.md
 └── LICENSE
 ```
+
+### Directory guide
+
+- [`frontend/`](frontend) — Next.js + React + Tailwind web app.
+- [`backend/`](backend) — Node.js + Express API ([`docs/api.md`](docs/api.md)).
+- [`contracts/`](contracts) — Stellar Soroban smart contracts (Rust).
+- [`mobile/`](mobile) — Expo / React Native mobile app — see [`mobile/README.md`](mobile/README.md).
+- [`extension/`](extension) — MV3 browser extension (GreenPay Companion) — store guide in [`extension/PUBLISH.md`](extension/PUBLISH.md).
+- [`docs/`](docs) — architecture, API & operations documentation.
+- [`scripts/`](scripts) — deployment & utility scripts.
+- [`helm/`](helm) · [`k8s/`](k8s) — deploy manifests — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- [`monitoring/`](monitoring) — Grafana/Prometheus — see [`docs/observability.md`](docs/observability.md).
+- [`load-tests/`](load-tests) — k6 performance tests — see [`docs/performance.md`](docs/performance.md).
+- [`infra/`](infra) — nginx reverse-proxy configuration.
+- [`pages/`](pages) — standalone page routes (public impact certificate).
+- [`.github/`](.github) — CI/CD workflows & issue templates.
 
 ---
 
@@ -138,6 +167,16 @@ ALLOWED_ORIGINS=http://localhost:3000
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). All skill levels welcome!
 
+### 💬 Community & Discussion
+
+Join the GreenPay contributor community to ask questions, share ideas, or coordinate contributions:
+- **Discord**: Join our [#greenpay](https://discord.gg/greenpay) Discord channel for developer discussions and support.
+- **Telegram**: Join our [GreenPay Community Group](https://t.me/greenpay_stellar) for real-time chat and announcements.
+
+### 🎃 Hacktoberfest
+
+GreenPay proudly participates in [Hacktoberfest](https://hacktoberfest.com)! Issues suited for first-time and intermediate contributors are tagged with `hacktoberfest` and `good-first-issue`. See our [Hacktoberfest section in CONTRIBUTING.md](CONTRIBUTING.md#hacktoberfest) for guidelines on how to participate and get your PRs merged!
+
 See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
 Please note that this project is governed by a [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold its terms.
@@ -168,13 +207,3 @@ See [ROADMAP.md](ROADMAP.md) for planned features.
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE)
-Optimized transaction settlement logic to accelerate payment verification workflows.
-​Updated Stellar SDK configurations and network payload definitions.
-​Enhanced inline comments across payment processing routines for clarity.
-​Corrected outdated environment configurations and build settings.
-​Clarified testing procedures for validating green payment ledger transactions.
-​Standardized error reporting response structures across API handlers.
-​Strengthened security protocols regarding account key management and signatures.
-​Resolved formatting inconsistencies across main project documentation.
-​Added step-by-step instructions for deploying service components to production.
-​Updated system status logging and network health monitoring utilities.....

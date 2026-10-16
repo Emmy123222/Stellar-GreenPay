@@ -972,6 +972,122 @@ function moderationSummary(verdict) {
   };
 }
 
+// ── Text moderation (donor comments, #1662) ──────────────────────────────────
+//
+// Comments are short user text, so they don't go through Rekognition. They use
+// the same verdict shape and STATUS values as images so routes handle both the
+// same way: `blocked` → 422 and nothing is stored, `flaggedForReview` → stored
+// as pending_review and hidden from the public thread until an admin approves.
+// Every rule is local and synchronous, so a text verdict is never `unavailable`.
+
+const TEXT_PROVIDER = "greenpay_text_rules";
+
+// A Stellar secret seed. Posting one publicly hands over the wallet, so it is
+// always rejected — it protects the donor rather than readers.
+const STELLAR_SECRET_RE = /\bS[A-Z2-7]{55}\b/;
+
+// Wallet-drainer phrasing that shows up in donation-site comment spam.
+const DEFAULT_TEXT_REJECT_TERMS = Object.freeze([
+  "seed phrase",
+  "secret phrase",
+  "recovery phrase",
+  "private key",
+  "secret key",
+  "wallet validation",
+  "validate your wallet",
+  "claim your airdrop",
+  "double your xlm",
+]);
+
+const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
+
+function parseTermList(raw) {
+  if (!raw || typeof raw !== "string") return [];
+  return raw
+    .split(",")
+    .map((t) => t.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Text moderation config. COMMENT_MODERATION_BLOCKLIST adds deployment-specific
+ * reject terms (e.g. profanity) on top of the built-in scam phrases;
+ * COMMENT_MODERATION_REVIEW_TERMS adds terms that only flag for review.
+ */
+function getTextModerationConfig() {
+  return {
+    enabled: parseBooleanEnv(process.env.COMMENT_MODERATION_ENABLED, true),
+    rejectTerms: [...DEFAULT_TEXT_REJECT_TERMS, ...parseTermList(process.env.COMMENT_MODERATION_BLOCKLIST)],
+    reviewTerms: parseTermList(process.env.COMMENT_MODERATION_REVIEW_TERMS),
+    maxLinks: parseNumberEnv(process.env.COMMENT_MODERATION_MAX_LINKS, 0),
+  };
+}
+
+function textVerdict(status, reason, labels = []) {
+  return {
+    applied: true,
+    blocked: status === STATUS.REJECTED,
+    status,
+    reason,
+    labels,
+    flaggedForReview: status === STATUS.PENDING_REVIEW,
+    maxConfidence: labels.length ? 100 : 0,
+    provider: TEXT_PROVIDER,
+  };
+}
+
+/**
+ * Moderate a piece of user-submitted text (donor comments).
+ *
+ *   rejected        — secret seed, built-in scam phrase or configured blocklist term
+ *   pending_review  — more links than COMMENT_MODERATION_MAX_LINKS (default 0),
+ *                     a configured review term, or mostly-uppercase shouting
+ *   approved        — everything else
+ *   skipped         — COMMENT_MODERATION_ENABLED=false
+ *
+ * @param {{text: string}} input
+ * @returns {object} verdict with the same shape moderateImage() returns
+ */
+function moderateText(input = {}) {
+  const config = getTextModerationConfig();
+  if (!config.enabled) {
+    return { ...skippedVerdict("Comment moderation is disabled"), provider: TEXT_PROVIDER };
+  }
+
+  const text = typeof input.text === "string" ? input.text : "";
+  const lower = text.toLowerCase();
+
+  if (STELLAR_SECRET_RE.test(text)) {
+    return textVerdict(
+      STATUS.REJECTED,
+      "Comments must not contain a Stellar secret key. Never share your secret key.",
+      ["stellar_secret_key"],
+    );
+  }
+
+  const rejectHit = config.rejectTerms.find((term) => lower.includes(term));
+  if (rejectHit) {
+    return textVerdict(STATUS.REJECTED, "The comment failed content moderation.", [`term:${rejectHit}`]);
+  }
+
+  const labels = [];
+  const links = text.match(URL_RE) || [];
+  if (links.length > config.maxLinks) labels.push("links");
+
+  const reviewHit = config.reviewTerms.find((term) => lower.includes(term));
+  if (reviewHit) labels.push(`term:${reviewHit}`);
+
+  const letters = text.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 20 && letters.replace(/[^A-Z]/g, "").length / letters.length > 0.8) {
+    labels.push("shouting");
+  }
+
+  if (labels.length) {
+    return textVerdict(STATUS.PENDING_REVIEW, "The comment is awaiting moderator review.", labels);
+  }
+  return textVerdict(STATUS.APPROVED, null);
+}
+
 /**
  * Best-effort removal of a rejected object from S3 so an auto-rejected image is
  * not left publicly readable. Failures are logged, never thrown.
@@ -1047,4 +1163,8 @@ module.exports = {
   attachDecisionToUpdateImage,
   // orchestration
   moderateImage,
+  // text moderation (comments, #1662)
+  TEXT_PROVIDER,
+  getTextModerationConfig,
+  moderateText,
 };

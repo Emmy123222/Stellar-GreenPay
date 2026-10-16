@@ -8,10 +8,10 @@ This guide enables third-party developers to integrate with the **GreenPay Donat
 - [Core Concepts](#core-concepts)
 - [Recording Donations (Cross-Contract Calls)](#recording-donations-cross-contract-calls)
 - [Querying Donor Statistics](#querying-donor-statistics)
-- [Badge Tiers & Thresholds](#badge-tiers--thresholds)
+- [Badge Tiers & Thresholds](#badge-tiers-thresholds)
 - [TypeScript Client Examples](#typescript-client-examples)
 - [Complete Soroban Contract Example](#complete-soroban-contract-example)
-- [Error Handling & Best Practices](#error-handling--best-practices)
+- [Error Handling & Best Practices](#error-handling-best-practices)
 - [Testing](#testing)
 
 ---

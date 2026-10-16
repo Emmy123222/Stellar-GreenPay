@@ -31,10 +31,18 @@ import {
 import en from "@/locales/en.json";
 import es from "@/locales/es.json";
 import fr from "@/locales/fr.json";
+import ar from "@/locales/ar.json";
 import { setFormattingLocale } from "./formatLocale";
 
-export const SUPPORTED_LOCALES = ["en", "es", "fr"] as const;
+export const SUPPORTED_LOCALES = ["en", "es", "fr", "ar"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
+
+export const RTL_LOCALES = ["ar", "he"] as const;
+export type RTLLocale = (typeof RTL_LOCALES)[number];
+
+export function isRTL(locale: string): boolean {
+  return (RTL_LOCALES as readonly string[]).includes(locale);
+}
 
 export const DEFAULT_LOCALE: Locale = "en";
 
@@ -43,7 +51,7 @@ export const LOCALE_STORAGE_KEY = "greenpay:locale";
 /** Key used before the `greenpay:` namespace was introduced (#1073). */
 const LEGACY_LOCALE_STORAGE_KEY = "locale";
 
-const locales: Record<Locale, Record<string, any>> = { en, es, fr };
+const locales: Record<Locale, Record<string, any>> = { en, es, fr, ar };
 
 interface I18nContextValue {
   locale: Locale;
@@ -134,9 +142,10 @@ export function resolveInitialLocale(): Locale {
  * Exported so `pages/_document.tsx` can mirror the same intent in its
  * pre-hydration inline script.
  */
-export function applyLocaleToDocument(locale: Locale): void {
+export function applyLocaleToDocument(locale: Locale | string): void {
   if (typeof document === "undefined") return;
   document.documentElement.lang = locale;
+  document.documentElement.dir = isRTL(locale) ? "rtl" : "ltr";
 }
 
 function get(obj: Record<string, any>, path: string): string {

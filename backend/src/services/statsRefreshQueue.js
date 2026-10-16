@@ -5,6 +5,7 @@
 
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { Sentry } = require("./sentry");
 const { statsRefreshFailuresTotal } = require("./metrics");
 
@@ -15,7 +16,7 @@ let boss = null;
 
 async function refreshGlobalStatsMv() {
   await pool.query("REFRESH MATERIALIZED VIEW CONCURRENTLY global_stats_mv");
-  console.log("[statsRefreshQueue] refreshed global_stats_mv");
+  logger.info({ event: "stats_refresh_completed" }, "[statsRefreshQueue] refreshed global_stats_mv");
 }
 
 /**
@@ -42,7 +43,7 @@ async function moveToDeadLetter(job, errorMessage) {
       [QUEUE, jobId, JSON.stringify(payload), String(error)]
     );
   } catch (err) {
-    console.error("[statsRefreshQueue] failed to write to dead_letter table:", err.message);
+    logger.error({ event: "stats_refresh_dead_letter_failed", err: err.message }, "[statsRefreshQueue] failed to write to dead_letter table");
   }
 }
 
@@ -92,7 +93,7 @@ async function onExpire(job) {
       });
     }
   } catch (sentryErr) {
-    console.error("[statsRefreshQueue] Failed to report to Sentry:", sentryErr.message);
+    logger.error({ event: "stats_refresh_sentry_error", err: sentryErr.message }, "[statsRefreshQueue] Failed to report to Sentry");
   }
 
   // 2. Move to dead_letter table
@@ -103,7 +104,7 @@ async function onExpire(job) {
     try {
       await boss.archive();
     } catch (archiveErr) {
-      console.error("[statsRefreshQueue] pg-boss archive error:", archiveErr.message);
+      logger.error({ event: "stats_refresh_archive_error", err: archiveErr.message }, "[statsRefreshQueue] pg-boss archive error");
     }
   }
 
@@ -113,7 +114,7 @@ async function onExpire(job) {
       statsRefreshFailuresTotal.inc({ queue: QUEUE, reason: state });
     }
   } catch (metricErr) {
-    console.error("[statsRefreshQueue] metric increment error:", metricErr.message);
+    logger.error({ event: "stats_refresh_metric_error", err: metricErr.message }, "[statsRefreshQueue] metric increment error");
   }
 }
 
@@ -122,7 +123,7 @@ async function start() {
     process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
 
   boss = new PgBoss(connectionString);
-  boss.on("error", (err) => console.error("[statsRefreshQueue] pg-boss error:", err.message));
+  boss.on("error", (err) => logger.error({ event: "stats_refresh_pgboss_error", err: err.message }, "[statsRefreshQueue] pg-boss error"));
 
   await boss.start();
 
@@ -162,10 +163,10 @@ async function start() {
   try {
     await pool.query("REFRESH MATERIALIZED VIEW global_stats_mv");
   } catch (err) {
-    console.error("[statsRefreshQueue] initial refresh failed:", err.message);
+    logger.error({ event: "stats_refresh_initial_failed", err: err.message }, "[statsRefreshQueue] initial refresh failed");
   }
 
-  console.log("[statsRefreshQueue] scheduled every 60s on queue:", QUEUE);
+  logger.info({ event: "stats_refresh_scheduled", queue: QUEUE }, `[statsRefreshQueue] scheduled every 60s on queue: ${QUEUE}`);
 }
 
 module.exports = {

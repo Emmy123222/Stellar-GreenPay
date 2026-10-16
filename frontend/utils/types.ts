@@ -33,8 +33,12 @@ export interface ClimateProject {
   location: string;
   imageUrl?: string;
   walletAddress: string;       // Stellar address that receives donations
+  // Asset the project prefers to receive. null/undefined = native XLM.
+  // When set, donors paying in another asset go through a DEX path payment.
+  preferredAsset?: { code: string; issuer: string } | null;
   goalXLM: string;             // fundraising goal
   raisedXLM: string;           // total raised so far
+  raisedUSDC?: string;
   donorCount: number;
   co2OffsetKg: number;         // estimated CO2 offset in kg
   co2_per_xlm?: number;        // CO2 offset per XLM donated
@@ -91,6 +95,17 @@ export interface DonationMatch {
 /**
  * A single donor review of a project.
  */
+/** A donor comment on a project page (GET /api/comments/project/:id). */
+export interface ProjectComment {
+  id: string;
+  projectId: string;
+  authorAddress: string;
+  authorDisplayName: string | null;
+  body: string;
+  moderationStatus: "approved" | "pending_review";
+  createdAt: string;
+}
+
 export interface ProjectReview {
   donorAddress: string;
   rating: number;
@@ -140,9 +155,15 @@ export interface Donation {
   amountXLM?: string;
   amount?: string;
   currency?: "XLM" | "USDC";
+  assetCode?: string | null;
+  assetIssuer?: string | null;
   message?: string;
   transactionHash: string;
   createdAt: string;
+  // DEX path payments (#1660): what the donor spent when it differs from the
+  // delivered `currency`/`amount` ("XLM" or "CODE:ISSUER").
+  sourceAsset?: string;
+  sourceAmount?: string | null;
   // On-chain contract data
   contractRecordId?: string;
   // Matching status

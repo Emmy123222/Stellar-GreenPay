@@ -13,9 +13,6 @@ import {
   type ExtensionSettings,
 } from './settings';
 import { getHostnameFromUrl, isUrlAllowed } from './allowlist';
-
-} from "@stellar/stellar-sdk";
-import { loadSettings, type ExtensionSettings } from "./settings";
 import {
   addPendingDonation,
   checkPendingDonations,
@@ -30,20 +27,13 @@ import {
 // Module-level vars
 let API_BASE = 'https://api.stellar-greenpay.app';
 let NETWORK_PASSPHRASE: string = Networks.TESTNET;
-let horizonUrl = 'https://horizon-testnet.stellar.org';
 let currentNetwork: "testnet" | "mainnet" = "testnet";
 let horizonUrl = "https://horizon-testnet.stellar.org";
 let server = new Horizon.Server(horizonUrl);
 
 function applySettings(settings: ExtensionSettings) {
   API_BASE = settings.backendUrl;
-  if (settings.network === 'mainnet') {
-    NETWORK_PASSPHRASE = Networks.PUBLIC;
-    horizonUrl = 'https://horizon.stellar.org';
-  } else {
-    NETWORK_PASSPHRASE = Networks.TESTNET;
-    horizonUrl = 'https://horizon-testnet.stellar.org';
-  currentNetwork = settings.network === "mainnet" ? "mainnet" : "testnet";
+  currentNetwork = settings.network === 'mainnet' ? 'mainnet' : 'testnet';
   if (settings.network === "mainnet") {
     NETWORK_PASSPHRASE = Networks.PUBLIC;
   } else {
@@ -223,27 +213,22 @@ function setStatus(message: string, isError = false) {
   statusEl.className = `status-message${isError ? ' error' : ' success'}`;
 }
 
-function initProjectSearch() {
-  const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
-  const dropdown = document.getElementById('search-dropdown') as HTMLUListElement | null;
-  if (!searchInput || !dropdown) return;
+function showFreighterRequiredMessage() {
+  const message = `
+    <div class="wallet-required-message">
+      <h2>Freighter Wallet Required</h2>
+      <p>GreenPay requires the Freighter wallet extension to process donations.</p>
+      <a href="https://www.freighter.app/" target="_blank" rel="noopener noreferrer">
+        Install Freighter Wallet
+      </a>
+    </div>
+  `;
 
-  searchInput.addEventListener('input', () => {
-    const query = searchInput.value.trim();
-    if (!query) {
-      dropdown.classList.add('hidden');
-      return;
-    }
+  const form = document.getElementById('donation-form');
+  if (form) form.innerHTML = message;
 
-    // TODO: wire this to a real project search API when available.
-    renderDropdown([], dropdown);
-  });
-
-  document.addEventListener('click', (event) => {
-    if (!dropdown.contains(event.target as Node) && event.target !== searchInput) {
-      dropdown.classList.add('hidden');
-    }
-  });
+  const statusEl = document.getElementById('status-message');
+  if (statusEl) statusEl.innerHTML = message;
 }
 
 function initDonationControls() {
@@ -668,20 +653,6 @@ async function restoreWalletSession() {
 
 // ==================== MAIN INIT ====================
 
-function escapeHtml(str: string): string {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function setStatus(message: string, isError = false) {
-  const statusEl = document.getElementById('status-message');
-  if (statusEl) {
-    statusEl.textContent = message;
-    statusEl.style.color = isError ? '#ef4444' : '#10b981';
-  }
-}
-
 const onboardingSteps = [
   {
     title: "What is GreenPay?",
@@ -853,11 +824,6 @@ async function initSiteOptin() {
   const domainEl = document.getElementById('current-site-domain');
   const toggle = document.getElementById('site-optin-toggle') as HTMLInputElement | null;
   const statusEl = document.getElementById('site-optin-status');
-document.addEventListener("DOMContentLoaded", async () => {
-  const settings = await loadSettings();
-  applySettings(settings);
-  showOnboardingIfNeeded();
-
   if (!panel || !domainEl || !toggle || !statusEl) return;
   if (typeof chrome === 'undefined' || !chrome.tabs?.query) return;
 
@@ -933,7 +899,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await loadSettings();
   applySettings(settings);
+  showOnboardingIfNeeded();
   initSiteOptin();
+  if (!(window as any).freighter) showFreighterRequiredMessage();
 
   // Pre-fill donation amount from saved default
   const amountInput = document.getElementById('custom-amount-input') as HTMLInputElement | null;
@@ -948,8 +916,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       window.location.href = 'settings.html';
     });
   }
-
-  document.getElementById("connect-btn")?.addEventListener("click", connectWallet);
 
   initProjectSearch();
   initProjectListKeyNav();

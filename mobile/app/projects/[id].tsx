@@ -32,10 +32,6 @@ import {
 import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
-import {
-  loadRecurringDonations,
-  type RecurringDonation,
-} from '../../utils/recurringDonations';
 
 import * as Notifications from 'expo-notifications';
 import MapView, { Marker } from 'react-native-maps';
@@ -50,20 +46,6 @@ import {
   loadRecurringDonations,
   type RecurringDonation,
 } from '../../utils/recurringDonations';
-
-export function formatNextPaymentDate(isoDate: string): string {
-  try {
-    const date = new Date(isoDate);
-    if (isNaN(date.getTime())) return isoDate;
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return isoDate;
-  }
-}
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
@@ -156,10 +138,7 @@ function Toast({
     // defence for any future async path that updates the closure.
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
     let mounted = true;
-    let anim: Animated.CompositeAnimation | undefined;
 
-    // Fade in
-    anim = Animated.timing(opacity, {
     const anim = Animated.timing(opacity, {
       toValue: 1,
       duration: 200,
@@ -290,10 +269,6 @@ export default function ProjectDetailScreen() {
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  const showToast = (message: string, variant: ToastVariant = 'success') => {
-    setToast({ message, variant });
-  };
-
   const loadUpdates = async (projectId: string) => {
     try {
       const res = await axios.get(`${API_URL}/api/updates/${projectId}`);
@@ -301,12 +276,6 @@ export default function ProjectDetailScreen() {
     } catch (error) {
       console.error('Error loading updates:', error);
     }
-  };
-
-  // ── helpers ────────────────────────────────────────────────────────────────
-
-  const showToast = (message: string, variant: ToastVariant = 'success') => {
-    setToast({ message, variant });
   };
 
   const initializeNotifications = async () => {
@@ -501,7 +470,7 @@ export default function ProjectDetailScreen() {
               <Text style={[styles.category, { color: colors.headerText }]}>
                 {project.category}
               </Text>
-              <Text style={[styles.name, { color: colors.headerText }]}>
+              <Text style={[styles.name, { color: colors.headerText }]} accessibilityRole="header">
                 {project.name}
               </Text>
               <Text style={[styles.location, { color: colors.headerText }]}>
@@ -513,15 +482,11 @@ export default function ProjectDetailScreen() {
               style={styles.shareButton}
               onPress={handleShare}
               activeOpacity={0.7}
-              style={styles.shareButton}
-              onPress={handleShare}
-              activeOpacity={0.7}
-              testID="share-button"
               accessibilityRole="button"
               accessibilityLabel={`Share ${project.name}`}
               accessibilityHint="Opens the system share sheet so you can send this project to others"
             >
-              <Text style={styles.shareIcon}>↗</Text>
+              <Text style={styles.shareIcon} accessibilityElementsHidden importantForAccessibility="no">↗</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -611,7 +576,7 @@ export default function ProjectDetailScreen() {
             },
           ]}
         >
-          <Text style={[styles.progressTitle, { color: colors.primaryText }]}>
+          <Text style={[styles.progressTitle, { color: colors.primaryText }]} accessibilityRole="header">
             Fundraising Progress
           </Text>
           <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
@@ -641,7 +606,7 @@ export default function ProjectDetailScreen() {
             },
           ]}
         >
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
             About this project
           </Text>
           <Text style={[styles.description, { color: colors.secondaryText }]}>
@@ -665,7 +630,7 @@ export default function ProjectDetailScreen() {
           accessibilityRole="summary"
           accessibilityLabel={`Updates for ${project.name}`}
         >
-          <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
             📰 Updates
           </Text>
 
@@ -879,7 +844,7 @@ export default function ProjectDetailScreen() {
               },
             ]}
           >
-            <Text style={[styles.sectionTitle, { color: colors.primaryText }]}>
+            <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
               Latest Updates
             </Text>
             {updates.map((update) => (
@@ -916,7 +881,7 @@ export default function ProjectDetailScreen() {
           disabled={followLoading}
           accessibilityRole="button"
           accessibilityLabel={followButtonLabel}
-          accessibilityState={{ selected: isFollowing, busy: followLoading }}
+          accessibilityState={{ selected: isFollowing, busy: followLoading, disabled: followLoading }}
         >
           <Text
             style={[
@@ -930,7 +895,6 @@ export default function ProjectDetailScreen() {
             <Text style={styles.unfollowHint}>Tap again to unfollow</Text>
           )}
         </TouchableOpacity>
-      )}
 
         {/* Donate button */}
         <TouchableOpacity
@@ -993,9 +957,10 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   shareButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    // 44pt minimum touch target (Apple HIG / WCAG 2.5.5).
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1165,17 +1130,10 @@ const styles = StyleSheet.create({
   manageButton: {
     paddingHorizontal: 14,
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     borderRadius: 8,
     backgroundColor: '#227239',
-  },
-  manageButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: 'bold',
-    backgroundColor: '#227239',
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 8,
   },
   manageButtonText: {
     color: '#ffffff',

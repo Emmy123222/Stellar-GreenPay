@@ -97,4 +97,19 @@ export function useTheme() {
   return context;
 }
 
+/**
+ * Provider-tolerant variant of {@link useTheme} for screens that are also
+ * mounted without a `ThemeProvider` above them — the scanner screens are
+ * rendered bare by their unit tests, and embeds/standalone mounts have no
+ * provider either. Falls back to the system colour scheme instead of
+ * throwing, so the screen still honours dark mode.
+ */
+export function useThemeOrDefault(): ThemeContextValue {
+  const context = useContext(ThemeContext);
+  const colorScheme = useColorScheme();
+  if (context) return context;
+  const mode: ThemeMode = colorScheme === 'dark' ? 'dark' : 'light';
+  return { mode, colors: themes[mode] };
+}
+
 export { themes };

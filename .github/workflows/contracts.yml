@@ -1,8 +1,15 @@
 name: Contracts CI
 
 on:
-  pull_request:
+  push:
+    branches: [main]
     paths: [contracts/**]
+  pull_request:
+    branches: [main]
+    paths: [contracts/**]
+  # Scheduled weekly run to catch toolchain drift / rot even if no contracts files changed
+  # schedule:
+  #   - cron: '0 0 * * 0' # Every Sunday at midnight UTC
 
 jobs:
   test:

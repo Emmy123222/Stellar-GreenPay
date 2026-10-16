@@ -9,14 +9,14 @@ This document describes how recurring (monthly) donations work in Stellar GreenP
 | Platform | Storage | Status |
 |----------|---------|--------|
 | Web (Next.js) | `window.localStorage` | ✅ Implemented (client-only) |
-| Mobile (React Native / Expo) | Backend `recurring_donations` = source of truth; `AsyncStorage` = offline cache | ✅ Implemented (see [Mobile sync](#mobile-sync--backend-as-source-of-truth)) |
+| Mobile (React Native / Expo) | Backend `recurring_donations` = source of truth; `AsyncStorage` = offline cache | ✅ Implemented (see [Mobile sync](#mobile-sync---backend-as-source-of-truth)) |
 | Backend (PostgreSQL) | Dedicated table + REST API (`/api/recurring-donations`) | ✅ Implemented and mounted in `src/server.js` |
 
 The web frontend still keeps subscriptions purely in `localStorage`; only mobile reads and writes schedules through the backend API today.
 
 ---
 
-## Mobile sync — backend as source of truth
+## Mobile sync - backend as source of truth
 
 Implemented in [`mobile/utils/recurringDonations.ts`](../mobile/utils/recurringDonations.ts) for issue #1059.
 
@@ -130,7 +130,7 @@ export const RECURRING_DONATIONS_KEY = 'greenpay_recurring_donations';
 | Cross-device | ❌ No | ❌ No |
 | Capacity | ~5 MB | ~6 MB (iOS); ~6 MB (Android) |
 
-For mobile this multi-device limitation no longer applies: the schedule is restored from the backend for any donor address, so switching devices or reinstalling the app recovers the pledges (see [Mobile sync](#mobile-sync--backend-as-source-of-truth)). The web frontend's `localStorage` model still has it.
+For mobile this multi-device limitation no longer applies: the schedule is restored from the backend for any donor address, so switching devices or reinstalling the app recovers the pledges (see [Mobile sync](#mobile-sync---backend-as-source-of-truth)). The web frontend's `localStorage` model still has it.
 
 ---
 
@@ -244,7 +244,7 @@ When the backend sync is added (see next section), the sync endpoint should:
 
 ## Backend Sync Strategy (Future)
 
-> **Status:** the mobile half of this has landed — see [Mobile sync](#mobile-sync--backend-as-source-of-truth). Mobile reads schedules from `GET /api/recurring-donations` and writes them with `POST`/`DELETE`. What is still future work: the `/sync` upsert endpoint with payment `history[]` de-duplication by `transaction_hash`, `action`/`skipReason` responses for paused projects, and server-initiated payment scheduling. This section is kept as the design record for those.
+> **Status:** the mobile half of this has landed — see [Mobile sync](#mobile-sync---backend-as-source-of-truth). Mobile reads schedules from `GET /api/recurring-donations` and writes them with `POST`/`DELETE`. What is still future work: the `/sync` upsert endpoint with payment `history[]` de-duplication by `transaction_hash`, `action`/`skipReason` responses for paused projects, and server-initiated payment scheduling. This section is kept as the design record for those.
 
 The web frontend still uses the client-only model, which works well for a single device but breaks down for:
 - Users who switch devices or reinstall the app.

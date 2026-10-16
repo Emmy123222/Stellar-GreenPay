@@ -97,7 +97,7 @@ async function navigateToMethodologyStep() {
   // Step 3 — wallet
   await waitFor(() => screen.getByLabelText(/stellar wallet address/i));
   fireEvent.change(screen.getByLabelText(/stellar wallet address/i), {
-    target: { value: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN" },
+    target: { value: "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ" },
   });
   fireEvent.click(screen.getByRole("button", { name: /^next$/i }));
 
@@ -167,7 +167,7 @@ describe("SubmitProjectPage — wallet guard (#1082)", () => {
   describe("wallet connected (publicKey present)", () => {
     beforeEach(() => {
       mockGetConnectedPublicKey.mockResolvedValue(
-        "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+        "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ",
       );
     });
 

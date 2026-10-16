@@ -3,7 +3,7 @@
  */
 import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
-import { formatDate, formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { formatAmount, formatDate, formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
 import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -84,7 +84,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
             </div>
           ) : null}
 
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
+          <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
             {project.description}
           </p>
 
@@ -102,8 +102,11 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 className="w-full"
               />
               <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)] font-body">
-                <span>{formatXLM(project.raisedXLM)} raised</span>
-                <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM)}` : "No goal set"}</span>
+                <span>{formatXLM(project.raisedXLM, 0)} raised</span>
+                {Number(project.raisedUSDC || 0) > 0 && (
+                  <span className="block text-xs text-[var(--text-secondary)]">+ {formatAmount(Number(project.raisedUSDC))} USDC</span>
+                )}
+                <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM, 0)}` : "No goal set"}</span>
               </div>
             </div>
           )}

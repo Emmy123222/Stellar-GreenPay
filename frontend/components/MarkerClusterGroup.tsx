@@ -10,6 +10,7 @@
  *  - Clicking a cluster zooms into the group (zoomToBoundsOnClick: true)
  *  - Individual markers visible at zoom level 10+ (disableClusteringAtZoom: 10)
  */
+/// <reference types="leaflet.markercluster" />
 "use client";
 
 import { createLayerComponent, createElementObject, extendContext } from "@react-leaflet/core";

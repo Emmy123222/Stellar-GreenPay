@@ -2,11 +2,14 @@
  * components/DonationModal.tsx
  * Accessible modal wrapper for the donation form.
  * - aria-modal, role="dialog", aria-labelledby
- * - Focus trap while open
+ * - Focus moved to dialog on open
+ * - Focus trap while open (Tab / Shift+Tab cycling)
  * - Close on Escape keypress
  * - Return focus to trigger button on close
+ * - Background content inert and aria-hidden while open
+ * - Prevent body scroll when open
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import DonateForm from "./DonateForm";
 import type { ClimateProject } from "@/utils/types";
 
@@ -18,6 +21,28 @@ interface DonationModalProps {
   onSuccess?: () => void;
 }
 
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  const selector = [
+    "a[href]",
+    "button:not([disabled])",
+    "input:not([disabled]):not([type='hidden'])",
+    "select:not([disabled])",
+    "textarea:not([disabled])",
+    "[tabindex]:not([tabindex='-1']):not([disabled])",
+  ].join(", ");
+
+  const elements = Array.from(container.querySelectorAll<HTMLElement>(selector));
+  return elements.filter((el) => {
+    return (
+      !el.hasAttribute("disabled") &&
+      el.getAttribute("aria-hidden") !== "true" &&
+      !el.hidden &&
+      el.style.display !== "none" &&
+      el.style.visibility !== "hidden"
+    );
+  });
+}
+
 export default function DonationModal({
   project,
   publicKey,
@@ -25,28 +50,92 @@ export default function DonationModal({
   onClose,
   onSuccess,
 }: DonationModalProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Store the element that had focus before opening
+  // Focus dialog on open, return focus on close, and make background inert/aria-hidden
   useEffect(() => {
-    if (isOpen) {
-      previousFocusRef.current = document.activeElement as HTMLElement;
-      // Focus the close button when modal opens
-      setTimeout(() => closeButtonRef.current?.focus(), 50);
+    if (!isOpen) return;
+
+    if (!previousFocusRef.current && document.activeElement instanceof HTMLElement) {
+      previousFocusRef.current = document.activeElement;
     }
+    modalRef.current?.focus();
+
+    // Make background content inert and aria-hidden
+    const modifiedElements: Array<{
+      el: HTMLElement;
+      prevAriaHidden: string | null;
+      prevInert: boolean;
+    }> = [];
+
+    let current: HTMLElement | null = overlayRef.current;
+    while (current && current !== document.body) {
+      const parent = current.parentElement;
+      if (!parent) break;
+
+      for (const sibling of Array.from(parent.children)) {
+        if (
+          sibling instanceof HTMLElement &&
+          sibling !== current &&
+          !sibling.contains(overlayRef.current)
+        ) {
+          modifiedElements.push({
+            el: sibling,
+            prevAriaHidden: sibling.getAttribute("aria-hidden"),
+            prevInert: sibling.hasAttribute("inert"),
+          });
+          sibling.setAttribute("aria-hidden", "true");
+          sibling.setAttribute("inert", "");
+          try {
+            (sibling as any).inert = true;
+          } catch {
+            // ignore if inert property not supported
+          }
+        }
+      }
+      current = parent;
+    }
+
+    return () => {
+      // Restore background content
+      for (const { el, prevAriaHidden, prevInert } of modifiedElements) {
+        if (prevAriaHidden === null) {
+          el.removeAttribute("aria-hidden");
+        } else {
+          el.setAttribute("aria-hidden", prevAriaHidden);
+        }
+
+        if (!prevInert) {
+          el.removeAttribute("inert");
+          try {
+            (el as any).inert = false;
+          } catch {
+            // ignore
+          }
+        } else {
+          el.setAttribute("inert", "");
+          try {
+            (el as any).inert = true;
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      // Return focus to trigger element on close
+      if (previousFocusRef.current) {
+        if (previousFocusRef.current.isConnected) {
+          previousFocusRef.current.focus();
+        }
+        previousFocusRef.current = null;
+      }
+    };
   }, [isOpen]);
 
-  // Return focus to trigger element on close
-  useEffect(() => {
-    if (!isOpen && previousFocusRef.current) {
-      previousFocusRef.current.focus();
-      previousFocusRef.current = null;
-    }
-  }, [isOpen]);
-
-  // Focus trap
+  // Focus trap and escape handling
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -57,19 +146,32 @@ export default function DonationModal({
 
       if (e.key !== "Tab" || !modalRef.current) return;
 
-      const focusableElements = modalRef.current.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
-      const firstElement = focusableElements[0] as HTMLElement;
-      const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+      const focusableElements = getFocusableElements(modalRef.current);
+
+      if (focusableElements.length === 0) {
+        e.preventDefault();
+        modalRef.current.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
 
       if (e.shiftKey) {
-        if (document.activeElement === firstElement) {
+        if (
+          document.activeElement === firstElement ||
+          document.activeElement === modalRef.current ||
+          !modalRef.current.contains(document.activeElement)
+        ) {
           e.preventDefault();
           lastElement.focus();
         }
       } else {
-        if (document.activeElement === lastElement) {
+        if (
+          document.activeElement === lastElement ||
+          document.activeElement === modalRef.current ||
+          !modalRef.current.contains(document.activeElement)
+        ) {
           e.preventDefault();
           firstElement.focus();
         }
@@ -101,6 +203,7 @@ export default function DonationModal({
 
   return (
     <div
+      ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-fade-in"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
@@ -111,7 +214,8 @@ export default function DonationModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="donation-modal-title"
-        className="relative w-full max-w-md mx-4 bg-white rounded-2xl shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto"
+        tabIndex={-1}
+        className="relative w-full max-w-md mx-4 bg-white rounded-2xl shadow-2xl animate-slide-up max-h-[90vh] overflow-y-auto outline-none"
       >
         {/* Hidden title for screen readers */}
         <h2 id="donation-modal-title" className="sr-only">

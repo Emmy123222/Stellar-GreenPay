@@ -880,11 +880,11 @@ impl MockPausedGreenPayContract {
         env.storage().instance().set(&symbol_short!("paused"), &paused);
     }
 
-        pub fn is_paused(env: Env) -> bool {
-            env.storage()
-                .instance()
-                .get(&symbol_short!("paused"))
-                .unwrap_or(false)
-        }
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("paused"))
+            .unwrap_or(false)
     }
 }
+} // mod tests

@@ -8,6 +8,15 @@
  * @see https://soroban.stellar.org/docs
  */
 import { Horizon, Networks, Asset, Operation, TransactionBuilder, Transaction, Memo, rpc, Contract, scValToNative, Address, nativeToScVal, Account, xdr } from "@stellar/stellar-sdk";
+import {
+  bestStrictSendPath,
+  clampSlippageBps,
+  DEFAULT_SLIPPAGE_BPS,
+  isNative,
+  minReceived,
+  type AssetRef,
+  type PathRecord,
+} from "./pathPayment";
 
 export const NETWORK = (process.env.NEXT_PUBLIC_STELLAR_NETWORK || "testnet") as "testnet" | "mainnet";
 const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL || "https://horizon-testnet.stellar.org";
@@ -123,6 +132,79 @@ export async function buildDonationTransaction({
 
   const builder = new TransactionBuilder(source, { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
     .addOperation(Operation.payment({ destination: toPublicKey, asset: paymentAsset, amount }))
+    .setTimeout(60);
+  if (memo) builder.addMemo(Memo.text(memo.slice(0, 28)));
+  return builder.build();
+}
+
+// ── DEX path-payment donations (#1660) ──────────────────────────────────────
+
+/** SDK Asset for an AssetRef (no issuer = native XLM). */
+export function toSdkAsset(asset: AssetRef | null | undefined): Asset {
+  return isNative(asset) ? Asset.native() : new Asset(asset!.code, asset!.issuer!);
+}
+
+export interface PathPaymentQuote {
+  sendAsset: AssetRef;
+  sendAmount: string;
+  destAsset: AssetRef;
+  /** Best destination amount Horizon found for this send amount. */
+  destAmount: string;
+  /** Lowest amount the donor accepts after slippage → the op's destMin. */
+  destMin: string;
+  slippageBps: number;
+  /** Intermediate hops, passed through to the operation. */
+  path: Asset[];
+  quotedAt: number;
+}
+
+/**
+ * Quote a strict-send conversion with Horizon's /paths/strict-send endpoint.
+ * Returns null when the DEX has no route (no liquidity / no orderbook).
+ */
+export async function getStrictSendQuote({
+  sendAsset, sendAmount, destAsset, slippageBps = DEFAULT_SLIPPAGE_BPS,
+}: {
+  sendAsset: AssetRef | null; sendAmount: string; destAsset: AssetRef; slippageBps?: number;
+}): Promise<PathPaymentQuote | null> {
+  const page = await server
+    .strictSendPaths(toSdkAsset(sendAsset), sendAmount, [toSdkAsset(destAsset)])
+    .call();
+  const best = bestStrictSendPath(page.records as unknown as PathRecord[]);
+  if (!best) return null;
+  const bps = clampSlippageBps(slippageBps);
+  return {
+    sendAsset: sendAsset ?? { code: "XLM" },
+    sendAmount,
+    destAsset,
+    destAmount: best.destination_amount,
+    destMin: minReceived(best.destination_amount, bps),
+    slippageBps: bps,
+    path: best.path.map((p) =>
+      p.asset_type === "native" ? Asset.native() : new Asset(p.asset_code!, p.asset_issuer!),
+    ),
+    quotedAt: Date.now(),
+  };
+}
+
+/**
+ * Build an unsigned pathPaymentStrictSend donation: the donor spends exactly
+ * `quote.sendAmount` of `quote.sendAsset`, and the network rejects the
+ * transaction unless the project receives at least `quote.destMin`.
+ */
+export async function buildPathPaymentDonationTransaction({
+  fromPublicKey, toPublicKey, quote, memo,
+}: { fromPublicKey: string; toPublicKey: string; quote: PathPaymentQuote; memo?: string }) {
+  const source = await server.loadAccount(fromPublicKey);
+  const builder = new TransactionBuilder(source, { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
+    .addOperation(Operation.pathPaymentStrictSend({
+      sendAsset: toSdkAsset(quote.sendAsset),
+      sendAmount: quote.sendAmount,
+      destination: toPublicKey,
+      destAsset: toSdkAsset(quote.destAsset),
+      destMin: quote.destMin,
+      path: quote.path,
+    }))
     .setTimeout(60);
   if (memo) builder.addMemo(Memo.text(memo.slice(0, 28)));
   return builder.build();

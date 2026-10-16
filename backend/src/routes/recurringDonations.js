@@ -31,6 +31,7 @@ const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const SKEY_RE   = /^G[A-Z0-9]{55}$/;
 const DATE_RE   = /^\d{4}-\d{2}-\d{2}$/;
 
+const MIN_RECURRING_AMOUNT_XLM     = 1;
 const DEFAULT_MAX_RECURRING_AMOUNT_XLM = 10000;
 
 let runtimeMaxOverride = null;
@@ -69,6 +70,7 @@ function buildCreateSchema() {
     amountXlm:      z.union([z.string(), z.number()])
       .transform((v) => parseFloat(String(v)))
       .refine((v) => !isNaN(v) && v > 0, "amountXlm must be a positive number")
+      .refine((v) => v >= 1, "Minimum recurring donation is 1 XLM")
       .refine(
         (v) => v <= getMaxRecurringAmount(),
         `amountXlm exceeds maximum of ${maxAtBuild} XLM per recurring donation`
@@ -333,6 +335,7 @@ module.exports.setMaxRecurringAmount = setMaxRecurringAmount;
 module.exports.buildCreateSchema = buildCreateSchema;
 module.exports.getCreateSchema = getCreateSchema;
 module.exports.DEFAULT_MAX_RECURRING_AMOUNT_XLM = DEFAULT_MAX_RECURRING_AMOUNT_XLM;
+module.exports.MIN_RECURRING_AMOUNT_XLM = MIN_RECURRING_AMOUNT_XLM;
 module.exports._resetMaxRecurringAmountForTests = _resetMaxRecurringAmountForTests;
 Object.defineProperty(module.exports, "createSchema", {
   get: () => buildCreateSchema(),

@@ -10,6 +10,7 @@
 
 const { Server, TransactionBuilder, Networks, Operation, Asset, Horizon } = require("@stellar/stellar-sdk");
 const pool = require("../db/pool");
+const logger = require("../logger");
 
 // Network configuration
 const NETWORK = process.env.STELLAR_NETWORK || "testnet";
@@ -41,7 +42,7 @@ async function matchDonationTxFunction(payment) {
 
     // Only match XLM donations
     if (asset_type !== "native" && asset_code !== "XLM") {
-      console.log(`Skipping non-XLM donation: ${asset_code || asset_type}`);
+      logger.info({ event: "turrets_skip_non_xlm", assetCode: asset_code || asset_type }, `Skipping non-XLM donation: ${asset_code || asset_type}`);
       return { matched: false, reason: "Not an XLM donation" };
     }
 
@@ -52,7 +53,7 @@ async function matchDonationTxFunction(payment) {
     );
 
     if (!projectResult.rows[0]) {
-      console.log(`Project not found for wallet: ${to}`);
+      logger.info({ event: "turrets_project_not_found", wallet: to }, `Project not found for wallet: ${to}`);
       return { matched: false, reason: "Project not found" };
     }
 
@@ -69,7 +70,7 @@ async function matchDonationTxFunction(payment) {
     );
 
     if (matchesResult.rows.length === 0) {
-      console.log(`No active matching offers for project: ${project.id}`);
+      logger.info({ event: "turrets_no_matching_offers", projectId: project.id }, `No active matching offers for project: ${project.id}`);
       return { matched: false, reason: "No active matching offers" };
     }
 
@@ -145,7 +146,7 @@ async function matchDonationTxFunction(payment) {
     };
 
   } catch (error) {
-    console.error("Error in matchDonationTxFunction:", error);
+    logger.error({ event: "turrets_match_error", err: error }, `Error in matchDonationTxFunction: ${error.message}`);
     return { matched: false, error: error.message };
   }
 }
@@ -202,7 +203,7 @@ async function submitMatchingPayment({
     const matcherSecret = process.env.MATCHER_SECRET_KEY;
     
     if (!matcherSecret) {
-      console.warn("MATCHER_SECRET_KEY not configured. Cannot submit matching payment.");
+      logger.warn({ event: "turrets_missing_matcher_secret" }, "MATCHER_SECRET_KEY not configured. Cannot submit matching payment.");
       return { success: false, reason: "Matcher secret not configured" };
     }
 
@@ -212,7 +213,7 @@ async function submitMatchingPayment({
     // Submit to Horizon
     const result = await getServer().submitTransaction(transaction);
 
-    console.log(`Matching payment submitted: ${result.hash}`);
+    logger.info({ event: "turrets_match_submitted", txHash: result.hash }, `Matching payment submitted: ${result.hash}`);
 
     return {
       success: true,
@@ -220,7 +221,7 @@ async function submitMatchingPayment({
     };
 
   } catch (error) {
-    console.error("Error submitting matching payment:", error);
+    logger.error({ event: "turrets_submit_match_error", err: error }, `Error submitting matching payment: ${error.message}`);
     return { success: false, error: error.message };
   }
 }
@@ -252,9 +253,9 @@ async function generatePreSignedTransactions({
   const donationAmounts = [10, 25, 50, 100, 250];
   
   for (const donationAmount of donationAmounts) {
-    const matchAmount = Math.min(donationAmount * multiplier, capXlm);
+    const matchAmount = donationAmount * multiplier;
     
-    if (matchAmount <= 0) continue;
+    if (matchAmount <= 0 || matchAmount > capXlm) continue;
 
     try {
       const account = await getServer().loadAccount(matcherAddress);
@@ -281,7 +282,7 @@ async function generatePreSignedTransactions({
         xdr: tx.toXDR()
       });
     } catch (error) {
-      console.error(`Error generating transaction for ${donationAmount} XLM:`, error);
+      logger.error({ event: "turrets_generate_tx_error", donationAmount, err: error }, `Error generating transaction for ${donationAmount} XLM: ${error.message}`);
     }
   }
 
@@ -319,7 +320,7 @@ function startTurretsServer(port = 3001) {
       const result = await matchDonationTxFunction(req.body);
       res.json(result);
     } catch (error) {
-      console.error("Error in txFunction:", error);
+      logger.error({ event: "turrets_txfunction_error", err: error }, `Error in txFunction: ${error.message}`);
       res.status(500).json({ error: error.message });
     }
   });
@@ -351,23 +352,25 @@ function startTurretsServer(port = 3001) {
 
       res.json({ success: true, transactions });
     } catch (error) {
-      console.error("Error generating pre-signed transactions:", error);
+      logger.error({ event: "turrets_admin_presign_error", err: error }, `Error generating pre-signed transactions: ${error.message}`);
       res.status(500).json({ error: error.message });
     }
   });
 
-  app.listen(port, () => {
-    console.log(`Turrets server listening on port ${port}`);
+  // Return the http.Server alongside the app so callers (and tests) can
+  // close the listener and release the port instead of leaking a handle.
+  const server = app.listen(port, () => {
+    logger.info({ event: "turrets_server_started", port }, `Turrets server listening on port ${port}`);
   });
 
-  return app;
+  return { app, server };
 }
 
 /**
  * Start a lightweight Turrets-compatible HTTP server exposing matching endpoints.
  *
  * @param {number} [port=3001] - TCP port to listen on.
- * @returns {object} Express app instance.
+ * @returns {{app: object, server: import('http').Server}} Express app and the underlying HTTP server.
  */
 // exported as `startTurretsServer`
 

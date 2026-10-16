@@ -1,6 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import Head from "next/head";
-import { fetchNotificationSubscriptions, ProjectNotificationSubscription, updateNotificationSubscription, updateProfileMilestoneNotifications } from "@/lib/api";
+import {
+  fetchNotificationSubscriptions,
+  ProjectNotificationSubscription,
+  updateNotificationSubscription,
+  updateProfileMilestoneNotifications,
+} from "@/lib/api";
 
 export default function NotificationSettingsPage() {
   const [email, setEmail] = useState("");

@@ -9,9 +9,9 @@ Use this checklist to ensure a smooth and safe mainnet deployment.
 ### Week Before Deployment
 
 - [ ] **Review All Documentation**
-  - [ ] Read [`MAINNET-DEPLOYMENT.md`](MAINNET-DEPLOYMENT.md)
-  - [ ] Review [`scripts/PREFLIGHT-README.md`](scripts/PREFLIGHT-README.md)
-  - [ ] Bookmark [`scripts/QUICK-REFERENCE.md`](scripts/QUICK-REFERENCE.md)
+  - [ ] Read [`deployment-mainnet.md`](deployment-mainnet.md)
+  - [ ] Review [`preflight.md`](preflight.md)
+  - [ ] Bookmark [`quick-reference.md`](quick-reference.md)
 
 - [ ] **Infrastructure Preparation**
   - [ ] Production database provisioned

@@ -25,6 +25,9 @@ tags:
   - name: Stats
   - name: Auth
   - name: Teams
+  - name: Referrals
+  - name: Subscriptions
+  - name: Recurring Donations
   - name: Admin
 security:
   - BearerAuth: []
@@ -1562,10 +1565,225 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+  /api/referrals/{publicKey}:
+    get:
+      tags: [Referrals]
+      summary: Get referral totals for a Stellar wallet
+      security: []
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+      responses:
+        '200':
+          description: Referral count, bonus total, and referring wallet (if any).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      referralCount: { type: integer }
+                      referralBonusXLM: { type: string }
+                      referredBy: { type: string, nullable: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/referrals:
+    post:
+      tags: [Referrals]
+      summary: Record a referral relationship
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referrerAddress, referredAddress]
+              properties:
+                referrerAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+                referredAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+      responses:
+        '200': { description: Referral recorded. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { description: Referral was already claimed. }
+  /api/referrals/award-bonus:
+    post:
+      tags: [Referrals]
+      summary: Award a referral bonus after the referred wallet's first donation
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [referredAddress, donationId]
+              properties:
+                referredAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+                donationId: { type: string, format: uuid }
+      responses:
+        '200': { description: Bonus award result, including whether a bonus was issued. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/subscriptions:
+    post:
+      tags: [Subscriptions]
+      summary: Subscribe an email address to project updates
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, email]
+              properties:
+                projectId: { type: string, format: uuid }
+                email: { type: string, format: email }
+                donorAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+      responses:
+        '201': { description: Subscription created. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: This email is already subscribed to the project. }
+    get:
+      tags: [Subscriptions]
+      summary: Get subscription settings for an email address
+      security: []
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema: { type: string, format: email }
+      responses:
+        '200': { description: Subscriptions for the supplied email address. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/subscriptions/{id}:
+    patch:
+      tags: [Subscriptions]
+      summary: Change a subscription's enabled state
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, subscribed]
+              properties:
+                email: { type: string, format: email }
+                subscribed: { type: boolean }
+      responses:
+        '200': { description: Updated subscription state. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Subscriptions]
+      summary: Unsubscribe using the subscription email or donor wallet
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: string, format: email }
+                donorAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+      responses:
+        '200': { description: Subscription removed. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/subscriptions/unsubscribe:
+    get:
+      tags: [Subscriptions]
+      summary: Unsubscribe from a signed email link
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: HTML unsubscribe confirmation page. }
+        '400': { description: Missing, invalid, or expired token. }
+  /api/subscriptions/{projectId}/count:
+    get:
+      tags: [Subscriptions]
+      summary: Get the active subscriber count for a project
+      security: []
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Subscriber count. }
+  /api/recurring-donations:
+    post:
+      tags: [Recurring Donations]
+      summary: Create a monthly donation pledge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [donorAddress, projectId, amountXlm, durationMonths]
+              properties:
+                donorAddress: { type: string, pattern: '^G[A-Z0-9]{55}$' }
+                projectId: { type: string, format: uuid }
+                amountXlm: { type: number, exclusiveMinimum: 0 }
+                currency: { type: string, enum: [XLM] }
+                durationMonths: { type: integer, minimum: 1, maximum: 120 }
+                startDate: { type: string, format: date }
+      responses:
+        '201': { description: Recurring pledge created. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    get:
+      tags: [Recurring Donations]
+      summary: List recurring donation pledges
+      security: []
+      parameters:
+        - { name: donor, in: query, schema: { type: string, pattern: '^G[A-Z0-9]{55}$' } }
+        - { name: project, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, paused, completed, cancelled] } }
+      responses:
+        '200': { description: Recurring pledge list. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/recurring-donations/{id}:
+    delete:
+      tags: [Recurring Donations]
+      summary: Cancel a recurring donation pledge
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Pledge cancelled. }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '403':
           $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Pledge is already complete or cancelled. }
   /api/ratings/pending:
     get:
       tags: [Ratings]
@@ -1652,6 +1870,25 @@ paths:
                     nullable: true
         '400':
           $ref: '#/components/responses/BadRequest'
+  /api/ratings/{projectId}:
+    get:
+      tags: [Ratings]
+      summary: List reviews for a project (legacy route)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ProjectIdParam'
+        - $ref: '#/components/parameters/LimitQuery'
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: cursor
+          in: query
+          description: ISO timestamp of the last review on the previous page.
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Reviews and pagination metadata.
+        '400': { $ref: '#/components/responses/BadRequest' }
         '404':
           $ref: '#/components/responses/NotFound'
   /api/auth/challenge:
@@ -1777,14 +2014,14 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '409':
           description: The wallet already belongs to a team or the invite code is taken.
-  /api/teams/{teamId}/join:
+  /api/teams/{id}/join:
     post:
       tags: [Teams]
       summary: Join a team with its invite code
       security:
         - WalletAuth: []
       parameters:
-        - name: teamId
+        - name: id
           in: path
           required: true
           schema:
@@ -1837,13 +2074,13 @@ paths:
                     nullable: true
         '401':
           $ref: '#/components/responses/Unauthorized'
-  /api/teams/{teamId}:
+  /api/teams/{id}:
     get:
       tags: [Teams]
       summary: Get a public team profile and combined stats
       security: []
       parameters:
-        - name: teamId
+        - name: id
           in: path
           required: true
           schema:

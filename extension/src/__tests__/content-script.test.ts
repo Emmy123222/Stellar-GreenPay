@@ -113,7 +113,7 @@ describe('Content Script Injection & Allowlist', () => {
 
   describe('Allowlisted pages injection', () => {
     it('injects widget on allowlisted GreenPay internal pages', async () => {
-      const allowlistedUrl = 'https://greenpay.io/projects/reforestation';
+      const allowlistedUrl = 'https://greenpay.app/projects/reforestation';
 
       const injected = await checkAndInject(allowlistedUrl);
 
@@ -141,7 +141,7 @@ describe('Content Script Injection & Allowlist', () => {
     });
 
     it('creates tooltip on hover and sends message on click for injected address', async () => {
-      const allowlistedUrl = 'https://greenpay.io/donate';
+      const allowlistedUrl = 'https://greenpay.app/donate';
       await checkAndInject(allowlistedUrl);
 
       const span = document.querySelector('.greenpay-address') as HTMLSpanElement;

@@ -2,6 +2,32 @@ const fs = require('fs');
 const path = require('path');
 const webpack = require('webpack');
 
+const ICON_SIZES = [16, 32, 48, 128];
+
+// Both manifests declare `icons/icon-<size>.png` relative to the extension
+// root, so the unpacked extension and the store zip carry them from there.
+// This mirrors the same files into `dist/` so the build output (the artifact CI
+// uploads) is self-contained, and fails the build if a declared size is missing
+// instead of shipping a manifest that points at nothing.
+class CopyIconsPlugin {
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap('CopyIconsPlugin', (compilation) => {
+      for (const size of ICON_SIZES) {
+        const source = path.resolve(__dirname, `icons/icon-${size}.png`);
+        if (!fs.existsSync(source)) {
+          throw new Error(
+            `Missing extension icon ${source}; generate it from store-assets/icon-128.png`,
+          );
+        }
+        compilation.emitAsset(
+          `icons/icon-${size}.png`,
+          new webpack.sources.RawSource(fs.readFileSync(source)),
+        );
+      }
+    });
+  }
+}
+
 function contractDefines() {
   const p = path.resolve(__dirname, '../contracts/addresses.json');
   if (!fs.existsSync(p)) return {};
@@ -58,6 +84,7 @@ module.exports = {
   performance: {
     hints: false,
   },
+  plugins: [new CopyIconsPlugin()],
   optimization: {
     minimize: true,
   },

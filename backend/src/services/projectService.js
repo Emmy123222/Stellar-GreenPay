@@ -40,7 +40,7 @@ async function getProjectById(id) {
   return mapProjectRow(result.rows[0]);
 }
 
-async function createProject({ id, name, description, category, location, walletAddress, goalXLM, cod2PerXLM } = {}) {
+async function createProject({ id, name, description, category, location, walletAddress, goalXLM, co2PerXLM } = {}) {
   if (!name || !category || !walletAddress) {
     throw new Error("name, category, and walletAddress are required");
   }
@@ -55,7 +55,7 @@ async function createProject({ id, name, description, category, location, wallet
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',false,false,0,0,'{}',NOW(),NOW())
      RETURNING *`,
     [id, name, description || "", category, location || "", walletAddress,
-goalXLM || "0", Number(co2PerXLM) || 0],
+      goalXLM || "0", Number(co2PerXLM) || 0],
   );
   return mapProjectRow(result.rows[0]);
 }

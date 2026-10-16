@@ -8,7 +8,9 @@ const crypto = require("crypto");
  */
 const EXEMPT_PREFIXES = [
   "/api/mobile/",
+  "/api/v1/mobile/",
   "/api/extension/",
+  "/api/v1/extension/",
   "/api/notifications",
   "/api/v1/notifications",
 ];

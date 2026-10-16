@@ -2,6 +2,7 @@
 
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
+const logger = require("../logger");
 
 const AUDIT_RETENTION_DAYS = 90;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -19,7 +20,7 @@ async function cleanupOldAuditEntries() {
       [AUDIT_RETENTION_DAYS],
     );
   } catch (err) {
-    console.error("[AuditLog] Failed to apply retention policy:", err.message);
+    logger.error({ event: "audit_cleanup_failed", err: err.message }, "[AuditLog] Failed to apply retention policy: " + err.message);
   }
 }
 
@@ -32,7 +33,7 @@ async function logAdminAction({ actor, action, targetType, targetId, metadata, i
     );
     await cleanupOldAuditEntries();
   } catch (err) {
-    console.error("[AuditLog] Failed to record action:", err.message);
+    logger.error({ event: "audit_log_failed", err: err.message }, `[AuditLog] Failed to record action: ${err.message}`);
   }
 }
 

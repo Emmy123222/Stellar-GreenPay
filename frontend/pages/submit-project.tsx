@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { toast } from "sonner";
 import { notifyAdmin, submitProject } from "@/lib/api";
@@ -54,10 +54,17 @@ function Field({
   error?: string;
   children: React.ReactNode;
 }) {
+  const id =
+    React.isValidElement(children) && (children as any).props?.id
+      ? (children as any).props.id
+      : label.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-");
+
   return (
     <div className="flex flex-col gap-1">
-      <label className="label">{label}</label>
-      {children}
+      <label htmlFor={id} className="label">{label}</label>
+      {React.isValidElement(children)
+        ? React.cloneElement(children as React.ReactElement<any>, { id })
+        : children}
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
@@ -400,7 +407,14 @@ export default function SubmitProjectPage() {
         </button>
 
         {step === "methodology" ? (
-          <span className="tooltip">
+          <span
+            className="tooltip"
+            onClickCapture={() => {
+              if (publicKey === null) {
+                handleSubmit();
+              }
+            }}
+          >
             <button
               type="button"
               onClick={handleSubmit}

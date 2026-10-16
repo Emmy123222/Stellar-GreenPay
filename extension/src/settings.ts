@@ -1,4 +1,4 @@
-import { DEFAULT_ALLOWLIST, isUrlAllowed } from './allowlist';
+import { DEFAULT_ALLOWLIST, isUrlAllowed, isValidAllowlistPattern } from './allowlist';
 
 export interface ExtensionSettings {
   backendUrl: string;
@@ -259,6 +259,14 @@ if (typeof document !== 'undefined') {
       if (!val) {
         if (allowlistError) {
           allowlistError.textContent = 'Please enter a site or pattern.';
+          allowlistError.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (!isValidAllowlistPattern(val)) {
+        if (allowlistError) {
+          allowlistError.textContent = 'Enter a valid host pattern, such as example.com/*.';
           allowlistError.classList.remove('hidden');
         }
         return;

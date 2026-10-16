@@ -24,14 +24,8 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert,
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import {
-  useBiometricAuth,
-  type BiometricAuthOutcome,
-} from '../../hooks/useBiometricAuth';
-import * as Linking from 'expo-linking';
-import { useEffect, useRef, useState } from 'react';
-import axios from 'axios';
 import { useBiometricAuth } from '../../hooks/useBiometricAuth';
+import * as Linking from 'expo-linking';
 import { useKeyboardAvoidance } from '../../hooks/useKeyboardAvoidance';
 import { useTheme } from '../theme';
 import {
@@ -40,6 +34,13 @@ import {
   markTestnetAddress,
   persistKnownTestnetAddresses,
 } from '../../utils/stellarValidation';
+import {
+  dismissNotificationRationale,
+  getPushToken,
+  registerDeviceToken,
+  requestNotificationPermissions,
+  shouldShowNotificationRationale,
+} from '../../utils/notifications';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -252,31 +253,6 @@ export default function DonateScreen() {
   };
 
   const selectedProject = projects.find((project: ClimateProject) => project.id === selectedProjectId) || projects[0] || null;
-
-  /**
-   * Map a biometric auth outcome to a user-facing status message.
-   */
-  const surfaceAuthFailure = (outcome: BiometricAuthOutcome) => {
-    switch (outcome) {
-      case 'cancel':
-        setStatusType('info');
-        setStatusMessage('Authentication cancelled — donation not sent.');
-        return;
-      case 'fallback':
-        setStatusType('info');
-        setStatusMessage('Use your device PIN to confirm the donation next time.');
-        return;
-      case 'error':
-        setStatusType('error');
-        setStatusMessage(
-          'Biometric authentication failed. Please try again or tap "Use Passcode" / "Cancel" and retry.'
-        );
-        return;
-      default:
-        setStatusType('error');
-        setStatusMessage('Authentication required to send a donation.');
-    }
-  };
 
   const handleDonate = async () => {
     setStatusMessage(null);
@@ -513,10 +489,6 @@ export default function DonateScreen() {
     );
   }
 
-
-
-  const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
-
   return (
     // Issue #1127: the form used to render straight into a bare
     // ScrollView, so the software keyboard covered the amount field on
@@ -548,7 +520,7 @@ export default function DonateScreen() {
       testID="donate-form-scroll"
     >
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.primaryText }]}>
+        <Text style={[styles.title, { color: colors.primaryText }]} accessibilityRole="header">
           Donate to {selectedProject?.name || 'a project'}
         </Text>
         <Text style={[styles.subtitle, { color: colors.secondaryText }]}>
@@ -557,7 +529,7 @@ export default function DonateScreen() {
       </View>
 
       <View style={styles.selectorCard}>
-        <Text style={styles.sectionTitle}>Select a project</Text>
+        <Text style={styles.sectionTitle} accessibilityRole="header">Select a project</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.projectList}>
           {projects.map((project: ClimateProject) => (
             <TouchableOpacity
@@ -575,6 +547,7 @@ export default function DonateScreen() {
               onPress={() => setSelectedProjectId(project.id)}
               accessibilityLabel={`Select project ${project.name}`}
               accessibilityRole="button"
+              accessibilityState={{ selected: project.id === selectedProjectId }}
             >
               <Text
                 style={[
@@ -642,6 +615,7 @@ export default function DonateScreen() {
                 key={preset}
                 accessibilityRole="button"
                 accessibilityLabel={`Donate ${preset} XLM`}
+                accessibilityState={{ selected: isActive }}
                 style={[
                   styles.presetChip,
                   {
@@ -773,6 +747,9 @@ export default function DonateScreen() {
           <TouchableOpacity
             style={styles.retryButton}
             onPress={handleDonate}
+            accessibilityRole="button"
+            accessibilityLabel="Retry donation"
+            accessibilityHint="Tries the donation again once you are back online"
           >
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
@@ -792,6 +769,7 @@ export default function DonateScreen() {
         onPress={handleDonate}
         disabled={submitting}
         accessibilityRole="button"
+        accessibilityState={{ disabled: submitting, busy: submitting || bio.isAuthenticating }}
         accessibilityLabel={`Confirm donation of ${amount || '1'} XLM`}
       >
         {bio.isAuthenticating ? (
@@ -859,6 +837,8 @@ const styles = StyleSheet.create({
   },
   projectOption: {
     paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 20,
     marginRight: 10,
@@ -911,6 +891,8 @@ const styles = StyleSheet.create({
   },
   presetChip: {
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1,
@@ -989,6 +971,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     lineHeight: 16,
+  },
   offlineBanner: {
     marginHorizontal: 16,
     marginTop: 8,
@@ -1007,6 +990,8 @@ const styles = StyleSheet.create({
   retryButton: {
     paddingVertical: 8,
     paddingHorizontal: 16,
+    minHeight: 44,
+    justifyContent: 'center',
     backgroundColor: '#ffc107',
     borderRadius: 8,
   },

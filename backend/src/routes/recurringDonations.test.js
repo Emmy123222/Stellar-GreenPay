@@ -11,6 +11,16 @@ jest.mock("../db/pool", () => ({ query: jest.fn() }));
 jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
+jest.mock("../services/recurringDonationQueue", () => ({
+  scheduleRecurringDonationJob: jest.fn().mockResolvedValue(undefined),
+  cancelRecurringDonationJob: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock("../logger", () => ({
+  info: jest.fn(),
+  error: jest.fn(),
+  warn: jest.fn(),
+  fatal: jest.fn(),
+}));
 
 const request = require("supertest");
 const express = require("express");
@@ -137,5 +147,110 @@ describe("DELETE /api/recurring-donations/:id", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe("cancelled");
+  });
+});
+
+// ── Ported from recurring-donations.test.js (deleted in #1536) ────────────────
+// Covers the 1 XLM minimum floor that only existed in the unmounted kebab-case
+// file. Uses camelCase field name `amountXlm` and the mounted router's response
+// shape: { success: false, error: "..." } at HTTP 400.
+
+describe("POST /api/recurring-donations — minimum amount (ported from #1536)", () => {
+  const BASE_BODY = {
+    donorAddress: DB_ROW.donor_address,
+    projectId:    DB_ROW.project_id,
+    durationMonths: 6,
+  };
+
+  // Shared fixture: make the DB happy for amounts that pass validation.
+  function mockDbAccept(amountXlm) {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: DB_ROW.project_id, name: "Test", status: "active" }] })
+      .mockResolvedValueOnce({ rows: [{ ...DB_ROW, amount_xlm: String(amountXlm) }] });
+  }
+
+  test("accepts exactly 1 XLM (minimum boundary)", async () => {
+    mockDbAccept(1);
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: 1 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+  });
+
+  test("accepts an amount greater than 1 XLM", async () => {
+    mockDbAccept(25.5);
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: 25.5 });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+  });
+
+  test("rejects 0 XLM with 400 and minimum-amount message", async () => {
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: 0 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain("Minimum recurring donation is 1 XLM");
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("rejects 0.5 XLM (below minimum) with 400", async () => {
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: 0.5 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain("Minimum recurring donation is 1 XLM");
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("rejects 0.9999999 XLM (just below minimum) with 400", async () => {
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: 0.9999999 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain("Minimum recurring donation is 1 XLM");
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("rejects a negative amount with 400", async () => {
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: -5 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    // Negative fails the "> 0" check first; either message is acceptable.
+    expect(res.body.error).toMatch(/positive number|Minimum recurring donation/);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("rejects a non-numeric string amount with 400", async () => {
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: "abc" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  test("accepts amountXlm supplied as a string '1'", async () => {
+    mockDbAccept(1);
+    const res = await request(buildApp())
+      .post("/api/recurring-donations")
+      .send({ ...BASE_BODY, amountXlm: "1" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
   });
 });

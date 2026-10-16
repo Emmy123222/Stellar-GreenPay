@@ -3,10 +3,12 @@
  * Donation form for a climate project.
  */
 import { useState, useEffect } from "react";
-import { buildDonationTransaction, buildContractDonationTransaction, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID } from "@/lib/stellar";
+import { buildDonationTransaction, buildContractDonationTransaction, buildPathPaymentDonationTransaction, getStrictSendQuote, submitTransaction, explorerUrl, getXLMBalance, getAssetBalance, getDonorStats, hashMessage, CONTRACT_ID, type PathPaymentQuote } from "@/lib/stellar";
+import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_OPTIONS_BPS, effectiveRate, quoteWithinBound, sameAsset, type AssetRef } from "@/lib/pathPayment";
 import { signTransactionWithWallet } from "@/lib/wallet";
 import { recordDonation } from "@/lib/api";
 import { formatAmount, formatXLM, formatCO2 } from "@/utils/format";
+import { usePriceContext } from "@/lib/priceContext";
 import type { ClimateProject } from "@/utils/types";
 
 interface DonateFormProps {
@@ -27,6 +29,8 @@ interface DonationDraft {
   message?: string;
   currency?: "XLM" | "USDC";
 }
+
+const QUOTE_DEBOUNCE_MS = 400;
 
 const draftKey = (projectId: string) => `greenpay:donate-draft:${projectId}`;
 
@@ -60,6 +64,22 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
+
+  const {
+    currency: fiatCurrency,
+    setCurrency: setFiatCurrency,
+    formatFiatEquivalent,
+    rates,
+    supportedCurrencies,
+  } = usePriceContext();
+
+  // DEX conversion (#1660): when the project prefers an asset other than the
+  // one the donor pays with, quote a path payment and show it before signing.
+  const [slippageBps, setSlippageBps] = useState<number>(DEFAULT_SLIPPAGE_BPS);
+  const [quote, setQuote] = useState<PathPaymentQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [deliveredLabel, setDeliveredLabel] = useState<string | null>(null);
 
   // Re-seed the editable amount/message fields whenever the caller passes a
   // new initial value (e.g. clicking a different preset/reply elsewhere on
@@ -145,7 +165,59 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   }, [publicKey, currency]);
 
   const amountNum = parseFloat(amount);
-  const isValid   = !isNaN(amountNum) && amountNum >= 1;
+  const amountValid = !isNaN(amountNum) && amountNum >= 1;
+
+  const usdcIssuer = process.env.NEXT_PUBLIC_USDC_ISSUER;
+  const sendAsset: AssetRef = currency === "USDC" && usdcIssuer ? { code: "USDC", issuer: usdcIssuer } : { code: "XLM" };
+  const preferredAsset = project.preferredAsset ?? null;
+  const needsConversion = !!preferredAsset && !sameAsset(sendAsset, preferredAsset);
+  const sendAmountStr = amountValid ? amountNum.toFixed(currency === "XLM" ? 7 : 2) : "";
+
+  useEffect(() => {
+    if (!needsConversion || !preferredAsset || !sendAmountStr) {
+      queueMicrotask(() => {
+        setQuote(null);
+        setQuoteError(null);
+        setQuoteLoading(false);
+      });
+      return;
+    }
+    let cancelled = false;
+    queueMicrotask(() => setQuoteLoading(true));
+    const timer = setTimeout(async () => {
+      try {
+        const q = await getStrictSendQuote({ sendAsset, sendAmount: sendAmountStr, destAsset: preferredAsset, slippageBps });
+        if (cancelled) return;
+        setQuote(q);
+        setQuoteError(q ? null : `No DEX route from ${sendAsset.code} to ${preferredAsset.code} right now.`);
+      } catch {
+        if (!cancelled) {
+          setQuote(null);
+          setQuoteError("Couldn't fetch a conversion quote. Please try again.");
+        }
+      } finally {
+        if (!cancelled) setQuoteLoading(false);
+      }
+    }, QUOTE_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // sendAsset/preferredAsset are derived from these primitives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needsConversion, sendAmountStr, currency, preferredAsset?.code, preferredAsset?.issuer, slippageBps]);
+
+  const isValid = amountValid && (!needsConversion || (!!quote && !quoteLoading));
+
+  // Calculate approximate fiat equivalent
+  const fiatEquivalent = (() => {
+    if (!amount || isNaN(amountNum) || amountNum <= 0) return null;
+    if (currency === "XLM") {
+      return formatFiatEquivalent(amountNum);
+    }
+    const usdPerXlm = rates.USD && rates.USD > 0 ? rates.USD : 0.125;
+    return formatFiatEquivalent(amountNum / usdPerXlm);
+  })();
 
   // Calculate CO₂ impact for XLM donations
   const co2Impact = currency === "XLM" && amount && !isNaN(amountNum) && project.co2_per_xlm
@@ -179,9 +251,54 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
     setStep("signing");
 
     try {
-      const useContract = CONTRACT_ID && currency === "XLM";
+      const useContract = CONTRACT_ID && currency === "XLM" && !needsConversion;
 
-      if (useContract) {
+      if (needsConversion && quote && preferredAsset) {
+        // Re-quote right before signing: if the market moved past the bound
+        // the donor approved, stop instead of signing a stale preview.
+        const fresh = await getStrictSendQuote({
+          sendAsset, sendAmount: quote.sendAmount, destAsset: preferredAsset, slippageBps: quote.slippageBps,
+        });
+        if (!fresh || !quoteWithinBound(fresh.destAmount, quote.destMin)) {
+          if (fresh) setQuote(fresh);
+          throw new Error("The conversion rate moved beyond your slippage limit. Review the new quote and try again.");
+        }
+
+        if (currency === "USDC" && trustlineMissing) throw new Error("No USDC trustline on your account.");
+
+        // destMin stays the one the donor saw, so the network enforces it.
+        const tx = await buildPathPaymentDonationTransaction({
+          fromPublicKey: publicKey,
+          toPublicKey: project.walletAddress,
+          quote: { ...fresh, destMin: quote.destMin, slippageBps: quote.slippageBps },
+          memo: `GreenPay:${project.id.slice(0, 16)}`,
+        });
+
+        const { signedXDR, error: signErr } = await signTransactionWithWallet(tx.toXDR());
+        if (signErr || !signedXDR) throw new Error(signErr || "Signing failed");
+
+        setStep("submitting");
+        const result = await submitTransaction(signedXDR);
+        setTxHash(result.hash);
+
+        setStep("recording");
+        // The backend reads what the project actually received from Horizon;
+        // amount/currency here are only the donor's side.
+        const recorded = await recordDonation({
+          projectId: project.id,
+          donorAddress: publicKey,
+          amount: amountNum.toString(),
+          currency,
+          message: message.trim() || undefined,
+          transactionHash: result.hash,
+          pathPayment: true,
+        });
+        setDeliveredLabel(`${recorded?.amount ?? fresh.destAmount} ${preferredAsset.code}`);
+
+        clearDraft(project.id);
+        setStep("success");
+        onSuccess?.();
+      } else if (useContract) {
         // Get native XLM token address (for testnet/mainnet)
         const nativeTokenAddress = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"; // Native XLM on testnet
         const msgHash = message.trim() ? hashMessage(message.trim()) : 0;
@@ -221,6 +338,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           donorAddress: publicKey,
           amount: amountNum.toString(),
           currency: currency,
+          assetCode: undefined,
+          assetIssuer: undefined,
           message: message.trim() || undefined,
           transactionHash: result.hash,
         });
@@ -260,6 +379,8 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           donorAddress: publicKey,
           amount: amountNum.toString(),
           currency: currency,
+          assetCode: currency === "USDC" ? "USDC" : undefined,
+          assetIssuer: currency === "USDC" ? process.env.NEXT_PUBLIC_USDC_ISSUER : undefined,
           message: message.trim() || undefined,
           transactionHash: result.hash,
         });
@@ -281,7 +402,11 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
         <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
-          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${formatAmount(amountNum)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>. Thank you!
+          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${formatAmount(amountNum)} ${currency}`}</span>
+          {fiatEquivalent && (
+            <span data-testid="receipt-fiat-equivalent" className="text-forest-600 dark:text-forest-400 font-medium"> ({fiatEquivalent})</span>
+          )}
+          {" "}has been sent to <span className="font-semibold">{project.name}</span>{deliveredLabel && <> and arrived as <span className="font-semibold text-forest-700">{deliveredLabel}</span></>}. Thank you!
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
@@ -338,7 +463,31 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
             aria-label={`Donation amount in ${currency}`}
             id={`donation-amount-${currency}`}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
-          {amount && !isValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
+          {amount && !amountValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
+
+          <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body" data-testid="fiat-preview">
+            <span className="font-medium text-forest-700 dark:text-forest-300" data-testid="fiat-equivalent">
+              {fiatEquivalent ? fiatEquivalent : `Approx. in ${fiatCurrency}`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="fiat-currency-select" className="text-[11px] text-[var(--text-secondary)]">
+                Fiat:
+              </label>
+              <select
+                id="fiat-currency-select"
+                aria-label="Select fiat currency"
+                value={fiatCurrency}
+                onChange={(e) => setFiatCurrency(e.target.value as any)}
+                className="bg-forest-50 dark:bg-forest-900 border border-forest-200 dark:border-forest-700 rounded px-1.5 py-0.5 text-xs text-forest-700 dark:text-forest-200 focus:outline-none focus:ring-1 focus:ring-forest-500 cursor-pointer"
+              >
+                {supportedCurrencies.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           
           {/* CO₂ Impact Calculator */}
           {currency === "XLM" && amount && !isNaN(amountNum) && co2Impact > 0 && (
@@ -354,6 +503,45 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
             </div>
           )}
         </div>
+
+        {/* DEX conversion preview (#1660) */}
+        {needsConversion && preferredAsset && (
+          <div className="p-3 rounded-xl border border-forest-200 bg-forest-50 text-sm font-body" data-testid="conversion-preview">
+            <p className="font-medium text-forest-900 mb-1">
+              This project receives {preferredAsset.code}. Your {sendAsset.code} is converted on the Stellar DEX in the same transaction.
+            </p>
+            {!amountValid ? (
+              <p className="text-xs text-[var(--text-secondary)]">Enter an amount to see a quote.</p>
+            ) : quoteLoading ? (
+              <p className="text-xs text-[var(--text-secondary)]" aria-live="polite">Fetching quote…</p>
+            ) : quoteError ? (
+              <p className="text-xs text-red-600" role="alert">{quoteError}</p>
+            ) : quote ? (
+              <dl className="text-xs grid grid-cols-2 gap-y-1" aria-live="polite">
+                <dt className="text-[var(--text-secondary)]">You send</dt>
+                <dd className="text-right font-semibold">{quote.sendAmount} {sendAsset.code}</dd>
+                <dt className="text-[var(--text-secondary)]">Project receives (est.)</dt>
+                <dd className="text-right font-semibold">≈ {quote.destAmount} {preferredAsset.code}</dd>
+                <dt className="text-[var(--text-secondary)]">Minimum received</dt>
+                <dd className="text-right font-semibold">{quote.destMin} {preferredAsset.code}</dd>
+                <dt className="text-[var(--text-secondary)]">Rate</dt>
+                <dd className="text-right">1 {sendAsset.code} ≈ {effectiveRate(quote.sendAmount, quote.destAmount).toFixed(6)} {preferredAsset.code}</dd>
+              </dl>
+            ) : null}
+            <fieldset className="mt-2">
+              <legend className="text-xs text-[var(--text-secondary)] mb-1">Max slippage</legend>
+              <div className="flex gap-2">
+                {SLIPPAGE_OPTIONS_BPS.map((bps) => (
+                  <button key={bps} type="button" onClick={() => setSlippageBps(bps)} disabled={isProcessing}
+                    aria-pressed={slippageBps === bps}
+                    className={`px-2 py-1 rounded-lg text-xs border ${slippageBps === bps ? "bg-forest-500 text-white border-forest-500" : "bg-white border-forest-200"}`}>
+                    {bps / 100}%
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+        )}
 
         {/* Message */}
         <div>

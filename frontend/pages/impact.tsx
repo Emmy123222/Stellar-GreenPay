@@ -11,6 +11,7 @@ import WorldMap from "@/components/WorldMap";
 import { fetchImpactDonor, fetchImpactGlobal, fetchLeaderboard, fetchProjects } from "@/lib/api";
 import { getGlobalImpactStats } from "@/lib/stellar";
 import { formatCO2, formatXLM, shortenAddress, normalizeXLMAmount } from "@/utils/format";
+import { usePriceContext } from "@/lib/priceContext";
 import type { LeaderboardEntry } from "@/utils/types";
 import type { ImpactGlobalStats } from "@/lib/api";
 
@@ -26,6 +27,12 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [personalImpact, setPersonalImpact] = useState<Awaited<ReturnType<typeof fetchImpactDonor>> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const { formatFiatEquivalent } = usePriceContext();
+  const totalRaisedFiat = formatFiatEquivalent(sorobanStats?.totalRaisedXLM ?? "0");
+  const personalDonatedFiat = personalImpact?.totalDonatedXLM
+    ? formatFiatEquivalent(personalImpact.totalDonatedXLM)
+    : null;
 
   useEffect(() => {
     async function loadData() {
@@ -79,6 +86,7 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
             value={sorobanStats?.totalRaisedXLM ?? "0"}
             unit="XLM"
             isLoading={isLoading}
+            subtitle={totalRaisedFiat ? totalRaisedFiat : undefined}
           />
           <StatCard
             label="CO₂ Offset"
@@ -118,7 +126,14 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
           <h2 id="personal-impact-heading" className="text-2xl font-display font-bold text-forest-900 mb-3">Your personal impact</h2>
           {publicKey ? (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <StatCard label="You donated" icon="💚" value={personalImpact?.totalDonatedXLM ?? "0"} unit="XLM" isLoading={isLoading} />
+              <StatCard
+                label="You donated"
+                icon="💚"
+                value={personalImpact?.totalDonatedXLM ?? "0"}
+                unit="XLM"
+                isLoading={isLoading}
+                subtitle={personalDonatedFiat ? personalDonatedFiat : undefined}
+              />
               <StatCard label="Projects supported" icon="🌱" value={personalImpact?.projectsSupported ?? 0} isLoading={isLoading} />
               <StatCard label="CO₂ offset" icon="🌿" value={personalImpact?.co2OffsetKg ?? 0} unit="Kg" isLoading={isLoading} />
             </div>
@@ -218,6 +233,7 @@ export function StatCard({
   isLoading,
   formatter,
   duration,
+  subtitle,
 }: {
   label: string;
   icon: string;
@@ -226,6 +242,7 @@ export function StatCard({
   isLoading: boolean;
   formatter?: (val: number) => string;
   duration?: number;
+  subtitle?: React.ReactNode;
 }) {
   const isXLM = unit === "XLM" || label.toUpperCase().includes("XLM");
   const normalizedValue = isXLM ? normalizeXLMAmount(value) : value;
@@ -244,6 +261,11 @@ export function StatCard({
         )}
         {unit && <span className="text-xl text-[var(--text-secondary)] dark:text-forest-400 font-normal">{unit}</span>}
       </div>
+      {subtitle && !isLoading && (
+        <p className="mt-2 text-xs text-[var(--text-secondary)] dark:text-forest-400 font-medium" data-testid="stat-card-subtitle">
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }

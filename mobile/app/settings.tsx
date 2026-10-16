@@ -62,7 +62,7 @@ export default function SettingsScreen() {
       contentContainerStyle={styles.content}
     >
       <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <Text style={[styles.headerTitle, { color: colors.headerText }]}>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]} accessibilityRole="header">
           Settings
         </Text>
         <Text style={[styles.headerSub, { color: colors.headerText }]}>
@@ -82,6 +82,7 @@ export default function SettingsScreen() {
           activeOpacity={0.7}
           accessibilityLabel={`App version ${versionString}. Tap to copy.`}
           accessibilityRole="button"
+          style={styles.versionButton}
           testID="settings-version"
         >
           <Text style={[styles.versionText, { color: colors.muted }]}>
@@ -131,6 +132,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
   },
+  versionButton: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12 },
   footer: {
     alignItems: 'center',
     paddingVertical: 16,

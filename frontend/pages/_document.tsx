@@ -37,7 +37,7 @@ class MyDocument extends Document<Props> {
     //    `THEME_INIT_SCRIPT` in `lib/theme.tsx` using `greenpay:theme`.
     // `lang="en"` on <Html> stays as the no-JS / SSR fallback value.
     return (
-      <Html lang="en">
+      <Html lang="en" dir="ltr">
         <Head nonce={nonce}>
           {/* The inline body script below is statically stringified — it
               reads `localStorage` directly rather than DOM meta tags, so
@@ -49,7 +49,7 @@ class MyDocument extends Document<Props> {
           <script
             nonce={nonce}
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var k="greenpay:locale";var legacy="locale";var supported=["en","es","fr"];var v=null;try{v=window.localStorage.getItem(k);if(supported.indexOf(v)<0){var l=window.localStorage.getItem(legacy);if(supported.indexOf(l)>=0){v=l;window.localStorage.setItem(k,l);window.localStorage.removeItem(legacy)}else{v=null}}}catch(e){v=null}if(supported.indexOf(v)<0){var c=(window.navigator.languages||[]).concat(window.navigator.language);v="en";for(var i=0;i<c.length;i++){var b=String(c[i]||"").slice(0,2).toLowerCase();if(supported.indexOf(b)>=0){v=b;break}}}document.documentElement.lang=v}catch(e){}})();`,
+              __html: `(function(){try{var k="greenpay:locale";var legacy="locale";var supported=["en","es","fr","ar"];var rtl=["ar","he"];var v=null;try{v=window.localStorage.getItem(k);if(supported.indexOf(v)<0){var l=window.localStorage.getItem(legacy);if(supported.indexOf(l)>=0){v=l;window.localStorage.setItem(k,l);window.localStorage.removeItem(legacy)}else{v=null}}}catch(e){v=null}if(supported.indexOf(v)<0){var c=(window.navigator.languages||[]).concat(window.navigator.language);v="en";for(var i=0;i<c.length;i++){var b=String(c[i]||"").slice(0,2).toLowerCase();if(supported.indexOf(b)>=0){v=b;break}}}document.documentElement.lang=v;document.documentElement.dir=rtl.indexOf(v)>=0?"rtl":"ltr"}catch(e){}})();`,
             }}
           />
           <script

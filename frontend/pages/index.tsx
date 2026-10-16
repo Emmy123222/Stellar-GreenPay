@@ -362,19 +362,41 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
         </div>
 
         {/* ── Footer ──────────────────────────────────────────────────── */}
-        <div className="text-center pb-12 border-t border-forest-100 pt-8">
-          <p className="text-[#4a6a4a] text-sm font-body">
-            Open source · MIT License ·{" "}
+        <footer className="text-center pb-12 border-t border-forest-100 dark:border-forest-800/40 pt-8 space-y-3">
+          <div className="flex flex-wrap items-center justify-center gap-4 text-sm font-body text-[#4a6a4a] dark:text-forest-300">
             <a
-              href="https://github.com/your-org/stellar-greenpay"
+              href="https://discord.gg/greenpay"
               target="_blank"
               rel="noopener noreferrer"
-              className="hover:text-forest-600 transition-colors"
+              className="inline-flex items-center gap-1.5 hover:text-forest-600 dark:hover:text-forest-400 transition-colors"
+              aria-label="Discord Community #greenpay"
             >
-              Contribute on GitHub →
+              <span>💬 Discord (#greenpay)</span>
             </a>
+            <span>·</span>
+            <a
+              href="https://t.me/greenpay_stellar"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 hover:text-forest-600 dark:hover:text-forest-400 transition-colors"
+              aria-label="Telegram Community Group"
+            >
+              <span>✈️ Telegram</span>
+            </a>
+            <span>·</span>
+            <a
+              href="https://github.com/Emmy123222/Stellar-GreenPay"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-forest-600 dark:hover:text-forest-400 transition-colors"
+            >
+              GitHub →
+            </a>
+          </div>
+          <p className="text-[#4a6a4a] dark:text-forest-400 text-xs font-body">
+            Open source · MIT License · Stellar Soroban
           </p>
-        </div>
+        </footer>
       </div>
 
       {/* Wallet connect modal */}

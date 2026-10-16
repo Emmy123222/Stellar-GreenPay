@@ -302,30 +302,24 @@ async function start() {
   await boss.start();
 
   // Worker for the daily reminder cron.
-  await boss.work
-    (QUEUE, async () => {
-      await runReminderCheck();
-    })
-    ;
+  await boss.work(QUEUE, async () => {
+    await runReminderCheck();
+  });
 
   // Worker for the daily funding deadline check.
-  await boss.work
-    (DEADLINE_QUEUE, async () => {
-      await runDeadlineCheck();
-    })
-    ;
+  await boss.work(DEADLINE_QUEUE, async () => {
+    await runDeadlineCheck();
+  });
 
   // Worker for per-pledge scheduled jobs.
-  await boss.work
-    (PLEDGE_QUEUE, async (job) => {
-      const { pledgeId } = job.data || {};
-      if (!pledgeId) return;
-      logger.info(
-        { event: "recurring_donation_pledge_job", pledgeId },
-        "[RecurringDonationQueue] Processing scheduled pledge job"
-      );
-    })
-    ;
+  await boss.work(PLEDGE_QUEUE, async (job) => {
+    const { pledgeId } = job.data || {};
+    if (!pledgeId) return;
+    logger.info(
+      { event: "recurring_donation_pledge_job", pledgeId },
+      "[RecurringDonationQueue] Processing scheduled pledge job"
+    );
+  });
 
   // Daily cron for the reminder check.
   await boss.schedule(QUEUE, cronOverride || DEFAULT_CRON);
@@ -360,4 +354,7 @@ module.exports = {
   getCurrentLedger,
   start,
   stop,
+  QUEUE,
+  PLEDGE_QUEUE,
+  DEADLINE_QUEUE,
 };

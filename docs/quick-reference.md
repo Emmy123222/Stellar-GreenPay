@@ -119,8 +119,8 @@ CMD ["sh", "-c", "bash scripts/mainnet-preflight.sh && npm start"]
 
 ## 📚 Full Documentation
 
-- **Complete Guide:** [MAINNET-DEPLOYMENT.md](../MAINNET-DEPLOYMENT.md)
-- **Detailed README:** [PREFLIGHT-README.md](PREFLIGHT-README.md)
+- **Complete Guide:** [deployment-mainnet.md](deployment-mainnet.md)
+- **Detailed README:** [preflight.md](preflight.md)
 - **Example Config:** [.env.mainnet.example](../.env.mainnet.example)
 
 ---
@@ -129,7 +129,7 @@ CMD ["sh", "-c", "bash scripts/mainnet-preflight.sh && npm start"]
 
 If preflight fails and you need help:
 1. Check error messages in output
-2. Review [PREFLIGHT-README.md](PREFLIGHT-README.md)
+2. Review [preflight.md](preflight.md)
 3. Contact DevOps team
 4. DO NOT bypass checks
 

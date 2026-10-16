@@ -184,6 +184,7 @@ export default function ProfileScreen({ address: propAddress }: { address?: stri
             disabled={isUploading}
             accessibilityLabel="Upload profile avatar"
             accessibilityRole="button"
+            accessibilityState={{ disabled: isUploading, busy: isUploading }}
             testID="avatar-upload-button"
           >
             {profile?.avatarUrl ? (

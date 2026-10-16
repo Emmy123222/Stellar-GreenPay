@@ -20,7 +20,7 @@ If a HIGH finding is reported by ZAP in CI but is determined to be a **false pos
    - **Alert**: The name of the alert.
    - **URI/URL**: The page/endpoint that triggered the alert.
 
-2. Open the main config file [zap-false-positives.json](../zap-false-positives.json).
+2. Open the main config file [zap-false-positives.json](../scripts/zap-false-positives.json).
 
 3. Append your rule override inside `ignored_alerts`:
    ```json

@@ -23,6 +23,19 @@ const CACHE_KEY    = "xlm_usdc_mid_price";
 const CACHE_TTL_MS = 30_000; // 30 seconds
 const FALLBACK_XLM_PER_USDC = 8;
 
+const FIAT_CACHE_KEY   = "xlm_fiat_rates";
+const FIAT_CACHE_TTL_MS = 60_000; // 60 seconds
+const STALE_THRESHOLD_MS = 300_000; // 5 minutes staleness threshold
+
+const SUPPORTED_FIAT = ["USD", "EUR", "BRL"];
+const DEFAULT_USD_TO_FIAT = {
+  USD: 1.0,
+  EUR: 0.92,
+  BRL: 5.50,
+};
+
+let lastSuccessfulFiatData = null;
+
 /**
  * Compute the mid-price from a Horizon orderbook response.
  *
@@ -81,4 +94,93 @@ async function getUsdcToXlmRate() {
   }
 }
 
-module.exports = { getUsdcToXlmRate, FALLBACK_XLM_PER_USDC };
+/**
+ * Fetch multi-fiat exchange rates for XLM in USD, EUR, and BRL.
+ *
+ * Returns cached rates if available, calculates fresh rates otherwise,
+ * and falls back to last known rates (marked with isStale: true) on failure.
+ *
+ * @returns {Promise<{
+ *   xlmPerUsdc: number,
+ *   rates: { USD: number, EUR: number, BRL: number },
+ *   timestamp: number,
+ *   cached: boolean,
+ *   isStale: boolean,
+ *   fallback: boolean
+ * }>}
+ */
+async function getFiatRates() {
+  const cached = cache.get(FIAT_CACHE_KEY);
+  if (cached !== null) {
+    return {
+      ...cached,
+      cached: true,
+      isStale: false,
+    };
+  }
+
+  const now = Date.now();
+  let xlmPerUsdc = FALLBACK_XLM_PER_USDC;
+  let isFallback = false;
+
+  try {
+    xlmPerUsdc = await getUsdcToXlmRate();
+    isFallback = xlmPerUsdc === FALLBACK_XLM_PER_USDC;
+  } catch {
+    isFallback = true;
+  }
+
+  const usdPerXlm = xlmPerUsdc > 0 ? 1 / xlmPerUsdc : 1 / FALLBACK_XLM_PER_USDC;
+
+  let rates = {
+    USD: Number(usdPerXlm.toFixed(6)),
+    EUR: Number((usdPerXlm * DEFAULT_USD_TO_FIAT.EUR).toFixed(6)),
+    BRL: Number((usdPerXlm * DEFAULT_USD_TO_FIAT.BRL).toFixed(6)),
+  };
+
+  try {
+    if (typeof fetch === "function") {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+      const resp = await fetch(
+        "https://api.coingecko.com/api/v3/simple/price?ids=stellar&vs_currencies=usd,eur,brl",
+        { signal: controller.signal },
+      );
+      clearTimeout(timeout);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data?.stellar?.usd && typeof data.stellar.usd === "number") {
+          rates = {
+            USD: Number(data.stellar.usd),
+            EUR: Number(data.stellar.eur || (data.stellar.usd * DEFAULT_USD_TO_FIAT.EUR).toFixed(6)),
+            BRL: Number(data.stellar.brl || (data.stellar.usd * DEFAULT_USD_TO_FIAT.BRL).toFixed(6)),
+          };
+          isFallback = false;
+        }
+      }
+    }
+  } catch {
+    // External call failed; keep the DEX/fallback-derived rates
+  }
+
+  const payload = {
+    xlmPerUsdc,
+    rates,
+    timestamp: now,
+    cached: false,
+    isStale: false,
+    fallback: isFallback,
+  };
+
+  lastSuccessfulFiatData = payload;
+  cache.set(FIAT_CACHE_KEY, payload, FIAT_CACHE_TTL_MS);
+  return payload;
+}
+
+module.exports = {
+  getUsdcToXlmRate,
+  getFiatRates,
+  FALLBACK_XLM_PER_USDC,
+  SUPPORTED_FIAT,
+  DEFAULT_USD_TO_FIAT,
+};

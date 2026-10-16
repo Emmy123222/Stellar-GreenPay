@@ -77,7 +77,7 @@ describe("DonateForm Loading & Signing State", () => {
     fireEvent.click(presetBtn);
 
     expect(donateButton).toBeEnabled();
-    expect(donateButton).toHaveTextContent(/Donate 25 XLM/i);
+    expect(donateButton).toHaveTextContent(/Donate 25.*XLM/i);
   });
 
   test("shows spinner and 'Signing with Freighter…' message after clicking Donate, and disables button", async () => {
@@ -216,7 +216,7 @@ describe("DonateForm Loading & Signing State", () => {
     });
 
     await waitFor(() => {
-      expect(donateButton).toHaveTextContent(/Donate 15 XLM/i);
+      expect(donateButton).toHaveTextContent(/Donate 15.*XLM/i);
       expect(donateButton).toBeEnabled();
     });
 

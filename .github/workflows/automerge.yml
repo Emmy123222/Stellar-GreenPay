@@ -42,12 +42,11 @@ jobs:
             echo "Skipping: not a Stellar Wave PR"
             exit 0
           fi
-          # Safety guard: never auto-merge a PR that changes workflows or
-          # repo automation — those could steal the merge token. A human
-          # must review and merge such PRs manually.
-          if gh pr view "$PR_URL" --json files --jq '.files[].path' | grep -q '^\.github/'; then
-            gh pr comment "$PR_URL" --body "👋 Hey @$AUTHOR, thanks for the PR! 🙏 Changes under \`.github/\` need a manual review by a maintainer before merging — hang tight!"
-            echo "Skipping: PR touches .github/"
+          # Contributors may never change the auto-merge bot itself:
+          # a PR touching this workflow always needs a maintainer merge.
+          if gh pr view "$PR_URL" --json files --jq '.files[].path' | grep -qxF '.github/workflows/automerge.yml'; then
+            gh pr comment "$PR_URL" --body "👋 Hey @$AUTHOR, thanks for the PR! 🙏 Changes to the auto-merge bot itself (\`.github/workflows/automerge.yml\`) can only be merged by a maintainer, so this PR will wait for a manual review."
+            echo "Skipping: PR modifies the automerge workflow"
             exit 0
           fi
           # Retry a few times: GitHub may still be computing mergeability

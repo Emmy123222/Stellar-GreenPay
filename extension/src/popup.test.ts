@@ -2,6 +2,17 @@
  * Tests for popup.ts Freighter wallet integration
  */
 
+jest.mock('@stellar/stellar-sdk', () => ({
+  Asset: { native: jest.fn() },
+  Horizon: { Server: jest.fn().mockImplementation(() => ({})) },
+  Memo: { text: jest.fn() },
+  Networks: { PUBLIC: 'public', TESTNET: 'testnet' },
+  Operation: { payment: jest.fn() },
+  TransactionBuilder: { fromXDR: jest.fn() },
+}));
+
+import './popup';
+
 describe("GreenPay Popup - Freighter Integration", () => {
   beforeEach(() => {
     // Clean up DOM before each test
@@ -15,6 +26,47 @@ describe("GreenPay Popup - Freighter Integration", () => {
       <button id="settings-btn">Settings</button>
     `;
     delete (window as any).freighter;
+
+    const storageArea = {
+      get: jest.fn((keys: any, callback?: (result: Record<string, unknown>) => void) => {
+        const result = Array.isArray(keys)
+          ? Object.fromEntries(keys.map((key: string) => [
+              key,
+              key === "onboarded" ? true : key === "pendingDonations" ? [] : undefined,
+            ]))
+          : typeof keys === "string"
+            ? { [keys]: keys === "network" ? "testnet" : [] }
+            : { ...keys };
+        callback?.(result);
+        return Promise.resolve(result);
+      }),
+      set: jest.fn((_items: unknown, callback?: () => void) => {
+        callback?.();
+        return Promise.resolve();
+      }),
+      remove: jest.fn((_keys: unknown, callback?: () => void) => {
+        callback?.();
+        return Promise.resolve();
+      }),
+    };
+    Object.defineProperty(globalThis, "chrome", {
+      configurable: true,
+      value: {
+        storage: {
+          local: storageArea,
+          sync: storageArea,
+          session: storageArea,
+          onChanged: { addListener: jest.fn() },
+        },
+        runtime: {},
+        tabs: { query: jest.fn().mockResolvedValue([]) },
+        action: {
+          setBadgeText: jest.fn(),
+          setBadgeBackgroundColor: jest.fn(),
+        },
+      },
+    });
+    jest.spyOn(window, "setInterval").mockReturnValue(0);
   });
 
   describe("Freighter Missing on DOMContentLoaded", () => {

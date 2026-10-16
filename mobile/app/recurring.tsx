@@ -121,7 +121,6 @@ function DonationCard({
 
 export default function RecurringScreen() {
   const { colors } = useTheme();
-  const [donations, setDonations] = useState<RecurringDonation[]>([]);
   const [history, setHistory] = useState<PaymentRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
@@ -189,22 +188,6 @@ export default function RecurringScreen() {
     loadProjects();
   }, [loadProjects]);
 
-
-  useEffect(() => {
-    if (showForm && projects.length === 0) {
-      axios
-        .get(`${API_URL}/api/projects`)
-        .then((res) => {
-          const list: ClimateProject[] = Array.isArray(res.data?.data) ? res.data.data : [];
-          setProjects(list);
-          if (list.length > 0 && !selectedProjectId) {
-            setSelectedProjectId(list[0].id);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [showForm]);
-
   const handleCancel = async (id: string) => {
     setCancellingId(id);
     try {
@@ -267,7 +250,7 @@ export default function RecurringScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <View style={[styles.header, { backgroundColor: colors.header }]}>
-        <Text style={[styles.headerTitle, { color: colors.headerText }]}>Monthly Giving</Text>
+        <Text style={[styles.headerTitle, { color: colors.headerText }]} accessibilityRole="header">Monthly Giving</Text>
         <Text style={[styles.headerSub, { color: colors.secondaryText }]}>Manage your recurring donations</Text>
       </View>
 
@@ -275,7 +258,7 @@ export default function RecurringScreen() {
       {/* Set up a new recurring donation */}
       {!projectsLoading && projects.length > 0 && (
         <View style={[styles.setupCard, { backgroundColor: colors.surface, shadowColor: colors.cardShadow, borderColor: colors.cardBorder }]}>
-          <Text style={[styles.setupTitle, { color: colors.text }]}>Set up a monthly donation</Text>
+          <Text style={[styles.setupTitle, { color: colors.text }]} accessibilityRole="header">Set up a monthly donation</Text>
 
           <Text style={[styles.label, { color: colors.text }]}>Project</Text>
           <ScrollView
@@ -362,11 +345,14 @@ export default function RecurringScreen() {
       ) : null}
 
       {/* Active recurring donations */}
-      <View style={[styles.tabBar, { backgroundColor: colors.surface }]}>
+      <View style={[styles.tabBar, { backgroundColor: colors.surface }]} accessibilityRole="tablist">
         <TouchableOpacity
           style={[styles.tab, activeTab === 'active' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('active')}
           activeOpacity={0.7}
+          accessibilityRole="tab"
+          accessibilityLabel="Active recurring donations"
+          accessibilityState={{ selected: activeTab === 'active' }}
         >
           <Text style={[styles.tabText, { color: activeTab === 'active' ? colors.buttonText : colors.secondaryText }]}>Active</Text>
         </TouchableOpacity>
@@ -374,6 +360,9 @@ export default function RecurringScreen() {
           style={[styles.tab, activeTab === 'history' && { backgroundColor: colors.primary }]}
           onPress={() => setActiveTab('history')}
           activeOpacity={0.7}
+          accessibilityRole="tab"
+          accessibilityLabel="Payment history"
+          accessibilityState={{ selected: activeTab === 'history' }}
         >
           <Text style={[styles.tabText, { color: activeTab === 'history' ? colors.buttonText : colors.secondaryText }]}>History</Text>
         </TouchableOpacity>
@@ -476,6 +465,8 @@ const styles = StyleSheet.create({
   },
   projectChip: {
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: 14,
     borderRadius: 18,
     borderWidth: 1,
@@ -500,6 +491,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 8,
     paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   confirmBtn: {},
@@ -589,6 +582,8 @@ const styles = StyleSheet.create({
     borderColor: '#c62828',
     borderRadius: 8,
     paddingVertical: 8,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   cancelBtnText: {
@@ -607,6 +602,8 @@ const styles = StyleSheet.create({
   tab: {
     flex: 1,
     paddingVertical: 10,
+    minHeight: 44,
+    justifyContent: 'center',
     alignItems: 'center',
   },
   tabText: {

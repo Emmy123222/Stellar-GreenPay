@@ -12,7 +12,7 @@ Admin users authenticate using JSON Web Tokens (JWT) with role-based access cont
 
 **Token Types:**
 - **Standard Admin Token**: 1-hour TTL, used for general admin operations
-- **Short-Lived Admin Token**: 15-minute TTL, used for sensitive operations (project registration, user management, status changes)
+- `Short-Lived Admin Token`: 15-minute TTL, used for sensitive operations (project registration, user management, status changes)
 - **Refresh Token**: 24-hour TTL, used to obtain new access tokens
 
 **Token Structure:**
@@ -169,6 +169,17 @@ Test coverage includes:
 ## Redis cache key namespacing
 Redis is optional and often shared with other applications (managed instance, sidecar, or a cluster with several databases). Every cache key this service writes is therefore qualified with the `greenpay:` namespace — `greenpay:project:abc123`, `greenpay:leaderboard:page:1`, `greenpay:projects:list:*`. The prefix is applied centrally by the cache services (`backend/src/services/redis.js` and `backend/src/services/cache.js`) using `backend/src/utils/cacheKeys.js`, so a new call site cannot forget it and `KEYS`-based invalidation can never delete another service's data. Rate-limit counters use their own `greenpay:rate-limit:` prefix.
 
+## Stellar SDK version policy
+
+All three JavaScript packages that talk to Stellar networks — `backend/package.json`, `frontend/package.json` and `mobile/package.json` — pin the same `@stellar/stellar-sdk` major line: **17.x** (currently `^17.0.1`). Horizon/Soroban types, fee handling, muxed account support and the `SorobanRpc` namespace change between majors, and the frontend and backend must agree on envelope formats (`see frontend/lib/stellar.ts` and `backend/src/services/stellar.js`).
+
+Rules for future bumps:
+
+1. Bump the major in all three `package.json` files in the same pull request.
+2. Re-run `npm test` in `backend/`, `frontend/` and `mobile/` and confirm all suites pass.
+3. Update this section with the new major version so the next bump starts from a known baseline.
+
+## Security
 
 | Concern | Mitigation |
 |---------|-----------|
@@ -178,5 +189,4 @@ Redis is optional and often shared with other applications (managed instance, si
 | Sybil donors | On-chain stats cannot be faked — all linked to real wallet |
 | Backend downtime | Donations still work — backend is not on the critical path |
 | Reentrancy in cross-contract calls | Guarded by an `is_processing` flag in temporary storage. While Soroban's single-threaded nature reduces risk, malicious tokens/oracles could still re-enter `donate()`. Explicit guards prevent this. |
-| --- | --- |
 | Shared-Redis key collision | Every cache key is namespaced (`greenpay:…`) and invalidation is namespace-scoped |

@@ -19,6 +19,15 @@
     "quotes": ["error", "double"],
     "semi": ["error", "always"],
     "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
-    "sql-injection/no-sql-injection": "error"
-  }
+    "sql-injection/no-sql-injection": "error",
+    "no-console": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.js", "**/*.spec.js"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
 }

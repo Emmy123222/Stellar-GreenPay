@@ -60,12 +60,25 @@ The E2E test suite covers:
 - Verifies UI responds to user interactions
 - Confirms state changes persist through the flow
 
+### 6. Settings and Allowlist (`settings-allowlist.spec.ts`)
+- Rejects malformed site patterns, adds and removes entries, and verifies saved allowlist state.
+
+### 7. Site Injection and Context Menu (`widget-allowlist.spec.ts`)
+- Confirms the content widget injects on an allowed project page and remains absent on a denied site.
+- Checks the background context-menu entry becomes visible after project context is detected.
+
+### 8. Pending Transaction Recovery (`pending-transactions.spec.ts`)
+- Stores a pending donation, restarts the extension with the same profile, and verifies expired work is cleared.
+
 ## Test Structure
 
 ```
 extension/
 ├── e2e/
-│   └── donate-flow.spec.ts       # All donation flow tests
+│   ├── donate-flow.spec.ts       # Popup and donation UI
+│   ├── settings-allowlist.spec.ts
+│   ├── widget-allowlist.spec.ts
+│   └── pending-transactions.spec.ts
 ├── playwright.config.ts           # Playwright configuration
 ├── package.json                   # Dependencies & scripts
 └── E2E_TESTS.md                   # This file
@@ -153,7 +166,7 @@ Test results and artifacts are uploaded after each run:
 
 ## Adding New Tests
 
-1. Add test cases to `e2e/donate-flow.spec.ts`
+1. Add test cases to the spec matching the extension surface
 2. Follow the test structure:
    ```typescript
    test('should do something', async () => {

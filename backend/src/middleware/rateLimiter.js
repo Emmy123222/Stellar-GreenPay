@@ -1,4 +1,5 @@
 const rateLimit = require("express-rate-limit");
+const { ipKeyGenerator } = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 const logger = require("../logger");
 const redis = require("../services/redis");
@@ -120,7 +121,15 @@ class FallbackStore {
   }
 }
 
-const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
+/**
+ * @param {number} maxRequests
+ * @param {number} windowMinutes
+ * @param {string} [namespace]
+ * @param {{keyGenerator?: (req: import("express").Request) => string}} [options]
+ *   keyGenerator buckets requests by something other than the client IP, e.g.
+ *   the authenticated wallet. Mount the limiter after the auth middleware.
+ */
+const createRateLimiter = (maxRequests, windowMinutes, namespace, options = {}) => {
   const limiterNamespace = namespace || `${maxRequests}-${windowMinutes}`;
   const windowMs = windowMinutes * 60 * 1000;
   const redisStore = new RedisStore({
@@ -137,6 +146,7 @@ const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
     legacyHeaders: false,
     passOnStoreError: true,
     store,
+    ...(options.keyGenerator ? { keyGenerator: options.keyGenerator } : {}),
     handler: (req, res) => {
       (req.log || logger).warn({
         event: "rate_limit_hit",
@@ -158,4 +168,4 @@ const createRateLimiter = (maxRequests, windowMinutes, namespace) => {
   return [limiter, setRateLimitHeaders];
 };
 
-module.exports = { createRateLimiter, clearMemoryStore };
+module.exports = { createRateLimiter, clearMemoryStore, ipKeyGenerator };

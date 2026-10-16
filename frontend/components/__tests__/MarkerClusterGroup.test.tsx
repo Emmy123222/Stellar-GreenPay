@@ -1,3 +1,4 @@
+/// <reference types="leaflet.markercluster" />
 import L from "leaflet";
 import { createClusterIcon } from "../MarkerClusterGroup";
 

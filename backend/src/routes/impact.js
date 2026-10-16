@@ -455,4 +455,15 @@ router.post("/certificate/pdf", async (req, res, next) => {
   }
 });
 
+// GET /api/impact/:projectId — alias of GET /api/impact/project/:id.
+// Defined last so the specific routes above (/global, /donor/:publicKey,
+// /project/:id, /certificate) match first.
+router.get("/:projectId", async (req, res, next) => {
+  try {
+    return await handleProjectImpact(req, res, req.params.projectId);
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

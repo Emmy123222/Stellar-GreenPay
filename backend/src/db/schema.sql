@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS donations (
   amount_xlm NUMERIC(20, 7),
   amount NUMERIC(20, 7) NOT NULL,
   currency TEXT NOT NULL DEFAULT 'XLM',
+  asset_code TEXT,
+  asset_issuer TEXT,
   message TEXT,
   transaction_hash TEXT NOT NULL UNIQUE,
   donor_country TEXT,

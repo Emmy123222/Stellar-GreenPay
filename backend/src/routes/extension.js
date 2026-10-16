@@ -24,6 +24,10 @@
 const express = require("express");
 const router = express.Router();
 
+router.get("/", (req, res) => {
+  res.json({ success: true, service: "extension-api" });
+});
+
 router.use("/donations", require("./donations"));
 router.use("/projects", require("./projects"));
 router.use("/profiles", require("./profiles"));

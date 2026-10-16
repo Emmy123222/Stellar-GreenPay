@@ -141,7 +141,7 @@ describe("GET /api/projects", () => {
 
     await request(app).get("/api/projects?q=ecologie").expect(200);
 
-    const query = pool.query.mock.calls[1][0];
+    const query = pool.query.mock.calls[0][0];
     expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
   });
 
@@ -288,6 +288,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
     pool.query.mockResolvedValueOnce({
       rows: [{ follow_count: 7, is_following: false }],
     }); // follow stats
@@ -308,6 +309,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
     pool.query.mockResolvedValueOnce({
       rows: [{ follow_count: 0, is_following: false }],
     }); // follow stats

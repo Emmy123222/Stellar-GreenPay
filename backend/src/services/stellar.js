@@ -6,6 +6,8 @@
 
 const { Horizon, Networks, rpc, Contract, TransactionBuilder, scValToNative, xdr, Address, StrKey, Account, Config } = require("@stellar/stellar-sdk");
 
+const { extractDelivery } = require("./pathPayment");
+
 const NETWORK     = process.env.STELLAR_NETWORK || "testnet";
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 const RPC_URL     = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -15,19 +17,19 @@ const RPC_URL     = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stel
 const STELLAR_TIMEOUT_MS = Number.parseInt(process.env.STELLAR_TIMEOUT_MS, 10) || 15000;
 
 // Three separate switches are needed, and only the first two are obvious:
-// `Config.setTimeout` is documented as global but in @stellar/stellar-sdk v13
+// `Config.setTimeout` is documented as global but in @stellar/stellar-sdk v17
 // it is read only by the Federation and stellar.toml clients. Horizon and
 // Soroban RPC each talk through their own module-level axios instance, so each
 // has to be bounded explicitly.
 Config.setTimeout(STELLAR_TIMEOUT_MS);
-Horizon.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
-rpc.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+if (Horizon?.AxiosClient?.defaults) Horizon.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+if (rpc?.AxiosClient?.defaults) rpc.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
 
 /**
  * True when `err` is an aborted/expired outbound request rather than a genuine
  * Horizon/RPC error response.
  *
- * The SDK exposes no `TimeoutError` class in v13, and the two axios clients
+ * The SDK exposes no `TimeoutError` class in v17, and the two axios clients
  * surface a timeout as `code: "ECONNABORTED"` (or `"ETIMEDOUT"` further down
  * the socket stack), so callers should not be taught to match one shape.
  *
@@ -268,7 +270,7 @@ function getRegisteredProjectIdFromTransaction(tx) {
  * @returns {string|null} The project ID, or `null` when no matching operation.
  */
 function getProjectIdFromEnvelope(tx) {
-  if (typeof tx.envelope_xdr !== "string") return null;
+  if (!tx || typeof tx.envelope_xdr !== "string") return null;
 
   let envelope;
   try {
@@ -278,39 +280,64 @@ function getProjectIdFromEnvelope(tx) {
   }
 
   let innerTx;
-  if (envelope.switch() === xdr.EnvelopeType.envelopeTypeTx()) {
-    innerTx = envelope.v1().tx();
-  } else if (envelope.switch() === xdr.EnvelopeType.envelopeTypeTxV0()) {
-    innerTx = envelope.v0().tx();
+  const envType = typeof envelope.switch === "function" ? envelope.switch() : envelope.type;
+  if (
+    envType === "envelopeTypeTx" ||
+    (xdr.EnvelopeType?.envelopeTypeTx && (envType === xdr.EnvelopeType.envelopeTypeTx || (typeof xdr.EnvelopeType.envelopeTypeTx === "function" && envType === xdr.EnvelopeType.envelopeTypeTx())))
+  ) {
+    const v1 = typeof envelope.v1 === "function" ? envelope.v1() : envelope.v1;
+    innerTx = v1 && (typeof v1.tx === "function" ? v1.tx() : v1.tx);
+  } else if (
+    envType === "envelopeTypeTxV0" ||
+    (xdr.EnvelopeType?.envelopeTypeTxV0 && (envType === xdr.EnvelopeType.envelopeTypeTxV0 || (typeof xdr.EnvelopeType.envelopeTypeTxV0 === "function" && envType === xdr.EnvelopeType.envelopeTypeTxV0())))
+  ) {
+    const v0 = typeof envelope.v0 === "function" ? envelope.v0() : envelope.v0;
+    innerTx = v0 && (typeof v0.tx === "function" ? v0.tx() : v0.tx);
   } else {
     // Fee-bump envelopes never carry our registration call.
     return null;
   }
 
-  for (const operation of innerTx.operations()) {
-    const body = operation.body();
-    if (body.switch() !== xdr.OperationType.invokeHostFunction()) continue;
+  if (!innerTx) return null;
+  const operations = typeof innerTx.operations === "function" ? innerTx.operations() : innerTx.operations;
+  if (!Array.isArray(operations)) return null;
 
-    const hostFunction = body.invokeHostFunctionOp().hostFunction();
-    if (hostFunction.switch() !== xdr.HostFunctionType.hostFunctionTypeInvokeContract()) {
-      continue;
-    }
+  for (const operation of operations) {
+    const body = typeof operation.body === "function" ? operation.body() : operation.body;
+    if (!body) continue;
+    const bodyType = typeof body.switch === "function" ? body.switch() : body.type;
+    const isInvoke = bodyType === "invokeHostFunction" ||
+      (xdr.OperationType?.invokeHostFunction && (bodyType === xdr.OperationType.invokeHostFunction || (typeof xdr.OperationType.invokeHostFunction === "function" && bodyType === xdr.OperationType.invokeHostFunction())));
+    if (!isInvoke) continue;
 
-    const invokeArgs = hostFunction.invokeContract();
+    const invokeOp = typeof body.invokeHostFunctionOp === "function" ? body.invokeHostFunctionOp() : body.invokeHostFunctionOp;
+    if (!invokeOp) continue;
+    const hostFunction = typeof invokeOp.hostFunction === "function" ? invokeOp.hostFunction() : invokeOp.hostFunction;
+    if (!hostFunction) continue;
+
+    const fnType = typeof hostFunction.switch === "function" ? hostFunction.switch() : hostFunction.type;
+    const isInvokeContract = fnType === "hostFunctionTypeInvokeContract" ||
+      (xdr.HostFunctionType?.hostFunctionTypeInvokeContract && (fnType === xdr.HostFunctionType.hostFunctionTypeInvokeContract || (typeof xdr.HostFunctionType.hostFunctionTypeInvokeContract === "function" && fnType === xdr.HostFunctionType.hostFunctionTypeInvokeContract())));
+    if (!isInvokeContract) continue;
+
+    const invokeArgs = typeof hostFunction.invokeContract === "function" ? hostFunction.invokeContract() : hostFunction.invokeContract;
+    if (!invokeArgs) continue;
 
     let contractId;
     try {
-      contractId = Address.fromScAddress(invokeArgs.contractAddress()).toString();
+      const rawContractAddress = typeof invokeArgs.contractAddress === "function" ? invokeArgs.contractAddress() : invokeArgs.contractAddress;
+      contractId = Address.fromScAddress(rawContractAddress).toString();
     } catch {
       continue;
     }
     if (contractId !== CONTRACT_ID) continue;
 
-    if (invokeArgs.functionName().toString() !== REGISTER_PROJECT_FUNCTION) continue;
+    const fnName = typeof invokeArgs.functionName === "function" ? invokeArgs.functionName() : invokeArgs.functionName;
+    if (!fnName || fnName.toString() !== REGISTER_PROJECT_FUNCTION) continue;
 
     // register_project(admin, project_id, name, wallet, co2_per_xlm, ...)
-    const args = invokeArgs.args();
-    if (args.length < 2) continue;
+    const args = typeof invokeArgs.args === "function" ? invokeArgs.args() : invokeArgs.args;
+    if (!Array.isArray(args) || args.length < 2) continue;
 
     let projectId;
     try {
@@ -342,29 +369,44 @@ function getProjectIdFromProjRegEvent(tx) {
   } catch {
     return null;
   }
-  if (meta.switch() !== 3) return null; // TransactionMetaV3
+  const metaType = typeof meta.switch === "function" ? meta.switch() : meta.type;
+  const isV3 = metaType === 3 || metaType === "v3" || Boolean(meta.v3);
+  if (!isV3) return null; // TransactionMetaV3
 
-  const sorobanMeta = meta.v3().sorobanMeta();
+  const v3 = typeof meta.v3 === "function" ? meta.v3() : meta.v3;
+  if (!v3) return null;
+  const sorobanMeta = typeof v3.sorobanMeta === "function" ? v3.sorobanMeta() : v3.sorobanMeta;
   if (!sorobanMeta) return null; // classic (non-Soroban) transaction
 
-  for (const event of sorobanMeta.events()) {
-    if (event.type() !== xdr.ContractEventType.contract()) continue;
-    if (!event.contractId()) continue;
+  const events = typeof sorobanMeta.events === "function" ? sorobanMeta.events() : sorobanMeta.events;
+  if (!Array.isArray(events)) return null;
+
+  for (const event of events) {
+    const evType = typeof event.type === "function" ? event.type() : event.type;
+    const isContractType = evType === "contract" || evType?.name === "contract" || evType === 1 || evType?.value === 1 ||
+      (xdr.ContractEventType?.contract && (evType === xdr.ContractEventType.contract || (typeof xdr.ContractEventType.contract === "function" && evType === xdr.ContractEventType.contract())));
+    if (!isContractType) continue;
+
+    const rawContractId = typeof event.contractId === "function" ? event.contractId() : event.contractId;
+    if (!rawContractId) continue;
 
     // Only accept events emitted by our contract.
     let eventContractId;
     try {
-      eventContractId = StrKey.encodeContract(event.contractId());
+      const contractBytes = rawContractId.value || rawContractId;
+      eventContractId = StrKey.encodeContract(contractBytes);
     } catch {
       continue;
     }
     if (eventContractId !== CONTRACT_ID) continue;
 
-    const body = event.body();
-    if (body.switch() !== 0) continue; // ContractEventV0
+    const body = typeof event.body === "function" ? event.body() : event.body;
+    if (!body) continue;
+    const bodyV0 = typeof body.v0 === "function" ? body.v0() : body.v0;
+    if (!bodyV0) continue;
 
-    const topics = body.v0().topics();
-    if (topics.length === 0) continue;
+    const topics = typeof bodyV0.topics === "function" ? bodyV0.topics() : bodyV0.topics;
+    if (!Array.isArray(topics) || topics.length === 0) continue;
 
     let topic0;
     try {
@@ -376,7 +418,8 @@ function getProjectIdFromProjRegEvent(tx) {
 
     let projectId;
     try {
-      projectId = scValToNative(body.v0().data());
+      const data = typeof bodyV0.data === "function" ? bodyV0.data() : bodyV0.data;
+      projectId = scValToNative(data);
     } catch {
       continue;
     }
@@ -476,6 +519,20 @@ async function getFundingMilestoneEvents(startLedger) {
   return events;
 }
 
+/**
+ * What a classic payment / DEX path-payment transaction delivered to
+ * `destination` from `source`, read from Horizon's operation records (#1660).
+ * Donation recording uses this instead of the client-reported amount so a
+ * path payment is credited with what the project actually received.
+ *
+ * @param {{transactionHash: string, destination: string, source: string}} params
+ * @returns {Promise<ReturnType<typeof import("./pathPayment").extractDelivery>>}
+ */
+async function getDeliveredPayment({ transactionHash, destination, source }) {
+  const page = await server.operations().forTransaction(transactionHash).limit(200).call();
+  return extractDelivery(page.records, { destination, source });
+}
+
 module.exports = {
   server,
   rpcServer,
@@ -488,4 +545,5 @@ module.exports = {
   getRegisteredProjectIdFromTransaction,
   getProjectDeactivatedEvents,
   getFundingMilestoneEvents,
+  getDeliveredPayment,
 };

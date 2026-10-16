@@ -2,13 +2,13 @@
 
 const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { computeBadges } = require("./store");
 const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
-const logger = require("../logger");
 
 const QUEUE = "profile-update";
 const AVATAR_QUEUE = "profile-avatar";
@@ -293,7 +293,7 @@ async function start(io) {
     process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
 
   boss = new PgBoss(connectionString);
-  boss.on("error", (err) => console.error("[profileQueue] pg-boss error:", err.message));
+  boss.on("error", (err) => logger.error({ event: "profile_queue_pgboss_error", err: err.message }, "[profileQueue] pg-boss error"));
 
   await boss.start();
 
@@ -311,7 +311,10 @@ async function start(io) {
     await processAvatar(donorAddress, avatarUrl);
   });
 
-  console.log("[profileQueue] pg-boss started, worker registered on queues:", QUEUE, AVATAR_QUEUE);
+  logger.info(
+    { event: "profile_queue_started", queues: [QUEUE, AVATAR_QUEUE] },
+    `[profileQueue] pg-boss started, workers registered on queues: ${QUEUE}, ${AVATAR_QUEUE}`
+  );
 }
 
 async function _enqueueProfileUpdateImpl(donorAddress) {

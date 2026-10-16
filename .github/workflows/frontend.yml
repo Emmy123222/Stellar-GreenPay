@@ -91,6 +91,9 @@ jobs:
             frontend/package-lock.json
             backend/package-lock.json
 
+      - name: Check locale key parity
+        run: node scripts/check-locale-keys.js
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci

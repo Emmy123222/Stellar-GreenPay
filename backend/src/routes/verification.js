@@ -31,6 +31,7 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { adminRequired, adminTokenRequired } = require("../middleware/auth");
 const { logAdminAction } = require("../services/audit");
 const { createRateLimiter } = require("../middleware/rateLimiter");
@@ -276,8 +277,10 @@ router.post("/", submitLimiter, async (req, res, next) => {
     // Fire-and-forget admin notification; failures here must NOT block the
     // persist + 201 success path. The submitter still gets their receipt.
     sendAdminVerificationNotification(created).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.error("[verification] admin notification failed:", err.message);
+      logger.error(
+        { event: "verification_admin_notification_failed", requestId: created.id, err: err.message },
+        "[verification] admin notification failed",
+      );
     });
 
     res.status(201).json({
@@ -533,8 +536,10 @@ router.patch("/:id/status", adminTokenRequired, async (req, res, next) => {
     // NOT block the PATCH success response.
     if (["approved", "rejected", "in_review"].includes(status)) {
       sendVerificationStatusNotification(updatedRow, status).catch((err) => {
-        // eslint-disable-next-line no-console
-        console.error("[verification] status-change notification failed:", err.message);
+        logger.error(
+          { event: "verification_status_notification_failed", requestId: updatedRow.id, status, err: err.message },
+          "[verification] status-change notification failed",
+        );
       });
     }
 

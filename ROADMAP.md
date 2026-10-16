@@ -1,5 +1,9 @@
 # 🗺 Stellar GreenPay — Roadmap
 
+> Status reviewed against the repository on 2026-10-15. A checked item has a working
+> implementation in the web, mobile, backend, or Soroban contract code. Unchecked
+> items include work that is only partly implemented or lacks the feature named here.
+
 ---
 
 ## ✅ v1.0 — Foundation (Current)
@@ -16,64 +20,65 @@
 
 ## 🔄 v1.1 — Developer Experience
 
-- [ ] Docker Compose one-command setup
-- [ ] GitHub Actions CI for all layers
-- [ ] Unit tests for backend services
-- [ ] Playwright e2e tests
+- [x] Docker Compose one-command setup
+- [x] GitHub Actions CI for all layers
+- [x] Unit tests for backend services
+- [x] Playwright e2e tests
 
 ---
 
 ## 🌿 v1.2 — Verified Projects
 
-> **Placeholder** — Contribute here!
-
-- [ ] Project verification submission form
-- [ ] Admin review and approval flow
-- [ ] Verified badge with on-chain proof
-- [ ] Project registration via Soroban contract
+- [x] Project verification submission form
+- [x] Admin review and approval flow
+- [x] Verified badge with on-chain proof
+- [x] Project registration via Soroban contract
 
 ---
 
 ## 🏆 v1.3 — Impact NFT Badges
 
-> **Placeholder** — Contribute here!
+- [x] Mint an impact NFT when a donor reaches a new badge tier
+- [x] Badge tiers: Seedling 🌱, Tree 🌳, Forest 🌲
+- [x] Display badges on donor profile
+- [ ] Share the badge itself on social media
 
-- [ ] Mint an impact NFT when donation threshold is reached
-- [ ] Badge tiers: Seedling 🌱, Tree 🌳, Forest 🌲
-- [ ] Display badges on donor profile
-- [ ] Share badge on social media
+> Impact certificates can be shared, but a badge-specific social share card is not implemented.
 
 ---
 
 ## 💬 v1.4 — Community Features
 
-> **Placeholder** — Contribute here!
-
 - [ ] Donor comments on project pages
-- [ ] Project update notifications
-- [ ] Follow a project
+- [x] Project update notifications
+- [x] Follow a project
 - [ ] Monthly impact digest email
+
+> Project updates and follows are wired to notifications. The backend digest currently
+> runs weekly; a monthly impact digest is not confirmed as a shipped schedule.
 
 ---
 
 ## 📊 v1.5 — Impact Dashboard
 
-> **Placeholder** — Contribute here!
+- [x] Total CO₂ offset tracker
+- [x] Real-time donation stream
+- [x] Project completion percentage
+- [x] Global impact map
 
-- [ ] Total CO₂ offset tracker
-- [ ] Real-time donation stream
-- [ ] Project completion percentage
-- [ ] Global impact map
+> The map plots project locations. It does not yet visualize a global CO₂ heatmap.
 
 ---
 
 ## 💱 v2.0 — Multi-Currency
 
-> **Placeholder** — Contribute here!
-
-- [ ] USDC donations alongside XLM
+- [x] USDC donations alongside XLM
 - [ ] Automatic XLM/USDC conversion via Stellar DEX
 - [ ] Show donation value in local fiat currency
+
+> USDC donations are supported. The DEX price feed supplies an estimate; it does not
+> execute a swap. USD estimates appear in some views, but localized fiat display is not
+> implemented throughout the donation flow.
 
 ---
 
@@ -115,9 +120,11 @@
 
 ## 🗳 v2.1 — DAO Governance
 
-> **Placeholder** — Contribute here!
-
-- [ ] Community vote on which projects get verified
+- [x] Community vote on which projects get verified
 - [ ] Donor voting power proportional to total donated
 - [ ] Governance token issued via Soroban
-- [ ] On-chain proposal and voting contract
+- [x] On-chain proposal and voting contract
+
+> Project proposals and votes run on Soroban and the web UI supports badge-holder voting.
+> Voting is eligibility-based rather than weighted by donation total; no governance token
+> is issued.

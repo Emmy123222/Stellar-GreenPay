@@ -18,6 +18,7 @@ import {
   applyLocaleToDocument,
   detectBrowserLocale,
   isLocale,
+  isRTL,
   readStoredLocale,
   useI18n,
   type Locale,
@@ -49,6 +50,9 @@ function LocaleProbe() {
       </button>
       <button data-testid="set-es" onClick={() => setLocale("es")}>
         es
+      </button>
+      <button data-testid="set-ar" onClick={() => setLocale("ar")}>
+        ar
       </button>
       <button data-testid="set-bogus" onClick={() => setLocale("pirate" as Locale)}>
         bogus
@@ -97,6 +101,7 @@ describe("isLocale", () => {
     expect(isLocale("en")).toBe(true);
     expect(isLocale("es")).toBe(true);
     expect(isLocale("fr")).toBe(true);
+    expect(isLocale("ar")).toBe(true);
     expect(isLocale("de")).toBe(false);
     expect(isLocale("")).toBe(false);
     expect(isLocale(undefined)).toBe(false);
@@ -155,10 +160,29 @@ describe("detectBrowserLocale", () => {
   });
 });
 
+describe("isRTL", () => {
+  it("identifies RTL locales including Arabic and Hebrew", () => {
+    expect(isRTL("ar")).toBe(true);
+    expect(isRTL("he")).toBe(true);
+    expect(isRTL("en")).toBe(false);
+    expect(isRTL("es")).toBe(false);
+    expect(isRTL("fr")).toBe(false);
+  });
+});
+
 describe("applyLocaleToDocument", () => {
-  it("writes the lang attribute on <html>", () => {
+  it("writes the lang and dir attributes on <html>", () => {
     applyLocaleToDocument("es");
     expect(document.documentElement.lang).toBe("es");
+    expect(document.documentElement.dir).toBe("ltr");
+
+    applyLocaleToDocument("ar");
+    expect(document.documentElement.lang).toBe("ar");
+    expect(document.documentElement.dir).toBe("rtl");
+
+    applyLocaleToDocument("he");
+    expect(document.documentElement.lang).toBe("he");
+    expect(document.documentElement.dir).toBe("rtl");
   });
 });
 
@@ -214,6 +238,21 @@ describe("I18nProvider", () => {
     expect(document.documentElement.lang).toBe("es");
     expect(screen.getByTestId("nav-home").textContent).toBe("Inicio");
     expect(formatXLM(1234.56)).toContain(",56 XLM");
+  });
+
+  it("sets dir='rtl' and translates strings when Arabic is selected", () => {
+    renderProvider();
+    expect(document.documentElement.lang).toBe("en");
+    expect(document.documentElement.dir).toBe("ltr");
+
+    act(() => {
+      fireEvent.click(screen.getByTestId("set-ar"));
+    });
+
+    expect(screen.getByTestId("locale").textContent).toBe("ar");
+    expect(screen.getByTestId("nav-home").textContent).toBe("الرئيسية");
+    expect(document.documentElement.lang).toBe("ar");
+    expect(document.documentElement.dir).toBe("rtl");
   });
 
   it("ignores an unsupported locale request", () => {

@@ -197,7 +197,7 @@ export default function LeaderboardScreen() {
       renderItem={renderItem}
       ListHeaderComponent={
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Top Donors</Text>
+          <Text style={styles.headerTitle} accessibilityRole="header">Top Donors</Text>
           <Text style={styles.headerSub}>Ranked by total XLM donated</Text>
         </View>
       }

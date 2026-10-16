@@ -26,7 +26,7 @@ function registerSocketHandlers(io) {
     });
 
     socket.on("leave_project", (projectId, callback) => {
-      if (typeof projectId === "string" && projectId.length > 0) {
+      if (typeof projectId === "string" && projectId.length > 0 && projectId.length <= 128) {
         socket.leave(`project:${projectId}`);
       }
       if (typeof callback === "function") callback();

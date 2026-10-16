@@ -54,9 +54,59 @@ jobs:
 
       - run: npm ci
 
+      - name: Validate extension JSON files
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          function getJsonFiles(dir) {
+            let results = [];
+            const list = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of list) {
+              const fullPath = path.join(dir, item.name);
+              if (item.isDirectory()) {
+                if (item.name !== 'node_modules' && item.name !== 'dist' && item.name !== 'dist-firefox') {
+                  results = results.concat(getJsonFiles(fullPath));
+                }
+              } else if (item.isFile() && item.name.endsWith('.json')) {
+                results.push(fullPath);
+              }
+            }
+            return results;
+          }
+
+          const files = getJsonFiles('.');
+          for (const file of files) {
+            try {
+              JSON.parse(fs.readFileSync(file, 'utf8'));
+              console.log(`✓ Valid JSON: ${file}`);
+            } catch (err) {
+              console.error(`✗ Invalid JSON: ${file} - ${err.message}`);
+              process.exit(1);
+            }
+          }
+          NODE
+
+      - name: Lint manifests with web-ext
+        run: |
+          CHROME_TMP=$(mktemp -d)
+          cp manifest.json "$CHROME_TMP/manifest.json"
+          npx web-ext lint --source-dir "$CHROME_TMP" --self-hosted
+
+          FIREFOX_TMP=$(mktemp -d)
+          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
+          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
+
       - run: npm test
 
       - run: npm run build
+
+      - name: Install Chromium for extension E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Run extension E2E suite
+        run: npm run test:e2e
 
       - name: Validate Manifest V3 browser actions
         run: |
