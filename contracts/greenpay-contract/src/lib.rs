@@ -2920,7 +2920,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #1)")]
+    #[should_panic(expected = "Error(Contract, #7)")]
     fn test_second_admin_proposal_fails_when_one_is_pending() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3047,7 +3047,7 @@ mod tests {
         let donor = Address::generate(&env);
         let usdc_amount = 4_000_000i128;
         StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &1i128, &0u32);
 
         // 4 USDC at 2.5 XLM per USDC = 10 XLM, represented in stroops.
         assert_eq!(client.get_global_total(), 10 * STROOP);
@@ -3073,7 +3073,7 @@ mod tests {
         // (3600s) and the resolution-derived window alike.
         env.ledger().set_timestamp(1_000 + 7_200);
 
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &1i128, &0u32);
     }
 
     #[test]
@@ -3092,7 +3092,7 @@ mod tests {
         // well within both the default and resolution-derived windows.
         env.ledger().set_timestamp(1_000 + 60);
 
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &1i128, &0u32);
 
         assert_eq!(client.get_donation_count(), 1);
     }
@@ -4037,19 +4037,26 @@ mod tests {
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
         let token_client = StellarAssetClient::new(&env, &token);
 
-        let donor      = Address::generate(&env);
-        let usdc_amt   = 1_000_000i128; // 0.1 USDC (7 decimal places)
-        // Simulate a DEX mid-price of 9 XLM per USDC (in stroops ratio: 9)
-        let rate       = 9i128;
-        let expected_xlm = usdc_amt.checked_mul(rate).unwrap();
+        let amount = 100 * STROOP;
+        token_client.mint(&donor, &amount);
+        client.donate(&token, &donor, &pid, &amount, &0u32);
 
-        usdc_client.mint(&donor, &usdc_amt);
-        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amt, &rate, &0u32);
+        let wallet = client.get_project(&pid).wallet;
+        let project_before = client.get_project(&pid);
+        let donor_stats_before = client.get_donor_stats(&donor);
+        assert_eq!(project_before.total_raised, amount);
+        assert_eq!(donor_stats_before.total_donated, amount);
 
-        let project = client.get_project(&pid);
-        assert_eq!(project.total_raised, expected_xlm);
-        let global = client.get_global_total();
-        assert_eq!(global, expected_xlm);
+        client.refund_donation(&admin, &pid, &donor, &amount, &token);
+
+        let project_after = client.get_project(&pid);
+        let donor_stats_after = client.get_donor_stats(&donor);
+        assert_eq!(project_after.total_raised, 0);
+        assert_eq!(donor_stats_after.total_donated, 0);
+
+        let native_client = soroban_sdk::token::Client::new(&env, &token);
+        assert_eq!(native_client.balance(&donor), amount);
+        assert_eq!(native_client.balance(&wallet), 0);
     }
 
     #[test]
@@ -4061,10 +4068,7 @@ mod tests {
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
-        let donor = Address::generate(&env);
-        usdc_client.mint(&donor, &1_000_000i128);
-        // Rate of 0 must be rejected
-        client.donate_usdc(&usdc_token, &donor, &pid, &1_000_000i128, &0i128, &0u32);
+        client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
     }
 
     // ─── Minimum donation enforcement (#1043) ─────────────────────────────────
@@ -4126,7 +4130,7 @@ mod tests {
         client.set_project_goal(&admin, &pid, &(100 * STROOP));
 
         let milestone_topic = soroban_sdk::xdr::ScVal::Symbol(
-            soroban_sdk::xdr::ScSymbol::try_from(std::vec::Vec::from("MilestoneReached")).unwrap(),
+            soroban_sdk::xdr::ScSymbol::try_from("MilestoneReached").unwrap(),
         );
         for expected_pct in [25u32, 50, 75, 100] {
             client.donate(&token, &donor, &pid, &(25 * STROOP), &0u32);
@@ -4258,7 +4262,7 @@ mod tests {
     fn test_donate_usdc_zero_amount_is_rejected() {
         let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
 
-        client.donate_usdc(&token, &donor, &pid, &0i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &0i128, &1i128, &0u32);
     }
 
     /// Negative USDC amounts are rejected the same way.
@@ -4267,7 +4271,7 @@ mod tests {
     fn test_donate_usdc_negative_amount_is_rejected() {
         let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
 
-        client.donate_usdc(&token, &donor, &pid, &-1i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &-1i128, &1i128, &0u32);
     }
     #[test]
     fn test_global_stats_cached_single_entry() {
