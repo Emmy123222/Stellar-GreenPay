@@ -17,6 +17,9 @@ jobs:
         with:
           targets: wasm32v1-none
 
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli --version 25.2.0
+
       # Build the WASM artifact first. include_bytes! in integration.rs
       # resolves at compile time, so the .wasm must exist before cargo test
       # or cargo clippy attempt to compile the integration test crate.
