@@ -38,3 +38,13 @@ jobs:
           --features testutils
           --test integration
           --manifest-path greenpay-contract/Cargo.toml
+
+      # Bounded emergency-deactivation tests (issue #1635) also require the
+      # testutils feature. They pin the deactivate_projects_range API and record
+      # the measured resource costs documented in contracts/README.md.
+      - name: Run deactivation tests
+        run: >
+          cargo test
+          --features testutils
+          --test deactivation
+          --manifest-path greenpay-contract/Cargo.toml
