@@ -24,12 +24,12 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
             </div>
             <div>
               <p
-                class="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body"
+                class="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body"
               >
                 Reforestation
               </p>
               <p
-                class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
+                class="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body"
               >
                 Brazil
               </p>
@@ -51,7 +51,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -68,7 +68,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
           class="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]"
         >
           <div
-            class="flex items-center gap-3 text-xs text-[#5a7a5a] font-body"
+            class="flex items-center gap-3 text-xs text-[var(--text-secondary)] font-body"
           >
             <span>
               👥 
@@ -112,7 +112,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
     <button
       aria-label="Add to wishlist"
       class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
-          bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
+          bg-white/90 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
     >
       <svg
         class="w-5 h-5 transition-all duration-300 fill-none"
@@ -155,12 +155,12 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
             </div>
             <div>
               <p
-                class="text-xs text-[#5a7a5a] dark:text-[#8aaa8a] font-body"
+                class="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body"
               >
                 Reforestation
               </p>
               <p
-                class="text-xs text-[#8aaa8a] dark:text-forest-300 font-body"
+                class="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body"
               >
                 Brazil
               </p>
@@ -187,7 +187,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -209,7 +209,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                   25%
                 </span>
                 <span
-                  class="text-xs text-[#5a7a5a] dark:text-[#a8c2a8]"
+                  class="text-xs text-[var(--text-secondary)] dark:text-[#a8c2a8]"
                 >
                   2,500
                    / 
@@ -233,7 +233,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
               </div>
             </div>
             <div
-              class="flex items-center justify-between text-[11px] text-[#8aaa8a] font-body"
+              class="flex items-center justify-between text-[11px] text-[var(--text-tertiary)] font-body"
             >
               <span>
                 2,500 XLM
@@ -249,7 +249,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
           class="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]"
         >
           <div
-            class="flex items-center gap-3 text-xs text-[#5a7a5a] font-body"
+            class="flex items-center gap-3 text-xs text-[var(--text-secondary)] font-body"
           >
             <span>
               👥 
@@ -293,7 +293,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
     <button
       aria-label="Add to wishlist"
       class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
-          bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
+          bg-white/90 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
     >
       <svg
         class="w-5 h-5 transition-all duration-300 fill-none"

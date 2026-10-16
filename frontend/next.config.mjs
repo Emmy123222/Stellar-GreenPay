@@ -42,6 +42,38 @@ const UNPKG = 'https://unpkg.com'
 // GitHub avatars rendered on the /contributors timeline
 const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
 
+/**
+ * connect-src entries beyond the Stellar endpoints.
+ *
+ * The backend API is normally same-origin (`'self'`), but a deployment may
+ * point NEXT_PUBLIC_API_URL at another host — that origin has to be allowed or
+ * the enforced CSP blocks every API call. Sentry has the same problem: the
+ * browser client posts to the DSN host directly (no tunnel route is set).
+ * Kept in step with the runtime CSP in middleware.ts.
+ */
+function extraConnectSources() {
+  const sources = ['https://api.coingecko.com']
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    try {
+      const { protocol, origin } = new URL(process.env.NEXT_PUBLIC_API_URL)
+      if (protocol === 'http:' || protocol === 'https:') sources.push(origin)
+    } catch {
+      // Ignore a malformed API URL: 'self' still covers same-origin deploys.
+    }
+  }
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN
+  if (dsn) {
+    try {
+      sources.push(new URL(dsn).origin)
+      return sources
+    } catch {
+      // Malformed DSN: fall through to the SaaS allowlist.
+    }
+  }
+  sources.push('https://*.ingest.sentry.io', 'https://*.ingest.us.sentry.io')
+  return sources
+}
+
 function buildStaticCsp(allowFraming = false) {
   const frameAncestors = allowFraming ? "frame-ancestors *" : "frame-ancestors 'none'"
   return [
@@ -55,7 +87,7 @@ function buildStaticCsp(allowFraming = false) {
     // OSM tiles loaded as images; Leaflet marker icons use data: URIs;
     // GitHub avatars are loaded on the /contributors timeline.
     `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES} ${GITHUB_AVATARS}`,
-    `connect-src 'self' ${STELLAR_CONNECT} https://api.coingecko.com`,
+    `connect-src 'self' ${STELLAR_CONNECT} ${extraConnectSources().join(' ')}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
@@ -66,6 +98,9 @@ function buildStaticCsp(allowFraming = false) {
 
 const nextConfig = {
   reactStrictMode: true,
+  experimental: {
+    useTypeScriptCli: true,
+  },
   webpack: (config) => {
     config.resolve.fallback = { ...config.resolve.fallback, fs: false, net: false, tls: false }
     return config
@@ -91,9 +126,13 @@ const nextConfig = {
         source: '/widget/:path*',
         headers: [
           { key: 'Content-Security-Policy', value: buildStaticCsp(true) },
-          // X-Frame-Options has no "allow all" value; rely on CSP frame-ancestors
-          // for modern browsers and omit the legacy header for widget routes.
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          // "ALLOWALL" is a non-standard value not defined by RFC 7034; modern
+          // browsers ignore it in favour of the CSP frame-ancestors directive
+          // above.  It is set here per issue acceptance criteria and as a
+          // signal to any legacy middleware or CDN that this route permits
+          // cross-origin framing.  The authoritative control is
+          // frame-ancestors * in the CSP header.
+          { key: 'X-Frame-Options', value: 'ALLOWALL' },
         ],
       },
     ]

@@ -7,6 +7,11 @@
  *   - accessibilityRole
  *
  * Uses @testing-library/jest-native matchers via getAllByRole.
+ *
+ * #1658 adds a generic sweep (bottom of file): every screen and shared
+ * component is rendered and its whole host tree is walked, so any new
+ * touchable or text input without a label/role fails here without anyone
+ * having to remember to add a per-screen assertion.
  */
 import React from 'react';
 import { render, waitFor, fireEvent } from '@testing-library/react-native';
@@ -17,9 +22,55 @@ import { ThemeProvider } from '../app/theme';
 // ─── Global mocks ──────────────────────────────────────────────────────────
 
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: jest.fn() }),
-  useLocalSearchParams: () => ({ id: 'proj-1' }),
+  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useLocalSearchParams: () => ({
+    id: 'proj-1',
+    address: 'GDONORAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+  }),
   useFocusEffect: (cb: () => void) => { cb(); },
+}));
+
+// Camera permission is switched per test to reach every branch of scan.tsx.
+let mockCameraPermission: { granted: boolean; canAskAgain?: boolean } | null = { granted: true };
+jest.mock('expo-camera', () => {
+  const { View } = require('react-native');
+  const CameraView = (props: object) => <View testID="camera-view" {...props} />;
+  CameraView.isAvailableAsync = () => Promise.resolve(true);
+  return {
+    CameraView,
+    useCameraPermissions: () => [mockCameraPermission, jest.fn()],
+  };
+});
+
+jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn().mockResolvedValue(true) }));
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { expoConfig: { version: '1.0.0', ios: { buildNumber: '1' } } },
+}));
+jest.mock('expo-linking', () => ({ openURL: jest.fn(), createURL: jest.fn() }));
+// Not declared in package.json on main; virtual so the profile screen loads.
+jest.mock('expo-image-picker', () => ({
+  requestMediaLibraryPermissionsAsync: jest.fn(),
+  launchImageLibraryAsync: jest.fn(),
+  MediaTypeOptions: { Images: 'Images' },
+}), { virtual: true });
+jest.mock('expo-image-manipulator', () => ({
+  manipulateAsync: jest.fn(),
+  SaveFormat: { JPEG: 'jpeg' },
+}), { virtual: true });
+
+// Wallet state for AppHeader / WalletConnect, switched per test.
+let mockWallet: { publicKey: string | null; loading: boolean; error: string | null } = {
+  publicKey: null,
+  loading: false,
+  error: null,
+};
+jest.mock('../src/hooks/useWallet', () => ({
+  useWallet: () => ({
+    ...mockWallet,
+    connect: jest.fn().mockResolvedValue(true),
+    disconnect: jest.fn(),
+  }),
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -64,6 +115,15 @@ jest.mock('../utils/notifications');
 
 jest.mock('../hooks/useBiometricAuth', () => ({
   authenticate: jest.fn().mockResolvedValue(true),
+  useBiometricAuth: () => ({
+    available: true,
+    enrolled: true,
+    isAuthenticating: false,
+    label: 'Face ID',
+    lastResult: null,
+    authenticate: jest.fn().mockResolvedValue({ success: true, outcome: 'success' }),
+    refresh: jest.fn(),
+  }),
 }));
 
 jest.mock('@stellar/stellar-sdk', () => ({
@@ -78,7 +138,8 @@ jest.mock('@stellar/stellar-sdk', () => ({
     setTimeout: jest.fn().mockReturnThis(),
     build: jest.fn().mockReturnThis(),
   })),
-  Networks: { TESTNET: 'Test SDF Network ; September 2015' },
+  Networks: { TESTNET: 'Test SDF Network ; September 2015', PUBLIC: 'Public Global Stellar Network ; September 2015' },
+  StrKey: { isValidEd25519PublicKey: (k: string) => typeof k === 'string' && /^G[A-Z2-7]{55}$/.test(k) },
   Operation: { payment: jest.fn() },
   Asset: { native: jest.fn() },
   Memo: { text: jest.fn() },
@@ -216,7 +277,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('every touchable element has a non-empty accessibilityLabel', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getAllByRole } = render(wrap(<RecurringScreen />));
+    const { getAllByRole } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const buttons = getAllByRole('button');
@@ -230,7 +291,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('amount input exposes a non-announced / numeric accessibility role', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = render(wrap(<RecurringScreen />));
+    const { getByLabelText } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const input = getByLabelText('Recurring donation amount in XLM');
@@ -243,7 +304,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('cancel button has a label distinct from the confirm button', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = render(wrap(<RecurringScreen />));
+    const { getByLabelText } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       const confirmBtn = getByLabelText('Confirm recurring donation');
@@ -260,7 +321,7 @@ describe('RecurringScreen — accessibility', () => {
 
   it('announces donation status changes via an alert live region', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText, getByRole } = render(wrap(<RecurringScreen />));
+    const { getByLabelText, getByRole } = await render(wrap(<RecurringScreen />));
 
     await waitFor(() => {
       expect(getByLabelText('Confirm recurring donation')).toBeTruthy();
@@ -298,5 +359,215 @@ describe('ProjectsScreen — offline banner accessibility', () => {
       expect(banner).toBeTruthy();
       expect(banner.props.accessibilityRole).toBe('alert');
     });
+  });
+});
+
+// ─── Generic sweep: every touchable on every screen is labelled (#1658) ─────
+
+type HostNode = {
+  type: string;
+  props: Record<string, any>;
+  children: Array<HostNode | string> | null;
+};
+
+/**
+ * Walk the rendered host tree and collect every interactive element:
+ * touchables (TouchableOpacity / Pressable / TouchableHighlight all render a
+ * host View with an `onClick` handler), text inputs and switches.
+ */
+function collectInteractive(node: unknown, out: HostNode[] = []): HostNode[] {
+  if (!node || typeof node === 'string') return out;
+  if (Array.isArray(node)) {
+    node.forEach((child) => collectInteractive(child, out));
+    return out;
+  }
+  const host = node as HostNode;
+  const props = host.props || {};
+  if (
+    typeof props.onClick === 'function' ||
+    host.type === 'TextInput' ||
+    host.type === 'RCTSwitch' ||
+    host.type === 'AndroidSwitch'
+  ) {
+    out.push(host);
+  }
+  collectInteractive(host.children, out);
+  return out;
+}
+
+function textOf(node: HostNode | string | null | undefined): string {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  return (node.children || []).map(textOf).join('');
+}
+
+/** Human-readable list of interactive elements missing a label or role. */
+function unlabelledInteractive(tree: unknown): string[] {
+  return collectInteractive(tree).flatMap((node) => {
+    const p = node.props;
+    const label = p.accessibilityLabel ?? p['aria-label'];
+    const role = p.accessibilityRole ?? p.role;
+    const what = `${node.type}${p.testID ? `#${p.testID}` : ''} "${textOf(node).trim().slice(0, 40)}"`;
+    const problems: string[] = [];
+    if (typeof label !== 'string' || !label.trim()) problems.push(`${what}: missing accessibilityLabel`);
+    // Inputs are announced as text fields by default; touchables must say
+    // what they are (button / link / tab / …).
+    if (node.type !== 'TextInput' && !role) problems.push(`${what}: missing accessibilityRole`);
+    return problems;
+  });
+}
+
+async function expectAllInteractiveLabelled(
+  element: React.ReactElement,
+  { minInteractive = 1, before }: { minInteractive?: number; before?: (r: any) => Promise<void> | void } = {},
+) {
+  const utils = await render(element);
+  await waitFor(() => {
+    expect(collectInteractive(utils.toJSON()).length).toBeGreaterThanOrEqual(minInteractive);
+  });
+  if (before) await before(utils);
+  expect(unlabelledInteractive(utils.toJSON())).toEqual([]);
+  return utils;
+}
+
+function mockApi() {
+  (axios.get as jest.Mock).mockImplementation((url: string) => {
+    if (/\/api\/projects\/[^/]+$/.test(url)) return Promise.resolve({ data: { data: MOCK_PROJECT } });
+    if (url.includes('/api/projects')) return Promise.resolve({ data: { data: MOCK_PROJECTS } });
+    if (url.includes('/api/leaderboard')) {
+      return Promise.resolve({
+        data: {
+          data: [{
+            rank: 1,
+            publicKey: 'GDONORAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+            displayName: 'Ada',
+            totalDonatedXLM: '120',
+            projectsSupported: 2,
+            topBadge: 'seedling',
+          }],
+          has_more: false,
+          next_cursor: null,
+        },
+      });
+    }
+    if (url.includes('/api/profiles/')) {
+      return Promise.resolve({ data: { data: { publicKey: 'GDONOR', totalDonatedXLM: '120', projectsSupported: 2, badges: [] } } });
+    }
+    if (url.includes('/api/donations/donor/')) return Promise.resolve({ data: { data: [] } });
+    return Promise.resolve({ data: { data: [] } });
+  });
+}
+
+describe('Every screen — every touchable exposes a label and role (#1658)', () => {
+  jest.setTimeout(30000);
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    mockApi();
+    mockCameraPermission = { granted: true };
+    mockWallet = { publicKey: null, loading: false, error: null };
+  });
+
+  const screens: Array<[string, () => React.ComponentType]> = [
+    ['Home (app/index)', () => require('../app/index').default],
+    ['Projects (app/projects/index)', () => require('../app/projects/index').default],
+    ['Project detail (app/projects/[id])', () => require('../app/projects/[id]').default],
+    ['Donate (app/donate/[id])', () => require('../app/donate/[id]').default],
+    ['Recurring (app/recurring)', () => require('../app/recurring').default],
+    ['Impact (app/impact)', () => require('../app/impact').default],
+    ['Leaderboard (app/leaderboard)', () => require('../app/leaderboard').default],
+    ['Settings (app/settings)', () => require('../app/settings').default],
+    ['Profile (app/profile/[address])', () => require('../app/profile/[address]').default],
+  ];
+
+  it.each(screens)('%s', async (_name, load) => {
+    const Screen = load();
+    await expectAllInteractiveLabelled(wrap(<Screen />));
+  });
+
+  it('Scan — permission denied (grant / open settings)', async () => {
+    mockCameraPermission = { granted: false, canAskAgain: true };
+    const ScanScreen = require('../app/scan').default;
+    await expectAllInteractiveLabelled(wrap(<ScanScreen />));
+  });
+
+  it('Scan — invalid QR error is a labelled, dismissible button', async () => {
+    const ScanScreen = require('../app/scan').default;
+    const { getByTestId, toJSON } = await render(wrap(<ScanScreen />));
+    const camera = await waitFor(() => getByTestId('camera-view'));
+    const { act } = require('@testing-library/react-native');
+    await act(async () => {
+      camera.props.onBarcodeScanned({ data: 'https://example.com' });
+    });
+    await waitFor(() => expect(collectInteractive(toJSON()).length).toBeGreaterThan(0));
+    expect(unlabelledInteractive(toJSON())).toEqual([]);
+  });
+
+  it('AppHeader — disconnected, with the connect sheet open', async () => {
+    const { AppHeader } = require('../src/components/AppHeader');
+    await expectAllInteractiveLabelled(<AppHeader />, {
+      before: async ({ getByLabelText }) => {
+        fireEvent.press(getByLabelText('Connect Stellar wallet'));
+        await waitFor(() => expect(getByLabelText('Stellar public key')).toBeTruthy());
+      },
+    });
+  });
+
+  it('WalletConnect — connected badge exposes a disconnect action', async () => {
+    mockWallet = { publicKey: 'GDONORAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', loading: false, error: null };
+    const { WalletConnect } = require('../src/components/WalletConnect');
+    const { getByRole } = await expectAllInteractiveLabelled(<WalletConnect />);
+    const badge = getByRole('button');
+    expect(badge.props.accessibilityActions).toEqual([{ name: 'longpress', label: 'Disconnect wallet' }]);
+  });
+
+  it('the sweep itself flags an unlabelled touchable', async () => {
+    const { TouchableOpacity, Text } = require('react-native');
+    const { toJSON } = await render(
+      <TouchableOpacity onPress={() => undefined}>
+        <Text>↗</Text>
+      </TouchableOpacity>,
+    );
+    expect(unlabelledInteractive(toJSON())).toEqual([
+      'View "↗": missing accessibilityLabel',
+      'View "↗": missing accessibilityRole',
+    ]);
+  });
+});
+
+// ─── Selection / disabled state is exposed, not just drawn ──────────────────
+
+describe('State is announced for selectable and disabled controls (#1658)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
+    mockApi();
+  });
+
+  it('recurring tabs use role=tab with selected state', async () => {
+    const RecurringScreen = require('../app/recurring').default;
+    const { getByLabelText } = await render(wrap(<RecurringScreen />));
+    const active = await waitFor(() => getByLabelText('Active recurring donations'));
+    const history = getByLabelText('Payment history');
+    expect(active.props.accessibilityRole).toBe('tab');
+    expect(active.props.accessibilityState).toEqual({ selected: true });
+    fireEvent.press(history);
+    await waitFor(() => expect(getByLabelText('Payment history').props.accessibilityState).toEqual({ selected: true }));
+    expect(getByLabelText('Active recurring donations').props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('donate preset amounts expose selected state', async () => {
+    const DonateScreen = require('../app/donate/[id]').default;
+    const { getByLabelText } = await render(wrap(<DonateScreen />));
+    const preset = await waitFor(() => getByLabelText('Donate 10 XLM'));
+    fireEvent.press(preset);
+    await waitFor(() => expect(getByLabelText('Donate 10 XLM').props.accessibilityState).toMatchObject({ selected: true }));
+  });
+
+  it('screen titles are exposed as headers', async () => {
+    const SettingsScreen = require('../app/settings').default;
+    const { getAllByRole } = await render(wrap(<SettingsScreen />));
+    await waitFor(() => expect(getAllByRole('header').length).toBeGreaterThan(0));
   });
 });

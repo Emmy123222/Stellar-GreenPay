@@ -1,0 +1,193 @@
+{
+  "topics": [
+    "stellar",
+    "soroban",
+    "climate-tech",
+    "hacktoberfest",
+    "web3",
+    "open-source"
+  ],
+  "hacktoberfest": {
+    "year": 2026,
+    "rulesUrl": "https://hacktoberfest.com",
+    "contributingGuide": "CONTRIBUTING.md#hacktoberfest",
+    "issues": [
+      {
+        "id": 1,
+        "title": "[Frontend] Add Hebrew (he) locale file and RTL alignment test",
+        "labels": ["hacktoberfest", "good-first-issue", "i18n"],
+        "difficulty": "Beginner",
+        "description": "Add frontend/locales/he.json translating core navigation and donation flows, and verify dir='rtl' behavior.",
+        "targetPath": "frontend/locales/he.json"
+      },
+      {
+        "id": 2,
+        "title": "[Frontend] Add sound/haptic feedback toggle in donation flow",
+        "labels": ["hacktoberfest", "good-first-issue", "frontend"],
+        "difficulty": "Beginner",
+        "description": "Provide a user preference toggle to enable or disable audio/haptic cues on successful donation.",
+        "targetPath": "frontend/components/WalletConnect.tsx"
+      },
+      {
+        "id": 3,
+        "title": "[Frontend] Add copy-to-clipboard button for transaction hashes on donation success",
+        "labels": ["hacktoberfest", "good-first-issue", "ux"],
+        "difficulty": "Beginner",
+        "description": "Allow donors to copy the 64-character Stellar transaction hash with one click with tooltip feedback.",
+        "targetPath": "frontend/pages/donate/[id].tsx"
+      },
+      {
+        "id": 4,
+        "title": "[Frontend] Add dark mode toggle keyboard shortcut (Cmd/Ctrl + Shift + D)",
+        "labels": ["hacktoberfest", "good-first-issue", "accessibility"],
+        "difficulty": "Beginner",
+        "description": "Register global keydown listener to toggle between light and dark themes quickly.",
+        "targetPath": "frontend/lib/theme.tsx"
+      },
+      {
+        "id": 5,
+        "title": "[Frontend] Implement skeleton loaders for project cards while data fetches",
+        "labels": ["hacktoberfest", "good-first-issue", "frontend"],
+        "difficulty": "Beginner",
+        "description": "Replace plain spinner with animated Tailwind CSS skeleton cards matching project card layout.",
+        "targetPath": "frontend/pages/index.tsx"
+      },
+      {
+        "id": 6,
+        "title": "[Frontend] Add tooltips explaining Soroban on-chain verification badges",
+        "labels": ["hacktoberfest", "good-first-issue", "ux"],
+        "difficulty": "Beginner",
+        "description": "Show accessible tooltip detailing contract verification state when hovering over verified badge.",
+        "targetPath": "frontend/components/VerificationBadge.tsx"
+      },
+      {
+        "id": 7,
+        "title": "[Frontend] Add QR code generator modal for project donation address",
+        "labels": ["hacktoberfest", "intermediate", "frontend"],
+        "difficulty": "Intermediate",
+        "description": "Render a QR code for mobile wallet scanning (e.g., LOBSTR or Freighter mobile) on project pages.",
+        "targetPath": "frontend/pages/donate/[id].tsx"
+      },
+      {
+        "id": 8,
+        "title": "[Frontend] Filter climate projects by SDG (Sustainable Development Goals)",
+        "labels": ["hacktoberfest", "intermediate", "frontend"],
+        "difficulty": "Intermediate",
+        "description": "Allow filtering projects by UN Sustainable Development Goals (SDG 13 Climate Action, SDG 14 Life Below Water, SDG 15 Life on Land).",
+        "targetPath": "frontend/pages/index.tsx"
+      },
+      {
+        "id": 9,
+        "title": "[Frontend] Add pagination or infinite scroll to donor discussion memos",
+        "labels": ["hacktoberfest", "intermediate", "frontend"],
+        "difficulty": "Intermediate",
+        "description": "Paginate transaction memos in project view to preserve responsiveness with 1,000+ donors.",
+        "targetPath": "frontend/pages/donate/[id].tsx"
+      },
+      {
+        "id": 10,
+        "title": "[Frontend] Add export certificate as PDF using HTML Canvas/jsPDF",
+        "labels": ["hacktoberfest", "intermediate", "frontend"],
+        "difficulty": "Intermediate",
+        "description": "Generate high-resolution printable impact certificate including donor address and verification hash.",
+        "targetPath": "frontend/utils/projectReport.ts"
+      },
+      {
+        "id": 11,
+        "title": "[Backend] Add rate limiting headers (RateLimit-Limit, RateLimit-Remaining)",
+        "labels": ["hacktoberfest", "good-first-issue", "backend"],
+        "difficulty": "Beginner",
+        "description": "Emit standard IETF RateLimit-* HTTP response headers across all public API routes.",
+        "targetPath": "backend/src/middleware/rateLimiter.js"
+      },
+      {
+        "id": 12,
+        "title": "[Backend] Add health check endpoint (/api/health/stellar) checking Horizon status",
+        "labels": ["hacktoberfest", "good-first-issue", "backend"],
+        "difficulty": "Beginner",
+        "description": "Ping Horizon root endpoint and return 200 OK with network status and ledger latency.",
+        "targetPath": "backend/src/routes/health.js"
+      },
+      {
+        "id": 13,
+        "title": "[Backend] Add validation schema for project application webhook notifications",
+        "labels": ["hacktoberfest", "good-first-issue", "backend"],
+        "difficulty": "Beginner",
+        "description": "Use Zod to validate incoming webhook events before dispatching reviewer notification emails.",
+        "targetPath": "backend/src/routes/verification.js"
+      },
+      {
+        "id": 14,
+        "title": "[Backend] Add Prometheus metrics exporter for donation transaction counts",
+        "labels": ["hacktoberfest", "intermediate", "backend"],
+        "difficulty": "Intermediate",
+        "description": "Expose /metrics endpoint with prom-client tracking total donations, XLM volume, and latency.",
+        "targetPath": "backend/src/index.js"
+      },
+      {
+        "id": 15,
+        "title": "[Backend] Implement caching layer for top donors leaderboard with Redis/TTL",
+        "labels": ["hacktoberfest", "intermediate", "performance"],
+        "difficulty": "Intermediate",
+        "description": "Cache computed donor leaderboard for 60 seconds with stale-while-revalidate semantics.",
+        "targetPath": "backend/src/routes/leaderboard.js"
+      },
+      {
+        "id": 16,
+        "title": "[Backend] Add automated retry with exponential backoff for Horizon RPC timeouts",
+        "labels": ["hacktoberfest", "intermediate", "backend"],
+        "difficulty": "Intermediate",
+        "description": "Wrap Horizon ledger queries in resilient exponential backoff retry loop.",
+        "targetPath": "backend/src/services/stellar.js"
+      },
+      {
+        "id": 17,
+        "title": "[Contracts] Add event emission on project milestone status updates",
+        "labels": ["hacktoberfest", "intermediate", "contracts"],
+        "difficulty": "Intermediate",
+        "description": "Emit Soroban topic events (milestone_achieved, milestone_funded) when milestone proofs are approved.",
+        "targetPath": "contracts/greenpay-contract/src/lib.rs"
+      },
+      {
+        "id": 18,
+        "title": "[Contracts] Add unit tests for donation memo length boundary checks",
+        "labels": ["hacktoberfest", "good-first-issue", "contracts"],
+        "difficulty": "Beginner",
+        "description": "Add test coverage for 28-byte Stellar text memo constraints and Soroban Symbol bounds.",
+        "targetPath": "contracts/greenpay-contract/src/test.rs"
+      },
+      {
+        "id": 19,
+        "title": "[Docs] Add interactive API reference using Swagger/OpenAPI spec",
+        "labels": ["hacktoberfest", "good-first-issue", "docs"],
+        "difficulty": "Beginner",
+        "description": "Document Express REST endpoints in openapi.yaml with request/response schema samples.",
+        "targetPath": "docs/openapi.yaml"
+      },
+      {
+        "id": 20,
+        "title": "[Docs] Add local offline development guide using Soroban sandbox network",
+        "labels": ["hacktoberfest", "good-first-issue", "docs"],
+        "difficulty": "Beginner",
+        "description": "Write step-by-step instructions for running standalone local Soroban RPC in docker without internet.",
+        "targetPath": "docs/local-development.md"
+      },
+      {
+        "id": 21,
+        "title": "[DevOps] Add GitHub Action to auto-label issues based on title prefixes",
+        "labels": ["hacktoberfest", "good-first-issue", "ci"],
+        "difficulty": "Beginner",
+        "description": "Automatically apply [frontend], [backend], or [contracts] labels using github-script action.",
+        "targetPath": ".github/workflows/labeler.yml"
+      },
+      {
+        "id": 22,
+        "title": "[DevOps] Add Lighthouse accessibility and SEO audit check to frontend PRs",
+        "labels": ["hacktoberfest", "intermediate", "ci"],
+        "difficulty": "Intermediate",
+        "description": "Integrate @lhci/cli in GitHub Actions asserting accessibility >= 90 and best-practices >= 90.",
+        "targetPath": ".github/workflows/lighthouse.yml"
+      }
+    ]
+  }
+}

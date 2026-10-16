@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
+import { formatAmount, formatDate } from "@/utils/format";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -37,7 +38,7 @@ const BADGE_ICONS: Record<string, string> = {
 const RANK_MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
 
 function monthLabel(ym: string) {
-  return new Date(ym + '-01').toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  return formatDate(`${ym}-01`, undefined, { month: "long", year: "numeric" });
 }
 
 /**
@@ -105,7 +106,7 @@ export default function LeaderboardHistoryPage() {
         <h1 className="font-display text-3xl sm:text-4xl font-bold text-forest-900 mb-3">
           Donor of the Month — History
         </h1>
-        <p className="text-[#5a7a5a] max-w-xl mx-auto font-body leading-relaxed">
+        <p className="text-[var(--text-secondary)] max-w-xl mx-auto font-body leading-relaxed">
           Each month&apos;s top climate donors, permanently recorded on the Stellar blockchain.
         </p>
         <Link href="/leaderboard" className="text-forest-600 text-sm underline mt-2 inline-block">
@@ -114,7 +115,7 @@ export default function LeaderboardHistoryPage() {
       </div>
 
       {loading && (
-        <div className="text-center text-[#5a7a5a] py-16">Loading…</div>
+        <div className="text-center text-[var(--text-secondary)] py-16">Loading…</div>
       )}
 
       {error && (
@@ -129,7 +130,7 @@ export default function LeaderboardHistoryPage() {
               <h2 className="font-display text-2xl font-bold text-forest-900 mb-1">
                 📈 Top Donor's 6-Month Trend
               </h2>
-              <p className="text-sm text-[#5a7a5a] mb-6">
+              <p className="text-sm text-[var(--text-secondary)] mb-6">
                 {chartData[0]?.donorName}'s XLM donations over the past 6 months
               </p>
               <div style={{ width: "100%", height: 350 }}>
@@ -145,7 +146,7 @@ export default function LeaderboardHistoryPage() {
                     />
                     <YAxis tick={{ fontSize: 12 }} label={{ value: "XLM", angle: -90, position: "insideLeft" }} />
                     <Tooltip 
-                      formatter={(value: any) => [`${Number(value || 0).toFixed(2)} XLM`, "Donated"]}
+                      formatter={(value: any) => [`${formatAmount(Number(value || 0))} XLM`, "Donated"]}
                       contentStyle={{ backgroundColor: "#f0fdf4", border: "1px solid #227239", borderRadius: "8px" }}
                     />
                     <Line 
@@ -164,7 +165,7 @@ export default function LeaderboardHistoryPage() {
 
           {/* Monthly Snapshots */}
           {history.length === 0 ? (
-            <div className="text-center text-[#5a7a5a] py-16">
+            <div className="text-center text-[var(--text-secondary)] py-16">
               No monthly snapshots yet. Check back after the first snapshot is taken.
             </div>
           ) : (
@@ -176,7 +177,7 @@ export default function LeaderboardHistoryPage() {
                   </h2>
 
                   {snapshot.entries.length === 0 ? (
-                    <p className="text-[#5a7a5a] text-sm">No donations recorded this month.</p>
+                    <p className="text-[var(--text-secondary)] text-sm">No donations recorded this month.</p>
                   ) : (
                     <div className="space-y-3">
                       {snapshot.entries.slice(0, 10).map((entry) => (
@@ -210,7 +211,7 @@ export default function LeaderboardHistoryPage() {
                               </span>
                             )}
                             <span className="font-bold text-forest-900 text-sm">
-                              {parseFloat(entry.totalXLMThatMonth).toFixed(2)} XLM
+                              {formatAmount(parseFloat(entry.totalXLMThatMonth))} XLM
                             </span>
                           </div>
                         </div>

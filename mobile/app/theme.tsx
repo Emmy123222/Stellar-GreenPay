@@ -15,6 +15,7 @@ export interface ThemeColors {
   cardBorder: string;
   cardShadow: string;
   primaryText: string;
+  text: string;
   secondaryText: string;
   muted: string;
   inputBackground: string;
@@ -42,6 +43,7 @@ const themes: Record<ThemeMode, ThemeColors> = {
     cardBorder: '#e8f3e8',
     cardShadow: '#000000',
     primaryText: '#1a2e1a',
+    text: '#1a2e1a',
     secondaryText: '#5a7a5a',
     muted: '#8aaa8a',
     inputBackground: '#ffffff',
@@ -62,6 +64,7 @@ const themes: Record<ThemeMode, ThemeColors> = {
     cardBorder: '#1c3928',
     cardShadow: '#000000',
     primaryText: '#e6f5e9',
+    text: '#e6f5e9',
     secondaryText: '#b2d5b5',
     muted: '#88b18f',
     inputBackground: '#122917',
@@ -92,6 +95,21 @@ export function useTheme() {
     throw new Error('useTheme must be used within ThemeProvider');
   }
   return context;
+}
+
+/**
+ * Provider-tolerant variant of {@link useTheme} for screens that are also
+ * mounted without a `ThemeProvider` above them — the scanner screens are
+ * rendered bare by their unit tests, and embeds/standalone mounts have no
+ * provider either. Falls back to the system colour scheme instead of
+ * throwing, so the screen still honours dark mode.
+ */
+export function useThemeOrDefault(): ThemeContextValue {
+  const context = useContext(ThemeContext);
+  const colorScheme = useColorScheme();
+  if (context) return context;
+  const mode: ThemeMode = colorScheme === 'dark' ? 'dark' : 'light';
+  return { mode, colors: themes[mode] };
 }
 
 export { themes };

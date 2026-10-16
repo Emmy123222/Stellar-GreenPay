@@ -8,34 +8,65 @@ jest.mock("../middleware/rateLimiter", () => ({
   createRateLimiter: () => (req, res, next) => next(),
 }));
 
-const pool = require("../db/pool");
-const express = require("express");
-const request = require("supertest");
-const profilesRouter = require("./profiles");
+jest.mock("../services/sentry", () => ({
+  initSentry: jest.fn(),
+  errorHandler: () => (err, _req, _res, next) => next(err),
+}));
+jest.mock("../services/profileQueue", () => ({
+  start: jest.fn(),
+  enqueueAvatarProcessing: jest.fn().mockResolvedValue(undefined),
+}));
+jest.mock("../services/summaryQueue", () => ({ start: jest.fn() }));
+jest.mock("../services/statsRefreshQueue", () => ({ start: jest.fn() }));
+jest.mock("../services/indexerService", () => ({ startIndexer: jest.fn() }));
+jest.mock("../services/socketHandler", () => ({ registerSocketHandlers: jest.fn() }));
+jest.mock("../db/migrate", () => ({ runMigrations: jest.fn() }));
+jest.mock("../services/turrets", () => ({ startTurretsServer: jest.fn() }));
+jest.mock("../services/stellar", () => ({
+  isStellarTimeoutError: jest.fn(() => false),
+  server: {},
+}));
+jest.mock("../services/metrics", () => ({
+  metricsHandler: (_req, res) => res.end(),
+  countRequest: jest.fn(),
+  startQueueRefresh: jest.fn(),
+}));
 
-function buildApp() {
-  const app = express();
-  app.use(express.json());
-  app.use("/api/profiles", profilesRouter);
-  app.use((err, _req, res, _next) => {
-    res.status(err.status || 500).json({ error: err.message || "Internal server error" });
-  });
-  return app;
-}
+const mockPassThroughRouter = (_req, _res, next) => next();
+jest.mock("../routes/projects", () => mockPassThroughRouter);
+jest.mock("../routes/uploads", () => mockPassThroughRouter);
+jest.mock("../routes/donations", () => mockPassThroughRouter);
+jest.mock("../routes/stats", () => mockPassThroughRouter);
+jest.mock("../routes/health", () => mockPassThroughRouter);
+jest.mock("../routes/readiness", () => mockPassThroughRouter);
+jest.mock("../routes/impact", () => mockPassThroughRouter);
+jest.mock("../routes/subscriptions", () => mockPassThroughRouter);
+jest.mock("../routes/referrals", () => mockPassThroughRouter);
+jest.mock("../routes/recurringDonations", () => mockPassThroughRouter);
+jest.mock("../routes/auth", () => mockPassThroughRouter);
+jest.mock("../routes/ratings", () => mockPassThroughRouter);
+jest.mock("../routes/teams", () => mockPassThroughRouter);
+
+const pool = require("../db/pool");
+const request = require("supertest");
+const app = require("../server");
 
 const PUBLIC_KEY = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
 
 describe("POST /api/profiles", () => {
-  let app;
+  let client;
+  let csrfToken;
 
-  beforeEach(() => {
-    app = buildApp();
+  beforeEach(async () => {
+    client = request.agent(app);
     jest.clearAllMocks();
+    csrfToken = (await client.get("/api/csrf-token").expect(200)).body.csrfToken;
   });
 
   test("rejects HTML in profile display name with 422 field errors", async () => {
-    const res = await request(app)
+    const res = await client
       .post("/api/profiles")
+      .set("X-CSRF-Token", csrfToken)
       .send({
         publicKey: PUBLIC_KEY,
         displayName: "<b>Bad</b>",
@@ -48,8 +79,9 @@ describe("POST /api/profiles", () => {
   });
 
   test("rejects invalid avatarUrl with 422", async () => {
-    const res = await request(app)
+    const res = await client
       .post("/api/profiles")
+      .set("X-CSRF-Token", csrfToken)
       .send({
         publicKey: PUBLIC_KEY,
         avatarUrl: "not-a-url",
@@ -62,11 +94,13 @@ describe("POST /api/profiles", () => {
 });
 
 describe("PATCH /api/profiles/:publicKey", () => {
-  let app;
+  let client;
+  let csrfToken;
 
-  beforeEach(() => {
-    app = buildApp();
+  beforeEach(async () => {
+    client = request.agent(app);
     jest.clearAllMocks();
+    csrfToken = (await client.get("/api/csrf-token").expect(200)).body.csrfToken;
   });
 
   test("updates avatarUrl for an existing profile", async () => {
@@ -84,8 +118,9 @@ describe("PATCH /api/profiles/:publicKey", () => {
       }],
     });
 
-    const res = await request(app)
+    const res = await client
       .patch(`/api/profiles/${PUBLIC_KEY}`)
+      .set("X-CSRF-Token", csrfToken)
       .send({ avatarUrl: "https://cdn.example.com/avatar.png" })
       .expect(200);
 
@@ -112,8 +147,9 @@ describe("PATCH /api/profiles/:publicKey", () => {
       }],
     });
 
-    const res = await request(app)
+    const res = await client
       .patch(`/api/profiles/${PUBLIC_KEY}`)
+      .set("X-CSRF-Token", csrfToken)
       .send({ avatarUrl: null })
       .expect(200);
 
@@ -123,8 +159,9 @@ describe("PATCH /api/profiles/:publicKey", () => {
   test("returns 404 when profile does not exist", async () => {
     pool.query.mockResolvedValue({ rows: [] });
 
-    const res = await request(app)
+    const res = await client
       .patch(`/api/profiles/${PUBLIC_KEY}`)
+      .set("X-CSRF-Token", csrfToken)
       .send({ avatarUrl: "https://cdn.example.com/a.png" })
       .expect(404);
 
@@ -132,11 +169,26 @@ describe("PATCH /api/profiles/:publicKey", () => {
   });
 
   test("rejects empty patch body with 422", async () => {
-    const res = await request(app)
+    const res = await client
       .patch(`/api/profiles/${PUBLIC_KEY}`)
+      .set("X-CSRF-Token", csrfToken)
       .send({})
       .expect(422);
 
     expect(res.body.error).toBe("Validation failed");
+  });
+});
+
+describe("GET profile endpoints", () => {
+  test.each(["/api/profiles", "/api/v1/profiles"])("serves %s from the exported app", async (prefix) => {
+    const client = request(app);
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ public_key: PUBLIC_KEY, display_name: "Ada", badges: [] }] })
+      .mockResolvedValueOnce({ rows: [{ total_co2_offset_kg: "12" }] });
+
+    const res = await client.get(`${prefix}/${PUBLIC_KEY}`).expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.totalCo2OffsetKg).toBe(12);
   });
 });

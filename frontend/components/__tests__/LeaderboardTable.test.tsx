@@ -29,3 +29,59 @@ describe("LeaderboardTable empty state", () => {
     expect(link).toHaveAttribute("href", "/projects");
   });
 });
+
+describe("LeaderboardTable populated state", () => {
+  beforeEach(() => {
+    fetchLeaderboard.mockReset();
+  });
+
+  it("renders donor avatar, display name, and links row to donor profile page", async () => {
+    fetchLeaderboard.mockResolvedValue([
+      {
+        rank: 1,
+        publicKey: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        displayName: "Alice Green",
+        avatarUrl: "https://example.com/alice.png",
+        totalDonatedXLM: "1000",
+        totalCO2OffsetKg: "250",
+        projectsSupported: 3,
+        topBadge: "earth",
+      },
+      {
+        rank: 2,
+        publicKey: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        displayName: null,
+        avatarUrl: null,
+        totalDonatedXLM: "500",
+        totalCO2OffsetKg: "100",
+        projectsSupported: 1,
+      },
+    ]);
+
+    render(<LeaderboardTable limit={50} period="all" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Alice Green")).toBeInTheDocument();
+    });
+
+    // Renders avatar image for Alice
+    const avatarImg = screen.getByAltText("Alice Green");
+    expect(avatarImg).toHaveAttribute("src", "https://example.com/alice.png");
+
+    // Renders abbreviated address fallback for Bob
+    expect(screen.getByText("GBBBBB...BBBBBB")).toBeInTheDocument();
+
+    // Clicking donor row links to public donor profile page
+    const aliceLink = screen.getByRole("link", { name: /alice green/i });
+    expect(aliceLink).toHaveAttribute(
+      "href",
+      "/donors/GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"
+    );
+
+    const bobLink = screen.getByRole("link", { name: /gbbbbb\.\.\.bbbbbb/i });
+    expect(bobLink).toHaveAttribute(
+      "href",
+      "/donors/GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+    );
+  });
+});

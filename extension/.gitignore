@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+.env.*.local
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Playwright
+playwright-report/
+.auth/
+test-results/

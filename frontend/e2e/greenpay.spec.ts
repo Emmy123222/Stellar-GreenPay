@@ -10,8 +10,8 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 // ── Mock data ───────────────────────────────────────────────────────────────
 
 const MOCK_PROJECT_ID = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
-const MOCK_WALLET     = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
-const MOCK_PUBLIC_KEY = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGLEWZE5BGYTG2XTGQBC3VP";
+const MOCK_WALLET     = "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ";
+const MOCK_PUBLIC_KEY = "GCXIWOIPXZ7TIMU4FQRNLOFXRY7HGHOE2OIJMJVCW7EK5QKPIOATGKNJ";
 
 const MOCK_PROJECT = {
   id: MOCK_PROJECT_ID,
@@ -98,6 +98,7 @@ async function mockApi(page: Page) {
 async function mockFreighter(page: Page, publicKey = MOCK_PUBLIC_KEY) {
   await page.addInitScript((pk) => {
     (window as unknown as Record<string, unknown>).__test_publicKey__ = pk;
+    (window as unknown as Record<string, unknown>).__test_signTransaction__ = true;
     // Keep window.freighter present so any code that does an
     // `isFreighterInstalled` check still sees a wallet.
     (window as unknown as Record<string, unknown>).freighter = {
@@ -160,6 +161,39 @@ test.describe("Project detail & DonateForm", () => {
     await mockApi(page);
     await page.goto(`/projects/${MOCK_PROJECT_ID}`);
     await expect(page.getByText(/connect your wallet to donate/i)).toBeVisible();
+  });
+
+  test("connects Freighter, browses a project, donates, and confirms", async ({ page }) => {
+    await mockFreighter(page);
+    await mockApi(page);
+    await page.route(`**/horizon-testnet.stellar.org/accounts/${MOCK_PUBLIC_KEY}`, (route) =>
+      route.fulfill({
+        json: {
+          account_id: MOCK_PUBLIC_KEY,
+          sequence: "1000",
+          subentry_count: 0,
+          thresholds: { low_threshold: 1, med_threshold: 1, high_threshold: 1 },
+          flags: { auth_required: false, auth_revocable: false, auth_immutable: false },
+          balances: [{ asset_type: "native", balance: "500.0000000" }],
+          signers: [{ key: MOCK_PUBLIC_KEY, type: "ed25519_public_key", weight: 1 }],
+          data: {},
+        },
+      }),
+    );
+    await page.route("**/horizon-testnet.stellar.org/transactions", (route) =>
+      route.fulfill({ json: { hash: "e2e-confirmed-transaction", successful: true } }),
+    );
+
+    await page.goto("/projects");
+    await page.getByText(MOCK_PROJECT.name).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${MOCK_PROJECT_ID}`));
+
+    const form = page.locator(".card", { hasText: /make a donation/i });
+    await form.getByPlaceholder(/or enter custom amount/i).fill("10");
+    await form.getByRole("button", { name: /Donate/ }).click();
+
+    await expect(page.getByRole("heading", { name: /transaction confirmed/i })).toBeVisible();
+    await expect(page.locator(".card", { hasText: /transaction confirmed/i })).toContainText("10 XLM");
   });
 
   test.describe("with a connected (mocked) Freighter wallet", () => {

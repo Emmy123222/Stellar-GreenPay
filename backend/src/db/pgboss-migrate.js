@@ -1,6 +1,7 @@
 "use strict";
 
 const PgBoss = require("pg-boss");
+const logger = require("../logger");
 
 async function main() {
   const connectionString =
@@ -10,11 +11,11 @@ async function main() {
   await boss.start();
   await boss.stop({ graceful: false });
 
-  console.log("[pgboss] Schema migrated successfully");
+  logger.info({ event: "pgboss_schema_migrated" }, "[pgboss] Schema migrated successfully");
   process.exit(0);
 }
 
 main().catch((err) => {
-  console.error("[pgboss] Migration failed:", err.message);
+  logger.error({ event: "pgboss_migration_failed", err: err.message }, `[pgboss] Migration failed: ${err.message}`);
   process.exit(1);
 });

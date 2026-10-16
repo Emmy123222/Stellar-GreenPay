@@ -157,8 +157,13 @@ function mapProjectRow(row) {
     location: row.location,
     imageUrl: row.image_url || null,
     walletAddress: row.wallet_address,
+    // Asset the project wants to receive (#1660); null = native XLM.
+    preferredAsset: row.preferred_asset_code
+      ? { code: row.preferred_asset_code, issuer: row.preferred_asset_issuer }
+      : null,
     goalXLM: row.goal_xlm?.toString() || "0",
     raisedXLM: row.raised_xlm?.toString() || "0",
+    raisedUSDC: row.raised_usdc?.toString() || "0",
     donorCount: row.donor_count,
     co2OffsetKg: row.co2_offset_kg,
     co2PerXLM: row.co2_per_xlm?.toString
@@ -203,6 +208,8 @@ function mapDonationRow(row) {
     donorAddress: row.donor_address,
     amount: row.amount?.toString() || "0",
     currency: row.currency,
+    assetCode: row.asset_code || null,
+    assetIssuer: row.asset_issuer || null,
     message: row.message,
     transactionHash: row.transaction_hash,
     createdAt: toIso(row.created_at),
@@ -225,6 +232,13 @@ function mapDonationRow(row) {
     data.donorCountry = row.donor_country;
   }
 
+  // DEX path payments (#1660): what the donor spent, when it differs from the
+  // delivered asset recorded in currency/amount.
+  if (row.source_asset) {
+    data.sourceAsset = row.source_asset;
+    data.sourceAmount = row.source_amount?.toString() ?? null;
+  }
+
   return data;
 }
 
@@ -245,6 +259,7 @@ function mapProfileRow(row) {
     totalDonatedXLM: row.total_donated_xlm?.toString() || "0",
     projectsSupported: row.projects_supported,
     badges: row.badges || [],
+    milestoneNotificationsEnabled: row.milestone_notifications_enabled !== false,
     createdAt: toIso(row.created_at),
     updatedAt: toIso(row.updated_at),
   };

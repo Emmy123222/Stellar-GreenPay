@@ -25,6 +25,13 @@ const mockUseLocalSearchParams = jest.fn(() => ({ id: 'proj-1' }));
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockRouterPush }),
   useLocalSearchParams: () => mockUseLocalSearchParams(),
+  useFocusEffect: (cb: () => void) => cb(),
+  // The screen re-checks the active recurring donation whenever the route is
+  // focused, so the mock has to invoke the callback on mount (matching
+  // __tests__/accessibility.test.tsx).
+  useFocusEffect: (cb: () => void) => {
+    cb();
+  },
 }));
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
@@ -43,6 +50,7 @@ jest.mock('expo-notifications', () => ({
 
 jest.mock('../utils/recurringDonations', () => ({
   loadRecurringDonations: jest.fn(),
+  cancelRecurringDonation: jest.fn(),
 }));
 
 import * as notifUtils from '../utils/notifications';
@@ -89,9 +97,22 @@ import ProjectDetailScreen, { formatNextPaymentDate } from '../app/projects/[id]
  */
 jest.setTimeout(30000);
 
-/** Wrap in ThemeProvider so useTheme() doesn't throw. */
+/**
+ * Wrap in ThemeProvider so useTheme() doesn't throw, then flush the mount
+ * effects (the project fetch, notification init, …) inside an empty `act()`.
+ *
+ * Callers must invoke this DIRECTLY — never as `await act(async () =>
+ * renderWithTheme(…))`. `render()` from RNTL already wraps `TestRenderer.create`
+ * in its own `act()`; nesting that inside an outer *async* `act()` defers the
+ * renderer's root past the point where RNTL reads it, so `renderer.root` throws
+ * "Can't access .root on unmounted test renderer" and every test in the file
+ * fails before it can assert anything. The empty `act()` below gives the same
+ * "let mount effects settle" behaviour without wrapping the render call.
+ */
 async function renderWithTheme(ui: React.ReactElement) {
-  return render(<ThemeProvider>{ui}</ThemeProvider>);
+  const screen = render(<ThemeProvider>{ui}</ThemeProvider>);
+  await act(async () => {});
+  return screen;
 }
 
 describe('ProjectDetailScreen – Follow button', () => {
@@ -114,12 +135,12 @@ describe('ProjectDetailScreen – Follow button', () => {
   // ── Initial render ───────────────────────────────────────────────────────────
 
   it('renders the Follow button after the project loads', async () => {
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => expect(getByTestId('follow-button')).toBeTruthy());
   });
 
   it('shows "Follow for Updates" text when not following', async () => {
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() =>
       expect(getByTestId('follow-button')).toBeTruthy()
     );
@@ -130,7 +151,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   // ── Follow action ────────────────────────────────────────────────────────────
 
   it('calls followProject with the project id and push token on press', async () => {
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -144,7 +165,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   });
 
   it('updates button label to "Following · Tap to unfollow" after successful follow', async () => {
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -159,7 +180,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   });
 
   it('shows a success toast after following', async () => {
-    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -176,7 +197,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Start in "already following" state
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -202,7 +223,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('resets button to "Follow for Updates" after unfollowing', async () => {
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -223,7 +244,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an unfollow confirmation toast', async () => {
     mockFollowsResponse([{ id: 'proj-1' }]);
 
-    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => {
       expect(getByTestId('follow-button').props.accessibilityLabel).toMatch(
         /following/i
@@ -243,7 +264,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an error toast when followProject returns false', async () => {
     (notifUtils.followProject as jest.Mock).mockResolvedValue(false);
 
-    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -259,7 +280,7 @@ describe('ProjectDetailScreen – Follow button', () => {
       new Error('network error')
     );
 
-    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -273,7 +294,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('does not toggle follow state when followProject fails', async () => {
     (notifUtils.followProject as jest.Mock).mockResolvedValue(false);
 
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -291,7 +312,7 @@ describe('ProjectDetailScreen – Follow button', () => {
   it('shows an error toast when push token is unavailable', async () => {
     (notifUtils.getPushToken as jest.Mock).mockResolvedValue(null);
 
-    const { getByTestId, findByText } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     await act(async () => {
@@ -315,7 +336,7 @@ describe('ProjectDetailScreen – Follow button', () => {
       .spyOn(Share, 'share')
       .mockResolvedValue({ action: 'sharedAction' as const });
     try {
-      const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+      const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
       const shareButton = await waitFor(() => getByTestId('share-button'));
 
       await act(async () => {
@@ -323,7 +344,10 @@ describe('ProjectDetailScreen – Follow button', () => {
       });
 
       expect(shareSpy).toHaveBeenCalledTimes(1);
-      const callArgs = shareSpy.mock.calls[0][0];
+      const callArgs = shareSpy.mock.calls[0][0] as {
+        title?: string;
+        message?: string;
+      };
       expect(callArgs.title).toBe(MOCK_PROJECT.name);
       expect(callArgs.message).toContain(MOCK_PROJECT.name);
       expect(callArgs.message).toContain(MOCK_PROJECT.description);
@@ -340,9 +364,7 @@ describe('ProjectDetailScreen – Follow button', () => {
       .spyOn(Share, 'share')
       .mockRejectedValueOnce(new Error('User did not share'));
     try {
-      const { getByTestId, queryByText } = await act(async () =>
-        renderWithTheme(<ProjectDetailScreen />)
-      );
+      const { getByTestId, queryByText } = await renderWithTheme(<ProjectDetailScreen />);
       const shareButton = await waitFor(() => getByTestId('share-button'));
 
       await act(async () => {
@@ -367,9 +389,7 @@ describe('ProjectDetailScreen – Follow button', () => {
       .spyOn(Share, 'share')
       .mockRejectedValueOnce(new Error('System share unavailable'));
     try {
-      const { getByTestId, findByText } = await act(async () =>
-        renderWithTheme(<ProjectDetailScreen />)
-      );
+      const { getByTestId, findByText } = await renderWithTheme(<ProjectDetailScreen />);
       const shareButton = await waitFor(() => getByTestId('share-button'));
 
       await act(async () => {
@@ -389,7 +409,7 @@ describe('ProjectDetailScreen – Follow button', () => {
     // Never resolve so we stay in loading state
     (notifUtils.followProject as jest.Mock).mockReturnValue(new Promise(() => {}));
 
-    const { getByTestId } = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const { getByTestId } = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => getByTestId('follow-button'));
 
     fireEvent.press(getByTestId('follow-button'));
@@ -411,7 +431,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   // we exercise the Updates card branch coverage as well as the always-on
   // fields. The IDs use a slugish format to prove the screen works for any
   // project key, not just the magic id "proj-1".
-  const PROJECTS = {
+  const PROJECTS: Record<string, typeof MOCK_PROJECT> = {
     'amazon-reforestation': {
       id: 'amazon-reforestation',
       name: 'Amazon Reforestation Initiative',
@@ -454,10 +474,23 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   };
 
   // Helper: drive one specific project through the screen end-to-end and
+  // yield the result of assertions on the rendered tree. The screen issues
+  // two GETs (`/api/projects/:id` and `/api/updates/:id`), so the mock is
+  // URL-aware rather than a blanket `mockResolvedValue`.
+  async function renderProject(
+    project: typeof MOCK_PROJECT,
+    updates: Array<Record<string, unknown>> = []
+  ) {
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/api/updates/')
+        ? Promise.resolve({ data: { data: updates } })
+        : Promise.resolve({ data: { data: project } })
+    );
+    const screen = await act(async () => renderWithTheme(<ProjectDetailScreen />));
   // yield the result of assertions on the rendered tree.
   async function renderProject(project: typeof MOCK_PROJECT) {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: project } });
-    const screen = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const screen = await renderWithTheme(<ProjectDetailScreen />);
     await waitFor(() => expect(screen.getByText(project.name)).toBeTruthy());
     return screen;
   }
@@ -473,31 +506,33 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
   // see file header: fake timers removed (broke waitFor() polling)
 
   it('renders the required fields (name, description, progress, CO₂) for project proj-1', async () => {
-    const renderer = await renderProject(PROJECTS['amazon-reforestation']);
+    const p = PROJECTS['amazon-reforestation'];
+    const renderer = await renderProject(p);
 
-    await waitFor(() =>
-      expect(renderer.getByText(PROJECTS['amazon-reforestation'].name)).toBeTruthy()
-    );
-    expect(
-      renderer.getByText(PROJECTS['amazon-reforestation'].description)
-    ).toBeTruthy();
+    await waitFor(() => expect(renderer.getByText(p.name)).toBeTruthy());
+    expect(renderer.getByText(p.description)).toBeTruthy();
     expect(renderer.getByText(/Fundraising Progress/i)).toBeTruthy();
-    expect(
-      renderer.getByText(
-        `${PROJECTS['amazon-reforestation'].co2OffsetKg.toLocaleString()} kg CO₂ offset`
-      )
-    ).toBeTruthy();
+    // The stats card renders the CO₂ figure and its unit label as two Text
+    // nodes (`co2OffsetKg.toFixed(0)` + "kg CO₂").
+    expect(renderer.getByText(`${p.co2OffsetKg.toFixed(0)}`)).toBeTruthy();
+    expect(renderer.getByText(/kg CO₂/)).toBeTruthy();
   });
 
-  it('renders the Updates card with donor count and status info for any project', async () => {
-    const renderer = await renderProject(PROJECTS['amazon-reforestation']);
+  it('renders the donor stats and the Latest Updates card for any project', async () => {
+    const p = PROJECTS['amazon-reforestation'];
+    const renderer = await renderProject(p, [
+      {
+        id: 'update-1',
+        title: 'Nursery Phase 2 complete',
+        body: '147 donors have contributed to the seedling nursery.',
+        createdAt: '2026-01-05T00:00:00.000Z',
+      },
+    ]);
 
-    // Match the 📰 emoji prefix to disambiguate from the
-    // "🔔 Follow for Updates" button which also contains the
-    // word "Updates".
-    expect(await renderer.findByText(/📰 Updates/)).toBeTruthy();
+    expect(await renderer.findByText('Latest Updates')).toBeTruthy();
     expect(await renderer.findByText(/147 donors have contributed/i)).toBeTruthy();
-    expect(await renderer.findByText(/Project active/i)).toBeTruthy();
+    // Donor count from the project payload is surfaced in the stats card.
+    expect(await renderer.findByText(`${p.donorCount}`)).toBeTruthy();
   });
 
   it('loads and renders the ocean cleanup project (different id, category)', async () => {
@@ -509,7 +544,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
     mockUseLocalSearchParams.mockReturnValue({ id: p.id });
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
 
-    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const renderer = await renderWithTheme(<ProjectDetailScreen />);
     const nameNode = await renderer.findByText(p.name);
     expect(nameNode).toBeTruthy();
     expect(axios.get).toHaveBeenCalledWith(
@@ -519,14 +554,23 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
 
   it('loads and renders the completed solar village project, including the "Goal fully funded" update', async () => {
     const p = PROJECTS['solar-village-completed'];
-    (axios.get as jest.Mock).mockResolvedValue({ data: { data: p } });
+    const renderer = await renderProject(p, [
+      {
+        id: 'update-final',
+        title: 'Goal fully funded',
+        body: '312 donors have hit the 8000 XLM goal.',
+        createdAt: '2026-02-01T00:00:00.000Z',
+      },
+    ]);
 
-    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const renderer = await renderWithTheme(<ProjectDetailScreen />);
     expect(await renderer.findByText(p.name)).toBeTruthy();
     expect(await renderer.findByText(/Goal fully funded/i)).toBeTruthy();
     expect(
       await renderer.findByText(/312 donors have hit the 8000 XLM goal/i)
     ).toBeTruthy();
+    // 100 % funded: the progress block reports the completed ratio.
+    expect(await renderer.findByText(/100% complete/)).toBeTruthy();
   });
 
   it('requests the project detail from /api/projects/:id with the id from the route', async () => {
@@ -555,7 +599,7 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
       data: { data: PROJECTS['amazon-reforestation'] },
     });
 
-    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const renderer = await renderWithTheme(<ProjectDetailScreen />);
     const donateCta = await renderer.findByText(/Donate Now/i);
     expect(donateCta).toBeTruthy();
 
@@ -568,7 +612,141 @@ describe('ProjectDetailScreen – Issue #168 AC: every project can be viewed', (
       response: { status: 404, data: { error: 'Project not found' } },
     });
 
-    const renderer = await act(async () => renderWithTheme(<ProjectDetailScreen />));
+    const renderer = await renderWithTheme(<ProjectDetailScreen />);
     expect(await renderer.findByText(/Project not found/i)).toBeTruthy();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #1122 — Acceptance Criteria: the project map must not crash when the
+// project has no coordinates. The API returns `latitude`/`longitude` as
+// `null` for projects created before coordinates were captured; feeding those
+// straight into the MapView threw "Cannot read properties of null" and took the
+// whole screen down. Instead the screen must render a map-unavailable
+// placeholder with a globe icon.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('ProjectDetailScreen – Issue #1122 AC: map pin with null coordinates', () => {
+  /** Base project; each test overrides only the coordinate fields. */
+  const baseProject = {
+    ...MOCK_PROJECT,
+    id: 'map-project',
+    name: 'Mangrove Restoration Bay',
+    description: 'Restoring coastal mangrove habitat.',
+    location: 'Sundarbans',
+  };
+
+  /** Render the screen with the given coordinate fields merged onto the project. */
+  async function renderWithCoords(
+    coords: Partial<{ latitude: number | null; longitude: number | null }>
+  ) {
+    (axios.get as jest.Mock).mockResolvedValue({
+      data: { data: { ...baseProject, ...coords } },
+    });
+    const renderer = await renderWithTheme(<ProjectDetailScreen />);
+    // Wait for the project payload to land so the map branch has been decided.
+    await waitFor(() => expect(renderer.getByText(baseProject.name)).toBeTruthy());
+    return renderer;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockFollowsResponse([]);
+    (notifUtils.getPushToken as jest.Mock).mockResolvedValue('expo-push-token-abc');
+    (notifUtils.followProject as jest.Mock).mockResolvedValue(true);
+    (notifUtils.unfollowProject as jest.Mock).mockResolvedValue(true);
+    (loadRecurringDonations as jest.Mock).mockResolvedValue([]);
+  });
+
+  // ── Coordinates present ─────────────────────────────────────────────────────
+
+  it('renders the map instead of the placeholder when both coordinates are set', async () => {
+    const renderer = await renderWithCoords({ latitude: 21.9497, longitude: 89.1833 });
+
+    expect(renderer.getByTestId('project-map')).toBeTruthy();
+    expect(renderer.queryByTestId('map-unavailable')).toBeNull();
+    expect(renderer.queryByText(/Location not available/i)).toBeNull();
+  });
+
+  it('centres the map on the project coordinates', async () => {
+    const renderer = await renderWithCoords({ latitude: 21.9497, longitude: 89.1833 });
+
+    expect(renderer.getByTestId('project-map').props.region).toMatchObject({
+      latitude: 21.9497,
+      longitude: 89.1833,
+    });
+  });
+
+  it('treats 0 as a valid coordinate instead of hiding the map', async () => {
+    // A truthiness guard (`project.latitude && ...`) would wrongly treat 0 as
+    // "missing" — the Gulf of Guinea is a perfectly valid place to put a pin.
+    const renderer = await renderWithCoords({ latitude: 0, longitude: 0 });
+
+    expect(renderer.getByTestId('project-map')).toBeTruthy();
+    expect(renderer.queryByTestId('map-unavailable')).toBeNull();
+  });
+
+  // ── Coordinates missing / null (#1122 regression) ───────────────────────────
+
+  it('shows the "Location not available" placeholder when latitude is null', async () => {
+    const renderer = await renderWithCoords({ latitude: null, longitude: 89.1833 });
+
+    expect(renderer.getByTestId('map-unavailable')).toBeTruthy();
+    expect(renderer.getByText(/Location not available/i)).toBeTruthy();
+    expect(renderer.queryByTestId('project-map')).toBeNull();
+  });
+
+  it('shows the "Location not available" placeholder when longitude is null', async () => {
+    const renderer = await renderWithCoords({ latitude: 21.9497, longitude: null });
+
+    expect(renderer.getByTestId('map-unavailable')).toBeTruthy();
+    expect(renderer.getByText(/Location not available/i)).toBeTruthy();
+    expect(renderer.queryByTestId('project-map')).toBeNull();
+  });
+
+  it('shows the "Location not available" placeholder when both coordinates are null', async () => {
+    const renderer = await renderWithCoords({ latitude: null, longitude: null });
+
+    expect(renderer.getByTestId('map-unavailable')).toBeTruthy();
+    expect(renderer.getByText(/Location not available/i)).toBeTruthy();
+    expect(renderer.queryByTestId('project-map')).toBeNull();
+  });
+
+  it('shows the placeholder when the coordinate fields are absent entirely', async () => {
+    // Older API payloads omit the fields rather than sending explicit nulls.
+    const renderer = await renderWithCoords({});
+
+    expect(renderer.getByTestId('map-unavailable')).toBeTruthy();
+    expect(renderer.getByText(/Location not available/i)).toBeTruthy();
+    expect(renderer.queryByTestId('project-map')).toBeNull();
+  });
+
+  it('renders a globe icon alongside the placeholder text', async () => {
+    const renderer = await renderWithCoords({ latitude: null, longitude: null });
+
+    expect(renderer.getByText('🌐')).toBeTruthy();
+  });
+
+  it('does not crash and still renders the rest of the screen on null coordinates', async () => {
+    // The regression: null coordinates used to reach the map section and throw
+    // "Cannot read properties of null" out of it, blanking the entire screen.
+    // The observable proxy is that the map never mounts — the real native
+    // MapView throws when handed a null coordinate, so leaving it unmounted is
+    // precisely what keeps the screen alive.
+    const renderer = await renderWithCoords({ latitude: null, longitude: null });
+
+    expect(renderer.queryByTestId('project-map')).toBeNull();
+    expect(renderer.getByText(baseProject.name)).toBeTruthy();
+    expect(renderer.getByText(baseProject.description)).toBeTruthy();
+    expect(renderer.getByText(/Fundraising Progress/i)).toBeTruthy();
+    expect(renderer.getByText(/Donate Now/i)).toBeTruthy();
+    expect(renderer.getByTestId('share-button')).toBeTruthy();
+  });
+
+  it('exposes an accessible label on the map-unavailable placeholder', async () => {
+    const renderer = await renderWithCoords({ latitude: null, longitude: null });
+
+    expect(renderer.getByTestId('map-unavailable').props.accessibilityLabel).toBe(
+      `Location not available for ${baseProject.name}`
+    );
   });
 });

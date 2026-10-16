@@ -10,6 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { useWallet } from '../hooks/useWallet';
+import { validateStellarAddress } from '../../utils/stellarValidation';
 
 // Lobstr deep-links only support payment requests, not wallet connection.
 // WalletConnect for Stellar (SEP-43) is still in draft and has no stable
@@ -23,17 +24,25 @@ export function WalletConnect() {
   if (loading) return <ActivityIndicator size="small" color="#22c55e" />;
 
   if (publicKey) {
+    const confirmDisconnect = () =>
+      Alert.alert('Disconnect wallet?', truncateAddress(publicKey), [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: disconnect },
+      ]);
+
     return (
       <TouchableOpacity
         style={styles.connectedBadge}
-        onLongPress={() =>
-          Alert.alert('Disconnect wallet?', truncateAddress(publicKey), [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Disconnect', style: 'destructive', onPress: disconnect },
-          ])
-        }
-        accessibilityLabel={`Connected wallet ${truncateAddress(publicKey)}, long press to disconnect`}
+        onLongPress={confirmDisconnect}
+        accessibilityLabel={`Connected wallet ${truncateAddress(publicKey)}`}
+        accessibilityHint="Long press, or use the Disconnect action, to disconnect"
         accessibilityRole="button"
+        // Screen-reader users can't easily long-press: expose disconnect as a
+        // named action (VoiceOver rotor "Actions" / TalkBack actions menu).
+        accessibilityActions={[{ name: 'longpress', label: 'Disconnect wallet' }]}
+        onAccessibilityAction={(e) => {
+          if (e.nativeEvent.actionName === 'longpress') confirmDisconnect();
+        }}
       >
         <View style={styles.dot} />
         <Text style={styles.addressText}>{truncateAddress(publicKey)}</Text>
@@ -41,7 +50,7 @@ export function WalletConnect() {
     );
   }
 
-  const handleConnect = async () => {
+  const performConnect = async () => {
     setConnecting(true);
     const ok = await connect(inputAddress);
     setConnecting(false);
@@ -51,16 +60,49 @@ export function WalletConnect() {
     }
   };
 
+  /**
+   * Issue #1126: a pasted address can be a perfectly valid testnet key
+   * (Friendbot creates them for free). On a mainnet build we warn and let
+   * the user confirm — a soft warning, never a hard block. `useWallet`
+   * still owns format validation and the error message.
+   */
+  const handleConnect = async () => {
+    const { warning } = validateStellarAddress(inputAddress);
+    if (!warning) {
+      await performConnect();
+      return;
+    }
+
+    Alert.alert(
+      warning.title,
+      `Wallet you are connecting\n\n${warning.message}`,
+      [
+        { text: warning.cancelLabel, style: 'cancel' },
+        {
+          text: warning.confirmLabel,
+          style: 'destructive',
+          onPress: () => void performConnect(),
+        },
+      ],
+      { cancelable: true }
+    );
+  };
+
   return (
     <>
       <TouchableOpacity style={styles.connectButton} onPress={() => setModalVisible(true)} accessibilityLabel="Connect Stellar wallet" accessibilityRole="button">
         <Text style={styles.connectButtonText}>Connect Wallet</Text>
       </TouchableOpacity>
 
-      <Modal visible={modalVisible} animationType="slide" transparent>
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setModalVisible(false)}
+      >
         <View style={styles.overlay}>
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>Connect Stellar Wallet</Text>
+          <View style={styles.sheet} accessibilityViewIsModal>
+            <Text style={styles.sheetTitle} accessibilityRole="header">Connect Stellar Wallet</Text>
             <Text style={styles.sheetSubtitle}>
               Enter your Stellar public key (starts with G)
             </Text>
@@ -73,9 +115,17 @@ export function WalletConnect() {
               onChangeText={setInputAddress}
               autoCapitalize="characters"
               autoCorrect={false}
+              accessibilityLabel="Stellar public key"
+              accessibilityHint="Starts with G, 56 characters"
             />
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            {/* Announce validation errors without moving focus. */}
+
+            {error ? (
+              <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+                {error}
+              </Text>
+            ) : null}
 
             <TouchableOpacity
               style={[styles.confirmButton, connecting && styles.disabled]}
@@ -83,6 +133,7 @@ export function WalletConnect() {
               disabled={connecting || !inputAddress.trim()}
               accessibilityLabel="Confirm wallet connection"
               accessibilityRole="button"
+              accessibilityState={{ disabled: connecting || !inputAddress.trim(), busy: connecting }}
             >
               {connecting ? (
                 <ActivityIndicator size="small" color="#fff" />
@@ -91,7 +142,12 @@ export function WalletConnect() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setModalVisible(false)} accessibilityLabel="Cancel wallet connection" accessibilityRole="button">
+            <TouchableOpacity
+              onPress={() => setModalVisible(false)}
+              accessibilityLabel="Cancel wallet connection"
+              accessibilityRole="button"
+              style={styles.cancelButton}
+            >
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -111,6 +167,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
+    // 44pt minimum touch target; minHeight (not height) so larger
+    // Dynamic Type / font scale sizes grow the button instead of clipping.
+    minHeight: 44,
+    justifyContent: 'center',
   },
   connectButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
   connectedBadge: {
@@ -119,6 +179,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0fdf4',
     paddingHorizontal: 10,
     paddingVertical: 5,
+    minHeight: 44,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#bbf7d0',
@@ -155,5 +216,6 @@ const styles = StyleSheet.create({
   },
   confirmButtonText: { color: '#fff', fontWeight: '700', fontSize: 15 },
   disabled: { opacity: 0.5 },
+  cancelButton: { minHeight: 44, justifyContent: 'center', marginTop: 4 },
   cancelText: { color: '#6b7280', textAlign: 'center', fontSize: 14 },
 });

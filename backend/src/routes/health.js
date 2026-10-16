@@ -7,8 +7,6 @@ const router = express.Router();
 const pool = require("../db/pool");
 const indexerService = require("../services/indexerService");
 
-const HORIZON_URL = process.env.NEXT_PUBLIC_HORIZON_URL ||
-  process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 
 function getMaxFailedJobs() {
   const parsed = Number.parseInt(process.env.PGBOSS_MAX_FAILED_JOBS ?? "10", 10);

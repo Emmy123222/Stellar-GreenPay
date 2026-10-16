@@ -79,4 +79,7 @@ module.exports = {
   // to the same beforeEach.
   setupNotificationListener: jest.fn().mockImplementation(makeNoopSubscription),
   setupNotificationResponseListener: jest.fn().mockImplementation(makeNoopSubscription),
+
+  // ── cold-start deep navigation (#1121) ─────────────────────────────────────
+  navigateFromInitialNotification: jest.fn().mockResolvedValue(undefined),
 };

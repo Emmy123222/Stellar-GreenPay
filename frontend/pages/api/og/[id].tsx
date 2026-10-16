@@ -1,5 +1,6 @@
 import { ImageResponse } from "@vercel/og";
 import type { NextRequest } from "next/server";
+import { formatXLM } from "@/utils/format";
 
 export const config = { runtime: "edge" };
 
@@ -45,7 +46,7 @@ export default async function handler(req: NextRequest) {
             <div style={{ width: `${progress}%`, height: "100%", borderRadius: "8px", background: "linear-gradient(90deg, #10b981, #34d399)" }} />
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "22px" }}>
-            <span style={{ fontWeight: 600 }}>{raised.toLocaleString()} XLM raised</span>
+            <span style={{ fontWeight: 600 }}>{formatXLM(raised)} raised</span>
             <span style={{ color: "#10b981", fontWeight: 600 }}>{progress}% funded</span>
           </div>
         </div>

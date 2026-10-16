@@ -2,6 +2,7 @@
 
 jest.mock("../db/pool", () => ({
   connect: jest.fn(),
+  query: jest.fn().mockResolvedValue({ rows: [] }),
 }));
 
 jest.mock("../middleware/rateLimiter", () => ({
@@ -19,6 +20,18 @@ jest.mock("geoip-lite", () => ({
 jest.mock("../services/profileQueue", () => ({
   enqueueProfileUpdate: jest.fn().mockResolvedValue(undefined),
 }));
+
+jest.mock("../services/webhook", () => ({
+  checkAndDeliverMilestones: jest.fn().mockResolvedValue(undefined),
+}));
+
+// Named with the `mock` prefix so the hoisted jest.mock factory may close over it.
+const mockRedis = {
+  get: jest.fn(async () => null),
+  set: jest.fn(async () => {}),
+  deletePattern: jest.fn(async () => {}),
+};
+jest.mock("../services/redis", () => mockRedis);
 
 const { server } = require("../services/stellar");
 const geoip = require("geoip-lite");
@@ -254,6 +267,43 @@ describe("POST /api/donations", () => {
     expect(pool.connect).not.toHaveBeenCalled();
   });
 
+  test.each([
+    ["zero", 0],
+    ["negative", -100],
+    ["NaN", NaN],
+    ["null", null],
+    ["infinite", "1e999"],
+  ])("returns 400 for a %s amount without touching the database", async (_label, amountXLM) => {
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("E"),
+      amountXLM,
+      transactionHash: makeTxHash("e"),
+    });
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe("Donation amount must be a positive number");
+    expect(pool.connect).not.toHaveBeenCalled();
+  });
+
+  test("accepts a valid positive amount", async () => {
+    const client = createMockClient(queryResult([]));
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-1",
+      donorAddress: makePublicKey("F"),
+      amountXLM: "25.5",
+      transactionHash: makeTxHash("f"),
+    });
+
+    expect(pool.connect).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalled();
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe("Project not found");
+  });
+
   test("deduplicates duplicate transaction hashes and returns the existing record", async () => {
     const donorAddress = makePublicKey("D");
     const transactionHash = makeTxHash("d");
@@ -308,7 +358,10 @@ describe("POST /api/donations", () => {
       created_at: "2026-03-29T10:00:00.000Z",
     };
 
-    const ioStub = { emit: jest.fn() };
+    const ioStub = {
+      to: jest.fn().mockReturnThis(),
+      emit: jest.fn(),
+    };
 
     const client = createMockClient(
       queryResult([{ id: "project-b" }]),
@@ -331,11 +384,13 @@ describe("POST /api/donations", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
-    // donation_event and badge_earned should be emitted
+    // donation_event and badge_earned should be emitted with room scoping
+    expect(ioStub.to).toHaveBeenCalledWith(["project:project-b", "all-donations"]);
     expect(ioStub.emit).toHaveBeenCalledWith(
       "donation_event",
       expect.objectContaining({ projectId: "project-b", donorAddress }),
     );
+    expect(ioStub.to).toHaveBeenCalledWith("project:project-b");
     expect(ioStub.emit).toHaveBeenCalledWith(
       "badge_earned",
       expect.objectContaining({ projectId: "project-b", donorAddress, badge: "seedling" }),
@@ -496,7 +551,7 @@ describe("POST /api/donations", () => {
 
   test("calculates badges from cumulative donations across multiple requests", async () => {
     const donorAddress = makePublicKey("F");
-    const client = createMockClient(
+    createMockClient(
       queryResult([{ id: "project-3" }]),    // SELECT project
       queryResult([]),                          // dedup check
       queryResult(),                            // BEGIN
@@ -674,7 +729,7 @@ describe("profile upsert on first donation", () => {
       created_at: "2026-03-29T10:00:00.000Z",
     };
 
-    const client = createMockClient(
+    createMockClient(
       queryResult([{ id: "project-p" }]),  // SELECT project
       queryResult([]),                      // dedup check
       queryResult(),                        // BEGIN
@@ -712,7 +767,7 @@ describe("profile upsert on first donation", () => {
       created_at: "2026-03-29T10:00:00.000Z",
     };
 
-    const client = createMockClient(
+    createMockClient(
       queryResult([{ id: "project-q" }]),  // SELECT project
       queryResult([]),                      // dedup check
       queryResult(),                        // BEGIN
@@ -750,7 +805,7 @@ describe("profile upsert on first donation", () => {
       created_at: "2026-03-29T10:00:00.000Z",
     };
 
-    const client = createMockClient(
+    createMockClient(
       queryResult([{ id: "project-r" }]),
       queryResult([]),
       queryResult(),
@@ -772,5 +827,64 @@ describe("profile upsert on first donation", () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(201);
     expect(enqueueProfileUpdate).toHaveBeenCalledWith(donorAddress);
+  });
+});
+
+describe("cache invalidation on recorded donation (issue #1093)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test("drops cached leaderboard pages once a donation is committed", async () => {
+    const donorAddress = makePublicKey("C");
+    const transactionHash = makeTxHash("c");
+    const donationRow = {
+      id: "donation-cache",
+      project_id: "project-c",
+      donor_address: donorAddress,
+      amount_xlm: "2",
+      amount: "2",
+      currency: "XLM",
+      message: null,
+      transaction_hash: transactionHash,
+      created_at: "2026-03-29T10:00:00.000Z",
+    };
+
+    createMockClient(
+      queryResult([{ id: "project-c" }]),
+      queryResult([]),
+      queryResult(),
+      queryResult([{ total: "9" }]),
+      queryResult([donationRow]),
+      queryResult([]),
+      queryResult(),
+      queryResult(),
+    );
+
+    const { res, next } = await invokeRecordDonation({
+      projectId: "project-c",
+      donorAddress,
+      amountXLM: "2",
+      transactionHash,
+    });
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(201);
+    // The new row feeds the leaderboard aggregate, so every cached page is stale.
+    expect(mockRedis.deletePattern).toHaveBeenCalledWith("leaderboard:*");
+  });
+
+  test("leaves the leaderboard cache alone when the insert fails", async () => {
+    createMockClient(queryResult([]));
+
+    const { next } = await invokeRecordDonation({
+      projectId: "project-c",
+      donorAddress: makePublicKey("C"),
+      amountXLM: "2",
+      transactionHash: makeTxHash("c"),
+    });
+
+    expect(next).toHaveBeenCalled();
+    expect(mockRedis.deletePattern).not.toHaveBeenCalled();
   });
 });

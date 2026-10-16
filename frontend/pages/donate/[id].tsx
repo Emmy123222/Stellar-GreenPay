@@ -50,8 +50,8 @@ function GoalProgress({ raised, goal }: { raised: number; goal: number }) {
         <div className="goal-progress__bar-fill" style={{ width: `${pct}%` }} />
       </div>
       <p className="goal-progress__label">
-        <strong>{raised.toLocaleString()} XLM</strong> raised of{" "}
-        {goal.toLocaleString()} XLM goal &mdash; <strong>{pct}%</strong>
+        <strong>{formatXLM(raised)}</strong> raised of{" "}
+        {formatXLM(goal)} goal &mdash; <strong>{pct}%</strong>
       </p>
     </div>
   );
@@ -456,6 +456,8 @@ const DonatePage: NextPage<DonatePageProps> = ({ project: initialProject, preset
               ref={qrRef}
               stellarUri={stellarUri}
               projectName={project.name}
+              projectId={project.id}
+              showActions={false}
               size={256}
             />
           </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatXLM } from "@/utils/format";
 
 export default function WorldMap({ countryBreakdown = [] }: { countryBreakdown?: { country: string; totalDonationsXLM: string; donorCount: number }[] }) {
   const locations = [
@@ -62,7 +63,7 @@ export default function WorldMap({ countryBreakdown = [] }: { countryBreakdown?:
                   <div className="mt-2 h-2 rounded-full bg-forest-100 overflow-hidden">
                     <div className="h-full bg-forest-600" style={{ width: `${Math.min(100, Number(row.totalDonationsXLM) / maxDonation * 100)}%` }} />
                   </div>
-                  <div className="mt-2 text-xs text-forest-500">{Number(row.totalDonationsXLM).toFixed(2)} XLM</div>
+                  <div className="mt-2 text-xs text-forest-500">{formatXLM(Number(row.totalDonationsXLM))}</div>
                 </div>
               ))}
             </div>

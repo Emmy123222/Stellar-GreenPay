@@ -24,3 +24,5 @@ spec:
                 name: greenpay-config
             - secretRef:
                 name: greenpay-secrets
+          resources:
+            {{- toYaml .Values.migrateJob.resources | nindent 12 }}

@@ -146,7 +146,14 @@ Mainnet uses the public passphrase:
 Public Global Stellar Network ; September 2015
 ```
 
-## 8. Troubleshooting
+## 8. Rollback and recovery
+
+If a deployment goes wrong — a testnet reset invalidates the contract ID, a
+migration fails half-applied, or the wrong contract ID is wired into the apps —
+follow the [Rollback and Recovery](./contract-deployment.md#rollback-and-recovery)
+section of the contract deployment guide.
+
+## 9. Troubleshooting
 
 - `stellar: command not found`: install `stellar-cli` with `cargo install --locked stellar-cli`.
 - `contract deploy` fails: confirm the identity has enough XLM and the account exists on Mainnet.

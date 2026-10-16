@@ -4,7 +4,9 @@ metadata:
   name: backend
   namespace: {{ .Values.namespace }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.backend.replicas }}
+  {{- end }}
   selector:
     matchLabels:
       app: backend
@@ -26,17 +28,12 @@ spec:
                 name: greenpay-secrets
           readinessProbe:
             httpGet:
-              path: /health
+              path: /api/readiness
               port: {{ .Values.backend.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
           resources:
-            requests:
-              cpu: "100m"
-              memory: "128Mi"
-            limits:
-              cpu: "500m"
-              memory: "512Mi"
+            {{- toYaml .Values.backend.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service

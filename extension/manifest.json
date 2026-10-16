@@ -3,29 +3,51 @@
   "name": "GreenPay Companion",
   "version": "1.0.1",
   "description": "Support your favorite sustainable projects with a single click.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GreenPay Companion"
+    "default_title": "GreenPay Companion",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
   },
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  },
+  "host_permissions": [
+    "<all_urls>",
+    "https://api.stellar-greenpay.app/*",
+    "https://horizon.stellar.org/*",
+    "https://horizon-testnet.stellar.org/*",
+    "https://greenpay.app/*",
+    "https://staging.greenpay.app/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "dist/content-script.js"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md",
   "permissions": [
     "storage",
     "activeTab",
     "scripting",
-    "contextMenus"
-  ],
-  "background": {
-    "service_worker": "dist/background.js"
-  },
-  "host_permissions": [
-    "https://app.greenpay.io/*",
-    "https://testnet.greenpay.io/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": ["https://app.greenpay.io/*", "https://testnet.greenpay.io/*"],
-      "js": ["dist/content-script.js"],
-      "run_at": "document_end"
-    }
-  ],
-  "privacy_policy_url": "https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md"
+    "contextMenus",
+    "alarms"
+  ]
 }

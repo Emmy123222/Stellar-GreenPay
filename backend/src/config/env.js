@@ -1,5 +1,6 @@
 "use strict";
 const { z } = require("zod");
+const logger = require("../logger");
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -45,7 +46,7 @@ function validateEnv() {
 
   if (!result.success) {
     const missing = result.error.errors.map((e) => `  - ${e.path.join(".")}: ${e.message}`).join("\n");
-    console.error(`\n[Startup] Environment validation failed:\n${missing}\n`);
+    logger.fatal({ event: "env_validation_failed", errors: result.error.errors }, `Environment validation failed:\n${missing}`);
     process.exit(1);
   }
 
