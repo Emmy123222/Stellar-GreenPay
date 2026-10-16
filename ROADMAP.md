@@ -121,3 +121,6 @@
 - [ ] Donor voting power proportional to total donated
 - [ ] Governance token issued via Soroban
 - [ ] On-chain proposal and voting contract
+
+## Milestone: Governance UI & Badge-Holder Integration (#1049)
+- Implemented fully interactive `frontend/pages/governance.tsx` supporting `mint_impact_nft`, `has_nft` verification, and badge-holder voting on project registrations.
