@@ -72,7 +72,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
 
       - name: Run database migrations
         run: |
@@ -135,7 +135,7 @@ jobs:
           cache: "npm"
           cache-dependency-path: backend/package-lock.json
 
-      - run: npm ci
+      - run: npm ci --legacy-peer-deps
 
       - name: Run migrations twice (must be idempotent)
         env:
