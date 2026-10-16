@@ -2,36 +2,50 @@
  * utils/notifications.ts
  * Push notification setup and helpers
  */
-import * as Notifications from 'expo-notifications';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import * as Notifications from "expo-notifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    // `shouldShowAlert` was replaced by the banner/list pair in SDK 53; the
-    // two flags below are what expo-notifications@57 actually reads.
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async () =>
+    ({
+      shouldShowAlert: true,
+      // The newer SDK still honours the banner/list flags, but the current Expo
+      // type definitions still require `shouldShowAlert`.
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }) as any,
 });
 
-const LAST_SEEN_KEY = 'greenpay:notifications:lastSeen';
-const PERMISSION_CHOICE_KEY = 'greenpay:notifications:permissionChoice';
+const LAST_SEEN_KEY = "greenpay:notifications:lastSeen";
+const PERMISSION_CHOICE_KEY = "greenpay:notifications:permissionChoice";
+
+type PermissionState = {
+  status?: "granted" | "denied" | "undetermined" | "limited";
+  canAskAgain?: boolean;
+};
+
+function asPermissionState(value: unknown): PermissionState {
+  return (value ?? {}) as PermissionState;
+}
 
 export async function shouldShowNotificationRationale(): Promise<boolean> {
   const choice = await AsyncStorage.getItem(PERMISSION_CHOICE_KEY);
   if (choice) return false;
 
-  const permission = await Notifications.getPermissionsAsync();
-  if (permission.status === 'granted') {
-    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
+  const permission = asPermissionState(
+    await Notifications.getPermissionsAsync(),
+  );
+  const status = permission.status ?? "undetermined";
+  if (status === "granted") {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "granted");
     return false;
   }
-  if (permission.status === 'denied' || !permission.canAskAgain) {
-    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
+  if (status === "denied" || permission.canAskAgain === false) {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "denied");
     return false;
   }
 
@@ -39,28 +53,37 @@ export async function shouldShowNotificationRationale(): Promise<boolean> {
 }
 
 export async function dismissNotificationRationale(): Promise<void> {
-  await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'dismissed');
+  await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "dismissed");
 }
 
 /**
  * Request notification permissions
  */
 export async function requestNotificationPermissions(): Promise<string | null> {
-  const permission = await Notifications.getPermissionsAsync();
-  if (permission.status === 'granted') {
-    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
-    return permission.status;
+  const permission = asPermissionState(
+    await Notifications.getPermissionsAsync(),
+  );
+  const currentStatus = permission.status ?? "undetermined";
+  if (currentStatus === "granted") {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "granted");
+    return currentStatus;
   }
-  if (permission.status === 'denied' || !permission.canAskAgain) {
-    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'denied');
-    console.log('Failed to get push token for push notification!');
+  if (currentStatus === "denied" || permission.canAskAgain === false) {
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "denied");
+    console.log("Failed to get push token for push notification!");
     return null;
   }
 
-  const { status } = await Notifications.requestPermissionsAsync();
-  await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, status === 'granted' ? 'granted' : 'denied');
-  if (status !== 'granted') {
-    console.log('Failed to get push token for push notification!');
+  const nextPermission = asPermissionState(
+    await Notifications.requestPermissionsAsync(),
+  );
+  const status = nextPermission.status ?? "undetermined";
+  await AsyncStorage.setItem(
+    PERMISSION_CHOICE_KEY,
+    status === "granted" ? "granted" : "denied",
+  );
+  if (status !== "granted") {
+    console.log("Failed to get push token for push notification!");
     return null;
   }
 
@@ -72,17 +95,19 @@ export async function requestNotificationPermissions(): Promise<string | null> {
  */
 export async function getPushToken(): Promise<string | null> {
   try {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== 'granted') return null;
-    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, 'granted');
-    
+    const permission = asPermissionState(
+      await Notifications.getPermissionsAsync(),
+    );
+    if ((permission.status ?? "undetermined") !== "granted") return null;
+    await AsyncStorage.setItem(PERMISSION_CHOICE_KEY, "granted");
+
     const token = await Notifications.getExpoPushTokenAsync({
-      projectId: process.env.EXPO_PUBLIC_PROJECT_ID || '',
+      projectId: process.env.EXPO_PUBLIC_PROJECT_ID || "",
     });
-    
+
     return token.data;
   } catch (error) {
-    console.error('Error getting push token:', error);
+    console.error("Error getting push token:", error);
     return null;
   }
 }
@@ -92,16 +117,16 @@ export async function getPushToken(): Promise<string | null> {
  */
 export async function registerDeviceToken(
   token: string,
-  walletAddress?: string
+  walletAddress?: string,
 ): Promise<boolean> {
   try {
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+    const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
     const platform = Platform.OS;
-    
+
     await fetch(`${API_URL}/api/notifications/register`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         token,
@@ -109,11 +134,11 @@ export async function registerDeviceToken(
         walletAddress,
       }),
     });
-    
-    console.log('Device token registered successfully');
+
+    console.log("Device token registered successfully");
     return true;
   } catch (error) {
-    console.error('Error registering device token:', error);
+    console.error("Error registering device token:", error);
     return false;
   }
 }
@@ -132,15 +157,15 @@ export async function registerDeviceToken(
 export async function followProject(
   projectId: string,
   token: string,
-  walletAddress?: string
+  walletAddress?: string,
 ): Promise<boolean> {
   try {
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+    const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
 
     const calls: Promise<Response>[] = [
       fetch(`${API_URL}/api/notifications/follow`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, token, walletAddress }),
       }),
     ];
@@ -148,11 +173,14 @@ export async function followProject(
     // Wire up the REST follows endpoint when we have a wallet address.
     if (walletAddress) {
       calls.push(
-        fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ walletAddress }),
-        })
+        fetch(
+          `${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ walletAddress }),
+          },
+        ),
       );
     }
 
@@ -160,7 +188,7 @@ export async function followProject(
     console.log(`Followed project ${projectId}`);
     return true;
   } catch (error) {
-    console.error('Error following project:', error);
+    console.error("Error following project:", error);
     return false;
   }
 }
@@ -173,26 +201,29 @@ export async function followProject(
 export async function unfollowProject(
   projectId: string,
   token: string,
-  walletAddress?: string
+  walletAddress?: string,
 ): Promise<boolean> {
   try {
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+    const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
 
     const calls: Promise<Response>[] = [
       fetch(`${API_URL}/api/notifications/unfollow`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectId, token }),
       }),
     ];
 
     if (walletAddress) {
       calls.push(
-        fetch(`${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ walletAddress }),
-        })
+        fetch(
+          `${API_URL}/api/projects/${encodeURIComponent(projectId)}/follows`,
+          {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ walletAddress }),
+          },
+        ),
       );
     }
 
@@ -200,7 +231,7 @@ export async function unfollowProject(
     console.log(`Unfollowed project ${projectId}`);
     return true;
   } catch (error) {
-    console.error('Error unfollowing project:', error);
+    console.error("Error unfollowing project:", error);
     return false;
   }
 }
@@ -210,18 +241,20 @@ export async function unfollowProject(
  */
 export async function getFollowedProjects(token: string): Promise<any[]> {
   try {
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
-    
-    const response = await fetch(`${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`);
+    const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
+
+    const response = await fetch(
+      `${API_URL}/api/notifications/follows?token=${encodeURIComponent(token)}`,
+    );
     const data = await response.json();
-    
+
     if (data.success) {
       return data.data;
     }
-    
+
     return [];
   } catch (error) {
-    console.error('Error getting followed projects:', error);
+    console.error("Error getting followed projects:", error);
     return [];
   }
 }
@@ -233,27 +266,33 @@ export async function getNotificationLastSeen(): Promise<string | null> {
   return AsyncStorage.getItem(LAST_SEEN_KEY);
 }
 
-export async function markNotificationsSeen(date = new Date()): Promise<string> {
+export async function markNotificationsSeen(
+  date = new Date(),
+): Promise<string> {
   const timestamp = date.toISOString();
   await AsyncStorage.setItem(LAST_SEEN_KEY, timestamp);
   return timestamp;
 }
 
-export async function getUnreadNotificationCount(token: string): Promise<number> {
+export async function getUnreadNotificationCount(
+  token: string,
+): Promise<number> {
   try {
-    const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
+    const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:4000";
     const lastSeen = await getNotificationLastSeen();
     const params = new URLSearchParams({ token });
-    if (lastSeen) params.set('lastSeen', lastSeen);
+    if (lastSeen) params.set("lastSeen", lastSeen);
 
-    const response = await fetch(`${API_URL}/api/notifications/unread-count?${params.toString()}`);
+    const response = await fetch(
+      `${API_URL}/api/notifications/unread-count?${params.toString()}`,
+    );
     if (!response.ok) return 0;
 
     const data = await response.json();
     const count = Number(data.unreadCount);
     return Number.isFinite(count) ? count : 0;
   } catch (error) {
-    console.error('Error getting unread notification count:', error);
+    console.error("Error getting unread notification count:", error);
     return 0;
   }
 }
@@ -261,15 +300,21 @@ export async function getUnreadNotificationCount(token: string): Promise<number>
 /**
  * Set up notification listener
  */
-export function setupNotificationListener(onUnreadCountChange?: (count: number) => void) {
-  const subscription = Notifications.addNotificationReceivedListener(async notification => {
-    console.log('Notification received:', notification);
-    const currentBadge = await Notifications.getBadgeCountAsync().catch(() => 0);
-    const nextBadge = currentBadge + 1;
-    await Notifications.setBadgeCountAsync(nextBadge).catch(() => undefined);
-    onUnreadCountChange?.(nextBadge);
-  });
-  
+export function setupNotificationListener(
+  onUnreadCountChange?: (count: number) => void,
+) {
+  const subscription = Notifications.addNotificationReceivedListener(
+    async (notification) => {
+      console.log("Notification received:", notification);
+      const currentBadge = await Notifications.getBadgeCountAsync().catch(
+        () => 0,
+      );
+      const nextBadge = currentBadge + 1;
+      await Notifications.setBadgeCountAsync(nextBadge).catch(() => undefined);
+      onUnreadCountChange?.(nextBadge);
+    },
+  );
+
   return subscription;
 }
 
@@ -281,7 +326,7 @@ export function setupNotificationListener(onUnreadCountChange?: (count: number) 
  * for payloads sent before the screen contract existed (#483).
  */
 export function pathForNotificationData(
-  data: Record<string, unknown> | null | undefined
+  data: Record<string, unknown> | null | undefined,
 ): string | null {
   if (!data) return null;
 
@@ -289,7 +334,7 @@ export function pathForNotificationData(
   const projectId = params.projectId ?? data.projectId;
   if (!projectId) return null;
 
-  if (data.screen === 'ProjectDetail' || !data.screen) {
+  if (data.screen === "ProjectDetail" || !data.screen) {
     return `/projects/${projectId}`;
   }
 
@@ -305,13 +350,15 @@ let lastHandledIdentifier: string | null = null;
  */
 export function handleNotificationResponse(
   response: Notifications.NotificationResponse,
-  push: (path: string) => void
+  push: (path: string) => void,
 ): void {
   const request = response?.notification?.request;
   const identifier = request?.identifier ?? null;
   if (identifier && identifier === lastHandledIdentifier) return;
 
-  const path = pathForNotificationData(request?.content.data as Record<string, unknown> | undefined);
+  const path = pathForNotificationData(
+    request?.content.data as Record<string, unknown> | undefined,
+  );
   if (!path) return;
 
   lastHandledIdentifier = identifier;
@@ -325,10 +372,14 @@ export function handleNotificationResponse(
  * @param push - router.push function from expo-router
  * @returns the subscription (call .remove() on cleanup)
  */
-export function setupNotificationResponseListener(push: (path: string) => void) {
-  const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-    handleNotificationResponse(response, push);
-  });
+export function setupNotificationResponseListener(
+  push: (path: string) => void,
+) {
+  const subscription = Notifications.addNotificationResponseReceivedListener(
+    (response) => {
+      handleNotificationResponse(response, push);
+    },
+  );
 
   return subscription;
 }
@@ -339,7 +390,7 @@ export function setupNotificationResponseListener(push: (path: string) => void) 
  * (or in addition to) the listener.
  */
 export async function navigateFromInitialNotification(
-  push: (path: string) => void
+  push: (path: string) => void,
 ): Promise<void> {
   try {
     const response = await Notifications.getLastNotificationResponseAsync();
@@ -347,6 +398,6 @@ export async function navigateFromInitialNotification(
       handleNotificationResponse(response, push);
     }
   } catch (error) {
-    console.error('Error reading initial notification response:', error);
+    console.error("Error reading initial notification response:", error);
   }
 }
