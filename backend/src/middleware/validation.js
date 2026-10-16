@@ -38,6 +38,7 @@ function validateBody(schema) {
       const details = {};
       for (const issue of result.error.issues) {
         const path = issue.path.length ? issue.path.join(".") : "body";
+        // eslint-disable-next-line security/detect-object-injection
         details[path] = issue.message;
       }
 
@@ -50,8 +51,6 @@ function validateBody(schema) {
 }
 
 module.exports = {
-  containsHtml,
   sanitizedStringField,
-  stripHtml,
   validateBody,
 };

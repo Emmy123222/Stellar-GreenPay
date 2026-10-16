@@ -4,15 +4,45 @@ backend:
   image: greenpay/backend:latest
   replicas: 2
   port: 4000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
 
 frontend:
   image: greenpay/frontend:latest
   replicas: 2
   port: 3000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
 
 postgres:
   image: postgres:16-alpine
   storage: 5Gi
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+
+# Horizontal Pod Autoscaler for the backend and frontend Deployments.
+# When enabled, the Deployments omit `spec.replicas` so that the HPA is the
+# single source of truth for replica counts.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
 
 config:
   stellarNetwork: testnet
@@ -21,6 +51,16 @@ config:
   contractId: ""
   usdcIssuer: ""
   emailFrom: "GreenPay <updates@yourdomain.com>"
+
+# Resources for the one-shot database migration Job (Helm post-upgrade hook).
+migrateJob:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
 
 secrets:
   postgresUser: postgres

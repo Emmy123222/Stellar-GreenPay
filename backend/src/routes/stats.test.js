@@ -15,6 +15,7 @@ const express = require("express");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const statsRouter = require("./stats");
+const { TRENDS_CACHE_KEY, TRENDS_CACHE_TTL_SECONDS } = require("./stats");
 
 function buildApp() {
   const app = express();

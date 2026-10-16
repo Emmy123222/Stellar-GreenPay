@@ -1,0 +1,50 @@
+/* GreenPay Widget Styles - Inline via Webpack */
+
+.greenpay-address {
+  background: linear-gradient(135deg, #4CAF50, #2E7D32);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  display: inline-block;
+  position: relative;
+  margin: 0 2px;
+  transition: all 0.2s ease;
+}
+
+.greenpay-address:hover {
+  background: linear-gradient(135deg, #66BB6A, #43A047);
+  box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+  transform: translateY(-1px);
+}
+
+.greenpay-tooltip {
+  position: absolute;
+  background: #1a1a1a;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 10000;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 8px;
+  animation: greenpay-fade-in 0.2s ease-out;
+}
+
+@keyframes greenpay-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}

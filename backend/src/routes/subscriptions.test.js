@@ -6,14 +6,19 @@ const express = require("express");
 const request = require("supertest");
 const pool = require("../db/pool");
 const subscriptionsRouter = require("./subscriptions");
-const { signUnsubscribeToken, verifyUnsubscribeToken } = require("../services/unsubscribeToken");
+const {
+  signUnsubscribeToken,
+  verifyUnsubscribeToken,
+} = require("../services/unsubscribeToken");
 
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/subscriptions", subscriptionsRouter);
   app.use((err, _req, res, _next) => {
-    res.status(err.status || 500).json({ error: err.message || "Internal server error" });
+    res
+      .status(err.status || 500)
+      .json({ error: err.message || "Internal server error" });
   });
   return app;
 }
@@ -71,7 +76,7 @@ describe("GET /api/subscriptions/unsubscribe", () => {
     );
     expect(pool.query).toHaveBeenNthCalledWith(
       2,
-      "DELETE FROM project_subscriptions WHERE project_id = $1 AND email = $2",
+      "UPDATE project_subscriptions SET unsubscribed = true WHERE project_id = $1 AND email = $2",
       ["project-123", "user@example.com"],
     );
   });

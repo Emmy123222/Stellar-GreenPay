@@ -75,7 +75,7 @@ function Field({
         <span className="label">{label}</span>
         {children}
       </label>
-      {helper && !error && <p className="text-xs text-[#8aaa8a] font-body">{helper}</p>}
+      {helper && !error && <p className="text-xs text-[var(--text-tertiary)] font-body">{helper}</p>}
       {error && <p className="text-xs text-red-500 font-body">{error}</p>}
     </div>
   );
@@ -238,7 +238,7 @@ export default function ApplyPage() {
       <div className="max-w-xl mx-auto px-4 py-20 text-center animate-fade-in">
         <div className="text-6xl mb-6">🔍</div>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">{T("subThanks")}</h1>
-        <p className="text-[#5a7a5a] font-body mb-8">
+        <p className="text-[var(--text-secondary)] font-body mb-8">
           {T("subCopy").replace("{timeline}", reviewTimeline).replace("{email}", form.contactEmail)}
         </p>
         <button className="btn-primary" onClick={() => router.push("/")}>
@@ -256,7 +256,7 @@ export default function ApplyPage() {
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         {T("pageTitle")}
       </h1>
-      <p className="text-[#5a7a5a] font-body mb-8 text-sm">{T("pageIntro")}</p>
+      <p className="text-[var(--text-secondary)] font-body mb-8 text-sm">{T("pageIntro")}</p>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-10">
@@ -268,14 +268,14 @@ export default function ApplyPage() {
                   ? "bg-emerald-600 border-emerald-600 text-white"
                   : i === stepIndex
                   ? "border-emerald-600 text-emerald-700 bg-white"
-                  : "border-forest-200 text-[#8aaa8a] bg-white"
+                  : "border-forest-200 text-[var(--text-tertiary)] bg-white"
               }`}
             >
               {i < stepIndex ? "✓" : i + 1}
             </div>
             <span
               className={`text-xs font-body hidden sm:block ${
-                i === stepIndex ? "text-forest-900 font-semibold" : "text-[#8aaa8a]"
+                i === stepIndex ? "text-forest-900 font-semibold" : "text-[var(--text-tertiary)]"
               }`}
             >
               {STEP_LABELS[s]}
@@ -398,7 +398,7 @@ export default function ApplyPage() {
             <h2 className="font-display text-xl font-bold text-forest-900">
               {T("stepImpact")}
             </h2>
-            <p className="text-[#5a7a5a] text-sm font-body">
+            <p className="text-[var(--text-secondary)] text-sm font-body">
               We use these numbers to communicate impact to donors and on-chain.
             </p>
             <Field
@@ -449,8 +449,8 @@ export default function ApplyPage() {
             <h2 className="font-display text-xl font-bold text-forest-900">
               {T("documentsTitle")}
             </h2>
-            <p className="text-[#5a7a5a] text-sm font-body">{T("documentsHint")}</p>
-            <p className="text-xs text-[#8aaa8a] font-body">{T("storageNote")}</p>
+            <p className="text-[var(--text-secondary)] text-sm font-body">{T("documentsHint")}</p>
+            <p className="text-xs text-[var(--text-tertiary)] font-body">{T("storageNote")}</p>
 
             <div className="rounded-lg border border-dashed border-forest-200 p-4 flex flex-col gap-3 bg-forest-50/40">
               <input
@@ -470,14 +470,14 @@ export default function ApplyPage() {
             </div>
 
             {documents.length === 0 ? (
-              <p className="text-sm text-[#8aaa8a] font-body">{T("noDocuments")}</p>
+              <p className="text-sm text-[var(--text-tertiary)] font-body">{T("noDocuments")}</p>
             ) : (
               <ul className="divide-y divide-forest-100 rounded-lg border border-forest-100 overflow-hidden">
                 {documents.map((doc, i) => (
                   <li key={`${doc.url}-${i}`} className="flex items-center gap-3 px-4 py-3 bg-white">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-forest-900 truncate font-body">{doc.name}</p>
-                      <p className="text-xs text-[#8aaa8a] font-body truncate">
+                      <p className="text-xs text-[var(--text-tertiary)] font-body truncate">
                         {doc.backend} · {doc.size ? `${(doc.size / 1024).toFixed(1)} KB` : "—"}
                       </p>
                     </div>
@@ -509,44 +509,44 @@ export default function ApplyPage() {
             <h2 className="font-display text-xl font-bold text-forest-900">
               {T("stepReview")}
             </h2>
-            <p className="text-sm text-[#5a7a5a] font-body">
+            <p className="text-sm text-[var(--text-secondary)] font-body">
               Quick scan before submission:
             </p>
             <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm font-body">
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("orgName")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("orgName")}</dt>
                 <dd className="text-forest-900">{form.organizationName || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("contactEmail")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("contactEmail")}</dt>
                 <dd className="text-forest-900 break-all">{form.contactEmail || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("walletAddress")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("walletAddress")}</dt>
                 <dd className="font-mono text-xs text-forest-900 break-all">{form.walletAddress || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("projectName")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("projectName")}</dt>
                 <dd className="text-forest-900">{form.projectName || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("projectCategory")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("projectCategory")}</dt>
                 <dd className="text-forest-900">{form.projectCategory || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("projectLocation")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("projectLocation")}</dt>
                 <dd className="text-forest-900">{form.projectLocation || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("co2PerXLM")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("co2PerXLM")}</dt>
                 <dd className="text-forest-900">{form.co2PerXLM || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">{T("annualTonnes")}</dt>
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">{T("annualTonnes")}</dt>
                 <dd className="text-forest-900">{form.expectedAnnualTonnesCO2 || "—"}</dd>
               </div>
               <div className="sm:col-span-2">
-                <dt className="text-xs text-[#8aaa8a] uppercase tracking-wider">
+                <dt className="text-xs text-[var(--text-tertiary)] uppercase tracking-wider">
                   {T("documentsTitle")}
                 </dt>
                 <dd className="text-forest-900">

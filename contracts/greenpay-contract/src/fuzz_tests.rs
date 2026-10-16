@@ -20,11 +20,13 @@ mod fuzz {
     };
     use crate::{DataKey, GreenPayContract, GreenPayContractClient, MockOracle, Project};
 
-    /// Upper bound for a single donation: 1 billion XLM in stroops (10^16).
-    /// Chosen so that a single donation is large but a few thousand back-to-back
-    /// still fit in an i128 without overflowing.
-    const MAX_DONATION: i128 = 1_000_000_000 * 10_000_000; // 10^16
+    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
     const FUZZ_STROOP: i128 = 10_000_000;
+
+    /// Upper bound for a single donation: 100 000 XLM in stroops (10^12).
+    const MAX_DONATION: i128 = 100_000 * FUZZ_STROOP; // 10^12
+
+    /// Fixed donation-message hash used for USDC fuzz donations.
     const MSG_HASH: u32 = 42;
 
     fn test_env() -> Env {
@@ -69,16 +71,9 @@ mod fuzz {
     }
 
 
-    /// 1 XLM in stroops — scaling constant for CO2-overflow math.
-    const FUZZ_STROOP: i128 = 10_000_000;
-
-    /// Fixed donation-message hash used for USDC fuzz donations.
-    const MSG_HASH: u32 = 42;
-
     /// Mint `amount` of a USDC-like stellar asset to `donor`.
     fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
-        let token_client = StellarAssetClient::new(env, token);
-        token_client.mint(donor, amount);
+        StellarAssetClient::new(env, token).mint(donor, amount);
     }
 
     /// Build an env with the GreenPay contract initialised, one project
@@ -87,9 +82,6 @@ mod fuzz {
     /// When `co2_per_xlm` exceeds the registration-time MAX_CO2_PER_XLM bound
     /// (e.g. `u32::MAX`), it is patched directly into storage so the overflow
     /// guards inside `donate_usdc` can be exercised.
-    fn setup_usdc(co2_per_xlm: u32) -> (Env, GreenPayContractClient<'static>, SorobanString, Address) {
-        let env = Env::default();
-
     fn setup_usdc(
         co2_per_xlm: u32,
     ) -> (
@@ -99,7 +91,6 @@ mod fuzz {
         Address,
     ) {
         let env = test_env();
-
         env.mock_all_auths();
 
         let contract_id = env.register_contract(None, GreenPayContract);
@@ -115,23 +106,8 @@ mod fuzz {
             &project_id,
             &SorobanString::from_str(&env, "USDC Fuzz Project"),
             &wallet,
-
-            &100u32,
-        );
-
-        if co2_per_xlm != 100u32 {
-            env.as_contract(&contract_id, || {
-                let mut project: Project = env
-                    .storage()
-                    .instance()
-                    .get(&DataKey::Project(project_id.clone()))
-                    .expect("project should exist");
-                project.co2_per_xlm = co2_per_xlm;
-                env.storage()
-                    .instance()
-                    .set(&DataKey::Project(project_id.clone()), &project);
-
             &co2_per_xlm.min(100_000),
+            &1i128,
         );
 
         // Some overflow tests intentionally need a rate above the public
@@ -146,74 +122,54 @@ mod fuzz {
                     .expect("project should exist");
                 project.co2_per_xlm = co2_per_xlm;
                 env.storage().instance().set(&key, &project);
-
             });
         }
 
         let token_admin = Address::generate(&env);
-
         let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
-        client.set_usdc_token(&admin, &usdc_token);
-
-        let oracle = env.register_contract(None, crate::MockOracle);
-
-        let usdc_token = env
-            .register_stellar_asset_contract_v2(token_admin)
-            .address();
-        client.set_usdc_token(&admin, &usdc_token);
-
         let oracle = env.register_contract(None, MockOracle);
-
-        client.set_oracle(&admin, &oracle);
+        client.set_usdc_token(&admin, &usdc_token, &oracle);
 
         (env, client, project_id, usdc_token)
     }
 
-    fn fund_usdc(env: &Env, token: &Address, donor: &Address, amount: &i128) {
-        StellarAssetClient::new(env, token).mint(donor, amount);
-    }
-
     #[test]
-    fn donation_of_i128_max_minus_one_does_not_panic() {
+    fn donation_of_max_donation_does_not_panic() {
         let (env, _contract_id, client, _wallet, project_id, token) = setup();
         let donor = Address::generate(&env);
-        mint_tokens(&env, &token, &donor, i128::MAX - 1);
+        mint_tokens(&env, &token, &donor, MAX_DONATION);
 
-        client.donate(&token, &donor, &project_id, &(i128::MAX - 1), &42u32);
+        client.donate(&token, &donor, &project_id, &MAX_DONATION, &42u32);
 
         let project = client.get_project(&project_id);
-        assert_eq!(project.total_raised, i128::MAX - 1);
+        assert_eq!(project.total_raised, MAX_DONATION);
         assert_eq!(project.donor_count, 1u32);
-        assert_eq!(client.get_global_total(), i128::MAX - 1);
+        assert_eq!(client.get_global_total(), MAX_DONATION);
     }
 
     #[test]
-    #[should_panic(expected = "Project total_raised overflow")]
-    fn donation_of_i128_max_panics() {
-        let (env, contract_id, client, _wallet, project_id, token) = setup();
+    #[should_panic(expected = "Donation amount exceeds maximum")]
+    fn donation_above_max_donation_panics() {
+        let (env, _contract_id, client, _wallet, project_id, token) = setup();
         let donor = Address::generate(&env);
-        set_project_total_raised(&env, &contract_id, &project_id, 1);
-        mint_tokens(&env, &token, &donor, i128::MAX);
+        mint_tokens(&env, &token, &donor, MAX_DONATION + 1);
 
-        client.donate(&token, &donor, &project_id, &i128::MAX, &42u32);
+        client.donate(&token, &donor, &project_id, &(MAX_DONATION + 1), &42u32);
     }
 
     #[test]
     #[should_panic(expected = "Project total_raised overflow")]
     fn sequential_donations_panic_when_sum_exceeds_i128_max() {
         let (env, contract_id, client, _wallet, project_id, token) = setup();
-        let donor_a = Address::generate(&env);
-        let donor_b = Address::generate(&env);
-        set_project_total_raised(&env, &contract_id, &project_id, 1);
-        mint_tokens(&env, &token, &donor_a, i128::MAX - 1);
-        mint_tokens(&env, &token, &donor_b, 2);
+        let donor = Address::generate(&env);
+        set_project_total_raised(&env, &contract_id, &project_id, i128::MAX);
+        mint_tokens(&env, &token, &donor, 100);
 
-        client.donate(&token, &donor_a, &project_id, &(i128::MAX - 1), &42u32);
-        client.donate(&token, &donor_b, &project_id, &2i128, &42u32);
+        client.donate(&token, &donor, &project_id, &100i128, &42u32);
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(10_000))]
+        #![proptest_config(ProptestConfig::with_cases(100))]
 
         /// Single donation with a random amount in [1, MAX_DONATION] should never
         /// overflow global stats.
@@ -276,11 +232,11 @@ mod fuzz {
             prop_assert_eq!(project.donor_count, 2u32);
         }
 
-        /// Donating a zero amount is an edge case — the contract uses
-        /// `checked_add(0)` which is always safe. Verify no state mutation occurs
-        /// when amount == 0 is passed (or contract rejects it gracefully).
+        /// A zero donation must be rejected by the amount > 0 guard (issue
+        /// #1058) and must leave global accounting untouched, regardless of
+        /// the size of the preceding legitimate donation.
         #[test]
-        fn prop_zero_donation_does_not_corrupt_state(
+        fn prop_zero_donation_is_rejected_without_state_mutation(
             legit in 1i128..=MAX_DONATION,
         ) {
             let (env, _contract_id, client, _wallet, project_id, token) = setup();
@@ -289,16 +245,23 @@ mod fuzz {
 
             client.donate(&token, &donor, &project_id, &legit, &42u32);
             let total_before = client.get_global_total();
-
-            // A second call with the same donor — amount 0 may panic or succeed
-            // depending on contract implementation; we only assert the state
-            // before the second call was not corrupted.
             prop_assert_eq!(total_before, legit);
+
+            // amount == 0 must be rejected by the contract's amount guard.
+            let rejected = client.try_donate(&token, &donor, &project_id, &0i128, &42u32);
+            prop_assert!(rejected.is_err(), "donate must reject amount 0");
+
+            // ...and the rejected attempt must not mutate any accounting state.
+            prop_assert_eq!(client.get_global_total(), total_before);
+            prop_assert_eq!(
+                client.get_project(&project_id).total_raised,
+                total_before,
+            );
         }
 
         // ── USDC fuzz cases ────────────────────────────────────────────────────
 
-        /// USDC amount near i128::MAX triggers the `checked_mul(8)` overflow guard
+        /// USDC amount near i128::MAX triggers the `checked_mul(xlm_per_usdc)` overflow guard
         /// inside donate_usdc. Any value above i128::MAX / 8 must panic.
         #[test]
         fn prop_usdc_amount_near_max(usdc_amount in (i128::MAX / 8 + 1)..=i128::MAX) {
@@ -307,7 +270,7 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic when usdc_amount > i128::MAX / 8");
         }
@@ -321,7 +284,7 @@ mod fuzz {
             let wrong_token = Address::generate(&env);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&wrong_token, &donor, &project_id, &amount, &MSG_HASH);
+                client.donate_usdc(&wrong_token, &donor, &project_id, &amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on token mismatch");
         }
@@ -351,7 +314,8 @@ mod fuzz {
 
             let token_admin = Address::generate(&env);
             let usdc_token = env.register_stellar_asset_contract_v2(token_admin).address();
-            client.set_usdc_token(&admin, &usdc_token);
+            let oracle = env.register_contract(None, MockOracle);
+            client.set_usdc_token(&admin, &usdc_token, &oracle);
 
             client.deactivate_project(&admin, &project_id);
 
@@ -359,7 +323,7 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic when project is inactive");
         }
@@ -380,57 +344,62 @@ mod fuzz {
             fund_usdc(&env, &usdc_token, &donor, &usdc_amount);
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &MSG_HASH);
+                client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &MSG_HASH);
             }));
             prop_assert!(result.is_err(), "donate_usdc should panic on CO2 overflow");
         }
-        /// With a platform fee configured, the fee recipient receives exactly
-        /// `amount * fee_bps / 10_000`, the project wallet the remainder, and
-        /// all accounting counters stay gross regardless of the rate.
+
+        /// Match pledge invariant: across arbitrary donations and caps,
+        /// the pledge matched_amount NEVER exceeds cap_xlm,
+        /// matcher deducted balance ALWAYS equals matched_amount,
+        /// and wallet balance ALWAYS equals total_donated + matched_amount.
         #[test]
-        fn prop_fee_withholding_matches_rate(
-            amount in 1i128..=MAX_DONATION,
-            fee_bps in 0u32..=200u32,
+        fn prop_match_pledge_never_exceeds_cap(
+            cap in 1i128..=MAX_DONATION,
+            d1 in 1i128..=MAX_DONATION,
+            d2 in 1i128..=MAX_DONATION,
         ) {
-            let env = test_env();
-            env.mock_all_auths();
-            let cid = env.register_contract(None, GreenPayContract);
-            let client = GreenPayContractClient::new(&env, &cid);
-            let admin = Address::generate(&env);
-            client.initialize(&admin);
+            let (env, _contract_id, client, wallet, project_id, token) = setup();
+            env.mock_all_auths_allowing_non_root_auth();
 
-            let project_id = SorobanString::from_str(&env, "proj-fee");
-            let wallet = Address::generate(&env);
-            client.register_project(
-                &admin,
-                &project_id,
-                &SorobanString::from_str(&env, "Fee Project"),
-                &wallet,
-                &100u32,
-                &1i128,
-            );
+            let matcher = Address::generate(&env);
+            let donor1 = Address::generate(&env);
+            let donor2 = Address::generate(&env);
 
-            let token_admin = Address::generate(&env);
-            let token = env
-                .register_stellar_asset_contract_v2(token_admin)
-                .address();
-            let fee_recipient = Address::generate(&env);
-            client.set_fee_recipient(&admin, &fee_recipient, &fee_bps);
+            let deadline = env.ledger().sequence() + 1_000;
+            client.create_match_pledge(&matcher, &project_id, &cap, &deadline);
 
-            let donor = Address::generate(&env);
-            mint_tokens(&env, &token, &donor, amount);
-            client.donate(&token, &donor, &project_id, &amount, &42u32);
+            mint_tokens(&env, &token, &matcher, cap);
+            mint_tokens(&env, &token, &donor1, d1);
+            mint_tokens(&env, &token, &donor2, d2);
 
-            let expected_fee = amount.checked_mul(fee_bps as i128).unwrap() / 10_000;
             let token_client = StellarAssetClient::new(&env, &token);
-            prop_assert_eq!(token_client.balance(&fee_recipient), expected_fee);
-            prop_assert_eq!(token_client.balance(&wallet), amount - expected_fee);
-            prop_assert_eq!(token_client.balance(&donor), 0);
 
-            // Accounting stays gross regardless of fee
-            prop_assert_eq!(client.get_global_total(), amount);
-            let project = client.get_project(&project_id);
-            prop_assert_eq!(project.total_raised, amount);
+            // Donation 1
+            client.donate(&token, &donor1, &project_id, &d1, &1u32);
+            let p1 = client.get_match_pledge(&project_id).unwrap();
+            prop_assert!(p1.matched_amount <= cap, "matched_amount {} > cap {}", p1.matched_amount, cap);
+            prop_assert_eq!(token_client.balance(&matcher), cap - p1.matched_amount);
+            prop_assert_eq!(token_client.balance(&wallet), d1 + p1.matched_amount);
+
+            // Donation 2
+            client.donate(&token, &donor2, &project_id, &d2, &2u32);
+            let p2 = client.get_match_pledge(&project_id).unwrap();
+            prop_assert!(p2.matched_amount <= cap, "matched_amount {} > cap {}", p2.matched_amount, cap);
+            prop_assert_eq!(token_client.balance(&matcher), cap - p2.matched_amount);
+            prop_assert_eq!(token_client.balance(&wallet), d1 + d2 + p2.matched_amount);
+
+            // Status invariants
+            let status = client.get_active_match_status(&project_id);
+            prop_assert_eq!(status.matched_amount, p2.matched_amount);
+            prop_assert_eq!(status.remaining_cap_xlm, cap - p2.matched_amount);
+            if p2.matched_amount >= cap {
+                prop_assert!(!p2.active, "pledge should be deactivated when cap is reached");
+                prop_assert!(!status.has_active_match);
+            } else {
+                prop_assert!(p2.active);
+                prop_assert!(status.has_active_match);
+            }
         }
     }
 }

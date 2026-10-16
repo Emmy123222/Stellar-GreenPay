@@ -1,6 +1,7 @@
 "use strict";
 
 const { Pool } = require("pg");
+const logger = require("../logger");
 
 const DATABASE_URL =
   process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/greenpay";
@@ -14,7 +15,7 @@ const pool = new Pool({
 });
 
 pool.on("error", (err) => {
-  console.error("[Postgres] Unexpected client error:", err.message);
+  logger.error({ event: "postgres_client_error", err }, `[Postgres] Unexpected client error: ${err.message}`);
 });
 
 module.exports = pool;

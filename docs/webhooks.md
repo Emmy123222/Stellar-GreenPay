@@ -59,7 +59,7 @@ GreenPay signs the **exact raw HTTP body** (the JSON string that was sent) with 
 3. Encode the digest as **lowercase hex** (no `sha256=` prefix).
 4. Compare it to `X-Webhook-Signature` using a **timing-safe** equality check.
 
-If the signatures do not match, reject the request (e.g. HTTP `401`).
+If `X-Webhook-Signature` is missing, reject the request with HTTP `400`. If it is present but does not match, reject the request with HTTP `401`.
 
 ### Node.js
 
@@ -174,9 +174,10 @@ If delivery fails (network error, timeout, or non-success response), GreenPay re
 | 3 | 5 minutes |
 | 4 | 30 minutes |
 | 5 | 2 hours |
-| 6 | 24 hours |
 
-After the final attempt, the delivery is abandoned. Make your endpoint **idempotent**: the same `milestone.reached` event may be delivered more than once.
+After the fifth attempt the delivery is marked `failed` and abandoned. A URL
+that fails SSRF validation is rejected permanently on the first attempt and is
+not retried, since it will never become deliverable. Make your endpoint **idempotent**: the same `milestone.reached` event may be delivered more than once.
 
 ---
 
@@ -232,6 +233,56 @@ After rotating:
 
 1. Update your receiver with the new secret immediately.
 2. Reject requests signed with the old secret.
+
+---
+
+## Managing a webhook (project owner)
+
+The webhook management API is mounted at `/api/webhooks`, with the versioned
+alias `/api/v1/webhooks`. All three endpoints require the caller to prove
+ownership of the project via the `X-Wallet-Address` header (optionally
+accompanied by a signed `X-Wallet-Challenge` / `X-Wallet-Signature` pair).
+
+### View the configuration
+
+```
+GET /api/webhooks/:projectId
+```
+
+Returns the configured URL and a masked secret (only the last four characters
+are visible).
+
+```json
+{
+  "success": true,
+  "data": {
+    "projectId": "550e8400-e29b-41d4-a716-446655440000",
+    "webhookUrl": "https://example.com/webhooks/greenpay",
+    "webhookSecretMasked": "************c1a2",
+    "configured": true
+  }
+}
+```
+
+### View delivery history
+
+```
+GET /api/webhooks/:projectId/history?page=1&pageSize=20
+```
+
+Returns a paginated list (max 100 per page) of recent delivery attempts with
+status, attempt count, response status and last error.
+
+### Send a test event
+
+```
+PATCH /api/webhooks/:projectId/test
+```
+
+Delivers a signed `webhook.test` payload to the configured URL. Responds
+`200` with `{ "success": true, "responseStatus": <upstream status> }` on
+success, `400` when no webhook is configured, and `502` when the endpoint
+returns a non-success status.
 
 ---
 

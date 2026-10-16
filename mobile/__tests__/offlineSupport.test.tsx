@@ -13,30 +13,35 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-jest.mock('../app/theme', () => ({
-  useTheme: () => ({
-    colors: {
-      background: '#ffffff',
-      surface: '#ffffff',
-      primary: '#000000',
-      accent: '#000000',
-      header: '#000000',
-      headerText: '#ffffff',
-      buttonBackground: '#000000',
-      buttonText: '#ffffff',
-      cardBorder: '#eeeeee',
-      cardShadow: '#000000',
-      primaryText: '#000000',
-      secondaryText: '#555555',
-      muted: '#888888',
-      inputBackground: '#ffffff',
-      inputBorder: '#eeeeee',
-      placeholder: '#888888',
-      border: '#dddddd',
-      statusBarStyle: 'dark',
-    },
-  }),
-}));
+jest.mock('../app/theme', () => {
+  const colors = {
+    background: '#ffffff',
+    surface: '#ffffff',
+    primary: '#000000',
+    accent: '#000000',
+    header: '#000000',
+    headerText: '#ffffff',
+    buttonBackground: '#000000',
+    buttonText: '#ffffff',
+    cardBorder: '#eeeeee',
+    cardShadow: '#000000',
+    primaryText: '#000000',
+    secondaryText: '#555555',
+    muted: '#888888',
+    inputBackground: '#ffffff',
+    inputBorder: '#eeeeee',
+    placeholder: '#888888',
+    border: '#dddddd',
+    statusBarStyle: 'dark',
+  };
+  return {
+    __esModule: true,
+    // The screen tree wraps content in <ThemeProvider>, so the stub has to
+    // export it too — an undefined component type fails at render time.
+    ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+    useTheme: () => ({ colors }),
+  };
+});
 
 
 import ProjectsScreen from '../app/projects/index';

@@ -14,6 +14,7 @@ jest.mock("../services/redis", () => ({
 jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn(),
   getProjectDonationEvents: jest.fn(),
+  getRegisteredProjectIdFromTransaction: jest.fn(),
   CONTRACT_ID: "test-contract",
   server: { getTransaction: jest.fn() },
   NETWORK_PASSPHRASE: "Test SDF Network ; September 2015",
@@ -126,13 +127,22 @@ describe("GET /api/projects", () => {
     expect(query).toContain("status =");
   });
 
-  test("handles search query", async () => {
+  test("handles search query 'reforest' matches 'Reforestation'", async () => {
     pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
 
-    await request(app).get("/api/projects?search=amazon").expect(200);
+    await request(app).get("/api/projects?q=reforest").expect(200);
 
     const query = pool.query.mock.calls[0][0];
-    expect(query).toContain("websearch_to_tsquery");
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
+  });
+
+  test("handles search query 'ecologie' matches 'Écologie'", async () => {
+    pool.query.mockResolvedValue({ rows: [MOCK_PROJECT_ROW] });
+
+    await request(app).get("/api/projects?q=ecologie").expect(200);
+
+    const query = pool.query.mock.calls[0][0];
+    expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
   });
 
   test("rejects invalid cursor", async () => {
@@ -222,6 +232,44 @@ describe("GET /api/projects/featured", () => {
   });
 });
 
+describe("GET /api/projects/:id/donors", () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+    jest.resetAllMocks();
+  });
+
+  test("returns unique donor addresses for an existing project", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ id: "proj-1" }] })
+      .mockResolvedValueOnce({
+        rows: [
+          { donor_address: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF" },
+          { donor_address: "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB" },
+        ],
+      });
+
+    const res = await request(app).get("/api/projects/proj-1/donors").expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+      "GBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    ]);
+    expect(pool.query.mock.calls[1][0]).toMatch(/SELECT DISTINCT donor_address/i);
+  });
+
+  test("returns 404 when the project does not exist", async () => {
+    pool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app).get("/api/projects/missing/donors").expect(404);
+
+    expect(res.body.error).toBe("Project not found");
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("GET /api/projects/:id", () => {
   let app;
 
@@ -237,8 +285,10 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] }); // SELECT project
     pool.query.mockResolvedValueOnce({ rows: [] }); // campaigns
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] }); // ratings
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
     pool.query.mockResolvedValueOnce({
       rows: [{ follow_count: 7, is_following: false }],
     }); // follow stats
@@ -249,14 +299,17 @@ describe("GET /api/projects/:id", () => {
     expect(res.body.data.name).toBe("Test Project");
     expect(res.body.data.followCount).toBe(7);
     expect(res.body.data.isFollowing).toBe(false);
+    expect(res.body.data.recentReviews).toEqual([]);
   });
 
   test("returns followCount zero when project has no followers", async () => {
     pool.query.mockResolvedValueOnce({ rows: [MOCK_PROJECT_ROW] });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [{ avg_rating: null, count: 0 }] });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] });
     pool.query.mockResolvedValueOnce({ rows: [] });
+    pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
     pool.query.mockResolvedValueOnce({
       rows: [{ follow_count: 0, is_following: false }],
     }); // follow stats
@@ -487,6 +540,132 @@ describe("mapCampaignRow", () => {
     expect(mapped.progressPercent).toBe(0);
     expect(mapped.completed).toBe(true);
   });
+
+  test("exposes raisedUSDC and uses converted raised_xlm for progress (issue #352)", () => {
+    const row = getBaseRow();
+    // SQL returns raised_xlm already converted (100 XLM + 150 USDC * 2 = 400)
+    row.raised_xlm = "400";
+    row.raised_usdc = "150";
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedXLM).toBe("400.0000000");
+    expect(mapped.raisedUSDC).toBe("150.0000000");
+    expect(mapped.progressPercent).toBe(40);
+    expect(mapped.completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0", () => {
+    const row = getBaseRow();
+    const mapped = mapCampaignRow(row);
+    expect(mapped.raisedUSDC).toBe("0.0000000");
+  });
+});
+
+describe("getUsdcToXlmRate (issue #352)", () => {
+  const getRate = projectsRouter.getUsdcToXlmRate;
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  test("falls back to the documented default (3) when unset/invalid", () => {
+    delete process.env.USDC_TO_XLM_RATE;
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "not-a-number";
+    expect(getRate()).toBe(3);
+    process.env.USDC_TO_XLM_RATE = "0";
+    expect(getRate()).toBe(3);
+  });
+
+  test("uses the configured env rate when valid", () => {
+    process.env.USDC_TO_XLM_RATE = "2.5";
+    expect(getRate()).toBe(2.5);
+  });
+});
+
+describe("GET /api/projects/:id/campaigns — USDC-aware progress (issue #352)", () => {
+  let app;
+  const rate = 2; // deterministic rate for these tests
+
+  beforeEach(() => {
+    process.env.USDC_TO_XLM_RATE = String(rate);
+    app = buildApp();
+    jest.resetAllMocks();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue(null);
+    redis.deletePattern.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    delete process.env.USDC_TO_XLM_RATE;
+  });
+
+  // Helper: the route issues `SELECT id FROM projects WHERE id=$1` then the
+  // campaign aggregation query. We mock both; the second result carries the
+  // values the SQL would have produced (XLM-equivalent total + raw USDC total).
+  async function getCampaigns(campaignRows) {
+    pool.query.mockResolvedValueOnce({ rows: [{ id: "proj-1" }] });
+    pool.query.mockResolvedValueOnce({ rows: campaignRows });
+    return request(app).get("/api/projects/proj-1/campaigns").expect(200);
+  }
+
+  const baseCampaign = (overrides = {}) => ({
+    id: "camp-1",
+    project_id: "proj-1",
+    title: "Campaign",
+    description: null,
+    goal_xlm: "1000",
+    deadline: new Date("2099-01-01T00:00:00.000Z").toISOString(),
+    created_at: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+    ...overrides,
+  });
+
+  test("only XLM donations → raisedXLM = XLM total, raisedUSDC = 0", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "0" }),
+    ]);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("only USDC donations → raisedXLM converted at rate, raisedUSDC raw", async () => {
+    // 250 USDC * rate(2) = 500 XLM-equivalent
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "500", raised_usdc: "250" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("500.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("250.0000000");
+    expect(res.body.data[0].progressPercent).toBe(50);
+  });
+
+  test("mix of XLM and USDC → raisedXLM = XLM + USDC*rate, raisedUSDC raw USDC", async () => {
+    // 100 XLM + (150 USDC * 2) = 400 XLM-equivalent; raisedUSDC = 150
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "400", raised_usdc: "150" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("400.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("150.0000000");
+    expect(res.body.data[0].progressPercent).toBe(40);
+  });
+
+  test("zero donations → both totals 0, not completed", async () => {
+    const res = await getCampaigns([
+      baseCampaign({ raised_xlm: "0", raised_usdc: "0" }),
+    ]);
+    expect(res.body.data[0].raisedXLM).toBe("0.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+    expect(res.body.data[0].progressPercent).toBe(0);
+    expect(res.body.data[0].completed).toBe(false);
+  });
+
+  test("missing raised_usdc column degrades to 0 (backwards compatible)", async () => {
+    const res = await getCampaigns([baseCampaign({ raised_xlm: "123" })]);
+    expect(res.body.data[0].raisedXLM).toBe("123.0000000");
+    expect(res.body.data[0].raisedUSDC).toBe("0.0000000");
+  });
 });
 
 // ── GET /api/projects/:id/impact-certificate ──────────────────────────────────
@@ -498,7 +677,8 @@ const MOCK_DONATION_ROW = {
   id: "don-1",
   amount_xlm: "250.0000000",
   message: "Keep it up!",
-  transaction_hash: "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  transaction_hash:
+    "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
   created_at: new Date("2025-06-01T12:00:00Z").toISOString(),
 };
 
@@ -527,7 +707,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // 1. project found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_CERT_PROJECT_ROW] });
     // 2. profile found (donor has a display name)
-    pool.query.mockResolvedValueOnce({ rows: [{ display_name: "Alice Donor" }] });
+    pool.query.mockResolvedValueOnce({
+      rows: [{ display_name: "Alice Donor" }],
+    });
     // 3. donations found
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
 
@@ -552,7 +734,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     // Donations
     expect(d.donationCount).toBe(1);
     expect(d.donations).toHaveLength(1);
-    expect(d.donations[0].transactionHash).toBe(MOCK_DONATION_ROW.transaction_hash);
+    expect(d.donations[0].transactionHash).toBe(
+      MOCK_DONATION_ROW.transaction_hash,
+    );
     // QR code
     expect(typeof d.qrCode).toBe("string");
     expect(d.qrCode).toMatch(/^data:image\/png;base64,/);
@@ -586,7 +770,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: true, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -600,7 +786,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is true when on_chain_verified = true", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: true },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -614,7 +802,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("projectVerified is false when both verified flags are false", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, verified: false, on_chain_verified: false },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({ rows: [MOCK_DONATION_ROW] });
@@ -656,7 +846,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns gold badge tier when donor gave >= 1000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "2000", co2_offset_kg: "10000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "2000",
+          co2_offset_kg: "10000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -672,7 +868,13 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("assigns platinum badge tier when donor gave >= 10000 XLM", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "20000", co2_offset_kg: "100000" }],
+      rows: [
+        {
+          ...MOCK_CERT_PROJECT_ROW,
+          raised_xlm: "20000",
+          co2_offset_kg: "100000",
+        },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -704,7 +906,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("returns 400 when donorAddress starts with wrong letter", async () => {
     const res = await request(app)
-      .get("/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J")
+      .get(
+        "/api/projects/proj-1/impact-certificate?donorAddress=XAUUCYNO24CCKKNOMT5AS6D73J6QMYC5IJI64H4ZBJL7NQUETW3KOO4J",
+      )
       .expect(400);
 
     expect(res.body.error).toMatch(/donorAddress/i);
@@ -714,7 +918,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // project not found
 
     const res = await request(app)
-      .get(`/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`)
+      .get(
+        `/api/projects/nonexistent/impact-certificate?donorAddress=${CERT_DONOR}`,
+      )
       .expect(404);
 
     expect(res.body.error).toMatch(/project not found/i);
@@ -750,7 +956,9 @@ describe("GET /api/projects/:id/impact-certificate", () => {
 
   test("co2OffsetKg is 0 when project has raised_xlm = 0", async () => {
     pool.query.mockResolvedValueOnce({
-      rows: [{ ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" }],
+      rows: [
+        { ...MOCK_CERT_PROJECT_ROW, raised_xlm: "0", co2_offset_kg: "5000" },
+      ],
     });
     pool.query.mockResolvedValueOnce({ rows: [] });
     pool.query.mockResolvedValueOnce({
@@ -883,20 +1091,21 @@ describe("POST /api/projects/:id/webhook", () => {
 
     expect(res.status).toBe(403);
   });
-});
-
-describe("POST /api/projects/admin/confirm", () => {
+});describe("POST /api/projects/admin/confirm", () => {
   let app;
+  let stellarService;
   const transactionHash = "a".repeat(64);
   const projectId = "proj-1";
 
   beforeEach(() => {
     app = buildApp();
+    stellarService = require("../services/stellar");
     jest.clearAllMocks();
   });
 
-  test("sets on_chain_verified and verified in DB when transaction succeeds", async () => {
+  test("sets on_chain_verified and verified in DB when transaction registers the project", async () => {
     server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(projectId);
 
     const updatedRow = {
       ...MOCK_PROJECT_ROW,
@@ -914,6 +1123,7 @@ describe("POST /api/projects/admin/confirm", () => {
       .expect(200);
 
     expect(server.getTransaction).toHaveBeenCalledWith(transactionHash);
+    expect(stellarService.getRegisteredProjectIdFromTransaction).toHaveBeenCalled();
 
     const updateCall = pool.query.mock.calls.find(([sql]) =>
       sql.includes("UPDATE projects"),
@@ -927,6 +1137,98 @@ describe("POST /api/projects/admin/confirm", () => {
     expect(res.body.data.verified).toBe(true);
     expect(res.body.data.onChainVerified).toBe(true);
   });
+
+  test("rejects when the transaction registered a different project", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(
+      "some-other-project",
+    );
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction is not a project registration", async () => {
+    server.getTransaction.mockResolvedValue({ successful: true });
+    stellarService.getRegisteredProjectIdFromTransaction.mockReturnValue(null);
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(400);
+
+    expect(res.body.error).toMatch(/does not register/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("rejects when the transaction failed on-chain", async () => {
+    server.getTransaction.mockResolvedValue({ successful: false });
+
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash, projectId })
+      .expect(500);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toMatch(/transaction failed/i);
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 400 when transactionHash or projectId is missing", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ transactionHash })
+      .expect(400);
+    expect(res.body.error).toMatch(/projectId is required/i);
+
+    const res2 = await request(app)
+      .post("/api/projects/admin/confirm")
+      .set("X-Admin-Key", "test-admin-key")
+      .send({ projectId })
+      .expect(400);
+    expect(res2.body.error).toMatch(/transactionHash is required/i);
+
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+  test("returns 401 without a valid admin key", async () => {
+    const res = await request(app)
+      .post("/api/projects/admin/confirm")
+      .send({ transactionHash, projectId })
+      .expect(401);
+
+    expect(res.body.error).toMatch(/X-Admin-Key|authorization/i);
+    expect(server.getTransaction).not.toHaveBeenCalled();
+    const updateCall = pool.query.mock.calls.find(([sql]) =>
+      sql.includes("UPDATE projects"),
+    );
+    expect(updateCall).toBeUndefined();
+  });
+
+
 });
 
 describe("GET /api/projects/:id/summary-status", () => {

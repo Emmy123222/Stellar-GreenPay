@@ -1,0 +1,30 @@
+# Lychee configuration for Stellar-GreenPay documentation link checking
+
+# Check anchors/fragments in markdown documents
+include_fragments = "full"
+
+# Output display formatting
+verbose = "info"
+format = "detailed"
+no_progress = true
+
+# Request behavior
+timeout = 20
+retries = 3
+max_redirects = 5
+
+# Accepted status codes
+accept = ["200..=299", "429"]
+
+# Exclude mailto, localhost/dev placeholders, and third-party rate-limited / anti-crawler endpoints
+exclude = [
+  '^mailto:',
+  '^https?://localhost(:[0-9]+)?',
+  '^https?://127\.0\.0\.1(:[0-9]+)?',
+  '^https://staging\.greenpay\.app',
+  '^https://uploads\.greenpay\.app',
+  'PLACEHOLDER',
+  'YOUR_',
+  'your-org',
+  'example\.com'
+]

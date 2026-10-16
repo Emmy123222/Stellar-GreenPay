@@ -4,6 +4,8 @@
 
 GreenPay uses PostgreSQL 16 as its primary database for managing user accounts, transactions, and smart contract interactions.
 
+For the human-readable schema — an ERD plus a column, foreign-key, and index reference — see [data-model.md](./data-model.md).
+
 ## Database Setup
 
 ### Docker Compose (Development)

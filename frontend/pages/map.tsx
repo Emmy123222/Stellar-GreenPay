@@ -17,6 +17,7 @@ import Link from "next/link";
 import type { GetServerSideProps } from "next";
 import type { ClimateProject } from "@/utils/types";
 import { fetchProjects } from "@/lib/api";
+import { formatTime } from "@/utils/format";
 import { useI18n } from "@/lib/i18n";
 
 // ── Dynamic import — Leaflet requires a real browser environment ───────────────
@@ -100,7 +101,7 @@ export default function MapPage({ projects, fetchedAt }: MapPageProps) {
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-forest-50 text-forest-600 px-4 text-center">
               <span className="text-5xl">🌿</span>
               <p className="font-display font-semibold text-lg">{t("map.noProjects")}</p>
-              <p className="text-sm font-body text-forest-400">{t("map.noProjectsDesc")}</p>
+              <p className="text-sm font-body text-[var(--text-secondary)] dark:text-forest-600">{t("map.noProjectsDesc")}</p>
               <Link href="/projects" className="btn-primary text-sm mt-2">
                 {t("map.browseAll")}
               </Link>
@@ -111,7 +112,7 @@ export default function MapPage({ projects, fetchedAt }: MapPageProps) {
 
           {/* Bottom-left attribution note (subtle) --------------------------- */}
           <p className="absolute bottom-2 left-3 z-[1000] text-[10px] text-gray-400 pointer-events-none select-none hidden sm:block">
-            {t("map.dataUpdated").replace("{time}", new Date(fetchedAt).toLocaleTimeString())}
+            {t("map.dataUpdated").replace("{time}", formatTime(fetchedAt))}
           </p>
         </div>
       </div>

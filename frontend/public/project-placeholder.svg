@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img" aria-label="Stellar GreenPay project cover placeholder">
+  <title>Stellar GreenPay project cover placeholder</title>
+  <defs>
+    <linearGradient id="gp-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0f7f0" />
+      <stop offset="1" stop-color="#e0efe0" />
+    </linearGradient>
+    <linearGradient id="gp-leaf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4caf70" />
+      <stop offset="1" stop-color="#227239" />
+    </linearGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#gp-bg)" />
+  <circle cx="200" cy="150" r="96" fill="#e8f3e8" />
+  <path
+    d="M200 70 C 262 112 262 196 200 240 C 138 196 138 112 200 70 Z"
+    fill="url(#gp-leaf)"
+  />
+  <g stroke="#e8f3e8" stroke-width="5" stroke-linecap="round" fill="none" opacity="0.85">
+    <path d="M200 84 L200 228" />
+    <path d="M200 124 L232 106" />
+    <path d="M200 124 L168 106" />
+    <path d="M200 158 L236 141" />
+    <path d="M200 158 L164 141" />
+    <path d="M200 192 L228 177" />
+    <path d="M200 192 L172 177" />
+  </g>
+</svg>

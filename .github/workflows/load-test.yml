@@ -1,0 +1,135 @@
+name: Donation Load Test
+
+# Nightly k6 run of the donation path, for issue #1182. The script
+# (scripts/load-test.js) already existed with the 100 VUs x 60 s scenario and the
+# p95 threshold; what was missing is anything that runs it. This job fails when a
+# threshold is breached, so the failure notification comes from the workflow itself
+# rather than from a separate alerting step that can rot.
+
+on:
+  schedule:
+    # 03:15 UTC — after the nightly database backup.
+    - cron: "15 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+env:
+  # Deliberately no Redis service. `POST /api/donations` sits behind a 10-requests-
+  # per-minute limiter with a Redis store, and the limiter passes requests through
+  # when the store errors (`passOnStoreError: true`). A 100 VU run against a live
+  # limiter would be 429s — the limiter doing its job, not the API failing — so this
+  # environment leaves the store unavailable. The trade-off is that the nightly does
+  # not measure the limiter at all; making the limit configurable per environment is a
+  # production decision, not something to slip into a load-test workflow.
+  DATABASE_URL: postgres://postgres:postgres@localhost:5432/greenpay
+  NODE_ENV: test
+  PORT: 4000
+  # scripts/stub-horizon.js: the donation path verifies the transaction hash with
+  # Horizon before writing, and synthetic hashes are never on-chain.
+  HORIZON_URL: http://127.0.0.1:8081
+  # Seeded below; `projects.id` is a UUID, so the load test cannot invent one.
+  PROJECT_ID: 11111111-1111-4111-8111-111111111111
+
+jobs:
+  load-test:
+    name: 100 VUs x 60 s on POST /api/donations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: greenpay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Migrate the database
+        run: node src/db/migrate.js
+
+      - name: Seed the project the load test donates to
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<SQL
+          INSERT INTO projects (id, name, description, category, location, wallet_address)
+          VALUES (
+            '$PROJECT_ID',
+            'Load test project',
+            'Seeded by .github/workflows/load-test.yml. Synthetic, never referenced in production.',
+            'reforestation',
+            'CI',
+            'GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3A73ZFMZE'
+          )
+          ON CONFLICT (id) DO NOTHING;
+          SQL
+
+      - name: Start the Horizon stub
+        run: "node ../scripts/stub-horizon.js &"
+
+      - name: Start the API
+        run: "node src/server.js &"
+
+      - name: Wait for the API to answer
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:4000/api/health > /dev/null; then
+              echo "API up after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not answer /api/health within 30s"
+          exit 1
+
+      - uses: grafana/setup-k6-action@v1
+
+      # Exits non-zero when a threshold in the script is breached, which fails the
+      # job and sends the run notification. That is the alerting path.
+      - name: Run the load test
+        run: k6 run --summary-export ../k6-summary.json ../scripts/load-test.js
+
+      - name: Publish the summary on the run page
+        if: always()
+        run: |
+          if [ -f ../k6-summary.json ]; then
+            {
+              echo "### Donation load test — 100 VUs, 60 s"
+              echo ""
+              echo '```'
+              cat ../k6-summary.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k6-summary
+          path: k6-summary.json
+          if-no-files-found: warn
+          retention-days: 14

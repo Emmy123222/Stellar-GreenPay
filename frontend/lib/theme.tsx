@@ -32,7 +32,26 @@ import {
 export type ThemeMode = "light" | "dark" | "system";
 export type EffectiveTheme = "light" | "dark";
 
-export const THEME_STORAGE_KEY = "greenpay-theme";
+export const THEME_STORAGE_KEY = "greenpay:theme";
+
+/**
+ * Keys used by earlier releases. Read once, copied to THEME_STORAGE_KEY,
+ * then removed, so users who already picked a theme keep it after upgrade.
+ */
+export const LEGACY_THEME_STORAGE_KEYS: readonly string[] = ["greenpay-theme"];
+
+/**
+ * Inline script rendered by `pages/_document.tsx` ahead of React. It
+ * resolves the stored (or legacy) preference, falls back to
+ * `prefers-color-scheme`, and sets `.dark` + `color-scheme` on <html>
+ * before first paint. Built from the constants above so the key can't
+ * drift between the pre-paint script and the provider.
+ */
+export const THEME_INIT_SCRIPT = `(function(){try{var s=window.localStorage;var m=s.getItem(${JSON.stringify(
+  THEME_STORAGE_KEY,
+)});if(m===null){var l=${JSON.stringify(
+  LEGACY_THEME_STORAGE_KEYS,
+)};for(var i=0;i<l.length&&m===null;i++){m=s.getItem(l[i])}}var d;if(m==="dark"){d=true}else if(m==="light"){d=false}else{d=!!(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)}var r=document.documentElement;if(d){r.classList.add("dark");r.style.colorScheme="dark"}else{r.classList.remove("dark");r.style.colorScheme="light"}}catch(e){}})();`;
 
 interface ThemeContextValue {
   /** What the user has explicitly chosen (including "follow my OS"). */
@@ -54,11 +73,27 @@ const ThemeContext = createContext<ThemeContextValue>({
   toggleTheme: () => {},
 });
 
+function isThemeMode(value: unknown): value is ThemeMode {
+  return value === "light" || value === "dark" || value === "system";
+}
+
 function readStoredTheme(): ThemeMode {
   if (typeof window === "undefined") return "system";
   try {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "system") {
+    const storage = window.localStorage;
+    const stored = storage.getItem(THEME_STORAGE_KEY);
+    if (stored === null) {
+      for (const legacyKey of LEGACY_THEME_STORAGE_KEYS) {
+        const legacy = storage.getItem(legacyKey);
+        if (legacy === null) continue;
+        storage.removeItem(legacyKey);
+        if (isThemeMode(legacy)) {
+          storage.setItem(THEME_STORAGE_KEY, legacy);
+          return legacy;
+        }
+      }
+    }
+    if (isThemeMode(stored)) {
       return stored;
     }
   } catch {
@@ -145,6 +180,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     mql.addListener(onChange);
     return () => mql.removeListener(onChange);
+  }, []);
+
+  // Keep other open tabs in step when the user changes theme in one.
+  // `storage` only fires in tabs other than the one that wrote the value.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== THEME_STORAGE_KEY) return;
+      setThemeState(isThemeMode(e.newValue) ? e.newValue : "system");
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
 
   const setTheme = useCallback((next: ThemeMode) => {

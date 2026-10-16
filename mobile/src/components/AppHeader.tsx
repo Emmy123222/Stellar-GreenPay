@@ -5,7 +5,7 @@ import { WalletConnect } from './WalletConnect';
 export function AppHeader() {
   return (
     <View style={styles.header}>
-      <Text style={styles.logo}>🌱 GreenPay</Text>
+      <Text style={styles.logo} accessibilityRole="header" accessibilityLabel="GreenPay">🌱 GreenPay</Text>
       <WalletConnect />
     </View>
   );

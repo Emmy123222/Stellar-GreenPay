@@ -5,16 +5,18 @@
 const express = require("express");
 const router  = express.Router();
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { mapProfileRow } = require("../services/store");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
 const { z } = require("zod");
+const { enqueueAvatarProcessing } = require("../services/profileQueue");
 
 function validateKey(k) {
   if (!k || !/^G[A-Z0-9]{55}$/.test(k)) { const e = new Error("Invalid public key"); e.status = 400; throw e; }
 }
 
-const profilePostLimiter = createRateLimiter(20, 1);
+const profilePostLimiter = createRateLimiter(20, 1, "profiles");
 
 const avatarUrlField = z
   .union([z.string().url().max(2048), z.literal(""), z.null()])
@@ -31,9 +33,10 @@ const profilePatchSchema = z.object({
   displayName: sanitizedStringField({ required: false, maxLength: 30, message: "must not contain HTML" }).optional(),
   bio: sanitizedStringField({ required: false, maxLength: 300, message: "must not contain HTML" }).optional(),
   avatarUrl: avatarUrlField,
+  milestoneNotificationsEnabled: z.boolean().optional(),
 }).refine(
-  (body) => body.displayName !== undefined || body.bio !== undefined || body.avatarUrl !== undefined,
-  { message: "At least one of displayName, bio, or avatarUrl is required" },
+  (body) => body.displayName !== undefined || body.bio !== undefined || body.avatarUrl !== undefined || body.milestoneNotificationsEnabled !== undefined,
+  { message: "At least one profile setting is required" },
 );
 
 router.get("/:publicKey", async (req, res, next) => {
@@ -92,6 +95,12 @@ router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, re
       [publicKey, trimmedDisplayName, trimmedBio, normalizedAvatarUrl],
     );
 
+    if (normalizedAvatarUrl) {
+      enqueueAvatarProcessing(publicKey, normalizedAvatarUrl).catch((err) => {
+        logger.error({ event: "avatar_processing_enqueue_failed", err: err.message }, "[profiles] Failed to enqueue avatar processing: " + err.message);
+      });
+    }
+
     res.json({ success: true, data: mapProfileRow(result.rows[0]) });
   } catch (e) { next(e); }
 });
@@ -107,6 +116,7 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
 
     const sets = [];
     const values = [];
+    let newAvatarUrl = null;
 
     if (req.body.displayName !== undefined) {
       values.push(req.body.displayName?.trim().slice(0, 30) || null);
@@ -120,8 +130,13 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
       const avatar = req.body.avatarUrl === "" || req.body.avatarUrl === null
         ? null
         : String(req.body.avatarUrl).trim();
+      newAvatarUrl = avatar;
       values.push(avatar);
       sets.push(`avatar_url = $${values.length}`);
+    }
+    if (req.body.milestoneNotificationsEnabled !== undefined) {
+      values.push(req.body.milestoneNotificationsEnabled);
+      sets.push(`milestone_notifications_enabled = $${values.length}`);
     }
 
     sets.push("updated_at = NOW()");
@@ -136,6 +151,12 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
       const e = new Error("Profile not found");
       e.status = 404;
       throw e;
+    }
+
+    if (newAvatarUrl) {
+      enqueueAvatarProcessing(req.params.publicKey, newAvatarUrl).catch((err) => {
+        logger.error({ event: "avatar_processing_enqueue_failed", err: err.message }, "[profiles] Failed to enqueue avatar processing: " + err.message);
+      });
     }
 
     res.json({ success: true, data: mapProfileRow(result.rows[0]) });

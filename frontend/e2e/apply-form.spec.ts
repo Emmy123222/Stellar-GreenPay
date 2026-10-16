@@ -5,6 +5,8 @@ async function mockApplySubmission(page: Page) {
 
   await page.addInitScript(() => {
     window.localStorage.clear();
+    (window as unknown as Record<string, unknown>).__test_publicKey__ =
+      "GCXIWOIPXZ7TIMU4FQRNLOFXRY7HGHOE2OIJMJVCW7EK5QKPIOATGKNJ";
   });
 
   await page.route("**/api/v1/csrf-token", (route) =>
@@ -75,7 +77,7 @@ test.describe("Project verification apply form", () => {
     await page.getByPlaceholder("Verra VM0007").fill("Verra VM0007");
     await page.getByPlaceholder("Gold Standard, Verra, etc.").fill("Gold Standard");
     await page.getByPlaceholder("1200").fill("1200");
-    await page.getByLabel("CO₂ Reduction").check();
+    await page.getByRole("checkbox", { name: "CO₂ Reduction" }).check();
     await page.getByLabel("Tree Planting").check();
 
     const notificationRequest = page.waitForRequest(

@@ -7,7 +7,7 @@
   },
   "extends": [
     "eslint:recommended",
-    "plugin:security/recommended"
+    "plugin:security/recommended-legacy"
   ],
   "plugins": ["security", "sql-injection"],
   "parserOptions": {
@@ -18,7 +18,16 @@
     "linebreak-style": "off",
     "quotes": ["error", "double"],
     "semi": ["error", "always"],
-    "no-unused-vars": ["warn"],
-    "sql-injection/no-sql-injection": "error"
-  }
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+    "sql-injection/no-sql-injection": "error",
+    "no-console": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.js", "**/*.spec.js"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ]
 }

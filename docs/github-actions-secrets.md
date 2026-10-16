@@ -125,12 +125,24 @@ else if github.event.inputs.storage_type == 'gcs'
 
 **Workflow**: `.github/workflows/mobile.yml`
 
-Triggered on every push to `main`. Builds the Expo/React Native mobile app
-via EAS (Expo Application Services) for both iOS and Android preview profiles.
+Triggered on every push to `main`. Uses EAS (Expo Application Services) to
+build the `preview` profile for Android and iOS. It does not distribute a
+store-ready build or submit to either app store. See the
+[mobile build and release guide](../mobile/README.md#mobile-build-and-release)
+for profiles, artifacts, environment configuration, and the manual submission
+process.
 
 | Secret | Required | Description |
 |--------|----------|-------------|
 | `EXPO_TOKEN` | **Yes** | Expo access token for EAS builds. Generate at [expo.dev/settings/access-tokens](https://expo.dev/settings/access-tokens). |
+
+The workflow's only required GitHub secret is `EXPO_TOKEN`. The
+`EXPO_PUBLIC_*` values listed in `mobile/.env.example` are public build
+configuration, not secrets; the workflow does not load a local `.env` file.
+Configure the appropriate values for the target build in the EAS project.
+Store signing and submission credentials are managed through the Expo and app
+store accounts when a store-ready release is configured; no store submission
+credentials are currently consumed by this workflow.
 
 ### Setting up EXPO_TOKEN
 

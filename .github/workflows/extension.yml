@@ -3,11 +3,11 @@ name: Extension CI
 on:
   push:
     paths:
-      - 'extension/**'
+      - "extension/**"
     branches: [main, develop]
   pull_request:
     paths:
-      - 'extension/**'
+      - "extension/**"
     branches: [main]
 
 jobs:
@@ -23,6 +23,7 @@ jobs:
 
       - name: Derive version from tag
         id: version
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           TAG="${GITHUB_REF_NAME}"
           if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)$ ]]; then
@@ -39,7 +40,7 @@ jobs:
           import os
           from pathlib import Path
 
-          manifest_path = Path("extension/manifest.json")
+          manifest_path = Path("manifest.json")
           data = json.loads(manifest_path.read_text())
           data["version"] = os.environ["VERSION"]
           manifest_path.write_text(json.dumps(data, indent=2) + "\n")
@@ -47,16 +48,86 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "22"
+          cache: "npm"
           cache-dependency-path: extension/package-lock.json
 
       - run: npm ci
 
+      - name: Validate extension JSON files
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          function getJsonFiles(dir) {
+            let results = [];
+            const list = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of list) {
+              const fullPath = path.join(dir, item.name);
+              if (item.isDirectory()) {
+                if (item.name !== 'node_modules' && item.name !== 'dist' && item.name !== 'dist-firefox') {
+                  results = results.concat(getJsonFiles(fullPath));
+                }
+              } else if (item.isFile() && item.name.endsWith('.json')) {
+                results.push(fullPath);
+              }
+            }
+            return results;
+          }
+
+          const files = getJsonFiles('.');
+          for (const file of files) {
+            try {
+              JSON.parse(fs.readFileSync(file, 'utf8'));
+              console.log(`✓ Valid JSON: ${file}`);
+            } catch (err) {
+              console.error(`✗ Invalid JSON: ${file} - ${err.message}`);
+              process.exit(1);
+            }
+          }
+          NODE
+
+      - name: Lint manifests with web-ext
+        run: |
+          CHROME_TMP=$(mktemp -d)
+          cp manifest.json "$CHROME_TMP/manifest.json"
+          npx web-ext lint --source-dir "$CHROME_TMP" --self-hosted
+
+          FIREFOX_TMP=$(mktemp -d)
+          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
+          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
+
+      - run: npm test
+
       - run: npm run build
 
+      - name: Install Chromium for extension E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Run extension E2E suite
+        run: npm run test:e2e
+
+      - name: Validate Manifest V3 browser actions
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          for (const file of ['manifest.json', 'manifest.firefox.json']) {
+            const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+            if (manifest.manifest_version !== 3) {
+              throw new Error(`${file} must use Manifest V3`);
+            }
+            if (manifest.browser_action || !manifest.action) {
+              throw new Error(`${file} must use the Manifest V3 action key`);
+            }
+          }
+          NODE
+
       - name: Verify build output
-        run: test -f dist/content-script.js
+        run: |
+          test -f dist/content-script.js
+          test -f dist/popup.js
+          test -f dist/background.js
 
       - uses: actions/upload-artifact@v4
         with:

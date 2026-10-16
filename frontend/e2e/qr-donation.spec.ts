@@ -16,7 +16,7 @@ import { test, expect, type Page } from "@playwright/test";
 // ── Mock data ────────────────────────────────────────────────────────────────
 
 const PROJECT_ID = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
-const MOCK_WALLET = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
+const MOCK_WALLET = "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ";
 
 const MOCK_PROJECT = {
   id: PROJECT_ID,
@@ -60,6 +60,7 @@ test.describe("QR code donation link flow", () => {
 
     // Simulate scanning a QR code that encodes this URL
     await page.goto(`/donate/${PROJECT_ID}`);
+    await page.waitForLoadState("networkidle");
 
     await expect(
       page.getByRole("heading", { name: "Amazon Reforestation Initiative" })

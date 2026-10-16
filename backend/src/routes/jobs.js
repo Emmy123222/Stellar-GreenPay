@@ -9,6 +9,7 @@ const { v4: uuid } = require("uuid");
 const pool = require("../db/pool");
 const redis = require("../services/redis");
 const { mapJobRow } = require("../services/store");
+const { adminRequired } = require("../middleware/auth");
 
 const JOBS_STATS_CACHE_KEY = "jobs:stats";
 const JOBS_STATS_CACHE_TTL_SECONDS = 60;
@@ -191,6 +192,33 @@ router.get("/:id", async (req, res, next) => {
       return res.status(404).json({ error: "Job not found" });
     }
     res.json({ success: true, data: mapJobRow(result.rows[0]) });
+  } catch (e) {
+    next(e);
+  }
+});
+
+// POST /api/jobs/trigger — Trigger background job (authenticated & admin-only)
+router.post("/trigger", adminRequired, async (req, res, next) => {
+  try {
+    const { jobType, payload } = req.body || {};
+    if (!jobType || typeof jobType !== "string") {
+      return res.status(400).json({ error: "jobType is required" });
+    }
+
+    const allowedJobTypes = ["indexer_sync", "stats_refresh", "summary_digest", "cleanup"];
+    if (!allowedJobTypes.includes(jobType)) {
+      return res.status(400).json({
+        error: `Invalid jobType. Allowed: ${allowedJobTypes.join(", ")}`,
+      });
+    }
+
+    res.status(202).json({
+      success: true,
+      message: `Job ${jobType} successfully queued`,
+      jobType,
+      triggeredBy: req.admin?.sub || "admin",
+      data: payload || {},
+    });
   } catch (e) {
     next(e);
   }

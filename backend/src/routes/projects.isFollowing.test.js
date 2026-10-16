@@ -79,8 +79,10 @@ function mockProjectDetailQueries({
   pool.query.mockResolvedValueOnce({
     rows: [{ avg_rating: null, count: 0 }],
   }); // ratings
+  pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
   pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
   pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+  pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
   pool.query.mockResolvedValueOnce({
     rows: [{ follow_count: followCount, is_following: isFollowing }],
   }); // follow stats

@@ -12,6 +12,12 @@ const { Pool } = require("pg");
 const request = require("supertest");
 const express = require("express");
 
+jest.mock("../services/redis", () => ({
+  get: jest.fn().mockResolvedValue(null),
+  set: jest.fn().mockResolvedValue(),
+  deletePattern: jest.fn().mockResolvedValue(),
+}));
+
 let container;
 let pool;
 let testPool;

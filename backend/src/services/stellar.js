@@ -4,22 +4,62 @@
  */
 "use strict";
 
-const { Horizon, Networks, rpc, Contract, TransactionBuilder, scValToNative, xdr } = require("@stellar/stellar-sdk");
+const { Horizon, Networks, rpc, Contract, TransactionBuilder, scValToNative, xdr, Address, StrKey, Account, Config } = require("@stellar/stellar-sdk");
+
+const { extractDelivery } = require("./pathPayment");
 
 const NETWORK     = process.env.STELLAR_NETWORK || "testnet";
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon-testnet.stellar.org";
 const RPC_URL     = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+
+// Bounded HTTP timeout for every outbound Stellar call (issue #1097). Without
+// one a hung Horizon/RPC connection parks the request that awaits it forever.
+const STELLAR_TIMEOUT_MS = Number.parseInt(process.env.STELLAR_TIMEOUT_MS, 10) || 15000;
+
+// Three separate switches are needed, and only the first two are obvious:
+// `Config.setTimeout` is documented as global but in @stellar/stellar-sdk v17
+// it is read only by the Federation and stellar.toml clients. Horizon and
+// Soroban RPC each talk through their own module-level axios instance, so each
+// has to be bounded explicitly.
+Config.setTimeout(STELLAR_TIMEOUT_MS);
+if (Horizon?.AxiosClient?.defaults) Horizon.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+if (rpc?.AxiosClient?.defaults) rpc.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+
+/**
+ * True when `err` is an aborted/expired outbound request rather than a genuine
+ * Horizon/RPC error response.
+ *
+ * The SDK exposes no `TimeoutError` class in v17, and the two axios clients
+ * surface a timeout as `code: "ECONNABORTED"` (or `"ETIMEDOUT"` further down
+ * the socket stack), so callers should not be taught to match one shape.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isStellarTimeoutError(err) {
+  if (!err || typeof err !== "object") return false;
+  const { name, code, message } = /** @type {{ name?: string, code?: string, message?: string }} */ (err);
+  if (name === "TimeoutError") return true;
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return true;
+  return typeof message === "string" && /timeout of \d+ms exceeded|timed? ?out/i.test(message);
+}
 
 const NETWORK_PASSPHRASE = NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 const server = new Horizon.Server(HORIZON_URL);
 const rpcServer = new rpc.Server(RPC_URL);
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 
+// Contract function invoked (with the project ID as its second argument) when
+// a project is registered on-chain, and the topic symbol of the event the
+// contract publishes with the registered project ID as its data payload.
+const REGISTER_PROJECT_FUNCTION = "register_project";
+const PROJ_REG_EVENT_TOPIC = "proj_reg";
+
 async function getOnChainProject(projectId) {
   if (!CONTRACT_ID) return null;
   
   const contract = new Contract(CONTRACT_ID);
-  const dummyAccount = new Horizon.Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
+  const dummyAccount = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "-1");
   
   const tx = new TransactionBuilder(dummyAccount, { fee: "100", networkPassphrase: NETWORK_PASSPHRASE })
     .addOperation(contract.call("get_project", projectId))
@@ -188,11 +228,322 @@ async function getProjectDonationEvents(projectId, { limit = 20, cursor } = {}) 
  */
 // Exported below as `getOnChainProject`
 
+/**
+ * Extract the project ID that a successful Soroban registration transaction
+ * registered on-chain, or `null` when the transaction is not a GreenPay
+ * `register_project` invocation for `CONTRACT_ID`.
+ *
+ * Two independent on-chain facts are verified:
+ *
+ *   1. The transaction envelope invokes `register_project` on `CONTRACT_ID`
+ *      and passes the project ID as its second argument.
+ *   2. The transaction result meta carries the contract's `proj_reg` event,
+ *      whose data payload is the registered project ID (the Soroban
+ *      operation's result / return value area for a `register_project` call).
+ *
+ * When both are present they must agree. This lets the admin confirm endpoint
+ * prove that a given transaction hash actually registered the project being
+ * confirmed, instead of trusting the `projectId` supplied in the request body.
+ *
+ * @param {object} tx - Horizon transaction record for a successful transaction.
+ * @returns {string|null} The project ID registered on-chain, or `null`.
+ */
+function getRegisteredProjectIdFromTransaction(tx) {
+  if (!tx || !CONTRACT_ID) return null;
+
+  const fromEnvelope = getProjectIdFromEnvelope(tx);
+  const fromEvent = getProjectIdFromProjRegEvent(tx);
+
+  // Both sources must agree when both are present; a mismatch means the
+  // transaction cannot be trusted as a registration for a single project.
+  if (fromEnvelope && fromEvent && fromEnvelope !== fromEvent) return null;
+
+  return fromEnvelope || fromEvent || null;
+}
+
+/**
+ * Read the project ID passed as the `register_project` argument in the
+ * transaction envelope. The envelope is committed to by the transaction hash,
+ * so this cannot be forged by a caller.
+ *
+ * @param {object} tx - Horizon transaction record.
+ * @returns {string|null} The project ID, or `null` when no matching operation.
+ */
+function getProjectIdFromEnvelope(tx) {
+  if (!tx || typeof tx.envelope_xdr !== "string") return null;
+
+  let envelope;
+  try {
+    envelope = xdr.TransactionEnvelope.fromXDR(tx.envelope_xdr, "base64");
+  } catch {
+    return null;
+  }
+
+  let innerTx;
+  const envType = typeof envelope.switch === "function" ? envelope.switch() : envelope.type;
+  if (
+    envType === "envelopeTypeTx" ||
+    (xdr.EnvelopeType?.envelopeTypeTx && (envType === xdr.EnvelopeType.envelopeTypeTx || (typeof xdr.EnvelopeType.envelopeTypeTx === "function" && envType === xdr.EnvelopeType.envelopeTypeTx())))
+  ) {
+    const v1 = typeof envelope.v1 === "function" ? envelope.v1() : envelope.v1;
+    innerTx = v1 && (typeof v1.tx === "function" ? v1.tx() : v1.tx);
+  } else if (
+    envType === "envelopeTypeTxV0" ||
+    (xdr.EnvelopeType?.envelopeTypeTxV0 && (envType === xdr.EnvelopeType.envelopeTypeTxV0 || (typeof xdr.EnvelopeType.envelopeTypeTxV0 === "function" && envType === xdr.EnvelopeType.envelopeTypeTxV0())))
+  ) {
+    const v0 = typeof envelope.v0 === "function" ? envelope.v0() : envelope.v0;
+    innerTx = v0 && (typeof v0.tx === "function" ? v0.tx() : v0.tx);
+  } else {
+    // Fee-bump envelopes never carry our registration call.
+    return null;
+  }
+
+  if (!innerTx) return null;
+  const operations = typeof innerTx.operations === "function" ? innerTx.operations() : innerTx.operations;
+  if (!Array.isArray(operations)) return null;
+
+  for (const operation of operations) {
+    const body = typeof operation.body === "function" ? operation.body() : operation.body;
+    if (!body) continue;
+    const bodyType = typeof body.switch === "function" ? body.switch() : body.type;
+    const isInvoke = bodyType === "invokeHostFunction" ||
+      (xdr.OperationType?.invokeHostFunction && (bodyType === xdr.OperationType.invokeHostFunction || (typeof xdr.OperationType.invokeHostFunction === "function" && bodyType === xdr.OperationType.invokeHostFunction())));
+    if (!isInvoke) continue;
+
+    const invokeOp = typeof body.invokeHostFunctionOp === "function" ? body.invokeHostFunctionOp() : body.invokeHostFunctionOp;
+    if (!invokeOp) continue;
+    const hostFunction = typeof invokeOp.hostFunction === "function" ? invokeOp.hostFunction() : invokeOp.hostFunction;
+    if (!hostFunction) continue;
+
+    const fnType = typeof hostFunction.switch === "function" ? hostFunction.switch() : hostFunction.type;
+    const isInvokeContract = fnType === "hostFunctionTypeInvokeContract" ||
+      (xdr.HostFunctionType?.hostFunctionTypeInvokeContract && (fnType === xdr.HostFunctionType.hostFunctionTypeInvokeContract || (typeof xdr.HostFunctionType.hostFunctionTypeInvokeContract === "function" && fnType === xdr.HostFunctionType.hostFunctionTypeInvokeContract())));
+    if (!isInvokeContract) continue;
+
+    const invokeArgs = typeof hostFunction.invokeContract === "function" ? hostFunction.invokeContract() : hostFunction.invokeContract;
+    if (!invokeArgs) continue;
+
+    let contractId;
+    try {
+      const rawContractAddress = typeof invokeArgs.contractAddress === "function" ? invokeArgs.contractAddress() : invokeArgs.contractAddress;
+      contractId = Address.fromScAddress(rawContractAddress).toString();
+    } catch {
+      continue;
+    }
+    if (contractId !== CONTRACT_ID) continue;
+
+    const fnName = typeof invokeArgs.functionName === "function" ? invokeArgs.functionName() : invokeArgs.functionName;
+    if (!fnName || fnName.toString() !== REGISTER_PROJECT_FUNCTION) continue;
+
+    // register_project(admin, project_id, name, wallet, co2_per_xlm, ...)
+    const args = typeof invokeArgs.args === "function" ? invokeArgs.args() : invokeArgs.args;
+    if (!Array.isArray(args) || args.length < 2) continue;
+
+    let projectId;
+    try {
+      projectId = scValToNative(args[1]);
+    } catch {
+      continue;
+    }
+    if (typeof projectId === "string" && projectId.length > 0) return projectId;
+  }
+
+  return null;
+}
+
+/**
+ * Read the project ID published by the contract's `proj_reg` event in the
+ * transaction result meta (the Soroban operation result data for a
+ * `register_project` call).
+ *
+ * @param {object} tx - Horizon transaction record.
+ * @returns {string|null} The project ID, or `null` when no matching event.
+ */
+function getProjectIdFromProjRegEvent(tx) {
+  const metaXdr = tx.result_meta_xdr || tx.meta_xdr;
+  if (typeof metaXdr !== "string") return null;
+
+  let meta;
+  try {
+    meta = xdr.TransactionMeta.fromXDR(metaXdr, "base64");
+  } catch {
+    return null;
+  }
+  const metaType = typeof meta.switch === "function" ? meta.switch() : meta.type;
+  const isV3 = metaType === 3 || metaType === "v3" || Boolean(meta.v3);
+  if (!isV3) return null; // TransactionMetaV3
+
+  const v3 = typeof meta.v3 === "function" ? meta.v3() : meta.v3;
+  if (!v3) return null;
+  const sorobanMeta = typeof v3.sorobanMeta === "function" ? v3.sorobanMeta() : v3.sorobanMeta;
+  if (!sorobanMeta) return null; // classic (non-Soroban) transaction
+
+  const events = typeof sorobanMeta.events === "function" ? sorobanMeta.events() : sorobanMeta.events;
+  if (!Array.isArray(events)) return null;
+
+  for (const event of events) {
+    const evType = typeof event.type === "function" ? event.type() : event.type;
+    const isContractType = evType === "contract" || evType?.name === "contract" || evType === 1 || evType?.value === 1 ||
+      (xdr.ContractEventType?.contract && (evType === xdr.ContractEventType.contract || (typeof xdr.ContractEventType.contract === "function" && evType === xdr.ContractEventType.contract())));
+    if (!isContractType) continue;
+
+    const rawContractId = typeof event.contractId === "function" ? event.contractId() : event.contractId;
+    if (!rawContractId) continue;
+
+    // Only accept events emitted by our contract.
+    let eventContractId;
+    try {
+      const contractBytes = rawContractId.value || rawContractId;
+      eventContractId = StrKey.encodeContract(contractBytes);
+    } catch {
+      continue;
+    }
+    if (eventContractId !== CONTRACT_ID) continue;
+
+    const body = typeof event.body === "function" ? event.body() : event.body;
+    if (!body) continue;
+    const bodyV0 = typeof body.v0 === "function" ? body.v0() : body.v0;
+    if (!bodyV0) continue;
+
+    const topics = typeof bodyV0.topics === "function" ? bodyV0.topics() : bodyV0.topics;
+    if (!Array.isArray(topics) || topics.length === 0) continue;
+
+    let topic0;
+    try {
+      topic0 = scValToNative(topics[0]);
+    } catch {
+      continue;
+    }
+    if (topic0 !== PROJ_REG_EVENT_TOPIC) continue;
+
+    let projectId;
+    try {
+      const data = typeof bodyV0.data === "function" ? bodyV0.data() : bodyV0.data;
+      projectId = scValToNative(data);
+    } catch {
+      continue;
+    }
+    if (typeof projectId === "string" && projectId.length > 0) return projectId;
+  }
+
+  return null;
+}
+
+/**
+ * Query Soroban RPC for ProjectDeactivated events.
+ *
+ * @param {number} [startLedger] - Ledger sequence to start querying from.
+ * @returns {Promise<Array<{ projectId: string, ledger: number }>>}
+ */
+async function getProjectDeactivatedEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+
+  const request = {
+    filters: [
+      {
+        type: "contract",
+        contractIds: [CONTRACT_ID],
+        topics: [
+          [
+            xdr.ScVal.scvSymbol("ProjectDeactivated").toXDR("base64"),
+            "*",
+          ],
+        ],
+      },
+    ],
+    limit: 50,
+  };
+  if (startLedger) {
+    request.startLedger = startLedger;
+  }
+
+  let response;
+  try {
+    response = await rpcServer.getEvents(request);
+  } catch (err) {
+    return [];
+  }
+
+  if (!response || !response.events) return [];
+
+  const results = [];
+  for (const evt of response.events) {
+    try {
+      let projectId = null;
+      if (evt.value) {
+        if (typeof evt.value === "string") {
+          projectId = scValToNative(xdr.ScVal.fromXDR(evt.value, "base64"));
+        } else {
+          projectId = scValToNative(evt.value);
+        }
+      }
+      if (typeof projectId === "string" && projectId.length > 0) {
+        results.push({ projectId, ledger: evt.ledger });
+      }
+    } catch {
+      // skip unparseable
+    }
+  }
+  return results;
+}
+
+async function getFundingMilestoneEvents(startLedger) {
+  if (!CONTRACT_ID) return [];
+  const request = {
+    filters: [{
+      type: "contract",
+      contractIds: [CONTRACT_ID],
+      topics: [[xdr.ScVal.scvSymbol("MilestoneReached").toXDR("base64"), "*", "*"]],
+    }],
+    limit: 100,
+  };
+  if (startLedger) request.startLedger = startLedger;
+  let response;
+  try { response = await rpcServer.getEvents(request); }
+  catch { return []; }
+  const events = [];
+  for (const event of response?.events || []) {
+    try {
+      const decode = (value) => scValToNative(
+        typeof value === "string" ? xdr.ScVal.fromXDR(value, "base64") : value,
+      );
+      const topics = event.topic || event.topics || [];
+      const projectId = decode(topics[1]);
+      const percentage = Number(decode(topics[2]));
+      const totalRaisedStroops = BigInt(decode(event.value));
+      if (typeof projectId === "string" && [25, 50, 75, 100].includes(percentage)) {
+        events.push({ projectId, percentage, totalRaisedXLM: Number(totalRaisedStroops) / 10_000_000, ledger: event.ledger });
+      }
+    } catch { /* Ignore malformed or unrelated events. */ }
+  }
+  return events;
+}
+
+/**
+ * What a classic payment / DEX path-payment transaction delivered to
+ * `destination` from `source`, read from Horizon's operation records (#1660).
+ * Donation recording uses this instead of the client-reported amount so a
+ * path payment is credited with what the project actually received.
+ *
+ * @param {{transactionHash: string, destination: string, source: string}} params
+ * @returns {Promise<ReturnType<typeof import("./pathPayment").extractDelivery>>}
+ */
+async function getDeliveredPayment({ transactionHash, destination, source }) {
+  const page = await server.operations().forTransaction(transactionHash).limit(200).call();
+  return extractDelivery(page.records, { destination, source });
+}
+
 module.exports = {
   server,
   rpcServer,
   CONTRACT_ID,
   NETWORK_PASSPHRASE,
+  STELLAR_TIMEOUT_MS,
+  isStellarTimeoutError,
   getOnChainProject,
-  getProjectDonationEvents
+  getProjectDonationEvents,
+  getRegisteredProjectIdFromTransaction,
+  getProjectDeactivatedEvents,
+  getFundingMilestoneEvents,
+  getDeliveredPayment,
 };

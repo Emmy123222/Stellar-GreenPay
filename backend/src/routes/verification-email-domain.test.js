@@ -1,10 +1,10 @@
 "use strict";
 
 /**
- * Tests for #795 — prevent org email spoofing in verification submissions.
+ * Tests for #1088 — enforce exact verification email domains from config.
  *
- * The contactEmail domain must match (or be a subdomain of) the
- * organizationWebsite domain when a website is provided.
+ * The contactEmail domain must exactly match the organizationWebsite domain
+ * and both must use a configured verification domain.
  */
 
 jest.mock("../db/pool", () => ({ query: jest.fn(), connect: jest.fn() }));
@@ -70,7 +70,7 @@ const MOCK_DB_ROW = {
   reviewed_at: null,
 };
 
-describe("verification submission — email domain validation (#795)", () => {
+describe("verification submission — email domain validation (#1088)", () => {
   const app = buildApp();
 
   beforeEach(() => {
@@ -86,11 +86,47 @@ describe("verification submission — email domain validation (#795)", () => {
     expect(res.body.success).toBe(true);
   });
 
-  test("accepts submission when email is a subdomain of website", async () => {
+  test("rejects submission when email is a subdomain of website", async () => {
     const res = await request(app)
       .post("/api/verification-requests")
       .send({ ...BASE, contactEmail: "team@mail.acme.org" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contactEmail domain/i);
+  });
+
+  test("accepts submission when email exactly matches an allowed domain", async () => {
+    const res = await request(app)
+      .post("/api/verification-requests")
+      .send({
+        ...BASE,
+        organizationWebsite: "https://greenpeace.org",
+        contactEmail: "contact@greenpeace.org",
+      });
     expect(res.status).toBe(201);
+  });
+
+  test("rejects attacker-controlled subdomain of an allowed domain", async () => {
+    const res = await request(app)
+      .post("/api/verification-requests")
+      .send({
+        ...BASE,
+        organizationWebsite: "https://greenpeace.org",
+        contactEmail: "attacker@evil.greenpeace.org",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contactEmail domain/i);
+  });
+
+  test("rejects exact domain that is not in the allowlist", async () => {
+    const res = await request(app)
+      .post("/api/verification-requests")
+      .send({
+        ...BASE,
+        organizationWebsite: "https://example.org",
+        contactEmail: "contact@example.org",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/contactEmail domain/i);
   });
 
   test("accepts www-prefixed website matched against plain domain email", async () => {

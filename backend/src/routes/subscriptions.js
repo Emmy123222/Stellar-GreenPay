@@ -1,12 +1,14 @@
 /**
  * src/routes/subscriptions.js
  * POST /api/subscriptions        — subscribe to project updates
+ * GET  /api/subscriptions?email= — list a donor's per-project preferences
+ * PATCH /api/subscriptions/:id   — enable or disable a preference
  * GET  /api/subscriptions/unsubscribe — one-click token unsubscribe
  * GET  /api/subscriptions/:projectId/count — subscriber count
  */
 "use strict";
 const express = require("express");
-const router  = express.Router();
+const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db/pool");
 const { verifyUnsubscribeToken } = require("../services/unsubscribeToken");
@@ -52,8 +54,11 @@ router.post("/", async (req, res, next) => {
     }
 
     // Verify project exists
-    const proj = await pool.query("SELECT id FROM projects WHERE id = $1", [projectId]);
-    if (!proj.rows[0]) return res.status(404).json({ error: "Project not found" });
+    const proj = await pool.query("SELECT id FROM projects WHERE id = $1", [
+      projectId,
+    ]);
+    if (!proj.rows[0])
+      return res.status(404).json({ error: "Project not found" });
 
     const insertResult = await pool.query(
       `INSERT INTO project_subscriptions (id, project_id, email, donor_address)
@@ -64,7 +69,9 @@ router.post("/", async (req, res, next) => {
     );
 
     if (insertResult.rowCount === 0) {
-      return res.status(409).json({ error: "Already subscribed with this email." });
+      return res
+        .status(409)
+        .json({ error: "Already subscribed with this email." });
     }
 
     res.status(201).json({ success: true, message: "Subscribed successfully" });
@@ -73,38 +80,80 @@ router.post("/", async (req, res, next) => {
   }
 });
 
+// Notification settings use the email verified by the recipient's digest link.
+// This endpoint intentionally returns no data unless a syntactically valid email
+// is supplied, so it cannot become a broad subscription directory.
+router.get("/", async (req, res, next) => {
+  try {
+    const email = typeof req.query.email === "string" ? req.query.email.toLowerCase().trim() : "";
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: "A valid email is required" });
+    const result = await pool.query(
+      `SELECT ps.id, ps.project_id, ps.email, ps.unsubscribed, p.name AS project_name
+       FROM project_subscriptions ps JOIN projects p ON p.id = ps.project_id
+       WHERE ps.email = $1 ORDER BY p.name ASC`, [email],
+    );
+    return res.json({ success: true, data: result.rows.map((row) => ({
+      id: row.id, projectId: row.project_id, projectName: row.project_name,
+      email: row.email, subscribed: !row.unsubscribed,
+    })) });
+  } catch (e) { return next(e); }
+});
+
+router.patch("/:id", async (req, res, next) => {
+  try {
+    const { email, subscribed } = req.body || {};
+    if (!EMAIL_RE.test(typeof email === "string" ? email : "") || typeof subscribed !== "boolean") {
+      return res.status(400).json({ error: "A valid email and subscribed boolean are required" });
+    }
+    const result = await pool.query(
+      `UPDATE project_subscriptions SET unsubscribed = $1 WHERE id = $2 AND email = $3
+       RETURNING id, project_id, unsubscribed`, [!subscribed, req.params.id, email.toLowerCase().trim()],
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: "Subscription not found" });
+    return res.json({ success: true, data: { id: result.rows[0].id, projectId: result.rows[0].project_id, subscribed: !result.rows[0].unsubscribed } });
+  } catch (e) { return next(e); }
+});
+
 // GET /api/subscriptions/unsubscribe?token=<hmac-signed-email-projectId>
 router.get("/unsubscribe", async (req, res, next) => {
   try {
     const { token } = req.query;
     if (!token || typeof token !== "string") {
-      return res.status(400).send(buildUnsubscribePage({
-        title: "Invalid link",
-        message: "This unsubscribe link is missing a token.",
-      }));
+      return res.status(400).send(
+        buildUnsubscribePage({
+          title: "Invalid link",
+          message: "This unsubscribe link is missing a token.",
+        }),
+      );
     }
 
     const parsed = verifyUnsubscribeToken(token);
     if (!parsed) {
-      return res.status(400).send(buildUnsubscribePage({
-        title: "Invalid link",
-        message: "This unsubscribe link is invalid or has expired.",
-      }));
+      return res.status(400).send(
+        buildUnsubscribePage({
+          title: "Invalid link",
+          message: "This unsubscribe link is invalid or has expired.",
+        }),
+      );
     }
 
     const { email, projectId } = parsed;
-    const proj = await pool.query("SELECT name FROM projects WHERE id = $1", [projectId]);
+    const proj = await pool.query("SELECT name FROM projects WHERE id = $1", [
+      projectId,
+    ]);
     const projectName = proj.rows[0]?.name || "this project";
 
     await pool.query(
-      "DELETE FROM project_subscriptions WHERE project_id = $1 AND email = $2",
+      "UPDATE project_subscriptions SET unsubscribed = true WHERE project_id = $1 AND email = $2",
       [projectId, email],
     );
 
-    res.status(200).send(buildUnsubscribePage({
-      title: "Unsubscribed",
-      message: `You will no longer receive monthly impact digests for ${projectName}.`,
-    }));
+    res.status(200).send(
+      buildUnsubscribePage({
+        title: "Unsubscribed",
+        message: `You will no longer receive monthly impact digests for ${projectName}.`,
+      }),
+    );
   } catch (e) {
     next(e);
   }
@@ -114,7 +163,7 @@ router.get("/unsubscribe", async (req, res, next) => {
 router.get("/:projectId/count", async (req, res, next) => {
   try {
     const result = await pool.query(
-      "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1",
+      "SELECT COUNT(*)::int AS count FROM project_subscriptions WHERE project_id = $1 AND (unsubscribed = false OR unsubscribed IS NULL)",
       [req.params.projectId],
     );
     res.json({ success: true, count: result.rows[0].count });
@@ -127,32 +176,42 @@ router.get("/:projectId/count", async (req, res, next) => {
 router.delete("/:id", async (req, res, next) => {
   try {
     const { email, donorAddress } = req.body;
-    
+
     if (!email && !donorAddress) {
-      return res.status(400).json({ error: "email or donorAddress is required to unsubscribe" });
+      return res
+        .status(400)
+        .json({ error: "email or donorAddress is required to unsubscribe" });
     }
 
-    const sub = await pool.query("SELECT email, donor_address FROM project_subscriptions WHERE id = $1", [req.params.id]);
-    
+    const sub = await pool.query(
+      "SELECT email, donor_address FROM project_subscriptions WHERE id = $1",
+      [req.params.id],
+    );
+
     if (!sub.rows[0]) {
       return res.status(404).json({ error: "Subscription not found" });
     }
-    
+
     const record = sub.rows[0];
-    
+
     let authorized = false;
     if (email && email.toLowerCase().trim() === record.email) {
       authorized = true;
     } else if (donorAddress && donorAddress === record.donor_address) {
       authorized = true;
     }
-    
+
     if (!authorized) {
-      return res.status(403).json({ error: "Unauthorized to delete this subscription" });
+      return res
+        .status(403)
+        .json({ error: "Unauthorized to delete this subscription" });
     }
-    
-    await pool.query("DELETE FROM project_subscriptions WHERE id = $1", [req.params.id]);
-    
+
+    await pool.query(
+      "UPDATE project_subscriptions SET unsubscribed = true WHERE id = $1",
+      [req.params.id],
+    );
+
     res.json({ success: true, message: "Unsubscribed successfully" });
   } catch (e) {
     next(e);

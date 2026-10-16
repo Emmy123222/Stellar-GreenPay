@@ -248,9 +248,13 @@ function Header({
   return (
     <View style={[styles.header, { backgroundColor: colors.primary }]}>
       <View style={styles.headerTitleRow}>
-        <Text style={[styles.title, { color: colors.headerText }]}>Stellar GreenPay</Text>
+        <Text style={[styles.title, { color: colors.headerText }]} accessibilityRole="header">Stellar GreenPay</Text>
         {unreadCount > 0 && (
-          <View style={styles.unreadBadge}>
+          <View
+            style={styles.unreadBadge}
+            accessible
+            accessibilityLabel={`${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`}
+          >
             <Text style={styles.unreadBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
           </View>
         )}

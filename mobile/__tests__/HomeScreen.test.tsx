@@ -25,12 +25,16 @@ jest.mock('expo-router', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
-
+// The screen only touches these four exports, so they are listed explicitly:
+// a factory-less `jest.mock('../utils/notifications')` would make Jest load
+// the real module (whose top level calls
+// `Notifications.setNotificationHandler`) just to introspect its shape.
 jest.mock('../utils/notifications', () => ({
   getPushToken: jest.fn().mockResolvedValue(null),
   getUnreadNotificationCount: jest.fn().mockResolvedValue(0),
   setupNotificationListener: jest.fn(() => ({ remove: jest.fn() })),
   setupNotificationResponseListener: jest.fn(() => ({ remove: jest.fn() })),
+  navigateFromInitialNotification: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('expo-notifications', () => ({
@@ -64,9 +68,7 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import { ThemeProvider } from '../app/theme';
-
 import HomeScreen from '../app/index';
-import { ThemeProvider } from '../app/theme';
 
 function wrap(element: React.ReactElement) {
   return <ThemeProvider>{element}</ThemeProvider>;
@@ -80,12 +82,6 @@ async function renderWithTheme(ui: React.ReactElement) {
 /**
  * Match the production API shape: GET /api/projects
  *   → { data: ClimateProject[] }
- *
- * Earlier revisions of this file mocked `{ data: MOCK_PROJECT }` (a single
- * object). Because the source uses `res.data.data ?? res.data` and the
- * FlatList expects an array, the screen rendered the empty-state UI and
- * every "after data loads" assertion failed even though the network path
- * was wired correctly.
  */
 const MOCK_PROJECT = {
   id: 'proj-1',
@@ -99,7 +95,6 @@ const MOCK_PROJECT = {
   status: 'active',
 };
 
-
 const MOCK_PROJECTS = [MOCK_PROJECT];
 
 // ── Animated mock ────────────────────────────────────────────────────────────
@@ -109,37 +104,30 @@ const MOCK_PROJECTS = [MOCK_PROJECT];
 // bridge level. Mirrors ProjectDetailScreen.test.tsx.
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 
-
 describe('HomeScreen', () => {
   beforeEach(() => {
-    // `jest.clearAllMocks()` preserves implementations, so a previous
-    // test's `mockReturnValue(new Promise(() => {}))` would bleed forward
-    // and starve later tests. `mockReset()` clears implementation too.
     jest.clearAllMocks();
     (axios.get as jest.Mock).mockReset();
   });
 
-
   it('shows the header before data arrives', () => {
     (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
     const { getByText, queryByText } = render(wrap(<HomeScreen />));
-    // Header renders during the initial load...
     expect(getByText('Stellar GreenPay')).toBeTruthy();
-    // ...but no project card is shown until data arrives.
     expect(queryByText('Amazon Reforestation Initiative')).toBeNull();
   });
 
   it('renders the app title', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
   it('renders project cards with progress after data loads', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => {
       expect(getByText('Amazon Reforestation Initiative')).toBeTruthy();
       expect(getByText('18420 / 50000 XLM')).toBeTruthy();
@@ -151,23 +139,18 @@ describe('HomeScreen', () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
     const { getByText } = render(wrap(<HomeScreen />));
+    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
+  });
 
   it('renders the header chrome while projects are loading', async () => {
-    // Make the API never resolve so `loading` stays true and the skeleton
-    // branch is rendered. The header is always visible above the skeleton,
-    // so we assert via the header text instead of the (deliberately
-    // text-free) skeleton placeholders.
     (axios.get as jest.Mock).mockReturnValue(new Promise(() => {}));
 
     const { getByText, queryByText } = await act(async () =>
       renderWithTheme(<HomeScreen />)
     );
 
-    // Header is part of the FlatList's ListHeaderComponent, which the
-    // skeleton branch mounts with the placeholder rows.
     expect(getByText('Stellar GreenPay')).toBeTruthy();
     expect(getByText('Climate donations on Stellar')).toBeTruthy();
-    // The project data hasn't arrived, so the card must NOT be present.
     expect(queryByText(MOCK_PROJECT.name)).toBeNull();
   });
 
@@ -176,60 +159,46 @@ describe('HomeScreen', () => {
 
     const { getByText } = await act(async () => renderWithTheme(<HomeScreen />));
 
-
     await waitFor(() =>
       expect(getByText(MOCK_PROJECT.name)).toBeTruthy()
     );
-    // Category upper-cased label and donor-count sub-line are rendered for
-    // each card; presence of both confirms we are on the loaded branch
-    // (not the skeleton or empty-state).
     await waitFor(() =>
       expect(getByText(`${MOCK_PROJECT.donorCount} donors`)).toBeTruthy()
     );
   });
 
-
   it('renders project cards with an accessible label', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByLabelText } = render(wrap(<HomeScreen />));
+    const { getByLabelText } = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() =>
       expect(getByLabelText('View Amazon Reforestation Initiative project')).toBeTruthy()
+    );
+  });
 
   it('survives a network failure without rendering project data', async () => {
     (axios.get as jest.Mock).mockRejectedValue(new Error('network error'));
 
     const { queryByText, findByText } = await act(async () =>
       renderWithTheme(<HomeScreen />)
-
     );
 
-    // Source has two failure branches: `networkError: true` shows
-    // "Unable to load projects. Check your connection." with a Retry
-    // button. If AsyncStorage holds a stale cache entry the catch-block
-    // falls back to that cached data instead of erroring out. The test
-    // must NOT depend on which branch fires — assert on the universal
-    // invariants instead.
     await findByText('Stellar GreenPay');
     await findByText('Climate donations on Stellar');
     expect(queryByText(MOCK_PROJECT.name)).toBeNull();
   });
 
   it('does not crash when subscriptions are torn down on unmount', async () => {
-    // Regression guard for the `subscription.remove is not a function`
-    // cleanup crash that surfaced under the old jest-expo@57 + RNTL@14 +
-    // expo-modules-core stacking. The auto-mock provides a fresh
-    // `{ remove: jest.fn() }` per call so the cleanup is a no-op.
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
 
     const view = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() => expect(view.getByText(MOCK_PROJECT.name)).toBeTruthy());
 
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
 
     expect(() => view.unmount()).not.toThrow();
-
   });
 });
+

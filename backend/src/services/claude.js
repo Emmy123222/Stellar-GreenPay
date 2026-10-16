@@ -15,7 +15,7 @@ const SUMMARY_MODEL = process.env.CLAUDE_SUMMARY_MODEL || "claude-opus-4-7";
 let client = null;
 function getClient() {
   if (client) return client;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim();
   if (!apiKey) {
     const err = new Error("ANTHROPIC_API_KEY is not set");
     err.code = "MISSING_API_KEY";
@@ -64,7 +64,7 @@ async function generateProjectSummary(project) {
     `Description:\n${project.description}`;
 
   const response = await anthropic.messages.create({
-    model: SUMMARY_MODEL,
+    model: process.env.CLAUDE_SUMMARY_MODEL || SUMMARY_MODEL,
     max_tokens: 400,
     // Single-call summarisation: skip thinking, keep effort low so the
     // response stays in the cost/latency budget the UI promises.
@@ -80,7 +80,9 @@ async function generateProjectSummary(project) {
     messages: [{ role: "user", content: userPrompt }],
   });
 
-  const textBlock = response.content.find((block) => block.type === "text");
+  const textBlock = Array.isArray(response?.content)
+    ? response.content.find((block) => block.type === "text")
+    : null;
   if (!textBlock) {
     const err = new Error("Claude returned no text content");
     err.code = "EMPTY_RESPONSE";

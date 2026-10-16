@@ -1,93 +1,29 @@
 "use strict";
 
-jest.mock("pg-boss", () => {
-  const mockBoss = {
-    on: jest.fn(),
-    start: jest.fn(),
-    schedule: jest.fn(),
-    work: jest.fn(),
-  };
-  return function PgBoss() { return mockBoss; };
-}, { virtual: true });
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
-jest.mock("../logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
-
 const pool = require("../db/pool");
-const logger = require("../logger");
-const { runDigest } = require("./digestQueue");
+const { buildDigestHtml, buildDigestText, runDigest } = require("./digestQueue");
 
-global.fetch = jest.fn();
+describe("weekly update digest", () => {
+  const projects = [{ project: { id: "project-1", name: "Solar Forest" }, updates: [{ id: "update-1", title: "First trees planted", body: "We planted one thousand trees.", url: "https://greenpay.test/updates/1" }], unsubscribeUrl: "https://api.test/unsubscribe" }];
 
-describe("runDigest", () => {
-  const OLD_ENV = process.env;
-
-  beforeEach(() => {
-    jest.clearAllMocks();
-    process.env = {
-      ...OLD_ENV,
-      RESEND_API_KEY: "re_test_key",
-      EMAIL_FROM: "GreenPay <updates@greenpay.example>",
-      APP_URL: "https://greenpay.example",
-      API_URL: "https://api.greenpay.example",
-      UNSUBSCRIBE_SECRET: "test-secret",
-    };
-    global.fetch.mockResolvedValue({
-      ok: true,
-      text: jest.fn().mockResolvedValue(""),
-    });
+  test("includes project name, update summary, full update link, and unsubscribe link", () => {
+    const html = buildDigestHtml({ projects, weekLabel: "Jan 1–Jan 7", unsubscribeUrl: "https://greenpay.test/settings" });
+    const text = buildDigestText({ projects, weekLabel: "Jan 1–Jan 7", unsubscribeUrl: "https://greenpay.test/settings" });
+    expect(html).toContain("Solar Forest");
+    expect(html).toContain("First trees planted");
+    expect(html).toContain("https://greenpay.test/updates/1");
+    expect(html).toContain("Unsubscribe from Solar Forest");
+    expect(text).toContain("Manage subscriptions");
   });
 
-  afterEach(() => {
-    process.env = OLD_ENV;
-  });
-
-  test("no active projects with subscribers sends no emails", async () => {
-    pool.query.mockResolvedValue({ rows: [] });
-
-    await runDigest();
-
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ event: "digest_run_complete", sent: 0 }),
-      expect.any(String),
-    );
-  });
-
-  test("sends individual subscriber emails without exposing them to each other", async () => {
-    const subscribers = [
-      "alice@example.com",
-      "bob@example.com",
-      "carol@example.com",
-    ];
-
-    pool.query
-      .mockResolvedValueOnce({
-        rows: [{ id: "project-1", name: "Forest Fund", co2_offset_kg: 1000 }],
-      })
-      .mockResolvedValueOnce({ rows: [{ raised_xlm: "25", donation_count: "2" }] })
-      .mockResolvedValueOnce({ rows: [{ total: "100" }] })
-      .mockResolvedValueOnce({ rows: [] })
-      .mockResolvedValueOnce({ rows: [{ title: "New trees", body: "Seedlings planted." }] })
-      .mockResolvedValueOnce({ rows: subscribers.map((email) => ({ email })) });
-
-    await runDigest();
-
-    expect(global.fetch).toHaveBeenCalledTimes(subscribers.length);
-
-    subscribers.forEach((subscriber, index) => {
-      const [, request] = global.fetch.mock.calls[index];
-      const payload = JSON.parse(request.body);
-
-      expect(payload.to).toBe(subscriber);
-
-      // Ensure other subscribers are not in this payload
-      const otherSubscribers = subscribers.filter(s => s !== subscriber);
-      for (const other of otherSubscribers) {
-        expect(payload.to).not.toContain(other);
-        expect(payload.from).not.toContain(other);
-        expect(payload.subject).not.toContain(other);
-        expect(JSON.stringify(payload.headers || {})).not.toContain(other);
-      }
-    });
+  test("only queries active subscriptions and groups update rows by donor", async () => {
+    delete process.env.RESEND_API_KEY;
+    pool.query.mockResolvedValueOnce({ rows: [
+      { email: "donor@example.com", project_id: "p1", name: "Project A", update_id: "u1", title: "A", body: "Body" },
+      { email: "donor@example.com", project_id: "p2", name: "Project B", update_id: "u2", title: "B", body: "Body" },
+    ] });
+    await expect(runDigest(new Date("2026-01-12T12:00:00Z"))).resolves.toEqual({ sent: 0, donors: 1 });
+    expect(pool.query.mock.calls[0][0]).toContain("ps.unsubscribed = false OR ps.unsubscribed IS NULL");
   });
 });

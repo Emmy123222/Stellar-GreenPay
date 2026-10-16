@@ -3,6 +3,7 @@
  */
 "use strict";
 
+const logger = require("../logger");
 const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
 const FROM_ADDRESS   = process.env.EMAIL_FROM || "GreenPay <updates@greenpay.app>";
 const APP_URL        = process.env.APP_URL || "http://localhost:3000";
@@ -13,7 +14,7 @@ const APP_URL        = process.env.APP_URL || "http://localhost:3000";
  */
 async function sendUpdateNotifications({ project, update, emails }) {
   if (!RESEND_API_KEY) {
-    console.warn("[email] RESEND_API_KEY not set — skipping notifications");
+    logger.warn({ event: "email_api_key_missing" }, "[email] RESEND_API_KEY not set — skipping notifications");
     return;
   }
   if (!emails || emails.length === 0) return;
@@ -43,7 +44,7 @@ async function sendUpdateNotifications({ project, update, emails }) {
 
     if (!res.ok) {
       const body = await res.text();
-      console.error(`[email] Resend error (batch ${i / BATCH + 1}):`, body);
+      logger.error({ event: "email_resend_error", batch: i / BATCH + 1, body }, `[email] Resend error (batch ${i / BATCH + 1}): ${body}`);
     }
   }
 }
@@ -76,7 +77,8 @@ const ADMIN_NOTIFICATION_EMAIL =
 async function sendAdminVerificationNotification(request) {
   if (!RESEND_API_KEY) {
     if (process.env.NODE_ENV !== "test") {
-      console.warn(
+      logger.warn(
+        { event: "email_api_key_missing" },
         "[email] RESEND_API_KEY not set — skipping admin verification notification",
       );
     }
@@ -108,7 +110,7 @@ async function sendAdminVerificationNotification(request) {
 
   if (!res.ok) {
     const errBody = await res.text();
-    console.error("[email] Resend error (verification notification):", errBody);
+    logger.error({ event: "email_resend_verification_error", errBody }, `[email] Resend error (verification notification): ${errBody}`);
   }
 }
 
@@ -260,7 +262,7 @@ function escHtml(str) {
 async function sendVerificationStatusNotification(request, newStatus) {
   if (!RESEND_API_KEY) {
     if (process.env.NODE_ENV !== "test") {
-      console.warn("[email] RESEND_API_KEY not set — skipping status-change notification");
+      logger.warn({ event: "email_api_key_missing" }, "[email] RESEND_API_KEY not set — skipping status-change notification");
     }
     return;
   }
@@ -288,7 +290,7 @@ async function sendVerificationStatusNotification(request, newStatus) {
 
   if (!res.ok) {
     const errBody = await res.text();
-    console.error("[email] Resend error (status-change notification):", errBody);
+    logger.error({ event: "email_resend_status_notification_error", errBody }, `[email] Resend error (status-change notification): ${errBody}`);
   }
 }
 
@@ -396,4 +398,159 @@ function buildStatusChangeText({ request, newStatus, adminUrl }) {
     .join("\n");
 }
 
-module.exports = { sendUpdateNotifications, sendAdminVerificationNotification, sendVerificationStatusNotification };
+/**
+ * Notify a donor that their recurring donation was cancelled because the project was deactivated.
+ *
+ * @param {object} opts
+ * @param {string} opts.email - Donor's email address.
+ * @param {string} opts.projectName - Name of the deactivated project.
+ * @param {string} [opts.donationId] - ID of the cancelled recurring donation.
+ * @returns {Promise<void>}
+ */
+async function sendRecurringDonationCancelledEmail({ email, projectName, donationId }) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      logger.warn(
+        { event: "email_api_key_missing" },
+        "[email] RESEND_API_KEY not set — skipping recurring donation cancellation notification",
+      );
+    }
+    return;
+  }
+  if (!email) return;
+
+  const safeProjectName = sanitizeHeader(projectName || "Project");
+  const subject = `Recurring Donation Cancelled: ${safeProjectName}`;
+  const donationRefHtml = donationId ? `<p style="margin:0 0 16px;font-size:13px;color:#888888;">Pledge ID: ${escHtml(donationId)}</p>` : "";
+  const donationRefText = donationId ? `\nPledge ID: ${donationId}\n` : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f0f7f0;font-family:sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f0;padding:32px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;max-width:600px;width:100%;">
+        <tr><td style="background:#c0392b;padding:24px 32px;">
+          <p style="margin:0;color:#ffffff;font-size:20px;font-weight:700;">🌱 Recurring Donation Cancelled</p>
+        </td></tr>
+        <tr><td style="padding:32px;">
+          <h1 style="margin:0 0 8px;font-size:22px;color:#1a3a1a;">${escHtml(safeProjectName)}</h1>
+          ${donationRefHtml}
+          <p style="margin:0 0 16px;font-size:16px;color:#4a6a4a;line-height:1.6;">
+            Your recurring donation to <strong>${escHtml(safeProjectName)}</strong> has been cancelled because the project has been deactivated.
+          </p>
+          <p style="margin:0;font-size:14px;color:#666666;">
+            No further charges or automated donations will be attempted. If you have any questions, please contact our support team.
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `Recurring Donation Cancelled\n\nYour recurring donation to ${safeProjectName} has been cancelled because the project has been deactivated.${donationRefText}\n\nNo further charges or automated donations will be attempted.`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [email],
+      subject,
+      html,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    logger.error({ event: "resend_error", err: errBody }, "[email] Resend error (recurring donation cancellation): " + errBody);
+  }
+}
+
+async function sendFundingMilestoneEmail({ emails, projectName, percentage, totalRaisedXLM }) {
+  if (!RESEND_API_KEY || !emails?.length) return;
+  const safeName = sanitizeHeader(projectName || "Project");
+  const subject = `Great news! ${safeName} just hit ${percentage}% of its goal`;
+  const text = `Great news! ${safeName} just hit ${percentage}% of its funding goal, with ${totalRaisedXLM} XLM raised.`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [...new Set(emails)],
+      subject,
+      text,
+      html: `<p>${escHtml(text)}</p>`,
+    }),
+  });
+  if (!res.ok) throw new Error(`Milestone email delivery failed (${res.status})`);
+}
+
+/**
+ * Alert platform admins that a webhook delivery has been abandoned after all
+ * retries were exhausted, so the dropped event can be investigated and the
+ * project owner can be told to reconcile manually.
+ *
+ * Best-effort: silently skips when Resend is not configured.
+ *
+ * @param {object} opts
+ * @param {string} opts.deliveryId - webhook_deliveries row id.
+ * @param {string} [opts.url] - Destination URL that kept failing.
+ * @param {number} [opts.attempts] - Number of attempts made.
+ * @param {string|null} [opts.lastError] - Final error message recorded.
+ * @returns {Promise<void>}
+ */
+async function sendWebhookFailureNotification({ deliveryId, url, attempts, lastError } = {}) {
+  if (!RESEND_API_KEY) {
+    if (process.env.NODE_ENV !== "test") {
+      logger.warn({ event: "email_api_key_missing" }, "[email] RESEND_API_KEY not set — skipping webhook failure notification");
+    }
+    return;
+  }
+
+  const subject = `Webhook delivery abandoned after ${attempts} attempts`;
+  const text = [
+    "A webhook delivery permanently failed and has been removed from the retry queue.",
+    "",
+    `Delivery ID: ${deliveryId || "(unknown)"}`,
+    `URL:         ${url || "(unknown)"}`,
+    `Attempts:    ${attempts}`,
+    `Last error:  ${lastError || "(none recorded)"}`,
+    "",
+    "The event was not delivered. Review the webhook endpoint and re-send from the admin dashboard.",
+  ].join("\n");
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: FROM_ADDRESS,
+      to: [ADMIN_NOTIFICATION_EMAIL],
+      subject,
+      text,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    logger.error({ event: "email_resend_webhook_failure_error", errBody }, `[email] Resend error (webhook failure notification): ${errBody}`);
+  }
+}
+
+module.exports = {
+  sendUpdateNotifications,
+  sendAdminVerificationNotification,
+  sendVerificationStatusNotification,
+  sendRecurringDonationCancelledEmail,
+  sendFundingMilestoneEmail,
+  sendWebhookFailureNotification,
+};

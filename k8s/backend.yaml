@@ -17,7 +17,11 @@ spec:
     spec:
       containers:
         - name: backend
-          image: greenpay/backend:latest
+          # The tag is a required placeholder that CI substitutes with an
+          # immutable value (short git SHA) at deploy time via
+          # scripts/render-k8s-manifests.sh. Never use the mutable `latest`
+          # tag here: nodes would silently run different image versions.
+          image: greenpay/backend:${GIT_SHA}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 4000

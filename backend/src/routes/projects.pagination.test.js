@@ -131,11 +131,13 @@ function simulateDbQuery(allRows, cursor, pageSize) {
 
 describe("GET /api/projects — cursor-based pagination across 3 pages", () => {
   let app;
+  let queryRows;
   const ALL_ROWS = generate25Projects(); // 25 rows, sorted DESC
 
   beforeEach(() => {
     app = buildApp();
     jest.clearAllMocks();
+    queryRows = ALL_ROWS;
 
     // Always cache-miss so every request hits pool.query.
     redis.get.mockResolvedValue(null);
@@ -174,9 +176,32 @@ describe("GET /api/projects — cursor-based pagination across 3 pages", () => {
         }
       }
 
-      const rows = simulateDbQuery(ALL_ROWS, cursor, pageSize);
+      const rows = simulateDbQuery(queryRows, cursor, pageSize);
       return Promise.resolve({ rows });
     });
+  });
+
+  test("does not skip projects when all rows share a created_at timestamp", async () => {
+    const createdAt = "2026-01-25T12:00:00.000Z";
+    queryRows = generate25Projects()
+      .map((row) => ({ ...row, created_at: createdAt }))
+      .sort((a, b) => b.id.localeCompare(a.id));
+
+    const page1 = await request(app).get("/api/projects?limit=10").expect(200);
+    const page2 = await request(app)
+      .get(`/api/projects?limit=10&cursor=${page1.body.next_cursor}`)
+      .expect(200);
+    const page3 = await request(app)
+      .get(`/api/projects?limit=10&cursor=${page2.body.next_cursor}`)
+      .expect(200);
+    const allIds = [
+      ...page1.body.data.map((project) => project.id),
+      ...page2.body.data.map((project) => project.id),
+      ...page3.body.data.map((project) => project.id),
+    ];
+
+    expect(allIds).toEqual(queryRows.map((row) => row.id));
+    expect(new Set(allIds).size).toBe(25);
   });
 
   // ── Page 1 ────────────────────────────────────────────────────────────────
