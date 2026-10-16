@@ -18,6 +18,8 @@ is violated.
 
 ## Running the test
 
+The load test can run against a composed stack using `docker-compose.test.yml` (see CI workflow).
+
 Use a dedicated test instance with an existing project and comma-separated
 transaction hashes for donations already stored in that project. The test
 replays those donations to exercise the API's idempotent path. Raise the
@@ -64,8 +66,7 @@ PROJECT_ID=<existing-project-uuid> TX_HASHES=<existing-donation-hash> SCENARIO=r
 | Threshold | k6 expression | Meaning |
 |-----------|--------------|---------|
 | `donation_latency p(95)<500` | Hard | 95 % of requests must complete in < 500 ms |
-| `donation_success_rate rate>0.99` | Hard | ≥ 99 % of checks must pass |
-| `http_req_failed rate<0.01` | Hard | HTTP error rate must stay below 1 % |
+| `http_req_failed rate<0.001` | Hard | HTTP error rate must stay below 0.1 % |
 
 A failed threshold causes k6 to exit with a non-zero status, which will fail the CI job.
 
