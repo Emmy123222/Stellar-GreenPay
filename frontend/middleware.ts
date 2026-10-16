@@ -22,12 +22,28 @@ const UNPKG = 'https://unpkg.com'
 // GitHub avatars rendered on the /contributors timeline
 const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
 
+function getApiConnectSources(): string[] {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL
+  if (!apiUrl) return []
+  try {
+    const parsed = new URL(apiUrl)
+    const isHttps = parsed.protocol === 'https:'
+    const isLocalHttp = process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:'
+    if (!isHttps && !isLocalHttp) return []
+    const websocketScheme = isHttps ? 'wss:' : 'ws:'
+    return [parsed.origin, `${websocketScheme}//${parsed.host}`]
+  } catch {
+    return []
+  }
+}
+
 function buildCsp(nonce: string, isWidget: boolean): string {
   // API origin: 'self' covers same-origin deploys; localhost:4000 covers local dev.
   const connectSrc = [
     "'self'",
     STELLAR_CONNECT,
     'https://api.coingecko.com',
+    ...getApiConnectSources(),
     ...(process.env.NODE_ENV === 'development' ? ['http://localhost:4000'] : []),
   ].join(' ')
 

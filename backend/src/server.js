@@ -17,7 +17,7 @@ const { startTurretsServer } = require("./services/turrets");
 const { start: startSummaryQueue } = require("./services/summaryQueue");
 const { start: startProfileQueue } = require("./services/profileQueue");
 const { start: startStatsRefreshQueue } = require("./services/statsRefreshQueue");
-const { startIndexer } = require("./services/indexerService");
+const indexerService = require("./services/indexerService");
 const { isStellarTimeoutError } = require("./services/stellar");
 const { createCorsMiddleware, getAllowedOrigins } = require("./middleware/corsPolicy");
 const { createRateLimiter } = require("./middleware/rateLimiter");
@@ -35,7 +35,7 @@ const PORT = process.env.PORT || 4000;
 const server = http.createServer(app);
 
 // Sentry initialization (must be added before other middleware)
-initSentry(app);
+initSentry();
 
 // ── Security & CSP (Helmet) ──────────────────────────────────────────────────
 const apiHelmet = helmet({
@@ -108,6 +108,9 @@ app.use(createSelectiveCsrf({
   ignoreMethods: ["GET", "HEAD", "OPTIONS"],
 }));
 
+const origins = getAllowedOrigins();
+app.use(...createCorsMiddleware(origins));
+
 const healthRouter = require("./routes/health");
 const readinessRouter = require("./routes/readiness");
 app.get("/metrics", metricsHandler);
@@ -116,6 +119,31 @@ app.use("/health", healthRouter);
 app.use("/api/health", healthRouter);
 app.use("/api/v1/health", healthRouter);
 app.use("/api/readiness", readinessRouter);
+app.get("/api/indexer/health", async (_req, res) => {
+  res.set("Cache-Control", "no-store");
+  try {
+    const health = await indexerService.getHealth();
+    res.status(health.status === "ok" ? 200 : 503).json({
+      service: "stellar-greenpay-indexer",
+      ...health,
+    });
+  } catch (error) {
+    logger.warn(
+      { event: "indexer_health_probe_failed", errorName: error instanceof Error ? error.name : "UnknownError" },
+      "Indexer health probe failed",
+    );
+    res.status(503).json({
+      service: "stellar-greenpay-indexer",
+      status: "unavailable",
+      timestamp: new Date().toISOString(),
+      isRunning: false,
+      currentLedger: null,
+      lastProcessedLedger: null,
+      lastProcessedAt: null,
+      lagLedgers: null,
+    });
+  }
+});
 app.use("/api/projects", projectsRouter);
 app.use("/api/v1/projects", projectsRouter);
 app.use("/api/uploads", uploadsRouter);
@@ -124,9 +152,6 @@ app.use("/api/donations", donationsRouter);
 app.use("/api/v1/donations", donationsRouter);
 app.use("/api/stats", statsRouter);
 app.use("/api/v1/stats", statsRouter);
-
-const origins = getAllowedOrigins();
-app.use(...createCorsMiddleware(origins));
 
 const io = new Server(server, {
   cors: {
@@ -215,7 +240,7 @@ async function startServer() {
   const { start: startDonationPushQueue } = require("./services/donationPushQueue");
   await startDonationPushQueue();
 
-  startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
+  indexerService.startIndexer(io).catch(err => logger.error({ event: "indexer_startup_error", err }, err.message));
 
   startQueueRefresh();
 

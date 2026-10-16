@@ -14,6 +14,7 @@ const logger = require("../logger");
 const { sendFundingMilestonePush } = require("./push");
 
 let lastProcessedLedger = 0;
+let lastProcessedAt = null;
 let lastDeactivationLedger = 0;
 let lastMilestoneLedger = 0;
 let isRunning = false;
@@ -27,6 +28,11 @@ let reconnectAttempt = 0;
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 60 * 1000;
+const LEDGER_HEALTH_CACHE_MS = 10 * 1000;
+
+let cachedLedgerHealth = null;
+let ledgerHealthExpiresAt = 0;
+let ledgerHealthRequest = null;
 
 function isAuthError(err) {
   const status = err?.status ?? err?.response?.status;
@@ -64,7 +70,14 @@ function openOperationsStream() {
     onmessage: async (op) => {
       reconnectAttempt = 0;
       try {
-        lastProcessedLedger = op.ledger_attr;
+        const rawLedger = op.ledger_attr;
+        const processedLedger = rawLedger === null || rawLedger === undefined || rawLedger === ""
+          ? Number.NaN
+          : Number(rawLedger);
+        if (Number.isSafeInteger(processedLedger) && processedLedger >= 0) {
+          lastProcessedLedger = processedLedger;
+          lastProcessedAt = new Date().toISOString();
+        }
         if (op.type === "payment" && op.asset_type === "native") {
           const projectId = projectWallets.get(op.to);
           if (projectId) await handleDonation(projectId, op);
@@ -119,6 +132,8 @@ async function startIndexer(socketIo) {
   if (isRunning) return;
   isRunning = true;
   io = socketIo;
+  lastProcessedLedger = 0;
+  lastProcessedAt = null;
 
   await updateProjectWallets();
   // Refresh cache every 10 minutes
@@ -286,9 +301,98 @@ function getStatus() {
   return {
     isRunning,
     lastProcessedLedger,
+    lastProcessedAt,
     lastDeactivationLedger,
     projectWalletsCount: projectWallets.size,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function getCurrentLedger() {
+  if (ledgerHealthRequest) return ledgerHealthRequest;
+  if (cachedLedgerHealth && Date.now() < ledgerHealthExpiresAt) {
+    return cachedLedgerHealth;
+  }
+
+  ledgerHealthRequest = stellarServer.ledgers()
+    .order("desc")
+    .limit(1)
+    .call()
+    .then((response) => {
+      const sequence = Number(response.records?.[0]?.sequence);
+      if (!Number.isSafeInteger(sequence) || sequence < 0) {
+        throw new Error("Horizon returned an invalid ledger sequence");
+      }
+      return { currentLedger: sequence, checkedAt: new Date().toISOString() };
+    })
+    .catch((error) => {
+      logger.warn(
+        {
+          event: "indexer_health_ledger_check_failed",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+        },
+        "Could not read the latest Horizon ledger for indexer health",
+      );
+      return { currentLedger: null, checkedAt: new Date().toISOString() };
+    })
+    .then((result) => {
+      cachedLedgerHealth = result;
+      ledgerHealthExpiresAt = Date.now() + LEDGER_HEALTH_CACHE_MS;
+      return result;
+    })
+    .finally(() => {
+      ledgerHealthRequest = null;
+    });
+
+  return ledgerHealthRequest;
+}
+
+async function getHealth() {
+  if (!isRunning) {
+    return {
+      ...getHealthFields(getStatus()),
+      status: "unavailable",
+      currentLedger: null,
+      lagLedgers: null,
+    };
+  }
+
+  const latest = await getCurrentLedger();
+  const status = getStatus();
+  const healthFields = getHealthFields(status);
+  if (!status.isRunning) {
+    return {
+      ...healthFields,
+      status: "unavailable",
+      currentLedger: latest.currentLedger,
+      lagLedgers: null,
+      timestamp: latest.checkedAt,
+    };
+  }
+
+  const lastProcessedLedger = status.lastProcessedLedger || null;
+  const lagLedgers = latest.currentLedger !== null && lastProcessedLedger !== null
+    ? Math.max(0, latest.currentLedger - lastProcessedLedger)
+    : null;
+
+  return {
+    ...healthFields,
+    status: latest.currentLedger === null
+      ? "degraded"
+      : lastProcessedLedger === null
+        ? "starting"
+        : "ok",
+    currentLedger: latest.currentLedger,
+    lagLedgers,
+    timestamp: latest.checkedAt,
+  };
+}
+
+function getHealthFields(status) {
+  return {
+    isRunning: status.isRunning,
+    lastProcessedLedger: status.lastProcessedLedger || null,
+    lastProcessedAt: status.lastProcessedAt,
   };
 }
 
@@ -476,6 +580,7 @@ module.exports = {
   startIndexer,
   stopIndexer,
   getStatus,
+  getHealth,
   handleProjectDeactivated,
   pollDeactivationEvents,
   handleFundingMilestone,

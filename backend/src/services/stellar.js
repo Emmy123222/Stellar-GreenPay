@@ -14,14 +14,9 @@ const RPC_URL     = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stel
 // one a hung Horizon/RPC connection parks the request that awaits it forever.
 const STELLAR_TIMEOUT_MS = Number.parseInt(process.env.STELLAR_TIMEOUT_MS, 10) || 15000;
 
-// Three separate switches are needed, and only the first two are obvious:
-// `Config.setTimeout` is documented as global but in @stellar/stellar-sdk v13
-// it is read only by the Federation and stellar.toml clients. Horizon and
-// Soroban RPC each talk through their own module-level axios instance, so each
-// has to be bounded explicitly.
+// `Config.setTimeout` covers Federation and stellar.toml clients. Horizon and
+// Soroban RPC each own an HTTP client, so bound those clients as well.
 Config.setTimeout(STELLAR_TIMEOUT_MS);
-Horizon.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
-rpc.AxiosClient.defaults.timeout = STELLAR_TIMEOUT_MS;
 
 /**
  * True when `err` is an aborted/expired outbound request rather than a genuine
@@ -45,6 +40,8 @@ function isStellarTimeoutError(err) {
 const NETWORK_PASSPHRASE = NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 const server = new Horizon.Server(HORIZON_URL);
 const rpcServer = new rpc.Server(RPC_URL);
+server.httpClient.defaults.timeout = STELLAR_TIMEOUT_MS;
+rpcServer.httpClient.defaults.timeout = STELLAR_TIMEOUT_MS;
 const CONTRACT_ID = process.env.CONTRACT_ID || "";
 
 // Contract function invoked (with the project ID as its second argument) when

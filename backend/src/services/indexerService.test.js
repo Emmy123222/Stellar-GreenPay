@@ -17,6 +17,8 @@ describe("indexerService - ProjectDeactivated", () => {
   let mockClient;
   let mockEmail;
   let mockStellar;
+  let mockStreamOptions;
+  let mockLedgerCall;
 
   beforeEach(() => {
     jest.resetModules();
@@ -34,14 +36,31 @@ describe("indexerService - ProjectDeactivated", () => {
     mockEmail = {
       sendRecurringDonationCancelledEmail: jest.fn().mockResolvedValue(undefined),
     };
+    mockStreamOptions = null;
+    mockLedgerCall = jest.fn().mockResolvedValue({
+      records: [{ sequence: "100" }],
+    });
 
     mockStellar = {
       server: {
         operations: jest.fn(() => ({
           cursor: jest.fn(() => ({
-            stream: jest.fn(),
+            stream: jest.fn((options) => {
+              mockStreamOptions = options;
+              return jest.fn();
+            }),
           })),
         })),
+        ledgers: jest.fn(() => {
+          const query = {
+            order: jest.fn(),
+            limit: jest.fn(),
+            call: mockLedgerCall,
+          };
+          query.order.mockReturnValue(query);
+          query.limit.mockReturnValue(query);
+          return query;
+        }),
       },
       getProjectDeactivatedEvents: jest.fn().mockResolvedValue([]),
     };
@@ -58,6 +77,53 @@ describe("indexerService - ProjectDeactivated", () => {
 
   afterEach(() => {
     indexerService.stopIndexer();
+  });
+
+  describe("getHealth", () => {
+    it("reports the stopped indexer without making a Horizon request", async () => {
+      await expect(indexerService.getHealth()).resolves.toMatchObject({
+        status: "unavailable",
+        isRunning: false,
+        currentLedger: null,
+        lagLedgers: null,
+      });
+      expect(mockStellar.server.ledgers).not.toHaveBeenCalled();
+    });
+
+    it("calculates ledger lag and shares the cached latest-ledger probe", async () => {
+      mockPool.query.mockResolvedValue({ rows: [] });
+      await indexerService.startIndexer({ emit: jest.fn() });
+      await mockStreamOptions.onmessage({ ledger_attr: 95, type: "other" });
+
+      const first = await indexerService.getHealth();
+      await mockStreamOptions.onmessage({ ledger_attr: 99, type: "other" });
+      const second = await indexerService.getHealth();
+
+      expect(first).toMatchObject({
+        status: "ok",
+        isRunning: true,
+        lastProcessedLedger: 95,
+        currentLedger: 100,
+        lagLedgers: 5,
+      });
+      expect(second).toMatchObject({ lastProcessedLedger: 99, lagLedgers: 1 });
+      expect(mockStellar.server.ledgers).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns a degraded, non-sensitive result when Horizon is unavailable", async () => {
+      mockPool.query.mockResolvedValue({ rows: [] });
+      mockLedgerCall.mockRejectedValueOnce(new Error("private endpoint details"));
+      await indexerService.startIndexer({ emit: jest.fn() });
+
+      const result = await indexerService.getHealth();
+
+      expect(result).toMatchObject({
+        status: "degraded",
+        currentLedger: null,
+        lagLedgers: null,
+      });
+      expect(JSON.stringify(result)).not.toContain("private endpoint details");
+    });
   });
 
   describe("handleProjectDeactivated", () => {

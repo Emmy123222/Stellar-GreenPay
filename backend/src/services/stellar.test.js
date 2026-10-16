@@ -19,6 +19,8 @@ process.env.STELLAR_NETWORK = "testnet";
 
 const {
   getRegisteredProjectIdFromTransaction,
+  server,
+  rpcServer,
   CONTRACT_ID,
   NETWORK_PASSPHRASE,
   STELLAR_TIMEOUT_MS,
@@ -204,11 +206,11 @@ describe("getRegisteredProjectIdFromTransaction", () => {
 describe("Horizon / Soroban request timeout (issue #1097)", () => {
   test("bounds outbound requests instead of letting them hang", () => {
     expect(STELLAR_TIMEOUT_MS).toBe(15000);
-    // Config.setTimeout only reaches Federation + stellar.toml, so the two
-    // axios clients that actually serve chain calls must be bounded too.
+    // Config.setTimeout only reaches Federation + stellar.toml; chain calls
+    // use each server instance's HTTP client.
     expect(sdk.Config.getTimeout()).toBe(STELLAR_TIMEOUT_MS);
-    expect(sdk.Horizon.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
-    expect(sdk.rpc.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    expect(server.httpClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    expect(rpcServer.httpClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
   });
 
   test("recognises the shapes the SDK and axios actually throw", () => {

@@ -1,6 +1,7 @@
 "use strict";
 
 jest.mock("../db/pool", () => ({ query: jest.fn() }));
+jest.mock("../services/redis", () => ({ ping: jest.fn() }));
 jest.mock("../services/indexerService", () => ({
   getStatus: jest.fn(() => ({
     isRunning: false,
@@ -13,6 +14,7 @@ jest.mock("../services/indexerService", () => ({
 const request = require("supertest");
 const express = require("express");
 const pool = require("../db/pool");
+const redis = require("../services/redis");
 const healthRouter = require("./health");
 
 function buildApp() {
@@ -29,6 +31,7 @@ describe("GET /api/health", () => {
     app = buildApp();
     jest.clearAllMocks();
     process.env.PGBOSS_MAX_FAILED_JOBS = "5";
+    redis.ping.mockResolvedValue("PONG");
   });
 
   afterAll(() => {
@@ -47,7 +50,9 @@ describe("GET /api/health", () => {
     const res = await request(app).get("/api/health").expect(200);
 
     expect(res.body.status).toBe("ok");
+    expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.body.checks.db).toBe("ok");
+    expect(res.body.checks.redis).toBe("ok");
     expect(res.body.checks.pgboss).toEqual({
       status: "ok",
       failedJobs: 2,
@@ -88,5 +93,30 @@ describe("GET /api/health", () => {
       maxFailedJobs: 5,
     });
     expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
+  test("returns degraded when Redis is unreachable while preserving other checks", async () => {
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ "?column?": 1 }] })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] });
+    redis.ping.mockRejectedValueOnce(new Error("connection refused"));
+
+    const res = await request(app).get("/api/health").expect(503);
+
+    expect(res.body.status).toBe("degraded");
+    expect(res.body.checks.db).toBe("ok");
+    expect(res.body.checks.redis).toBe("unreachable");
+    expect(res.body.checks.pgboss.status).toBe("ok");
+  });
+
+  test("marks a timed-out Redis health check unreachable", async () => {
+    redis.ping.mockImplementationOnce(() => new Promise(() => {}));
+    pool.query
+      .mockResolvedValueOnce({ rows: [{ "?column?": 1 }] })
+      .mockResolvedValueOnce({ rows: [{ count: 0 }] });
+
+    const res = await request(app).get("/api/health").expect(503);
+
+    expect(res.body.checks.redis).toBe("unreachable");
   });
 });

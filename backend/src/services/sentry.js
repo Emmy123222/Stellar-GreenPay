@@ -2,7 +2,7 @@
 
 const Sentry = require("@sentry/node");
 
-function initSentry(app) {
+function initSentry() {
   if (!process.env.SENTRY_DSN) return Sentry;
 
   Sentry.init({
@@ -24,14 +24,17 @@ function initSentry(app) {
     console.error("[Unhandled Rejection]", reason);
   });
 
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.tracingHandler());
-
   return Sentry;
 }
 
 function errorHandler() {
-  return Sentry.Handlers.errorHandler();
+  if (Sentry.Handlers?.errorHandler) {
+    return Sentry.Handlers.errorHandler();
+  }
+  if (typeof Sentry.expressErrorHandler === "function") {
+    return Sentry.expressErrorHandler();
+  }
+  return (err, _req, _res, next) => next(err);
 }
 
 module.exports = { initSentry, errorHandler, Sentry };

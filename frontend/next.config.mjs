@@ -42,6 +42,21 @@ const UNPKG = 'https://unpkg.com'
 // GitHub avatars rendered on the /contributors timeline
 const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
 
+function getApiConnectSources() {
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL
+  if (!apiUrl) return []
+  try {
+    const parsed = new URL(apiUrl)
+    const isHttps = parsed.protocol === 'https:'
+    const isLocalHttp = process.env.NODE_ENV !== 'production' && parsed.protocol === 'http:'
+    if (!isHttps && !isLocalHttp) return []
+    const websocketScheme = isHttps ? 'wss:' : 'ws:'
+    return [parsed.origin, `${websocketScheme}//${parsed.host}`]
+  } catch {
+    return []
+  }
+}
+
 function buildStaticCsp(allowFraming = false) {
   const frameAncestors = allowFraming ? "frame-ancestors *" : "frame-ancestors 'none'"
   return [
@@ -55,7 +70,7 @@ function buildStaticCsp(allowFraming = false) {
     // OSM tiles loaded as images; Leaflet marker icons use data: URIs;
     // GitHub avatars are loaded on the /contributors timeline.
     `img-src 'self' data: blob: ${LEAFLET_TILE_SOURCES} ${GITHUB_AVATARS}`,
-    `connect-src 'self' ${STELLAR_CONNECT} https://api.coingecko.com`,
+    `connect-src 'self' ${STELLAR_CONNECT} https://api.coingecko.com ${getApiConnectSources().join(' ')}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
