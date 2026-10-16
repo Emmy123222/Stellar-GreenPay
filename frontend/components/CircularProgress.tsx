@@ -4,21 +4,24 @@ interface CircularProgressProps {
   percentage: number;
   size?: number;
   strokeWidth?: number;
+  "aria-label"?: string;
 }
 
 export default function CircularProgress({
   percentage,
   size = 48,
   strokeWidth = 4,
+  "aria-label": ariaLabel,
 }: CircularProgressProps) {
   const [offset, setOffset] = useState<number | null>(null);
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
 
+  const clamped = Math.min(Math.max(percentage, 0), 100);
+
   useEffect(() => {
     // Determine target offset
-    const p = Math.min(Math.max(percentage, 0), 100);
-    const progressOffset = ((100 - p) / 100) * circumference;
+    const progressOffset = ((100 - clamped) / 100) * circumference;
 
     // Small delay ensures the initial render (with 0% circle) 
     // happens, and then CSS animates it filling up.
@@ -26,19 +29,27 @@ export default function CircularProgress({
       setOffset(progressOffset);
     }, 50);
     return () => clearTimeout(timer);
-  }, [percentage, circumference]);
+  }, [clamped, circumference]);
 
   const initialOffset = circumference;
 
   let colorClass = "text-green-500";
-  if (percentage >= 50 && percentage <= 80) {
+  if (clamped >= 50 && clamped <= 80) {
     colorClass = "text-teal-500";
-  } else if (percentage > 80) {
+  } else if (clamped > 80) {
     colorClass = "text-emerald-500";
   }
 
   return (
-    <div className="relative inline-flex items-center justify-center font-body" style={{ width: size, height: size }}>
+    <div
+      role="progressbar"
+      aria-valuenow={Math.round(clamped)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={ariaLabel || "Progress"}
+      className="relative inline-flex items-center justify-center font-body"
+      style={{ width: size, height: size }}
+    >
       <svg className="transform -rotate-90" width={size} height={size}>
         {/* Background rounded track */}
         <circle
@@ -51,6 +62,7 @@ export default function CircularProgress({
         />
         {/* Colored arc */}
         <circle
+          data-testid="circular-progress-bar"
           className={`${colorClass} stroke-current transition-all ease-out duration-1000`}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
@@ -63,7 +75,7 @@ export default function CircularProgress({
         />
       </svg>
       <span className="absolute font-semibold text-forest-900" style={{ fontSize: Math.max(10, size * 0.25) }}>
-        {Math.round(percentage)}%
+        {Math.round(clamped)}%
       </span>
     </div>
   );

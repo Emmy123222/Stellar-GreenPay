@@ -10,6 +10,7 @@
  *   to clearly explain the ticker's purpose without noisy live announcements.
  */
 import { useEffect, useState } from "react";
+import { io, Socket } from "socket.io-client";
 import { server } from "@/lib/stellar";
 import { formatAmount, formatTime, formatXLM, shortenAddress } from "@/utils/format";
 
@@ -29,47 +30,88 @@ export default function DonationTicker({
   const [items, setItems] = useState<TickerItem[]>(initialItems);
 
   useEffect(() => {
+    let mounted = true;
+
     // Fetch initial latest payments
-    server.payments()
-      .limit(5)
-      .order("desc")
-      .call()
-      .then((resp) => {
-        if (!resp || !resp.records || resp.records.length === 0) return;
-        const initial = resp.records.map((r: any) => ({
-          id: r.id,
-          from: r.from || r.funder || r.account,
-          amount: r.amount || "0",
-          asset: r.asset_code || "XLM",
-          time: formatTime(r.created_at),
-        }));
-        setItems(initial);
-      })
-      .catch((err) => {
-        // Horizon network fallback
+    try {
+      server.payments()
+        .limit(5)
+        .order("desc")
+        .call()
+        .then((resp) => {
+          if (!mounted || !resp || !resp.records || resp.records.length === 0) return;
+          const initial = resp.records.map((r: any) => ({
+            id: r.id,
+            from: r.from || r.funder || r.account,
+            amount: r.amount || "0",
+            asset: r.asset_code || "XLM",
+            time: formatTime(r.created_at),
+          }));
+          setItems(initial);
+        })
+        .catch(() => {
+          // Horizon network fallback
+        });
+    } catch {
+      // Horizon network fallback
+    }
+
+    // Helper to add incoming item capped at 10 items total
+    const handleIncoming = (payment: any) => {
+      if (!mounted || !payment) return;
+      const newItem: TickerItem = {
+        id: String(payment.id || payment.txHash || payment.transactionHash || `${Date.now()}-${Math.random()}`),
+        from: payment.from || payment.donorAddress || payment.funder || payment.account || "Anonymous",
+        amount: String(payment.amount ?? payment.amountXLM ?? "0"),
+        asset: payment.asset || payment.asset_code || payment.currency || "XLM",
+        time: formatTime(payment.time || payment.timestamp || payment.createdAt || payment.created_at || new Date()),
+      };
+      setItems((prev) => [newItem, ...prev.slice(0, 9)]);
+    };
+
+    // Stream new payments via Horizon SSE
+    let closeStream: (() => void) | null = null;
+    try {
+      closeStream = server.payments()
+        .cursor("now")
+        .stream({
+          onmessage: handleIncoming,
+          onerror: (err) => console.error("Horizon SSE Error:", err),
+        });
+    } catch {
+      // Stream fallback
+    }
+
+    // Connect to socket.io for real-time live events
+    let socket: Socket | null = null;
+    try {
+      const base = process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? window.location.origin : "");
+      socket = io(base, { path: "/socket.io", transports: ["websocket"] });
+
+      socket.on("connect", () => {
+        socket?.emit("join_global_feed");
       });
 
-
-    // Stream new payments
-    const closeStream = server.payments()
-      .cursor("now")
-      .stream({
-        onmessage: (payment: any) => {
-          const newItem = {
-            id: payment.id,
-            from: payment.from || payment.funder || payment.account,
-            amount: payment.amount || "0",
-            asset: payment.asset_code || "XLM",
-            time: formatTime(payment.created_at),
-          };
-          setItems((prev) => [newItem, ...prev.slice(0, 9)]);
-        },
-        onerror: (err) => console.error("Horizon SSE Error:", err),
-      });
+      socket.on("donation_event", handleIncoming);
+      socket.on("newDonation", handleIncoming);
+      socket.on("donation", handleIncoming);
+    } catch {
+      // Ignore socket load / connection error in environments where socket is unavailable
+    }
 
     return () => {
+      mounted = false;
       if (typeof closeStream === "function") {
         closeStream();
+      }
+      if (socket) {
+        socket.emit("leave_global_feed");
+        socket.off("donation_event", handleIncoming);
+        socket.off("newDonation", handleIncoming);
+        socket.off("donation", handleIncoming);
+        if (typeof socket.disconnect === "function") {
+          socket.disconnect();
+        }
       }
     };
   }, []);
