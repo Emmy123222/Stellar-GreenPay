@@ -45,7 +45,7 @@ jobs:
         run: docker compose config -q
 
       - name: Validate dev compose config
-        run: docker compose -f docker-compose.dev.yml config -q
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
 
       - name: Validate test compose config
         run: docker compose -f docker-compose.test.yml config -q
@@ -121,13 +121,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run hadolint on backend/Dockerfile
-        uses: hadolint/hadolint-action@v3
+        uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: backend/Dockerfile
           config: .hadolint.yaml
 
       - name: Run hadolint on frontend/Dockerfile
-        uses: hadolint/hadolint-action@v3
+        uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: frontend/Dockerfile
           config: .hadolint.yaml
