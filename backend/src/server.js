@@ -51,6 +51,7 @@ const extensionRouter = require("./routes/extension");
 const mobileRouter = require("./routes/mobile");
 const profilesRouter = require("./routes/profiles");
 const leaderboardRouter = require("./routes/leaderboard");
+const verificationRouter = require("./routes/verification");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -152,6 +153,8 @@ app.use("/api/stats", statsRouter);
 app.use("/api/v1/stats", statsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/v1/notifications", notificationsRouter);
+app.use("/api/leaderboard", leaderboardRouter);
+app.use("/api/v1/leaderboard", leaderboardRouter);
 
 const origins = getAllowedOrigins();
 app.use(...createCorsMiddleware(origins));
@@ -224,6 +227,11 @@ app.use("/api/v1/admin", adminRouter);
 // Webhook subscription management, delivery history and test sends (dual-prefix like projects/donations).
 app.use("/api/webhooks", webhooksRouter);
 app.use("/api/v1/webhooks", webhooksRouter);
+// Project verification requests (dual-prefix like projects/donations).
+app.use("/api/verification", verificationRouter);
+app.use("/api/v1/verification", verificationRouter);
+app.use("/api/verification-requests", verificationRouter);
+app.use("/api/v1/verification-requests", verificationRouter);
 app.use((req, res) => res.status(404).json({ error: `${req.method} ${req.path} not found` }));
 // Sentry error handler — capture exceptions before the final error middleware
 app.use(sentryErrorMiddleware());

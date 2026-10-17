@@ -1,5 +1,9 @@
 services:
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
     command: npm run dev:docker
     environment:
       - WATCHPACK_POLLING=true
@@ -26,7 +30,7 @@ services:
       - ipfs
 
   ipfs:
-    image: ipfs/go-ipfs:latest
+    image: ipfs/kubo:v0.28.0
     ports:
       - '5001:5001'
       - '8080:8080'

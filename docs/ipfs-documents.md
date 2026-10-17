@@ -2,6 +2,14 @@
 
 This guide explains how project documents are stored on IPFS in Stellar-GreenPay and how you can verify and manage your project's documents.
 
+## IPFS Node Version
+
+The development environment (`docker-compose.dev.yml`) runs **[ipfs/kubo v0.28.0](https://github.com/ipfs/kubo/releases/tag/v0.28.0)** as the local IPFS daemon.
+
+`ipfs/kubo` is the actively maintained continuation of the former `ipfs/go-ipfs` image (renamed as of Kubo v0.16). The image exposes the Kubo RPC API on port **5001**, which the backend consumes via `IPFS_API_URL=http://ipfs:5001` (`/api/v0/add`).
+
+When upgrading the pinned version, update the `image:` field in `docker-compose.dev.yml` and update the version recorded here.
+
 ## Why IPFS?
 
 Stellar-GreenPay stores project documents on IPFS (InterPlanetary File System) for several key reasons:

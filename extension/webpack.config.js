@@ -23,6 +23,14 @@ class CopyIconsPlugin {
           `icons/icon-${size}.png`,
           new webpack.sources.RawSource(fs.readFileSync(source)),
         );
+
+        const darkSource = path.resolve(__dirname, `icons/icon-dark-${size}.png`);
+        if (fs.existsSync(darkSource)) {
+          compilation.emitAsset(
+            `icons/icon-dark-${size}.png`,
+            new webpack.sources.RawSource(fs.readFileSync(darkSource)),
+          );
+        }
       }
     });
   }

@@ -5,29 +5,83 @@ import {
 
 const tabProjects = new Map<number, string>();
 
+export const LIGHT_ICONS = {
+  16: 'icons/icon-16.png',
+  32: 'icons/icon-32.png',
+  48: 'icons/icon-48.png',
+  128: 'icons/icon-128.png'
+};
+
+export const DARK_ICONS = {
+  16: 'icons/icon-dark-16.png',
+  32: 'icons/icon-dark-32.png',
+  48: 'icons/icon-dark-48.png',
+  128: 'icons/icon-dark-128.png'
+};
+
+export function updateExtensionIcon(isDark: boolean) {
+  const path = isDark ? DARK_ICONS : LIGHT_ICONS;
+  if (typeof chrome !== 'undefined' && chrome.action && chrome.action.setIcon) {
+    chrome.action.setIcon({ path });
+  } else if (typeof chrome !== 'undefined' && (chrome as any).browserAction && (chrome as any).browserAction.setIcon) {
+    (chrome as any).browserAction.setIcon({ path });
+  }
+}
+
+export function initDarkModeIconListener() {
+  const win = typeof window !== 'undefined' ? window : (globalThis as any).window;
+  if (win && typeof win.matchMedia === 'function') {
+    const mediaQuery = win.matchMedia('(prefers-color-scheme: dark)');
+    updateExtensionIcon(mediaQuery.matches);
+
+    const listener = (e: MediaQueryListEvent) => {
+      updateExtensionIcon(e.matches);
+    };
+
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', listener);
+    } else if ((mediaQuery as any).addListener) {
+      (mediaQuery as any).addListener(listener);
+    }
+  }
+}
+
+// Set initial icon and listen for prefers-color-scheme change events
+initDarkModeIconListener();
+
 const PENDING_ALARM = 'greenpay-check-pending-transactions';
 const PENDING_POLL_MINUTES = 0.5;
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.contextMenus.create({
-    id: 'donate-project',
-    title: 'Donate to this GreenPay project',
-    contexts: ['all'],
-    visible: false,
-    documentUrlPatterns: ['*://*/*']
-  });
-  resumePendingTransactions();
-});
+if (typeof chrome !== 'undefined') {
+  if (chrome.runtime?.onInstalled) {
+    chrome.runtime.onInstalled.addListener(() => {
+      if (chrome.contextMenus?.create) {
+        chrome.contextMenus.create({
+          id: 'donate-project',
+          title: 'Donate to this GreenPay project',
+          contexts: ['all'],
+          visible: false,
+          documentUrlPatterns: ['*://*/*']
+        });
+      }
+      resumePendingTransactions();
+    });
+  }
 
-chrome.runtime.onStartup.addListener(() => {
-  resumePendingTransactions();
-});
+  if (chrome.runtime?.onStartup) {
+    chrome.runtime.onStartup.addListener(() => {
+      resumePendingTransactions();
+    });
+  }
 
-// Clear scheduled work when the extension is suspended or removed so a stale
-// recurring donation check cannot run against an invalid extension context.
-chrome.runtime.onSuspend.addListener(() => {
-  chrome.alarms.clearAll();
-});
+  // Clear scheduled work when the extension is suspended or removed so a stale
+  // recurring donation check cannot run against an invalid extension context.
+  if (chrome.runtime?.onSuspend) {
+    chrome.runtime.onSuspend.addListener(() => {
+      chrome.alarms?.clearAll();
+    });
+  }
+}
 
 // Polling only runs while something is actually in flight, so the badge clears
 // itself once every donation has confirmed or failed.

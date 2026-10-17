@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DonationModal from "../DonationModal";
 import type { ClimateProject } from "@/utils/types";
@@ -404,6 +404,176 @@ describe("DonationModal", () => {
       );
 
       expect(document.body.style.overflow).toBe("");
+    });
+  });
+
+  describe("Donation confirmation flow and states", () => {
+    it("opens with the expected amount and project props rendered", () => {
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      // Project props rendered
+      expect(screen.getByRole("heading", { name: `Donate to ${mockProject.name}`, hidden: true })).toBeInTheDocument();
+      expect(screen.getByText("Make a Donation")).toBeInTheDocument();
+
+      // Preset amounts are rendered
+      expect(screen.getByRole("button", { name: "10 XLM" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "25 XLM" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "50 XLM" })).toBeInTheDocument();
+    });
+
+    it("confirm button triggers the submit callback once", async () => {
+      (signTransactionWithWallet as jest.Mock).mockResolvedValue({
+        signedXDR: "signed-xdr-valid",
+        error: null,
+      });
+      (submitTransaction as jest.Mock).mockResolvedValue({
+        hash: "tx-hash-12345",
+      });
+
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      // Select preset amount
+      const presetBtn = screen.getByRole("button", { name: "25 XLM" });
+      fireEvent.click(presetBtn);
+
+      const confirmButton = screen.getByRole("button", { name: /Donate 25.*XLM/i });
+      expect(confirmButton).toBeEnabled();
+
+      fireEvent.click(confirmButton);
+
+      await waitFor(() => {
+        expect(submitTransaction).toHaveBeenCalledTimes(1);
+        expect(onSuccessMock).toHaveBeenCalledTimes(1);
+      });
+      expect(screen.getByText("Transaction confirmed!")).toBeInTheDocument();
+    });
+
+    it("cancel button closes or resets without submitting", async () => {
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      // Select preset amount
+      fireEvent.click(screen.getByRole("button", { name: "25 XLM" }));
+      const cancelButton = screen.getByRole("button", { name: /cancel/i });
+      expect(cancelButton).toBeInTheDocument();
+
+      fireEvent.click(cancelButton);
+
+      // Reset form without calling submit or onClose
+      expect(submitTransaction).not.toHaveBeenCalled();
+      expect(signTransactionWithWallet).not.toHaveBeenCalled();
+      expect(onSuccessMock).not.toHaveBeenCalled();
+
+      // Close button closes without submitting
+      const closeBtn = screen.getByRole("button", { name: "Close donation widget" });
+      fireEvent.click(closeBtn);
+      expect(onCloseMock).toHaveBeenCalledTimes(1);
+      expect(submitTransaction).not.toHaveBeenCalled();
+    });
+
+    it("backdrop click closes without submitting", () => {
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      const dialog = screen.getByRole("dialog");
+      const backdrop = dialog.parentElement as HTMLElement;
+
+      fireEvent.click(backdrop);
+
+      expect(onCloseMock).toHaveBeenCalledTimes(1);
+      expect(submitTransaction).not.toHaveBeenCalled();
+      expect(signTransactionWithWallet).not.toHaveBeenCalled();
+    });
+
+    it("pending state disables the confirm button", async () => {
+      let resolveSign: (val: any) => void;
+      const signPromise = new Promise((resolve) => {
+        resolveSign = resolve;
+      });
+      (signTransactionWithWallet as jest.Mock).mockReturnValue(signPromise);
+
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "50 XLM" }));
+      const confirmButton = screen.getByRole("button", { name: /Donate 50.*XLM/i });
+      expect(confirmButton).toBeEnabled();
+
+      fireEvent.click(confirmButton);
+
+      await waitFor(() => {
+        expect(screen.getAllByText(/Signing with Freighter…/i).length).toBeGreaterThanOrEqual(1);
+      });
+      expect(confirmButton).toBeDisabled();
+
+      // Resolve signing to finish
+      await act(async () => {
+        resolveSign!({ signedXDR: "mock-xdr", error: null });
+      });
+    });
+
+    it("error state renders the failure message", async () => {
+      (signTransactionWithWallet as jest.Mock).mockResolvedValue({
+        signedXDR: null,
+        error: "User rejected transaction in wallet",
+      });
+
+      render(
+        <DonationModal
+          project={mockProject}
+          publicKey={mockPublicKey}
+          isOpen={true}
+          onClose={onCloseMock}
+          onSuccess={onSuccessMock}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "10 XLM" }));
+      const confirmButton = screen.getByRole("button", { name: /Donate 10.*XLM/i });
+      fireEvent.click(confirmButton);
+
+      await waitFor(() => {
+        expect(screen.getByText("User rejected transaction in wallet")).toBeInTheDocument();
+      });
+      expect(submitTransaction).not.toHaveBeenCalled();
+      expect(onSuccessMock).not.toHaveBeenCalled();
     });
   });
 });

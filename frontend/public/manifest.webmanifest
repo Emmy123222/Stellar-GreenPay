@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "GreenPay — Climate Impact Giving",
+  "short_name": "GreenPay",
+  "description": "Discover verified climate projects and support measurable impact.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f5f9f5",
+  "theme_color": "#227239",
+  "icons": [
+    {
+      "src": "/icons/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

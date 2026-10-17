@@ -117,7 +117,7 @@ export async function csrfFetch(input: RequestInfo, init: RequestInit = {}) {
  *
  * @example
  * const projects = await fetchProjects({ verified: true, limit: 12 });
- * console.log("projects:", projects.length);
+ * // Render the projects in the page.
  */
 export async function fetchProjects(params?: {
   category?: string;

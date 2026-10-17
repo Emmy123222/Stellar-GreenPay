@@ -14,7 +14,15 @@ let cachedRaw: string | null | undefined;
 let cachedWishlist: string[] = [];
 
 function readWishlist(): string[] {
-  const raw = localStorage.getItem(WISHLIST_STORAGE_KEY);
+  let raw: string | null;
+  try {
+    raw = localStorage.getItem(WISHLIST_STORAGE_KEY);
+  } catch {
+    // Storage can be disabled by browser privacy settings or sandboxing.
+    cachedRaw = undefined;
+    cachedWishlist = [];
+    return cachedWishlist;
+  }
   if (raw === cachedRaw) return cachedWishlist;
   cachedRaw = raw;
   try {
@@ -56,7 +64,11 @@ export function useWishlist() {
       ? current.filter((id) => id !== projectId)
       : [...current, projectId];
 
-    localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(updated));
+    try {
+      localStorage.setItem(WISHLIST_STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      return;
+    }
     window.dispatchEvent(new Event(WISHLIST_CHANGED_EVENT));
   }, []);
 
