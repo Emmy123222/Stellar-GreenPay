@@ -8,7 +8,7 @@ const baseProps = {
   donorName: "Jane Doe",
   totalDonatedXLM: "1500",
   totalCO2OffsetKg: 2400,
-  badgeTier: "forest" as const,
+  badgeTier: "forest" as BadgeTier,
   projectsSupported: [
     { id: "p1", name: "Amazon Reforestation" },
     { id: "p2", name: "Solar for Schools" },
@@ -42,17 +42,24 @@ describe("ImpactCertificate", () => {
     const { container } = render(<ImpactCertificate {...baseProps} />);
     expect(container).toMatchSnapshot();
   });
-  const badgeTiers: [string, string][] = [
-    ["seedling", "Seedling"],
-    ["tree", "Tree"],
-    ["forest", "Forest"],
-    ["earth", "Earth Guardian"],
-  ];
-  badgeTiers.forEach(([badgeTier, label]) => {
-    it(`renders the ${badgeTier} badge tier`, () => {
-      render(<ImpactCertificate {...baseProps} badgeTier={badgeTier as BadgeTier} />);
-      expect(screen.getByText(label)).toBeInTheDocument();
-    });
+
+  it("renders the seedling badge tier", () => {
+    render(<ImpactCertificate {...baseProps} badgeTier="seedling" as BadgeTier />);
+    expect(screen.getByText("Seedling")).toBeInTheDocument();
+  });
+
+  it("renders the tree badge tier", () => {
+    render(<ImpactCertificate {...baseProps} badgeTier="tree" as BadgeTier />);
+    expect(screen.getByText("Tree")).toBeInTheDocument();
+  });
+
+  it("renders the forest badge tier", () => {
+    render(<ImpactCertificate {...baseProps} badgeTier="forest" as BadgeTier />);
+    expect(screen.getByText("Forest")).toBeInTheDocument();
+  });
+
+  it("renders the earth badge tier", () => {
+    render(<ImpactCertificate {...baseProps} badgeTier="earth" as BadgeTier />);
+    expect(screen.getByText("Earth Guardian")).toBeInTheDocument();
   });
 });
-
