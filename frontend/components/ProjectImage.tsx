@@ -9,7 +9,9 @@
  * 5. Placeholder image (when src is missing) always gets alt="" + role="presentation"
  *    so it is never announced as "project-placeholder".
  */
-import Image from "next/image";
+import { useEffect, useState } from "react";
+
+export const PROJECT_PLACEHOLDER_SRC = "/project-placeholder.svg";
 
 interface ProjectImageProps {
   src?: string;
@@ -34,56 +36,27 @@ export function ProjectImage({
   height,
   priority = false,
 }: ProjectImageProps) {
-  // Resolve alt text per the documented fallback chain
-  const resolvedAlt: string =
-    decorative || !src
-      ? ""
-      : alt ?? description ?? name;
+  const [currentSrc, setCurrentSrc] = useState(src);
+  useEffect(() => setCurrentSrc(src), [src]);
 
-  const hasImage = Boolean(src);
-
-  if (decorative) {
-    return (
-      <img
-        src={src || "/project-placeholder.svg"}
-        alt=""
-        role="presentation"
-        className={className}
-        width={width}
-        height={height}
-        priority={priority}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-      />
-    );
-  }
-
-  if (!hasImage) {
-    return (
-      <img
-        src="/project-placeholder.svg"
-        alt=""
-        role="presentation"
-        className={className}
-        width={width}
-        height={height}
-        priority={priority}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-      />
-    );
-  }
+  const hasImage = Boolean(src && currentSrc && currentSrc !== PROJECT_PLACEHOLDER_SRC);
+  const resolvedAlt = decorative || !hasImage ? "" : alt ?? description ?? name;
 
   return (
     <img
-      src={src}
+      src={hasImage ? currentSrc : PROJECT_PLACEHOLDER_SRC}
       alt={resolvedAlt}
+      role={decorative || !hasImage ? "presentation" : undefined}
       className={className}
       width={width}
       height={height}
-      priority={priority}
       loading={priority ? "eager" : "lazy"}
       decoding="async"
+      onError={
+        hasImage
+          ? () => setCurrentSrc(PROJECT_PLACEHOLDER_SRC)
+          : undefined
+      }
     />
   );
 }

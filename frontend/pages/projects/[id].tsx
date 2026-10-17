@@ -1779,6 +1779,7 @@ export default function ProjectDetail({
         <MonthlyGivingSetup
           projectId={project.id}
           projectName={project.name}
+          donorAddress={publicKey}
           onClose={() => setShowMonthlySetup(false)}
         />
       )}

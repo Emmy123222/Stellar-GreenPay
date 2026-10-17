@@ -123,8 +123,8 @@ describe("SkipLink", () => {
         <div>
           <SkipLink />
           <nav>
-          <Link href="/">Home</Link>
-          <Link href="/projects">Projects</Link>
+            <Link href="/">Home</Link>
+            <Link href="/projects">Projects</Link>
           </nav>
           <main id="main-content" tabIndex={-1}>
             <button>Inside Main</button>

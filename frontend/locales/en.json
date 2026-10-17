@@ -1,5 +1,6 @@
 {
   "nav": {
+    "skipToContent": "Skip to main content",
     "home": "Home",
     "projects": "Projects",
     "jobs": "Jobs",
@@ -139,6 +140,7 @@
     "dataUpdated": "Data as of {time}"
   },
   "common": {
+    "skipToContent": "Skip to main content",
     "loading": "Loading…",
     "error": "Error",
     "cancel": "Cancel",
