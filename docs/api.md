@@ -63,8 +63,8 @@ Content-Type: application/json
 {
   "success": true,
   "data": {
-    "token": "eyJhbGciOiJIUzI1NiIs...",
-    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "token": "<access-token>",
+    "refreshToken": "<refresh-token>",
     "expiresIn": 3600
   }
 }
@@ -84,7 +84,7 @@ need to re-enter credentials until the refresh token itself expires (24 h):
 POST /api/admin/refresh
 Content-Type: application/json
 
-{ "refreshToken": "eyJhbGciOiJIUzI1NiIs..." }
+{ "refreshToken": "<refresh-token>" }
 ```
 
 ```json

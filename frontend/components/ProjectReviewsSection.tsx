@@ -37,7 +37,7 @@ export default function ProjectReviewsSection({
             <span className="font-bold text-forest-900 font-body">
               {averageRating.toFixed(1)}
             </span>
-            <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+            <span className="text-xs text-forest-600 dark:text-forest-300 font-body">
               ({ratingCount} review{ratingCount === 1 ? "" : "s"})
             </span>
           </div>
@@ -80,7 +80,7 @@ export default function ProjectReviewsSection({
                       {shortenAddress(r.donorAddress)}
                     </span>
                   </div>
-                  <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                  <span className="text-xs text-forest-600 dark:text-forest-300 font-body">
                     {timeAgo(r.createdAt)}
                   </span>
                 </div>

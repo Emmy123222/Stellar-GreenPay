@@ -66,7 +66,6 @@ const TX_HASHES = (__ENV.TX_HASHES || '').split(',').map((hash) => hash.trim()).
 // The run also needs the transaction-hash check to pass. `scripts/stub-horizon.js`
 // serves that in CI via HORIZON_URL; against a real Horizon every hash here would be
 // rejected as unconfirmed, so a local run against production Horizon measures 400s.
-const PROJECT_ID = __ENV.PROJECT_ID || '11111111-1111-4111-8111-111111111111';
 
 // Valid Stellar testnet public keys (G... 56-char base32)
 const SAMPLE_ADDRESSES = [

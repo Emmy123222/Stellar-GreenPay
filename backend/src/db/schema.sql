@@ -300,3 +300,46 @@ CREATE TABLE IF NOT EXISTS impact_certificates (
 );
 CREATE INDEX IF NOT EXISTS idx_impact_certificates_donor
   ON impact_certificates (donor_address, created_at DESC);
+
+-- webhook_deliveries: one row per webhook delivery attempt schedule for a
+-- project milestone event (mirrors migrations/003_webhook_deliveries.js).
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id UUID PRIMARY KEY,
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'delivered', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  last_attempt_at TIMESTAMPTZ,
+  next_attempt_at TIMESTAMPTZ,
+  delivered_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_status
+  ON webhook_deliveries (status);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_id
+  ON webhook_deliveries (project_id);
+
+-- DEX path-payment donations (mirrors migrations/014_project_preferred_asset.js):
+-- a project can ask to receive a stable asset instead of XLM, and donations
+-- record what the donor actually spent when it differs from what was delivered.
+ALTER TABLE projects
+  ADD COLUMN IF NOT EXISTS preferred_asset_code   TEXT,
+  ADD COLUMN IF NOT EXISTS preferred_asset_issuer TEXT;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'projects_preferred_asset_chk'
+  ) THEN
+    ALTER TABLE projects ADD CONSTRAINT projects_preferred_asset_chk CHECK (
+      (preferred_asset_code IS NULL AND preferred_asset_issuer IS NULL)
+      OR (preferred_asset_code ~ '^[A-Za-z0-9]{1,12}$'
+          AND preferred_asset_issuer ~ '^G[A-Z2-7]{55}$')
+    );
+  END IF;
+END $$;
+ALTER TABLE donations
+  ADD COLUMN IF NOT EXISTS source_asset  TEXT,
+  ADD COLUMN IF NOT EXISTS source_amount NUMERIC(20, 7);

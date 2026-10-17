@@ -7,7 +7,7 @@
  */
 "use strict";
 
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const logger = require("../logger");
 const Sentry = require("@sentry/node");
 

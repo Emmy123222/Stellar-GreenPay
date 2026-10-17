@@ -4,7 +4,12 @@ const crypto = require("crypto");
 const Redis = require("ioredis");
 const { CACHE_KEY_PREFIX, namespacedKey } = require("../utils/cacheKeys");
 
-const isTest = process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined;
+const isTest =
+  (process.env.NODE_ENV === "test" || process.env.JEST_WORKER_ID !== undefined) &&
+  // The live-Redis integration test (redis.namespace.integration.test.js)
+  // sets USE_REAL_REDIS=1 so the service connects to REDIS_URL instead of
+  // falling back to ioredis-mock under Jest.
+  process.env.USE_REAL_REDIS !== "1";
 const isMockedByJest = typeof jest !== "undefined" && jest.isMockFunction(Redis);
 
 const url = process.env.REDIS_URL || "redis://localhost:6379";

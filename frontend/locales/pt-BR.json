@@ -150,6 +150,10 @@
     "back": "Voltar",
     "next": "Próximo",
     "close": "Fechar",
+    "serverErrorTitle": "Algo deu errado",
+    "serverErrorDescription": "Não foi possível carregar esta página agora. Tente novamente ou volte para a página inicial.",
+    "retry": "Tentar novamente",
+    "backToHome": "Ir para o início",
     "language": "Idioma"
   },
   "apply": {
