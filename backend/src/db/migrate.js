@@ -105,7 +105,15 @@ async function runMigrations(options) {
  * Each migration's `down()` function is called in reverse-applied order.
  */
 async function applyRollbackMigrations(steps) {
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    throw new Error(`Failed to acquire database connection: ${err.message}`);
+  }
+  if (!client) {
+    throw new Error("Failed to obtain database client from connection pool");
+  }
   try {
     await client.query("BEGIN");
     await ensureMigrationsTable(client);
@@ -159,7 +167,15 @@ async function rollbackMigrations(steps = 1, options) {
 }
 
 async function seedDatabase() {
-  const client = await pool.connect();
+  let client;
+  try {
+    client = await pool.connect();
+  } catch (err) {
+    throw new Error(`Failed to acquire database connection: ${err.message}`);
+  }
+  if (!client) {
+    throw new Error("Failed to obtain database client from connection pool");
+  }
   try {
     await client.query("BEGIN");
 
