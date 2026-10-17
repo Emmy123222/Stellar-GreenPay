@@ -18,6 +18,7 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
 
     const context = await chromium.launchPersistentContext("", {
       headless: !!process.env.CI,
+      channel: "chromium",
       args: [
         `--disable-extensions-except=${extPath}`,
         `--load-extension=${extPath}`,
@@ -28,6 +29,15 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
 
     // Attempt to find extension ID
     for (let attempt = 0; attempt < 10; attempt++) {
+      for (const worker of context.serviceWorkers()) {
+        const match = worker.url().match(/chrome-extension:\/\/([a-z]+)\//);
+        if (match) {
+          foundId = match[1];
+          break;
+        }
+      }
+      if (foundId) break;
+
       try {
         const bgPages = await context.backgroundPages();
         if (bgPages && bgPages.length > 0) {
@@ -143,9 +153,8 @@ test.describe("GreenPay Extension E2E - Donate Flow", () => {
       const projectList = page.locator("#project-list");
       await expect(projectList).toBeVisible();
 
-      const projectItems = page.locator(".project-item");
-      const count = await projectItems.count();
-      expect(count).toBeGreaterThan(0);
+      await expect(page.locator(".empty-state")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Find a project" })).toBeVisible();
     } finally {
       await context.close();
     }

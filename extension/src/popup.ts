@@ -23,6 +23,7 @@ import {
   syncBadge,
   type PendingDonation,
 } from "./pendingTransactions";
+import { localizeDocument, message } from './i18n';
 
 // Module-level vars
 let API_BASE = 'https://api.stellar-greenpay.app';
@@ -120,10 +121,10 @@ function renderProjectList(projects: ProjectResult[]) {
     empty.innerHTML = `
       <div class="empty-state-icon" aria-hidden="true">🌱</div>
       <div class="empty-state-content">
-        <h4 class="empty-state-title">Start your climate journey</h4>
-        <p class="empty-state-text">You haven't donated to any projects yet. Discover amazing climate initiatives and make your first donation!</p>
+      <h4 class="empty-state-title">${message('emptyStateTitle')}</h4>
+      <p class="empty-state-text">${message('emptyStateText')}</p>
         <button class="btn empty-state-btn" id="find-project-btn">
-          Find a project
+          ${message('findProject')}
         </button>
       </div>
     `;
@@ -214,21 +215,21 @@ function setStatus(message: string, isError = false) {
 }
 
 function showFreighterRequiredMessage() {
-  const message = `
+  const walletRequiredMarkup = `
     <div class="wallet-required-message">
-      <h2>Freighter Wallet Required</h2>
-      <p>GreenPay requires the Freighter wallet extension to process donations.</p>
+      <h2>${message('freighterRequired')}</h2>
+      <p>${message('freighterRequiredText')}</p>
       <a href="https://www.freighter.app/" target="_blank" rel="noopener noreferrer">
-        Install Freighter Wallet
+        ${message('installFreighter')}
       </a>
     </div>
   `;
 
   const form = document.getElementById('donation-form');
-  if (form) form.innerHTML = message;
+  if (form) form.innerHTML = walletRequiredMarkup;
 
   const statusEl = document.getElementById('status-message');
-  if (statusEl) statusEl.innerHTML = message;
+  if (statusEl) statusEl.innerHTML = walletRequiredMarkup;
 }
 
 function initDonationControls() {
@@ -247,19 +248,19 @@ function initDonationControls() {
   donateBtn.addEventListener('click', async () => {
     const amount = parseFloat(amountInput.value || '0');
     if (Number.isNaN(amount) || amount <= 0) {
-      setStatus('Enter a valid donation amount.', true);
+      setStatus(message('validDonationAmount'), true);
       return;
     }
 
-    setStatus('Processing donation...', false);
+    setStatus(message('processingDonation'), false);
     try {
       await updateTotalAfterDonation(amount);
-      setStatus(`Donation of ${amount.toFixed(2)} XLM recorded.`, false);
+      setStatus(message('donationRecorded', amount.toFixed(2)), false);
       amountInput.value = '';
       updateButtonState();
     } catch (err) {
       console.error('Donation error:', err);
-      setStatus('Donation failed. Please try again.', true);
+      setStatus(message('donationFailed'), true);
     }
   });
 }
@@ -284,7 +285,7 @@ function initProjectListKeyNav() {
   if (!list) return;
 
   list.setAttribute('role', 'listbox');
-  list.setAttribute('aria-label', 'Saved projects');
+  list.setAttribute('aria-label', message('savedProjects'));
 
   list.addEventListener('keydown', (e) => {
     if (projectListItems.length === 0) return;
@@ -321,7 +322,7 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
   if (projects.length === 0) {
     const empty = document.createElement('li');
     empty.className = 'search-no-results';
-    empty.textContent = 'No projects found';
+    empty.textContent = message('noProjectsFound');
     dropdown.appendChild(empty);
     dropdown.classList.remove('hidden');
     return;
@@ -370,8 +371,8 @@ function truncateAddress(address: string): string {
 
 function formatAge(createdAt: number): string {
   const seconds = Math.max(0, Math.round((Date.now() - createdAt) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 60) return message('secondsAgo', String(seconds));
+  return message('minutesAgo', String(Math.floor(seconds / 60)));
 }
 
 function renderPendingDonations(donations: PendingDonation[]) {
@@ -392,11 +393,11 @@ function renderPendingDonations(donations: PendingDonation[]) {
 
     const amount = document.createElement("div");
     amount.className = "pending-amount";
-    amount.textContent = `${donation.amount} XLM pending`;
+    amount.textContent = message('pendingAmount', donation.amount);
 
     const recipient = document.createElement("div");
     recipient.className = "pending-dest";
-    recipient.textContent = `to ${truncateAddress(donation.destination)} · ${formatAge(donation.createdAt)}`;
+    recipient.textContent = message('pendingRecipient', [truncateAddress(donation.destination), formatAge(donation.createdAt)]);
 
     info.append(amount, recipient);
 
@@ -464,17 +465,17 @@ function renderDonorStats(totalXLM: number, badgeTier: string | null) {
   const totalElement = document.getElementById("donor-total");
   const tierElement = document.getElementById("donor-badge-tier");
   const tierLabels: Record<string, string> = {
-    seedling: "Seedling",
-    tree: "Tree",
-    forest: "Forest",
-    earth: "Earth",
+    seedling: message('badgeSeedling'),
+    tree: message('badgeTree'),
+    forest: message('badgeForest'),
+    earth: message('badgeEarth'),
   };
 
   if (totalElement) {
     totalElement.textContent = `${totalXLM.toLocaleString(undefined, { maximumFractionDigits: 7 })} XLM`;
   }
   if (tierElement) {
-    tierElement.textContent = badgeTier ? tierLabels[badgeTier] || badgeTier : "No badge";
+    tierElement.textContent = badgeTier ? tierLabels[badgeTier] || badgeTier : message('noBadge');
   }
 }
 
@@ -561,7 +562,7 @@ function renderConnectedAddress(publicKey: string) {
 
   const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
   if (connectBtn) {
-    connectBtn.textContent = '✓ Connected';
+    connectBtn.textContent = message('connected');
     connectBtn.disabled = true;
   }
 }
@@ -570,7 +571,7 @@ async function connectWallet() {
   try {
     const freighter = (window as any).freighter;
     if (!freighter) {
-      alert('Please install the Freighter wallet extension.');
+      alert(message('installFreighterAlert'));
       return;
     }
 
@@ -588,7 +589,7 @@ async function connectWallet() {
 
     const connectBtn = document.getElementById('connect-btn') as HTMLButtonElement | null;
     if (connectBtn) {
-      connectBtn.textContent = '✓ Connected';
+      connectBtn.textContent = message('connected');
       connectBtn.disabled = true;
     }
 
@@ -604,7 +605,7 @@ async function connectWallet() {
 
   } catch (err: any) {
     console.error('Wallet connect error:', err);
-    alert('Failed to connect wallet: ' + (err.message || 'Unknown error'));
+    alert(message('walletConnectFailed', err.message || message('unknownError')));
   }
 }
 
@@ -655,19 +656,19 @@ async function restoreWalletSession() {
 
 const onboardingSteps = [
   {
-    title: "What is GreenPay?",
+    title: message('onboardingTitle1'),
     description:
-      "GreenPay helps you discover climate projects and support them with Stellar payments.",
+      message('onboardingDescription1'),
   },
   {
-    title: "Connect Freighter wallet",
+    title: message('onboardingTitle2'),
     description:
-      "Connect your Freighter wallet to GreenPay on the selected Stellar network. Review each request in Freighter before signing a donation.",
+      message('onboardingDescription2'),
   },
   {
-    title: "Find your first project",
+    title: message('onboardingTitle3'),
     description:
-      "Choose an active climate project from the catalog or search for one to prepare your first donation.",
+      message('onboardingDescription3'),
   },
 ];
 
@@ -715,15 +716,15 @@ function renderOnboardingStep(overlay: HTMLElement, stepIndex: number) {
   overlay.dataset.step = String(stepIndex + 1);
   overlay.innerHTML = `
     <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-      <p class="onboarding-progress">Step ${stepIndex + 1} of ${onboardingSteps.length}</p>
+      <p class="onboarding-progress">${message('onboardingStep', [String(stepIndex + 1), String(onboardingSteps.length)])}</p>
       <h2 id="onboarding-title" tabindex="-1">${step.title}</h2>
       <p class="onboarding-description">${step.description}</p>
       <p class="onboarding-error" role="status" aria-live="polite"></p>
       <div class="onboarding-actions">
-        ${stepIndex > 0 ? '<button class="btn onboarding-back" type="button">Back</button>' : ""}
+        ${stepIndex > 0 ? `<button class="btn onboarding-back" type="button">${message('back')}</button>` : ""}
         ${stepIndex < onboardingSteps.length - 1
-          ? '<button class="btn onboarding-next" type="button">Next</button>'
-          : '<button class="btn onboarding-done" type="button">Got it</button>'}
+          ? `<button class="btn onboarding-next" type="button">${message('next')}</button>`
+          : `<button class="btn onboarding-done" type="button">${message('gotIt')}</button>`}
       </div>
     </section>
   `;
@@ -745,7 +746,7 @@ function renderOnboardingStep(overlay: HTMLElement, stepIndex: number) {
         if (chrome.runtime.lastError) {
           button.disabled = false;
           const error = overlay.querySelector<HTMLElement>(".onboarding-error");
-          if (error) error.textContent = "Could not save your progress. Please try again.";
+          if (error) error.textContent = message('onboardingSaveFailed');
           return;
         }
         closeOnboarding(overlay);
@@ -844,19 +845,17 @@ async function initSiteOptin() {
     const settings = await loadSettings();
     const isAllowed = isUrlAllowed(activeTab.url, settings.allowlist);
     toggle.checked = isAllowed;
-    statusEl.textContent = isAllowed
-      ? 'Widget enabled on this site'
-      : 'Widget disabled on this site';
+    statusEl.textContent = message(isAllowed ? 'widgetEnabled' : 'widgetDisabled');
     statusEl.classList.toggle('enabled', isAllowed);
 
     toggle.addEventListener('change', async () => {
       const checked = toggle.checked;
-      statusEl.textContent = checked ? 'Enabling widget…' : 'Disabling widget…';
+      statusEl.textContent = message(checked ? 'enablingWidget' : 'disablingWidget');
 
       try {
         if (checked) {
           await addSiteToAllowlist(`${hostname}/*`);
-          statusEl.textContent = 'Widget enabled on this site';
+          statusEl.textContent = message('widgetEnabled');
           statusEl.classList.add('enabled');
 
           if (activeTab.id) {
@@ -875,7 +874,7 @@ async function initSiteOptin() {
           }
         } else {
           await removeSiteFromAllowlist(hostname);
-          statusEl.textContent = 'Widget disabled on this site';
+          statusEl.textContent = message('widgetDisabled');
           statusEl.classList.remove('enabled');
 
           if (activeTab.id) {
@@ -888,7 +887,7 @@ async function initSiteOptin() {
         }
       } catch (err: any) {
         console.error('Failed to update site allowlist:', err);
-        statusEl.textContent = 'Failed to update site settings';
+        statusEl.textContent = message('siteSettingsFailed');
       }
     });
   } catch (err) {
@@ -897,6 +896,7 @@ async function initSiteOptin() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  localizeDocument();
   const settings = await loadSettings();
   applySettings(settings);
   showOnboardingIfNeeded();
@@ -972,11 +972,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const memo = ((document.getElementById('memo') as HTMLInputElement)?.value ?? '').trim();
 
     if (!sourceAddress || !destination || !amount) {
-      setStatus('Please fill in all required fields.', true);
+      setStatus(message('requiredFields'), true);
       return;
     }
 
-    setStatus('Preparing transaction…');
+    setStatus(message('preparingTransaction'));
     try {
       const [fee, account] = await Promise.all([server.fetchBaseFee(), server.loadAccount(sourceAddress)]);
       const tx = new TransactionBuilder(account, {
@@ -992,10 +992,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         .setTimeout(180)
         .build();
 
-      setStatus('Please sign in your Freighter wallet…');
+      setStatus(message('signInFreighter'));
       const signedXdr = await signWithFreighter(tx.toXDR());
 
-      setStatus('Submitting transaction…');
+      setStatus(message('submittingTransaction'));
       const hash = await submitTransaction(signedXdr);
 
       // Horizon accepts the transaction before the ledger has applied it, so it
@@ -1003,12 +1003,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       await addPendingDonation({ hash, amount, destination });
       await updateTotalAfterDonation(parseFloat(amount));
 
-      setStatus(
-        `⏳ Transaction submitted! Awaiting confirmation. Hash: ${hash.slice(0, 16)}…`,
-      );
+      setStatus(message('transactionSubmitted', hash.slice(0, 16)));
     } catch (err: any) {
       console.error('Donation error:', err);
-      setStatus(`❌ Transaction failed: ${err.message || 'Unknown error'}`, true);
+      setStatus(message('transactionFailed', err.message || message('unknownError')), true);
     }
   });
 

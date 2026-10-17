@@ -23,7 +23,7 @@ test('pending transactions persist and expired entries recover after restart', a
   const restarted = await launchExtension(profile);
   const page = await restarted.newPage();
   try {
-    await extensionPage(restarted, page, 'settings.html');
+    await extensionPage(restarted, page, 'popup.html');
     await expect.poll(() => page.evaluate(async () => {
       const stored = await chrome.storage.local.get('pendingDonations');
       return stored.pendingDonations?.length || 0;

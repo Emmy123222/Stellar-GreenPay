@@ -11,6 +11,7 @@ export async function launchExtension(profile?: string): Promise<BrowserContext>
   }
   return chromium.launchPersistentContext(profile || '', {
     headless: !!process.env.CI,
+    channel: 'chromium',
     args: [
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,

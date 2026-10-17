@@ -1,4 +1,5 @@
 import { DEFAULT_ALLOWLIST, isUrlAllowed, isValidAllowlistPattern } from './allowlist';
+import { localizeDocument, message } from './i18n';
 
 export interface ExtensionSettings {
   backendUrl: string;
@@ -133,6 +134,7 @@ async function freighterDisconnect(): Promise<void> {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('DOMContentLoaded', async () => {
+    localizeDocument();
     const backBtn = document.getElementById('back-btn') as HTMLButtonElement | null;
     const form = document.getElementById('settings-form') as HTMLFormElement | null;
     const urlInput = document.getElementById('backend-url') as HTMLInputElement | null;
@@ -165,7 +167,7 @@ if (typeof document !== 'undefined') {
       if (currentAllowlist.length === 0) {
         const emptyLi = document.createElement('li');
         emptyLi.className = 'allowlist-empty';
-        emptyLi.textContent = 'No sites allowlisted. Widget is disabled on all external sites.';
+        emptyLi.textContent = message('noSitesAllowlisted');
         allowlistItemsList.appendChild(emptyLi);
         return;
       }
@@ -182,8 +184,8 @@ if (typeof document !== 'undefined') {
         delBtn.type = 'button';
         delBtn.className = 'allowlist-remove-btn';
         delBtn.innerHTML = '&times;';
-        delBtn.title = 'Remove site';
-        delBtn.setAttribute('aria-label', `Remove ${item}`);
+        delBtn.title = message('removeSite');
+        delBtn.setAttribute('aria-label', message('removeSiteNamed', item));
         delBtn.addEventListener('click', () => {
           currentAllowlist.splice(index, 1);
           renderAllowlist();
@@ -207,11 +209,11 @@ if (typeof document !== 'undefined') {
       if (connected && publicKey) {
         if (walletAddressText) walletAddressText.textContent = truncateAddress(publicKey);
         if (walletDot) walletDot.className = 'dot online';
-        if (walletActionBtn) walletActionBtn.textContent = 'Disconnect';
+        if (walletActionBtn) walletActionBtn.textContent = message('disconnect');
       } else {
-        if (walletAddressText) walletAddressText.textContent = 'Not connected';
+        if (walletAddressText) walletAddressText.textContent = message('notConnected');
         if (walletDot) walletDot.className = 'dot';
-        if (walletActionBtn) walletActionBtn.textContent = 'Connect Wallet';
+        if (walletActionBtn) walletActionBtn.textContent = message('connectWallet');
       }
     }
 
@@ -258,7 +260,7 @@ if (typeof document !== 'undefined') {
       const val = allowlistInput.value.trim().toLowerCase();
       if (!val) {
         if (allowlistError) {
-          allowlistError.textContent = 'Please enter a site or pattern.';
+          allowlistError.textContent = message('enterSitePattern');
           allowlistError.classList.remove('hidden');
         }
         return;
@@ -266,7 +268,7 @@ if (typeof document !== 'undefined') {
 
       if (!isValidAllowlistPattern(val)) {
         if (allowlistError) {
-          allowlistError.textContent = 'Enter a valid host pattern, such as example.com/*.';
+          allowlistError.textContent = message('validHostPattern');
           allowlistError.classList.remove('hidden');
         }
         return;
@@ -274,7 +276,7 @@ if (typeof document !== 'undefined') {
 
       if (currentAllowlist.includes(val)) {
         if (allowlistError) {
-          allowlistError.textContent = 'Site pattern is already in allowlist.';
+          allowlistError.textContent = message('siteAlreadyAllowlisted');
           allowlistError.classList.remove('hidden');
         }
         return;
@@ -320,12 +322,12 @@ if (typeof document !== 'undefined') {
           allowlist: currentAllowlist,
         });
         if (saveStatus) {
-          saveStatus.textContent = 'Settings saved.';
+          saveStatus.textContent = message('settingsSaved');
           saveStatus.classList.add('success');
         }
       } catch (err: any) {
         if (saveStatus) {
-          saveStatus.textContent = `Failed to save: ${err.message}`;
+          saveStatus.textContent = message('settingsSaveFailed', err.message);
           saveStatus.classList.add('error');
         }
       }

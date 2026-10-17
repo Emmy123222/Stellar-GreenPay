@@ -88,19 +88,49 @@ jobs:
           }
           NODE
 
-      - name: Lint manifests with web-ext
-        run: |
-          CHROME_TMP=$(mktemp -d)
-          cp manifest.json "$CHROME_TMP/manifest.json"
-          npx web-ext lint --source-dir "$CHROME_TMP" --self-hosted
-
-          FIREFOX_TMP=$(mktemp -d)
-          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
-          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
-
       - run: npm test
 
       - run: npm run build
+
+      - name: Validate Chrome manifest and localized messages
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          const messages = JSON.parse(fs.readFileSync('_locales/en/messages.json', 'utf8'));
+          if (manifest.manifest_version !== 3 || !manifest.action || manifest.browser_action) {
+            throw new Error('Chrome manifest must use Manifest V3 browser actions');
+          }
+          if (manifest.default_locale !== 'en') {
+            throw new Error('Chrome manifest default_locale must be en');
+          }
+
+          for (const value of [manifest.name, manifest.description, manifest.action.default_title]) {
+            for (const [, key] of value.matchAll(/__MSG_([A-Za-z0-9_]+)__/g)) {
+              if (!messages[key]) throw new Error(`Missing English locale message: ${key}`);
+            }
+          }
+
+          const referencedFiles = [
+            ...Object.values(manifest.icons),
+            ...Object.values(manifest.action.default_icon),
+            manifest.background.service_worker,
+            ...manifest.content_scripts.flatMap((script) => script.js),
+          ];
+          for (const file of referencedFiles) {
+            if (!fs.existsSync(path.resolve(file))) throw new Error(`Missing Chrome manifest file: ${file}`);
+          }
+          NODE
+
+      - name: Lint Firefox manifest with web-ext
+        run: |
+          FIREFOX_TMP=$(mktemp -d)
+          cp manifest.firefox.json "$FIREFOX_TMP/manifest.json"
+          cp -R _locales icons "$FIREFOX_TMP/"
+          cp -R dist "$FIREFOX_TMP/dist-firefox"
+          npx web-ext lint --source-dir "$FIREFOX_TMP" --self-hosted
 
       - name: Install Chromium for extension E2E
         run: npx playwright install --with-deps chromium

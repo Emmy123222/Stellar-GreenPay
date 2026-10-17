@@ -59,6 +59,17 @@ describe("GreenPay Popup - Freighter Integration", () => {
           onChanged: { addListener: jest.fn() },
         },
         runtime: {},
+        i18n: {
+          getMessage: jest.fn((key: string) => {
+            const messages: Record<string, string> = {
+            freighterRequired: 'Freighter Wallet Required',
+            freighterRequiredText: 'GreenPay requires the Freighter wallet extension to process donations.',
+            installFreighter: 'Install Freighter Wallet',
+            };
+            return messages[key] || key;
+          }),
+          getUILanguage: jest.fn(() => 'en'),
+        },
         tabs: { query: jest.fn().mockResolvedValue([]) },
         action: {
           setBadgeText: jest.fn(),
