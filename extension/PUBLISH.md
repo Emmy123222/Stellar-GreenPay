@@ -27,6 +27,27 @@ All assets must be committed to `extension/store-assets/`:
    - Demonstrates the extension in action
    - Shows the popup interface
 
+## Extension UI translations
+
+The popup, settings page, and manifest metadata use Chrome's extension i18n catalogs in `extension/_locales/`.
+The English catalog (`_locales/en/messages.json`) is the source of truth and must contain every message key
+referenced by `data-i18n*` attributes, `message()` calls, and `__MSG_*__` manifest placeholders. Keep the
+Spanish (`es`) and French (`fr`) catalogs in sync with those keys; translate only each `message` value and
+preserve `$1`/`$2` substitutions exactly.
+
+When adding or changing UI copy:
+
+1. Add or update the English message in `_locales/en/messages.json`.
+2. Add the matching key and translation in `_locales/es/messages.json` and `_locales/fr/messages.json`.
+3. Reference the key with `data-i18n`, `data-i18n-placeholder`, `data-i18n-title`,
+   `data-i18n-aria-label`, or the `message()` helper in `src/i18n.ts`.
+4. Keep `default_locale: "en"` in the manifests and retain the `_locales/` directory at the root
+   of the packaged extension alongside `manifest.json` (and `manifest.firefox.json` for Firefox builds).
+
+Chrome chooses the catalog from the browser's UI language and falls back to English for unsupported
+languages. Validate each locale by loading the unpacked extension with the browser language set to English,
+Spanish, and French before publishing.
+
 ## Store Listing Details
 
 ### Summary (140 characters max)

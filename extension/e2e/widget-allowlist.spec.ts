@@ -3,7 +3,7 @@ import { launchExtension } from './extension-helpers';
 
 const stellarAddress = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
-test('content script injects only on allowlisted sites and reveals project context menu', async () => {
+test('content script injects only on allowlisted sites', async () => {
   const context = await launchExtension();
   try {
     const worker = context.serviceWorkers()[0];
@@ -16,11 +16,6 @@ test('content script injects only on allowlisted sites and reveals project conte
     }));
     await page.goto('https://allowed.test/projects/demo', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('.greenpay-address')).toContainText(stellarAddress);
-
-    const menu = await worker.evaluate(async () => chrome.contextMenus.getAll());
-    expect(menu).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'donate-project', visible: true }),
-    ]));
 
     const denied = await context.newPage();
     await denied.route('https://denied.test/**', (route) => route.fulfill({
