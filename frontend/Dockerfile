@@ -1,4 +1,19 @@
-# 1. Builder Stage
+# Development target used by docker compose. The source bind mount in the dev
+# override keeps edits live while node_modules remains inside the container.
+FROM node:22-alpine AS dev
+
+WORKDIR /app
+ENV NODE_ENV=development
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 3000
+CMD ["npm", "run", "dev:docker"]
+
+# Production build stages
 FROM node:22-alpine AS builder
 
 WORKDIR /app

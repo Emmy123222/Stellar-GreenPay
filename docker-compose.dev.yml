@@ -1,5 +1,9 @@
 services:
   frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: dev
     command: npm run dev:docker
     environment:
       - WATCHPACK_POLLING=true

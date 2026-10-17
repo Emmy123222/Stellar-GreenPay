@@ -17,6 +17,12 @@ const eslintConfig = [
     },
   },
   {
+    files: ["components/**/*.{js,jsx,ts,tsx}", "pages/**/*.{js,jsx,ts,tsx}", "lib/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-console": ["error", { allow: ["warn", "error"] }],
+    },
+  },
+  {
     ignores: [
       ".next/**",
       "coverage/**",

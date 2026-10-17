@@ -86,8 +86,9 @@ export default function BridgePage() {
       const address = typeof pk === "string" ? pk : (pk as { address?: string } | null)?.address ?? null;
       setStellarAddress(address);
       if (address) setNotice(null);
-    } catch (err) {
-      console.log("Wallet not connected");
+    } catch {
+      // A disconnected wallet is an expected state on this page.
+      setStellarAddress(null);
     }
   };
 

@@ -97,6 +97,19 @@ describe("ApplyPage", () => {
     expect(screen.getByText("apply.stepOrg")).toBeTruthy();
   });
 
+  test("associates validation messages with invalid fields and focuses the first error", async () => {
+    render(<ApplyPage />);
+    const organizationName = screen.getByLabelText("apply.orgName *");
+
+    fireEvent.click(screen.getByRole("button", { name: /common\.next/ }));
+
+    await waitFor(() => {
+      expect(organizationName).toHaveAttribute("aria-invalid", "true");
+      expect(organizationName).toHaveAttribute("aria-describedby", "organizationName-error");
+      expect(document.activeElement).toBe(organizationName);
+    });
+  });
+
   test("blocks invalid Stellar wallet and email", async () => {
     render(<ApplyPage />);
     fireEvent.input(screen.getByLabelText("apply.orgName *"), {

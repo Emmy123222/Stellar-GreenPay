@@ -138,7 +138,12 @@
     "confirm": "Confirmer",
     "back": "Retour",
     "next": "Suivant",
-    "close": "Fermer"
+    "close": "Fermer",
+    "serverErrorTitle": "Une erreur s’est produite",
+    "serverErrorDescription": "Nous ne pouvons pas charger cette page pour le moment. Réessayez ou retournez à l’accueil.",
+    "retry": "Réessayer",
+    "backToHome": "Retour à l’accueil",
+    "language": "Langue"
   },
   "map": {
     "title": "Carte mondiale des projets",

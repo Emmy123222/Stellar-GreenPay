@@ -16,6 +16,19 @@ We welcome contributors from all backgrounds! Connect with the core maintainers 
 4. Start the backend: `pnpm --filter backend dev`.
 5. Start the mobile app: `pnpm --filter mobile start`.
 
+## Backend coverage
+
+Run the backend suite with coverage from the `backend/` directory:
+
+```bash
+npm test -- --coverage
+```
+
+Jest writes the HTML report to `backend/coverage/lcov-report/index.html` and
+prints the summary in the terminal. The backend Jest configuration enforces a
+global floor of 30% statements and lines, 25% functions, and 20% branches;
+coverage below any floor fails locally and in Backend CI.
+
 ## ✅ Prerequisites
 
 Install the following before cloning:
