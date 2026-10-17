@@ -112,14 +112,14 @@ async function releaseMigrationLock(client) {
  * Run `fn` while holding the migration lock.
  *
  * @template T
- * @param {() => Promise<T>} fn
+ * @param {(client: import("pg").PoolClient) => Promise<T>} fn
  * @param {{ timeoutSeconds?: number, onWait?: (waitedMs: number) => void }} [options]
  * @returns {Promise<T>}
  */
 async function withMigrationLock(fn, options) {
   const client = await acquireMigrationLock(options);
   try {
-    return await fn();
+    return await fn(client);
   } finally {
     await releaseMigrationLock(client);
   }
