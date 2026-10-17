@@ -46,7 +46,7 @@ describe("ImpactCertificate", () => {
     ["tree", "Tree"],
     ["forest", "Forest"],
     ["earth", "Earth Guardian"],
-  ] as const)("renders the %s badge tier", (badgeTier, label) => {
+  ] as [string, string][])("renders the %s badge tier", (badgeTier: string, label: string) => {
     render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
