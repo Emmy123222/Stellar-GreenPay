@@ -10,10 +10,17 @@
 
 const fs = require("fs");
 const path = require("path");
-const { GenericContainer, Wait } = require("testcontainers");
-const { Pool } = require("pg");
 const request = require("supertest");
 const express = require("express");
+
+let GenericContainer;
+let Wait;
+try {
+  ({ GenericContainer, Wait } = require("testcontainers"));
+} catch {
+  // testcontainers is optional — integration tests are skipped when unavailable.
+}
+const { Pool } = require("pg");
 
 let container;
 let pool;
