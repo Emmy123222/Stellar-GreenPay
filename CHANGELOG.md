@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Consolidated the three duplicated SSRF helpers (`middleware/ssrf.js`, `services/ssrfCheck.js`, `utils/ssrf.js`) into the single canonical `utils/ssrf.js`; the two redundant modules and their test suites were removed and every test case now guards the one implementation (#1551).
+
 ### Added
 
+- Spanish (`docs/README.es.md`) and French (`docs/README.fr.md`) translations of the README core sections, a language row at the top of `README.md`, and a translation-maintenance note in `CONTRIBUTING.md` (#1596).
 - Right-to-left (RTL) layout support for Arabic (`ar`) and Hebrew (`he`) with dynamic `dir="rtl"` attribute on `<html>`, logical CSS property helpers, and full Arabic (`ar.json`) translations covering navigation and donation flows (#1318).
 - Discord (`#greenpay`) and Telegram community channels in `README.md`, website footer, and README badges (#1319).
 - Hacktoberfest onboarding guide and catalog of 22 beginner and intermediate issues labeled `hacktoberfest` in `CONTRIBUTING.md` and `.github/hacktoberfest-issues.json` (#1321).

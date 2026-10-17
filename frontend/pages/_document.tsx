@@ -39,6 +39,9 @@ class MyDocument extends Document<Props> {
     return (
       <Html lang="en" dir="ltr">
         <Head nonce={nonce}>
+          <link rel="icon" href="/favicon.ico" sizes="48x48" />
+          <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+          <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
           <link rel="manifest" href="/manifest.webmanifest" />
           <meta name="theme-color" content="#227239" />
           {/* The inline body script below is statically stringified — it
