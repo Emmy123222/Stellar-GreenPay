@@ -147,7 +147,9 @@
     "confirm": "Confirmar",
     "back": "Voltar",
     "next": "Próximo",
-    "close": "Fechar"
+    "close": "Fechar",
+    "serverErrorTitle": "Erro no servidor",
+    "serverErrorDescription": "Ocorreu um erro no servidor. Tente novamente mais tarde."
   },
   "apply": {
     "pageTitle": "Solicitar Verificação",
