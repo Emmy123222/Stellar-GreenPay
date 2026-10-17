@@ -14,7 +14,7 @@
  * 404 or be unreachable, which used to leave a broken-image icon in the card. On
  * any load error we swap in the branded leaf placeholder.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export const PROJECT_PLACEHOLDER_SRC = "/project-placeholder.svg";
 
@@ -41,49 +41,27 @@ export function ProjectImage({
   height,
   priority = false,
 }: ProjectImageProps) {
-  const [prevSrc, setPrevSrc] = useState(src);
-  const [errored, setErrored] = useState(false);
+  const [currentSrc, setCurrentSrc] = useState(src);
+  useEffect(() => setCurrentSrc(src), [src]);
 
-  // A NEW src clears the error flag during render (the "adjusting state when a
-  // prop changes" pattern), so an admin re-uploading a cover is picked up
-  // without a remount.
-  if (prevSrc !== src) {
-    setPrevSrc(src);
-    setErrored(false);
-  }
-
-  const showPlaceholder = decorative || !src || errored;
-
-  // Resolve alt text per the documented fallback chain.
-  const resolvedAlt: string = showPlaceholder
-    ? ""
-    : alt ?? description ?? name;
-
-  if (showPlaceholder) {
-    return (
-      <img
-        src={src && !errored ? src : PROJECT_PLACEHOLDER_SRC}
-        alt=""
-        role="presentation"
-        className={className}
-        width={width}
-        height={height}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-      />
-    );
-  }
+  const hasImage = Boolean(src && currentSrc && currentSrc !== PROJECT_PLACEHOLDER_SRC);
+  const resolvedAlt = decorative || !hasImage ? "" : alt ?? description ?? name;
 
   return (
     <img
-      src={src}
+      src={hasImage ? currentSrc : PROJECT_PLACEHOLDER_SRC}
       alt={resolvedAlt}
+      role={decorative || !hasImage ? "presentation" : undefined}
       className={className}
       width={width}
       height={height}
       loading={priority ? "eager" : "lazy"}
       decoding="async"
-      onError={errored ? undefined : () => setErrored(true)}
+      onError={
+        hasImage
+          ? () => setCurrentSrc(PROJECT_PLACEHOLDER_SRC)
+          : undefined
+      }
     />
   );
 }

@@ -93,7 +93,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
               <Link key={l.href} href={l.href}
                 aria-current={isActive ? "page" : undefined}
                 className={clsx(
-                  "px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 font-body",
+                  "px-3 py-2 rounded-lg text-sm font-medium transition-all motion-reduce:transition-none duration-150 font-body",
                   isActive
                     ? "bg-forest-100 dark:bg-[#1c3928] text-forest-700 dark:text-[#81c784]"
                     : "text-[#5a7a5a] dark:text-[#b2d5b5] hover:text-forest-700 dark:hover:text-[#81c784] hover:bg-forest-50 dark:hover:bg-[rgba(96,208,123,0.10)]"
@@ -118,7 +118,7 @@ export default function Navbar({ publicKey, onConnect, onDisconnect }: NavbarPro
           {publicKey ? (
             <>
               <span className="address-tag flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" />
                 {shortenAddress(publicKey)}
               </span>
               <button

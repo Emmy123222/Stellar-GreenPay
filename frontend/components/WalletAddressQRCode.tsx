@@ -73,7 +73,7 @@ const WalletAddressQRCode: React.FC<WalletAddressQRCodeProps> = ({
           id="wallet-qr-panel"
           role="region"
           aria-label={`QR code to donate to ${projectName}`}
-          className="mt-3 flex flex-col items-center gap-2 animate-fade-in"
+          className="mt-3 flex flex-col items-center gap-2 animate-fade-in motion-reduce:animate-none"
         >
           {/* White border so the QR has adequate quiet zone on coloured backgrounds */}
           <div className="bg-white p-2 rounded-lg shadow-sm border border-forest-100 inline-block">

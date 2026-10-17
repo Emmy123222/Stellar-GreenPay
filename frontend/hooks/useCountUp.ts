@@ -1,11 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
+import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 
 export function useCountUp(target: number, duration: number = 2000) {
   const [count, setCount] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const elementRef = useRef<any>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    if (prefersReducedMotion) {
+      return;
+    }
+
+    if (typeof IntersectionObserver === 'undefined') {
+      setIsVisible(true);
+      return;
+    }
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
@@ -21,9 +32,14 @@ export function useCountUp(target: number, duration: number = 2000) {
     }
 
     return () => observer.disconnect();
-  }, []);
+  }, [prefersReducedMotion]);
 
   useEffect(() => {
+    if (prefersReducedMotion || duration <= 0) {
+      setCount(target);
+      return;
+    }
+
     if (!isVisible) return;
 
     let startTime: number | null = null;
@@ -46,7 +62,7 @@ export function useCountUp(target: number, duration: number = 2000) {
 
     animationFrame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationFrame);
-  }, [isVisible, target, duration]);
+  }, [isVisible, target, duration, prefersReducedMotion]);
 
   return { count, elementRef };
 }

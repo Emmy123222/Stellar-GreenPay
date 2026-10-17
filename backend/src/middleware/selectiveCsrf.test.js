@@ -58,4 +58,24 @@ describe("selective CSRF middleware", () => {
   it("continues to exempt mobile routes", async () => {
     await request(app).post("/api/mobile/test").expect(200);
   });
+
+  it("regression #1521: server boots without merge-conflict leftovers", async () => {
+    const fs = require("fs");
+    const path = require("path");
+    const serverPath = path.join(__dirname, "..", "server.js");
+    const source = fs.readFileSync(serverPath, "utf8");
+
+    // No unresolved merge markers or stray branch-name lines.
+    expect(source).not.toMatch(/<<<<<<<|>>>>>>>|=======\r?\n/);
+    expect(source).not.toMatch(/fix\/csrf-mobile-extension-clients/);
+    expect(source).not.toMatch(/^\s*main\s*$/m);
+    // The selective-CSRF variant must win over the legacy manual path.
+    expect(source).toContain("createSelectiveCsrf");
+    expect(source).not.toContain('require("csurf")');
+    expect(source).not.toContain("csrfProtection(req, res, next)");
+
+    // The file must parse so the API, Docker targets and npm run dev can boot.
+    const { execFileSync } = require("child_process");
+    execFileSync(process.execPath, ["--check", serverPath], { stdio: "pipe" });
+  });
 });

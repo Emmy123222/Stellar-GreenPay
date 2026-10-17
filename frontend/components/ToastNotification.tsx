@@ -83,7 +83,7 @@ export default function ToastNotification({
           isError
             ? "border-red-200 bg-red-50/95 dark:border-red-800 dark:bg-red-950/95 text-red-900 dark:text-red-100"
             : "border-forest-200 bg-white/95 text-forest-900"
-        } backdrop-blur shadow-lg px-4 py-3 transition-all duration-300 ${
+        } backdrop-blur shadow-lg px-4 py-3 transition-all motion-reduce:transition-none duration-300 ${
           isExiting ? "opacity-0 translate-y-2" : "opacity-100 translate-y-0"
         }`}
       >

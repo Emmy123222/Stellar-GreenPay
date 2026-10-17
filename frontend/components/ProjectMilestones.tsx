@@ -62,7 +62,7 @@ export default function ProjectMilestones({
               </div>
               <div className="w-full bg-forest-100 h-1.5 rounded-full overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-1000 ${
+                  className={`h-full transition-all motion-reduce:transition-none duration-1000 ${
                     m.reachedAt
                       ? "bg-emerald-500"
                       : reached

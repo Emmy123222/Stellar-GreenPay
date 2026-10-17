@@ -156,7 +156,7 @@ function ProfileNotFound({ publicKey }: { publicKey: string }) {
 
 function ProfileSkeleton() {
   return (
-    <div className="animate-pulse space-y-6 max-w-2xl mx-auto px-4 py-10">
+    <div className="animate-pulse motion-reduce:animate-none space-y-6 max-w-2xl mx-auto px-4 py-10">
       <div className="flex items-center gap-4">
         <div className="w-16 h-16 rounded-full bg-[#c8dfc8]" />
         <div className="space-y-2 flex-1">

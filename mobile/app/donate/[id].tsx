@@ -41,6 +41,13 @@ import {
   requestNotificationPermissions,
   shouldShowNotificationRationale,
 } from '../../utils/notifications';
+import {
+  queueDonation,
+  readDonationOutbox,
+  removeQueuedDonation,
+  removeQueuedDonationsForProject,
+  type QueuedDonation,
+} from '../../utils/donationOutbox';
 import { Keypair, Horizon, TransactionBuilder, Networks, Operation, Asset, Memo } from '@stellar/stellar-sdk';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -192,6 +199,83 @@ export default function DonateScreen() {
   const [showFundingGuide, setShowFundingGuide] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
 
+  /**
+   * Issue #1655: donations attempted while the device is offline are queued in
+   * AsyncStorage and surfaced here as pending. They are only ever sent after
+   * the donor reviews the item and presses Donate again, because a transaction
+   * built offline carries a sequence number and fee that go stale.
+   */
+  const [outbox, setOutbox] = useState<QueuedDonation[]>([]);
+  const outboxRef = useRef<QueuedDonation[]>([]);
+
+  const refreshOutbox = async (): Promise<QueuedDonation[]> => {
+    const queue = await readDonationOutbox();
+    outboxRef.current = queue;
+    setOutbox(queue);
+    return queue;
+  };
+
+  /**
+   * Loads a queued intent back into the form for review. Nothing is signed or
+   * submitted here — the donor confirms the details and presses Donate, which
+   * rebuilds the transaction with a current sequence number and fee.
+   */
+  const reviewQueuedDonation = async (item: QueuedDonation) => {
+    const netState = await NetInfo.fetch();
+    if (!netState.isConnected) {
+      setIsOffline(true);
+      setStatusType('info');
+      setStatusMessage(
+        'Still offline — the queued donation stays saved until you reconnect.'
+      );
+      return;
+    }
+
+    const project = projects.find((candidate) => candidate.id === item.projectId);
+    if (!project) {
+      setStatusType('error');
+      setStatusMessage(
+        'The project for this queued donation is unavailable. Reload the project list before sending.'
+      );
+      return;
+    }
+
+    const walletChanged = project.walletAddress !== item.destination;
+    const confirmed = await confirmAlert(
+      'Review queued donation',
+      `${item.amountXLM} XLM to ${project.name}.` +
+        (walletChanged
+          ? ' The project wallet changed since you queued this donation, so it will be sent to the current address.'
+          : '') +
+        ' The transaction is rebuilt now — nothing is signed until you press Donate.',
+      'Load into form',
+      'Keep queued'
+    );
+    if (!isMountedRef.current || !confirmed) return;
+
+    setSelectedProjectId(project.id);
+    setAmount(String(parseFloat(item.amountXLM)));
+    setMessage(item.memo ?? '');
+    if (item.donorPublicKey && !publicKey) setPublicKey(item.donorPublicKey);
+    setStatusType('info');
+    setStatusMessage(
+      'Queued donation loaded. Check the details, then press Donate to sign and send it.'
+    );
+  };
+
+  const discardQueuedDonation = async (item: QueuedDonation) => {
+    const confirmed = await confirmAlert(
+      'Discard queued donation',
+      `Remove the queued ${item.amountXLM} XLM donation to ${item.projectName}? It will not be sent.`,
+      'Discard',
+      'Keep queued'
+    );
+    if (!isMountedRef.current || !confirmed) return;
+
+    outboxRef.current = await removeQueuedDonation(item.id);
+    setOutbox(outboxRef.current);
+  };
+
   const bioHint = buildBioHint(bio.available, bio.enrolled, bio.label);
   // Surfaces the hook's human-readable failure reason (issue #1050) instead of
   // the raw outcome enum, so the banner explains *why* nothing was sent.
@@ -234,6 +318,52 @@ export default function DonateScreen() {
     loadProjects();
   }, [id]);
 
+  // Restore any donation queued during a previous offline session.
+  useEffect(() => {
+    void refreshOutbox();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * Issue #1655: reconnection only *prompts* — the queued intent is loaded into
+   * the form for the donor to confirm, and Donate rebuilds the transaction with
+   * a current sequence number and fee. A queued donation is never signed
+   * automatically.
+   */
+  useEffect(() => {
+    let wasOffline = false;
+
+    const unsubscribe = NetInfo.addEventListener((state) => {
+      if (state.isConnected === false) {
+        wasOffline = true;
+        setIsOffline(true);
+        return;
+      }
+
+      // Only act on a disconnect → connect transition.
+      if (!wasOffline) return;
+      wasOffline = false;
+      setIsOffline(false);
+
+      const pending = outboxRef.current;
+      if (pending.length === 0 || !isMountedRef.current) return;
+      const oldest = pending[0];
+
+      Alert.alert(
+        'Back online',
+        `${pending.length} queued donation${pending.length === 1 ? '' : 's'} waiting.` +
+          ' Review it before signing — queued donations are never sent automatically.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Review now', onPress: () => void reviewQueuedDonation(oldest) },
+        ]
+      );
+    });
+
+    return () => unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects]);
+
   const loadProjects = async () => {
     setLoading(true);
     setStatusMessage(null);
@@ -261,10 +391,8 @@ export default function DonateScreen() {
     setIsOffline(false);
 
     const netState = await NetInfo.fetch();
-    if (!netState.isConnected) {
-      setIsOffline(true);
-      return;
-    }
+    const online = netState.isConnected === true;
+    if (!online) setIsOffline(true);
 
     if (!selectedProject) {
       Alert.alert('Error', 'Please choose a project to donate to.');
@@ -276,6 +404,38 @@ export default function DonateScreen() {
       Alert.alert(
         'Error',
         `Please enter a valid amount (minimum ${MIN_AMOUNT_XLM} XLM).`
+      );
+      return;
+    }
+
+    /**
+     * Issue #1655: offline, the intent (project, amount, memo, donor address) is
+     * queued instead of dropped. The secret key is never stored and no
+     * transaction is built, so nothing stale can be signed when the connection
+     * comes back.
+     */
+    if (!online) {
+      const queued = await queueDonation({
+        projectId: selectedProject.id,
+        projectName: selectedProject.name,
+        destination: selectedProject.walletAddress,
+        amountXLM: donationAmount.toFixed(7),
+        memo: message.trim() || undefined,
+        donorPublicKey: publicKey || undefined,
+      });
+      if (!isMountedRef.current) return;
+
+      if (!queued) {
+        setStatusType('error');
+        setStatusMessage('You are offline and this donation could not be queued.');
+        return;
+      }
+
+      await refreshOutbox();
+      if (!isMountedRef.current) return;
+      setStatusType('info');
+      setStatusMessage(
+        'Saved offline. Review and sign this donation when you are back online — it is never sent automatically.'
       );
       return;
     }
@@ -381,6 +541,12 @@ export default function DonateScreen() {
         message: message.trim() || undefined,
         transactionHash,
       });
+
+      // A donation that just landed fulfils any queued intent for the same
+      // project, so the donor is not prompted to review it again.
+      if ((await removeQueuedDonationsForProject(selectedProject.id)) > 0) {
+        await refreshOutbox();
+      }
 
       setStatusType('success');
       setStatusMessage(`Donation successful! Transaction hash: ${transactionHash}`);
@@ -739,6 +905,48 @@ export default function DonateScreen() {
         </TouchableOpacity>
       ) : null}
 
+      {outbox.length > 0 ? (
+        <View style={styles.outboxCard} testID="offline-outbox" accessibilityRole="summary">
+          <Text style={[styles.sectionTitle, { color: colors.primaryText }]} accessibilityRole="header">
+            Queued offline ({outbox.length})
+          </Text>
+          {outbox.map((item) => (
+            <View
+              key={item.id}
+              style={styles.outboxRow}
+              testID={`queued-donation-${item.projectId}`}
+            >
+              <Text style={[styles.outboxText, { color: colors.primaryText }]}>
+                {item.amountXLM} XLM · {item.projectName}
+              </Text>
+              {item.memo ? (
+                <Text style={[styles.outboxMemo, { color: colors.secondaryText }]}>
+                  "{item.memo}"
+                </Text>
+              ) : null}
+              <View style={styles.outboxActions}>
+                <TouchableOpacity
+                  onPress={() => void reviewQueuedDonation(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Review queued donation of ${item.amountXLM} XLM to ${item.projectName}`}
+                >
+                  <Text style={[styles.outboxActionText, { color: colors.primary }]}>Review</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => void discardQueuedDonation(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Discard queued donation to ${item.projectName}`}
+                >
+                  <Text style={[styles.outboxActionText, { color: colors.secondaryText }]}>
+                    Discard
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {isOffline ? (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>
@@ -981,6 +1189,36 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  outboxCard: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    backgroundColor: '#f7faf7',
+    borderColor: '#cfe3d1',
+    borderWidth: 1,
+    borderRadius: 12,
+  },
+  outboxRow: {
+    marginTop: 10,
+  },
+  outboxText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  outboxMemo: {
+    fontSize: 13,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  outboxActions: {
+    flexDirection: 'row',
+    gap: 18,
+    marginTop: 6,
+  },
+  outboxActionText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   offlineBannerText: {
     color: '#856404',

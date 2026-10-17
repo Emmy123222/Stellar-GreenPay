@@ -295,7 +295,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
 
       {pendingRating && publicKey && (
         <ProjectRating
@@ -311,7 +311,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
         <div>
           <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">My Impact</h1>
           <div className="flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" />
             <span className="address-tag">{shortenAddress(publicKey)}</span>
           </div>
         </div>
@@ -391,13 +391,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       <div className="flex border-b border-forest-100 mb-6">
         <button
           onClick={() => setActiveTab('impact')}
-          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 ${activeTab === 'impact' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[var(--text-tertiary)] dark:text-forest-300 hover:text-forest-600'}`}
+          className={`px-6 py-3 text-sm font-semibold transition-all motion-reduce:transition-none border-b-2 ${activeTab === 'impact' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[var(--text-tertiary)] dark:text-forest-300 hover:text-forest-600'}`}
         >
           My Impact
         </button>
         <button
           onClick={() => setActiveTab('saved')}
-          className={`px-6 py-3 text-sm font-semibold transition-all border-b-2 flex items-center gap-2 ${activeTab === 'saved' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[var(--text-tertiary)] dark:text-forest-300 hover:text-forest-600'}`}
+          className={`px-6 py-3 text-sm font-semibold transition-all motion-reduce:transition-none border-b-2 flex items-center gap-2 ${activeTab === 'saved' ? 'border-forest-500 text-forest-900' : 'border-transparent text-[var(--text-tertiary)] dark:text-forest-300 hover:text-forest-600'}`}
         >
           Saved Projects
           {wishlist.length > 0 && (
@@ -407,7 +407,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
       </div>
 
       {activeTab === 'impact' ? (
-        <div className="space-y-8 animate-slide-up">
+        <div className="space-y-8 animate-slide-up motion-reduce:animate-none">
           {/* Referral Section */}
           <ReferralSection publicKey={publicKey} />
 
@@ -430,13 +430,13 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                 <button
                   onClick={handleDownloadCertificate}
                   disabled={certificateRendering || !showCertificate}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all motion-reduce:transition-none disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {certificateRendering ? "Rendering…" : "Download Certificate"}
                 </button>
                 <button
                   onClick={handleShareCertificate}
-                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-white hover:bg-forest-50 transition-all"
+                  className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-white hover:bg-forest-50 transition-all motion-reduce:transition-none"
                 >
                   Share to Twitter
                 </button>
@@ -483,7 +483,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                 ].map(m => (
                   <div
                     key={m.m}
-                    className={`flex flex-col items-center p-3 rounded-xl border transition-all ${streak.longest >= m.m ? 'bg-white/10 border-white/30' : 'bg-black/20 border-white/5 opacity-30'}`}
+                    className={`flex flex-col items-center p-3 rounded-xl border transition-all motion-reduce:transition-none ${streak.longest >= m.m ? 'bg-white/10 border-white/30' : 'bg-black/20 border-white/5 opacity-30'}`}
                     title={`${m.m} Month Milestone`}
                   >
                     <span className="text-xl mb-1">{m.emoji}</span>
@@ -508,7 +508,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             </h2>
 
             {teamLoading ? (
-              <div className="animate-pulse h-16 bg-forest-50 rounded-xl" />
+              <div className="animate-pulse motion-reduce:animate-none h-16 bg-forest-50 rounded-xl" />
             ) : myTeam ? (
               <div>
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -699,7 +699,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
             </div>
             {loading ? (
               <div className="space-y-3">
-                {[1, 2, 3].map(i => <div key={i} className="h-16 bg-forest-50 rounded-xl animate-pulse" />)}
+                {[1, 2, 3].map(i => <div key={i} className="h-16 bg-forest-50 rounded-xl animate-pulse motion-reduce:animate-none" />)}
               </div>
             ) : donations.length === 0 ? (
               <div className="text-center py-12">
@@ -731,7 +731,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
           </div>
         </div>
       ) : (
-        <div className="animate-slide-up">
+        <div className="animate-slide-up motion-reduce:animate-none">
           {savedProjects.length === 0 ? (
             <div className="card text-center py-20">
               <p className="text-5xl mb-4">❤️</p>

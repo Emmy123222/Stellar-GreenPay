@@ -291,7 +291,9 @@ describe('RecurringScreen — accessibility', () => {
 
   it('amount input exposes a non-announced / numeric accessibility role', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = await render(wrap(<RecurringScreen />));
+    const { getByLabelText, getByTestId } = await render(wrap(<RecurringScreen />));
+
+    fireEvent.press(await waitFor(() => getByTestId('create-recurring-button')));
 
     await waitFor(() => {
       const input = getByLabelText('Recurring donation amount in XLM');
@@ -304,7 +306,9 @@ describe('RecurringScreen — accessibility', () => {
 
   it('cancel button has a label distinct from the confirm button', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText } = await render(wrap(<RecurringScreen />));
+    const { getByLabelText, getByTestId } = await render(wrap(<RecurringScreen />));
+
+    fireEvent.press(await waitFor(() => getByTestId('create-recurring-button')));
 
     await waitFor(() => {
       const confirmBtn = getByLabelText('Confirm recurring donation');
@@ -321,7 +325,11 @@ describe('RecurringScreen — accessibility', () => {
 
   it('announces donation status changes via an alert live region', async () => {
     const RecurringScreen = require('../app/recurring').default;
-    const { getByLabelText, getByRole } = await render(wrap(<RecurringScreen />));
+    const { getByLabelText, getByRole, getByTestId } = await render(
+      wrap(<RecurringScreen />)
+    );
+
+    fireEvent.press(await waitFor(() => getByTestId('create-recurring-button')));
 
     await waitFor(() => {
       expect(getByLabelText('Confirm recurring donation')).toBeTruthy();
@@ -383,11 +391,14 @@ function collectInteractive(node: unknown, out: HostNode[] = []): HostNode[] {
   }
   const host = node as HostNode;
   const props = host.props || {};
+  // Only host (native) nodes count: composite components can carry an
+  // `onClick` prop through from a caller without rendering a control.
   if (
-    typeof props.onClick === 'function' ||
-    host.type === 'TextInput' ||
-    host.type === 'RCTSwitch' ||
-    host.type === 'AndroidSwitch'
+    typeof host.type === 'string' &&
+    (typeof props.onClick === 'function' ||
+      host.type === 'TextInput' ||
+      host.type === 'RCTSwitch' ||
+      host.type === 'AndroidSwitch')
   ) {
     out.push(host);
   }
@@ -423,10 +434,10 @@ async function expectAllInteractiveLabelled(
 ) {
   const utils = await render(element);
   await waitFor(() => {
-    expect(collectInteractive(utils.toJSON()).length).toBeGreaterThanOrEqual(minInteractive);
+    expect(collectInteractive(utils.root).length).toBeGreaterThanOrEqual(minInteractive);
   });
   if (before) await before(utils);
-  expect(unlabelledInteractive(utils.toJSON())).toEqual([]);
+  expect(unlabelledInteractive(utils.root)).toEqual([]);
   return utils;
 }
 
@@ -494,14 +505,15 @@ describe('Every screen — every touchable exposes a label and role (#1658)', ()
 
   it('Scan — invalid QR error is a labelled, dismissible button', async () => {
     const ScanScreen = require('../app/scan').default;
-    const { getByTestId, toJSON } = await render(wrap(<ScanScreen />));
+    const utils = await render(wrap(<ScanScreen />));
+    const { getByTestId } = utils;
     const camera = await waitFor(() => getByTestId('camera-view'));
     const { act } = require('@testing-library/react-native');
     await act(async () => {
       camera.props.onBarcodeScanned({ data: 'https://example.com' });
     });
-    await waitFor(() => expect(collectInteractive(toJSON()).length).toBeGreaterThan(0));
-    expect(unlabelledInteractive(toJSON())).toEqual([]);
+    await waitFor(() => expect(collectInteractive(utils.root).length).toBeGreaterThan(0));
+    expect(unlabelledInteractive(utils.root)).toEqual([]);
   });
 
   it('AppHeader — disconnected, with the connect sheet open', async () => {
@@ -524,12 +536,14 @@ describe('Every screen — every touchable exposes a label and role (#1658)', ()
 
   it('the sweep itself flags an unlabelled touchable', async () => {
     const { TouchableOpacity, Text } = require('react-native');
-    const { toJSON } = await render(
+    const utils = await render(
       <TouchableOpacity onPress={() => undefined}>
         <Text>↗</Text>
       </TouchableOpacity>,
     );
-    expect(unlabelledInteractive(toJSON())).toEqual([
+    console.log('DEBUG KEYS', Object.keys(utils));
+
+    expect(unlabelledInteractive(utils.root)).toEqual([
       'View "↗": missing accessibilityLabel',
       'View "↗": missing accessibilityRole',
     ]);

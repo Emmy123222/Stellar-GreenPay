@@ -220,7 +220,7 @@ After deploying the infrastructure, you must deploy and register the Soroban sma
 
 ```bash
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/greenpay_contract.wasm \
+  --wasm target/wasm32v1-none/release/greenpay_contract.wasm \
   --source admin \
   --network mainnet
 ```

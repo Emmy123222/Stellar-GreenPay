@@ -7,6 +7,13 @@
  * a burst of input has to collapse into a single request, a request that is
  * superseded by a newer one has to be aborted, and the UI has to say that a
  * search is in flight.
+ *
+ * These tests use real timers. Under jest fake timers, React 18 flushes
+ * effects on its own captured `setTimeout`, so the debounce effect lands
+ * *after* the clock has already been advanced and the timer fires one window
+ * late — the assertions would measure React's scheduler, not the debounce.
+ * Waiting slightly longer than the 300 ms window on the real clock keeps the
+ * timing behaviour under test without that coupling.
  */
 import React from 'react';
 import { act, render, fireEvent, waitFor } from '@testing-library/react-native';
@@ -24,6 +31,9 @@ jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 
 import ProjectsScreen from '../app/projects/index';
+
+const DEBOUNCE_MS = 300;
+const SETTLE_MS = DEBOUNCE_MS + 80;
 
 const MOCK_PROJECTS = [
   {
@@ -51,29 +61,23 @@ const MOCK_PROJECTS = [
 /** All URLs passed to axios.get since the last reset. */
 const requestedUrls = () => (axios.get as jest.Mock).mock.calls.map((call) => String(call[0]));
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 describe('ProjectsScreen — debounced search (#1129)', () => {
   beforeEach(() => {
-    jest.useFakeTimers();
     jest.clearAllMocks();
     (AsyncStorage.getItem as jest.Mock).mockResolvedValue(null);
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: MOCK_PROJECTS } });
   });
 
-  afterEach(() => {
-    jest.useRealTimers();
-  });
-
   /** Renders the screen and flushes the initial (empty-query) load. */
   const renderScreen = async () => {
-    const utils = render(
+    const utils = await render(
       <ThemeProvider>
         <ProjectsScreen />
       </ThemeProvider>
     );
-    await act(async () => {
-      await jest.advanceTimersByTimeAsync(0);
-    });
-    expect((axios.get as jest.Mock).mock.calls.length).toBe(1);
+    await waitFor(() => expect(axios.get).toHaveBeenCalledTimes(1));
     return utils;
   };
 
@@ -90,12 +94,12 @@ describe('ProjectsScreen — debounced search (#1129)', () => {
     return value;
   };
 
-  /** Types `text` and lets the 300ms debounce window elapse. */
-  const typeAndSettle = async (input: any, current: string, text: string, ms = 300) => {
+  /** Types `text` and lets the debounce window elapse. */
+  const typeAndSettle = async (input: any, current: string, text: string) => {
     let value = '';
     await act(async () => {
       value = typeSearch(input, current, text);
-      await jest.advanceTimersByTimeAsync(ms);
+      await sleep(SETTLE_MS);
     });
     return value;
   };
@@ -109,12 +113,12 @@ describe('ProjectsScreen — debounced search (#1129)', () => {
     await act(async () => {
       typeSearch(search, '', 'solar');
       // Nothing may leave the component before the debounce window closes.
-      await jest.advanceTimersByTimeAsync(299);
+      await sleep(DEBOUNCE_MS - 100);
     });
     expect(axios.get).not.toHaveBeenCalled();
 
     await act(async () => {
-      await jest.advanceTimersByTimeAsync(1);
+      await sleep(150);
     });
 
     expect(axios.get).toHaveBeenCalledTimes(1);
@@ -133,6 +137,7 @@ describe('ProjectsScreen — debounced search (#1129)', () => {
     });
 
     const typed = await typeAndSettle(search, '', 'solar');
+    expect(firstSignal).toBeDefined();
     expect(firstSignal?.aborted).toBe(false);
 
     // A newer query supersedes it.

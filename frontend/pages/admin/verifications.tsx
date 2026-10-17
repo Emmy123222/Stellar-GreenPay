@@ -82,7 +82,7 @@ export default function AdminVerifications({ publicKey, onConnect }: AdminVerifi
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <div className="mb-8">
         <p className="text-xs tracking-[0.22em] uppercase text-[var(--text-tertiary)] dark:text-forest-300 font-body">Admin</p>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">Verification Queue</h1>
@@ -92,7 +92,7 @@ export default function AdminVerifications({ publicKey, onConnect }: AdminVerifi
       </div>
 
       {loading && (
-        <div className="card animate-pulse space-y-4">
+        <div className="card animate-pulse motion-reduce:animate-none space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-10 bg-forest-100 rounded" />
           ))}

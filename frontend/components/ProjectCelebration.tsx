@@ -37,7 +37,7 @@ export default function ProjectCelebration({
       <div className="celebration-banner mb-6 bg-gradient-to-r from-emerald-500 via-green-500 to-teal-500 text-white rounded-2xl p-8 text-center shadow-2xl border-4 border-white relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent pointer-events-none" />
         <div className="relative z-10">
-          <div className="text-6xl mb-4 animate-bounce">🎉</div>
+          <div className="text-6xl mb-4 animate-bounce motion-reduce:animate-none">🎉</div>
           <h2 className="font-display text-3xl sm:text-4xl font-bold mb-3">
             Fully Funded!
           </h2>

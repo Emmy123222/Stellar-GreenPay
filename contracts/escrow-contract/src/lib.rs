@@ -4,8 +4,60 @@
 //! Client locks funds with `create_job`, then releases them per milestone.
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, BytesN, Env,
+    String, Symbol, Vec,
 };
+
+// ─── Errors ───────────────────────────────────────────────────────────────────
+//
+// Every failure path in the escrow contract is expressed as a typed
+// `ContractError` instead of a bare `panic!("...")`. Panics surface to clients
+// as opaque `HostError`s, so callers (the frontend job board and the backend
+// jobs route) cannot distinguish "milestone already released" from "not
+// authorized". A typed error decodes to a stable `u32` code that clients can
+// branch on. The codes are documented for client integrators in
+// `docs/contract-events.md` (canonical contract reference).
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum ContractError {
+    /// Contract storage has no `Admin` set — `initialize` was never called.
+    NotInitialized = 1,
+    /// `initialize` was called after the contract was already initialized.
+    AlreadyInitialized = 2,
+    /// The caller is not permitted to perform this action (wrong admin, client,
+    /// matcher, or party to the job).
+    Unauthorized = 3,
+    /// No job is stored under the requested `job_id`.
+    JobNotFound = 4,
+    /// `create_job` was called with a `job_id` that already exists.
+    JobAlreadyExists = 5,
+    /// The escrow `amount` must be strictly positive.
+    InvalidAmount = 6,
+    /// Milestone percentages must sum to exactly 100.
+    InvalidMilestoneSplit = 7,
+    /// The supplied `milestone_index` is out of range for the job's milestones.
+    InvalidMilestoneIndex = 8,
+    /// The requested milestone has already been released.
+    MilestoneAlreadyReleased = 9,
+    /// The job is disputed; an admin must resolve it before funds move.
+    DisputeActive = 10,
+    /// The job is not in a disputed state, so `resolve_dispute` does not apply.
+    NotDisputed = 11,
+    /// There is no pending admin proposal to accept.
+    NoProposedAdmin = 12,
+    /// The caller is not the address that was proposed as the new admin.
+    NotProposedAdmin = 13,
+    /// The `release_after` ledger window has not elapsed yet.
+    ReleasePeriodNotReached = 14,
+    /// `release_funds` was called but every milestone is already released.
+    NoUnreleasedFunds = 15,
+    /// The linked GreenPay contract is paused, so escrow operations are blocked.
+    GreenPayPaused = 16,
+    /// An arithmetic operation (milestone split / release tally) overflowed.
+    Overflow = 17,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -28,7 +80,7 @@ pub enum JobStatus {
 #[derive(Clone, Debug)]
 pub struct Milestone {
     pub name: String,
-    pub percentage: u32,  // 0-100
+    pub percentage: u32, // 0-100
     pub released: bool,
 }
 
@@ -62,40 +114,44 @@ pub struct EscrowContract;
 #[contractimpl]
 impl EscrowContract {
     /// Initialize contract with admin address.
-    pub fn initialize(env: Env, admin: Address) {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), ContractError> {
         if env.storage().instance().has(&DataKey::Admin) {
-            panic!("Already initialized");
+            return Err(ContractError::AlreadyInitialized);
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        Ok(())
     }
 
     /// Set the GreenPay contract ID for pause checking.
     /// Only the admin can set this.
-    pub fn set_greenpay_contract(env: Env, admin: Address, greenpay_contract_id: Address) {
+    pub fn set_greenpay_contract(
+        env: Env,
+        admin: Address,
+        greenpay_contract_id: Address,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
         let stored_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("Not initialized");
+            .ok_or(ContractError::NotInitialized)?;
         if stored_admin != admin {
-            panic!("Only admin can set GreenPay contract");
+            return Err(ContractError::Unauthorized);
         }
         env.storage()
             .instance()
             .set(&DataKey::GreenPayContractId, &greenpay_contract_id);
+        Ok(())
     }
 
     /// Get the configured GreenPay contract ID.
     pub fn get_greenpay_contract(env: Env) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::GreenPayContractId)
+        env.storage().instance().get(&DataKey::GreenPayContractId)
     }
 
     /// Internal helper to check if the main GreenPay contract is paused.
-    /// If no GreenPay contract is configured, returns false (allows operations).
-    fn check_pause_state(env: &Env) {
+    /// If no GreenPay contract is configured, operations are allowed.
+    fn check_pause_state(env: &Env) -> Result<(), ContractError> {
         if let Some(greenpay_addr) = env
             .storage()
             .instance()
@@ -108,59 +164,60 @@ impl EscrowContract {
                 soroban_sdk::vec![env],
             );
             if is_paused {
-                panic!("GreenPay contract is paused");
+                return Err(ContractError::GreenPayPaused);
             }
         }
+        Ok(())
     }
 
     /// Propose a new admin address. Only the current admin can propose.
-    pub fn propose_admin(env: Env, current_admin: Address, new_admin: Address) {
+    pub fn propose_admin(
+        env: Env,
+        current_admin: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
         current_admin.require_auth();
         let stored_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("Not initialized");
+            .ok_or(ContractError::NotInitialized)?;
         if stored_admin != current_admin {
-            panic!("Only admin can propose new admin");
+            return Err(ContractError::Unauthorized);
         }
         env.storage()
             .instance()
             .set(&DataKey::ProposedAdmin, &new_admin);
+        Ok(())
     }
 
     /// Accept the proposed admin role. Only the proposed new admin can accept.
-    pub fn accept_admin(env: Env, new_admin: Address) {
+    pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), ContractError> {
         new_admin.require_auth();
         let proposed_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::ProposedAdmin)
-            .expect("No proposed admin");
+            .ok_or(ContractError::NoProposedAdmin)?;
         if proposed_admin != new_admin {
-            panic!("Not the proposed admin");
+            return Err(ContractError::NotProposedAdmin);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::Admin, &new_admin);
-        env.storage()
-            .instance()
-            .remove(&DataKey::ProposedAdmin);
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.storage().instance().remove(&DataKey::ProposedAdmin);
+        Ok(())
     }
 
     /// Get the current admin address.
-    pub fn get_admin(env: Env) -> Address {
+    pub fn get_admin(env: Env) -> Result<Address, ContractError> {
         env.storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("Not initialized")
+            .ok_or(ContractError::NotInitialized)
     }
 
     /// Get the proposed admin address, if any.
     pub fn get_proposed_admin(env: Env) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&DataKey::ProposedAdmin)
+        env.storage().instance().get(&DataKey::ProposedAdmin)
     }
 
     /// Client funds escrow with milestones: transfers `amount` of `token` from client into this contract.
@@ -172,25 +229,26 @@ impl EscrowContract {
         token: Address,
         amount: i128,
         milestones: Vec<Milestone>,
-    ) {
+    ) -> Result<(), ContractError> {
         client.require_auth();
-        Self::check_pause_state(&env);
-        
+        Self::check_pause_state(&env)?;
+
         if amount <= 0 {
-            panic!("Amount must be positive");
+            return Err(ContractError::InvalidAmount);
         }
         if env.storage().instance().has(&DataKey::Job(job_id.clone())) {
-            panic!("Job already exists");
+            return Err(ContractError::JobAlreadyExists);
         }
 
         // Validate milestones sum to 100%
         let mut total_percentage: u32 = 0;
         for milestone in milestones.iter() {
-            total_percentage = total_percentage.checked_add(milestone.percentage)
-                .expect("Milestone percentage overflow");
+            total_percentage = total_percentage
+                .checked_add(milestone.percentage)
+                .ok_or(ContractError::Overflow)?;
         }
         if total_percentage != 100 {
-            panic!("Milestones must sum to 100%");
+            return Err(ContractError::InvalidMilestoneSplit);
         }
 
         let token_client = token::Client::new(&env, &token);
@@ -209,32 +267,38 @@ impl EscrowContract {
             release_after: env.ledger().sequence() + RELEASE_AFTER_LEDGERS,
         };
         env.storage().instance().set(&DataKey::Job(job_id), &job);
+        Ok(())
     }
 
     /// Client releases a specific milestone. Pays proportional XLM to freelancer.
-    pub fn release_milestone(env: Env, client: Address, job_id: String, milestone_index: u32) {
+    pub fn release_milestone(
+        env: Env,
+        client: Address,
+        job_id: String,
+        milestone_index: u32,
+    ) -> Result<(), ContractError> {
         client.require_auth();
-        Self::check_pause_state(&env);
-        
+        Self::check_pause_state(&env)?;
+
         let mut job: Job = env
             .storage()
             .instance()
             .get(&DataKey::Job(job_id.clone()))
-            .expect("Job not found");
+            .ok_or(ContractError::JobNotFound)?;
 
         if job.client != client {
-            panic!("Only the client can release");
+            return Err(ContractError::Unauthorized);
         }
         if job.disputed {
-            panic!("Job is disputed; admin must resolve");
+            return Err(ContractError::DisputeActive);
         }
         if milestone_index >= job.milestones.len() {
-            panic!("Invalid milestone index");
+            return Err(ContractError::InvalidMilestoneIndex);
         }
 
         let milestone = job.milestones.get(milestone_index).unwrap();
         if milestone.released {
-            panic!("Milestone already released");
+            return Err(ContractError::MilestoneAlreadyReleased);
         }
 
         // Calculate proportional amount
@@ -256,7 +320,9 @@ impl EscrowContract {
                 m.released = true;
             }
             if m.released {
-                released_count = released_count.checked_add(1).expect("released_count overflow");
+                released_count = released_count
+                    .checked_add(1)
+                    .ok_or(ContractError::Overflow)?;
             }
             updated_milestones.push_back(m);
             idx += 1;
@@ -271,46 +337,56 @@ impl EscrowContract {
         }
 
         env.storage().instance().set(&DataKey::Job(job_id), &job);
+        Ok(())
     }
 
     /// Client or freelancer: Mark a job as disputed, freezing remaining releases.
-    pub fn raise_dispute(env: Env, client: Address, job_id: String) {
+    pub fn raise_dispute(env: Env, client: Address, job_id: String) -> Result<(), ContractError> {
         client.require_auth();
-        Self::check_pause_state(&env);
+        Self::check_pause_state(&env)?;
 
         let mut job: Job = env
             .storage()
             .instance()
             .get(&DataKey::Job(job_id.clone()))
-            .expect("Job not found");
+            .ok_or(ContractError::JobNotFound)?;
 
         if job.client != client && job.freelancer != client {
-            panic!("Only client or freelancer can raise dispute");
+            return Err(ContractError::Unauthorized);
         }
         job.disputed = true;
         job.status = JobStatus::Disputed;
         env.storage().instance().set(&DataKey::Job(job_id), &job);
+        Ok(())
     }
 
     /// Admin-only: Resolve a dispute and release remaining funds.
-    pub fn resolve_dispute(env: Env, admin: Address, job_id: String, release_to_freelancer: bool) {
+    pub fn resolve_dispute(
+        env: Env,
+        admin: Address,
+        job_id: String,
+        release_to_freelancer: bool,
+    ) -> Result<(), ContractError> {
         admin.require_auth();
-        Self::check_pause_state(&env);
-        
-        let stored_admin: Address = env.storage().instance()
-            .get(&DataKey::Admin).expect("Not initialized");
+        Self::check_pause_state(&env)?;
+
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(ContractError::NotInitialized)?;
         if stored_admin != admin {
-            panic!("Only admin can resolve disputes");
+            return Err(ContractError::Unauthorized);
         }
 
         let mut job: Job = env
             .storage()
             .instance()
             .get(&DataKey::Job(job_id.clone()))
-            .expect("Job not found");
+            .ok_or(ContractError::JobNotFound)?;
 
         if !job.disputed {
-            panic!("Job is not disputed");
+            return Err(ContractError::NotDisputed);
         }
 
         if release_to_freelancer {
@@ -319,9 +395,9 @@ impl EscrowContract {
             for milestone in job.milestones.iter() {
                 if !milestone.released {
                     let proportion = milestone.percentage as i128;
-                    total_unreleased = total_unreleased.checked_add(
-                        (job.amount * proportion) / 100i128
-                    ).expect("total_unreleased overflow");
+                    total_unreleased = total_unreleased
+                        .checked_add((job.amount * proportion) / 100i128)
+                        .ok_or(ContractError::Overflow)?;
                 }
             }
 
@@ -338,9 +414,9 @@ impl EscrowContract {
             for milestone in job.milestones.iter() {
                 if !milestone.released {
                     let proportion = milestone.percentage as i128;
-                    remaining_amount = remaining_amount.checked_add(
-                        (job.amount * proportion) / 100i128
-                    ).expect("remaining_amount overflow");
+                    remaining_amount = remaining_amount
+                        .checked_add((job.amount * proportion) / 100i128)
+                        .ok_or(ContractError::Overflow)?;
                 }
             }
 
@@ -355,27 +431,37 @@ impl EscrowContract {
 
         job.disputed = false;
         env.storage().instance().set(&DataKey::Job(job_id), &job);
+        Ok(())
     }
 
     /// Freelancer can claim a milestone after release_after ledgers if not disputed.
-    pub fn claim_milestone(env: Env, freelancer: Address, job_id: String, milestone_index: u32) {
+    pub fn claim_milestone(
+        env: Env,
+        freelancer: Address,
+        job_id: String,
+        milestone_index: u32,
+    ) -> Result<(), ContractError> {
         freelancer.require_auth();
-        Self::check_pause_state(&env);
-        
-        let mut job: Job = env.storage().instance().get(&DataKey::Job(job_id.clone())).expect("Job not found");
+        Self::check_pause_state(&env)?;
+
+        let mut job: Job = env
+            .storage()
+            .instance()
+            .get(&DataKey::Job(job_id.clone()))
+            .ok_or(ContractError::JobNotFound)?;
 
         if job.disputed {
-            panic!("Job is disputed; cannot claim milestone");
+            return Err(ContractError::DisputeActive);
         }
         if env.ledger().sequence() < job.release_after {
-            panic!("Release period not reached");
+            return Err(ContractError::ReleasePeriodNotReached);
         }
         if milestone_index >= job.milestones.len() {
-            panic!("Invalid milestone index");
+            return Err(ContractError::InvalidMilestoneIndex);
         }
         let milestone = job.milestones.get(milestone_index).unwrap();
         if milestone.released {
-            panic!("Milestone already released");
+            return Err(ContractError::MilestoneAlreadyReleased);
         }
         // Calculate amount
         let proportion = milestone.percentage as i128;
@@ -403,9 +489,14 @@ impl EscrowContract {
         job.milestones = updated_milestones;
 
         // Update status
-        job.status = if all_released { JobStatus::Completed } else { JobStatus::PartiallyReleased };
+        job.status = if all_released {
+            JobStatus::Completed
+        } else {
+            JobStatus::PartiallyReleased
+        };
 
         env.storage().instance().set(&DataKey::Job(job_id), &job);
+        Ok(())
     }
 
     /// Release funds for a job upon verification of completion evidence, anchoring the SHA-256 report hash.
@@ -414,28 +505,28 @@ impl EscrowContract {
         caller: Address,
         job_id: String,
         project_report_hash: BytesN<32>,
-    ) -> i128 {
+    ) -> Result<i128, ContractError> {
         caller.require_auth();
-        Self::check_pause_state(&env);
+        Self::check_pause_state(&env)?;
 
         let stored_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .expect("Not initialized");
+            .ok_or(ContractError::NotInitialized)?;
 
         let mut job: Job = env
             .storage()
             .instance()
             .get(&DataKey::Job(job_id.clone()))
-            .expect("Job not found");
+            .ok_or(ContractError::JobNotFound)?;
 
         if caller != stored_admin && caller != job.client {
-            panic!("Only admin or client can release funds");
+            return Err(ContractError::Unauthorized);
         }
 
         if job.disputed {
-            panic!("Job is disputed; cannot release funds");
+            return Err(ContractError::DisputeActive);
         }
 
         let mut total_unreleased: i128 = 0;
@@ -447,14 +538,14 @@ impl EscrowContract {
                 let milestone_amount = (job.amount * proportion) / 100i128;
                 total_unreleased = total_unreleased
                     .checked_add(milestone_amount)
-                    .expect("total_unreleased overflow");
+                    .ok_or(ContractError::Overflow)?;
                 m.released = true;
             }
             updated_milestones.push_back(m);
         }
 
         if total_unreleased == 0 {
-            panic!("No unreleased funds available");
+            return Err(ContractError::NoUnreleasedFunds);
         }
 
         let token_client = token::Client::new(&env, &job.token);
@@ -463,7 +554,9 @@ impl EscrowContract {
 
         job.milestones = updated_milestones;
         job.status = JobStatus::Completed;
-        env.storage().instance().set(&DataKey::Job(job_id.clone()), &job);
+        env.storage()
+            .instance()
+            .set(&DataKey::Job(job_id.clone()), &job);
 
         // Emit FundsReleased event anchoring the project_report_hash
         env.events().publish(
@@ -475,7 +568,7 @@ impl EscrowContract {
             },
         );
 
-        total_unreleased
+        Ok(total_unreleased)
     }
 
     pub fn get_job(env: Env, job_id: String) -> Option<Job> {
@@ -516,7 +609,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only admin can propose new admin")]
     fn test_propose_admin_unauthorized_fails() {
         let env = Env::default();
         env.mock_all_auths();
@@ -524,11 +616,13 @@ mod tests {
         let impostor = Address::generate(&env);
         let new_admin = Address::generate(&env);
 
-        client.propose_admin(&impostor, &new_admin);
+        assert_eq!(
+            client.try_propose_admin(&impostor, &new_admin),
+            Err(Ok(ContractError::Unauthorized))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Not the proposed admin")]
     fn test_accept_admin_wrong_address_fails() {
         let env = Env::default();
         env.mock_all_auths();
@@ -537,18 +631,23 @@ mod tests {
         let wrong_admin = Address::generate(&env);
 
         client.propose_admin(&admin, &new_admin);
-        client.accept_admin(&wrong_admin);
+        assert_eq!(
+            client.try_accept_admin(&wrong_admin),
+            Err(Ok(ContractError::NotProposedAdmin))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "No proposed admin")]
     fn test_accept_admin_no_proposal_fails() {
         let env = Env::default();
         env.mock_all_auths();
         let (_admin, client) = setup(&env);
         let new_admin = Address::generate(&env);
 
-        client.accept_admin(&new_admin);
+        assert_eq!(
+            client.try_accept_admin(&new_admin),
+            Err(Ok(ContractError::NoProposedAdmin))
+        );
     }
 
     #[test]
@@ -561,7 +660,9 @@ mod tests {
         let freelancer = Address::generate(&env);
         // Use a real Stellar asset token so create_job's transfer succeeds
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-1");
 
@@ -583,7 +684,14 @@ mod tests {
             released: false,
         });
 
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         let job = client.get_job(&job_id).expect("Job should exist");
         assert_eq!(job.status, JobStatus::Escrowed);
@@ -591,7 +699,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Milestones must sum to 100%")]
     fn test_milestone_validation() {
         let env = Env::default();
         env.mock_all_auths();
@@ -613,19 +720,31 @@ mod tests {
             percentage: 40,
             released: false,
         });
-        // Only 90%, should panic
+        // Only 90%, should return InvalidMilestoneSplit
 
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        assert_eq!(
+            client.try_create_job(
+                &client_addr,
+                &freelancer,
+                &job_id,
+                &token,
+                &1000i128,
+                &milestones
+            ),
+            Err(Ok(ContractError::InvalidMilestoneSplit))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "Job not found")]
     fn release_missing_job_panics() {
         let env = Env::default();
         env.mock_all_auths();
         let (_admin, client) = setup(&env);
         let addr = Address::generate(&env);
-        client.release_milestone(&addr, &String::from_str(&env, "no-such-job"), &0u32);
+        assert_eq!(
+            client.try_release_milestone(&addr, &String::from_str(&env, "no-such-job"), &0u32),
+            Err(Ok(ContractError::JobNotFound))
+        );
     }
 
     #[test]
@@ -638,7 +757,9 @@ mod tests {
         let freelancer = Address::generate(&env);
         // Use a real Stellar asset token so create_job's transfer succeeds
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-dispute");
 
@@ -649,7 +770,14 @@ mod tests {
             released: false,
         });
 
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         // Dispute the job
         client.raise_dispute(&client_addr, &job_id);
@@ -668,7 +796,9 @@ mod tests {
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-evidence-1");
 
@@ -679,7 +809,14 @@ mod tests {
             released: false,
         });
 
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         let report_hash = BytesN::from_array(&env, &[0xab; 32]);
         let released = client.release_funds(&admin, &job_id, &report_hash);
@@ -694,7 +831,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only admin or client can release funds")]
     fn test_release_funds_unauthorized_caller_fails() {
         let env = Env::default();
         env.mock_all_auths();
@@ -704,7 +840,9 @@ mod tests {
         let freelancer = Address::generate(&env);
         let unauthorized = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-unauth");
 
@@ -715,10 +853,20 @@ mod tests {
             released: false,
         });
 
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         let report_hash = BytesN::from_array(&env, &[0xcd; 32]);
-        client.release_funds(&unauthorized, &job_id, &report_hash);
+        assert_eq!(
+            client.try_release_funds(&unauthorized, &job_id, &report_hash),
+            Err(Ok(ContractError::Unauthorized))
+        );
     }
 
     #[test]
@@ -735,7 +883,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Only admin can set GreenPay contract")]
     fn test_set_greenpay_contract_unauthorized_fails() {
         let env = Env::default();
         env.mock_all_auths();
@@ -743,11 +890,13 @@ mod tests {
         let unauthorized = Address::generate(&env);
         let greenpay_addr = Address::generate(&env);
 
-        client.set_greenpay_contract(&unauthorized, &greenpay_addr);
+        assert_eq!(
+            client.try_set_greenpay_contract(&unauthorized, &greenpay_addr),
+            Err(Ok(ContractError::Unauthorized))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "GreenPay contract is paused")]
     fn test_create_job_fails_when_greenpay_paused() {
         let env = Env::default();
         env.mock_all_auths();
@@ -755,7 +904,7 @@ mod tests {
 
         // Register a mock GreenPay contract that returns is_paused = true
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        
+
         // Initialize the mock contract to return paused = true
         env.invoke_contract::<()>(
             &greenpay_cid,
@@ -768,7 +917,9 @@ mod tests {
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-paused");
 
@@ -779,12 +930,21 @@ mod tests {
             released: false,
         });
 
-        // This should panic with "GreenPay contract is paused"
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        // GreenPay is paused, so create_job must be rejected with GreenPayPaused
+        assert_eq!(
+            client.try_create_job(
+                &client_addr,
+                &freelancer,
+                &job_id,
+                &token,
+                &1000i128,
+                &milestones
+            ),
+            Err(Ok(ContractError::GreenPayPaused))
+        );
     }
 
     #[test]
-    #[should_panic(expected = "GreenPay contract is paused")]
     fn test_release_milestone_fails_when_greenpay_paused() {
         let env = Env::default();
         env.mock_all_auths();
@@ -793,7 +953,9 @@ mod tests {
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-pause-release");
 
@@ -805,22 +967,32 @@ mod tests {
         });
 
         // Create job first (without pause)
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         // Now set up paused GreenPay contract
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        
+
         // Initialize the mock contract to return paused = true
         env.invoke_contract::<()>(
             &greenpay_cid,
             &Symbol::new(&env, "initialize"),
             soroban_sdk::vec![&env, true.into()],
         );
-        
+
         client.set_greenpay_contract(&admin, &greenpay_cid);
 
-        // This should panic with "GreenPay contract is paused"
-        client.release_milestone(&client_addr, &job_id, &0u32);
+        // GreenPay is paused, so release_milestone must be rejected
+        assert_eq!(
+            client.try_release_milestone(&client_addr, &job_id, &0u32),
+            Err(Ok(ContractError::GreenPayPaused))
+        );
     }
 
     #[test]
@@ -831,7 +1003,7 @@ mod tests {
 
         // Register a mock GreenPay contract that returns is_paused = false
         let greenpay_cid = env.register_contract(None, MockPausedGreenPayContract);
-        
+
         // Initialize the mock contract to return paused = false
         env.invoke_contract::<()>(
             &greenpay_cid,
@@ -844,7 +1016,9 @@ mod tests {
         let client_addr = Address::generate(&env);
         let freelancer = Address::generate(&env);
         let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
+        let token = env
+            .register_stellar_asset_contract_v2(token_admin)
+            .address();
         soroban_sdk::token::StellarAssetClient::new(&env, &token).mint(&client_addr, &1000i128);
         let job_id = String::from_str(&env, "job-not-paused");
 
@@ -856,7 +1030,14 @@ mod tests {
         });
 
         // This should succeed
-        client.create_job(&client_addr, &freelancer, &job_id, &token, &1000i128, &milestones);
+        client.create_job(
+            &client_addr,
+            &freelancer,
+            &job_id,
+            &token,
+            &1000i128,
+            &milestones,
+        );
 
         let job = client.get_job(&job_id).expect("Job should exist");
         assert_eq!(job.status, JobStatus::Escrowed);
@@ -864,27 +1045,29 @@ mod tests {
 
     // ─── Mock GreenPay Contract for Testing Pause ────────────────────────────────
 
-// Test-only. `#[contractimpl]` emits one exported WASM symbol per function, so a
-// non-test build would define `initialize` here as well as on EscrowContract
-// and the release wasm32 build fails with "symbol `initialize` is already
-// defined". Host `cargo check`/`cargo test` do not export symbols, which is why
-// only the wasm build catches it.
-#[cfg(test)]
-#[contract]
-pub struct MockPausedGreenPayContract;
+    // Test-only. `#[contractimpl]` emits one exported WASM symbol per function, so a
+    // non-test build would define `initialize` here as well as on EscrowContract
+    // and the release wasm32 build fails with "symbol `initialize` is already
+    // defined". Host `cargo check`/`cargo test` do not export symbols, which is why
+    // only the wasm build catches it.
+    #[cfg(test)]
+    #[contract]
+    pub struct MockPausedGreenPayContract;
 
-#[cfg(test)]
-#[contractimpl]
-impl MockPausedGreenPayContract {
-    pub fn initialize(env: Env, paused: bool) {
-        env.storage().instance().set(&symbol_short!("paused"), &paused);
-    }
+    #[cfg(test)]
+    #[contractimpl]
+    impl MockPausedGreenPayContract {
+        pub fn initialize(env: Env, paused: bool) {
+            env.storage()
+                .instance()
+                .set(&symbol_short!("paused"), &paused);
+        }
 
-    pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&symbol_short!("paused"))
-            .unwrap_or(false)
+        pub fn is_paused(env: Env) -> bool {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("paused"))
+                .unwrap_or(false)
+        }
     }
-}
 } // mod tests

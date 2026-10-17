@@ -20,7 +20,7 @@ export default function JobsIndexPage() {
   }, []);
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <h1 className="font-display text-3xl font-bold text-forest-900 mb-2">
         Jobs
       </h1>

@@ -134,7 +134,7 @@ export default function ProjectMap({ projects }: ProjectMapProps) {
               role="button"
               onKeyDown={(e) => handleKeyDown(e, index)}
               onClick={() => window.location.href = `/projects/${project.id}`}
-              className={`p-4 rounded-lg border cursor-pointer transition-all ${
+              className={`p-4 rounded-lg border cursor-pointer transition-all motion-reduce:transition-none ${
                 focusedIndex === index
                   ? 'bg-forest-100 border-forest-500 ring-2 ring-forest-500'
                   : 'bg-white border-forest-200 hover:border-forest-400 hover:bg-forest-50'
