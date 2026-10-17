@@ -6,22 +6,26 @@
 const fs = require('fs');
 const path = require('path');
 
-const addressesPath = path.resolve(__dirname, '../../contracts/addresses.json');
-const envLocalPath = path.resolve(__dirname, '../.env.local');
+const addressesPath = process.env.CONTRACT_ADDRESSES_FILE ||
+  path.resolve(__dirname, '../../contracts/addresses.json');
+const envLocalPath = process.env.FRONTEND_ENV_FILE ||
+  path.resolve(__dirname, '../.env.local');
 
 if (!fs.existsSync(addressesPath)) {
   console.warn('[set-contract-env] contracts/addresses.json not found — skipping');
   process.exit(0);
 }
 
-const addresses = JSON.parse(fs.readFileSync(addressesPath, 'utf8'));
-const network = process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet';
-const net = addresses[network] || {};
-
-if (!net.greenpay && !net.escrow) {
-  console.warn(`[set-contract-env] No addresses set for "${network}" in contracts/addresses.json — skipping`);
-  process.exit(0);
+let addresses;
+try {
+  addresses = JSON.parse(fs.readFileSync(addressesPath, 'utf8'));
+} catch (error) {
+  console.error(`[set-contract-env] Could not read ${addressesPath}: ${error.message}`);
+  process.exit(1);
 }
+
+const network = process.env.NEXT_PUBLIC_STELLAR_NETWORK || process.env.STELLAR_NETWORK || 'testnet';
+const net = addresses[network] || {};
 
 // Read existing .env.local so we only patch the two contract lines
 let existing = fs.existsSync(envLocalPath) ? fs.readFileSync(envLocalPath, 'utf8') : '';
@@ -32,8 +36,22 @@ function upsertLine(content, key, value) {
   return re.test(content) ? content.replace(re, line) : content + (content.endsWith('\n') ? '' : '\n') + line + '\n';
 }
 
-if (net.greenpay) existing = upsertLine(existing, 'NEXT_PUBLIC_CONTRACT_ID', net.greenpay);
-if (net.escrow)   existing = upsertLine(existing, 'NEXT_PUBLIC_ESCROW_CONTRACT_ID', net.escrow);
+const contractIds = [
+  ['NEXT_PUBLIC_CONTRACT_ID', net.contractId],
+  ['NEXT_PUBLIC_ESCROW_CONTRACT_ID', net.escrowContractId],
+];
+let changed = false;
 
-fs.writeFileSync(envLocalPath, existing);
-console.log(`[set-contract-env] Written contract addresses for "${network}" to .env.local`);
+for (const [key, id] of contractIds) {
+  if (typeof id === 'string' && id.trim()) {
+    existing = upsertLine(existing, key, id.trim());
+    changed = true;
+  } else {
+    console.warn(`[set-contract-env] ${key} is empty for "${network}" in contracts/addresses.json`);
+  }
+}
+
+if (changed) {
+  fs.writeFileSync(envLocalPath, existing);
+  console.log(`[set-contract-env] Written configured contract addresses for "${network}" to ${envLocalPath}`);
+}

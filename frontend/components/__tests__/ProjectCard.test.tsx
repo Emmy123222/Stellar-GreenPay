@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import ProjectCard, { ProjectCardSkeleton } from "../ProjectCard";
 import type { ClimateProject } from "@/utils/types";
 
@@ -39,13 +39,24 @@ describe("ProjectCard", () => {
     expect(container).toMatchSnapshot();
   });
 
-  it("renders an uploaded project image when present", () => {
-    const { getByRole } = render(
+  it("renders an uploaded project image as decorative (not announced by screen readers)", () => {
+    const { getByRole, queryByRole } = render(
       <ProjectCard
         project={{ ...mockProject, imageUrl: "https://example.com/banner.png" }}
       />,
     );
 
-    expect(getByRole("img", { name: /amazon reforestation initiative/i })).toBeInTheDocument();
+    const img = getByRole("img");
+    expect(img).toBeInTheDocument();
+    expect(img).toHaveAttribute("alt", "");
+    expect(img).toHaveAttribute("role", "presentation");
+
+    // Card image must not repeat the project name for screen readers
+    expect(queryByRole("img", { name: /amazon reforestation initiative/i })).not.toBeInTheDocument();
+  });
+
+  it("renders no image element when project has no imageUrl", () => {
+    const { queryByRole } = render(<ProjectCard project={mockProject} />);
+    expect(queryByRole("img")).not.toBeInTheDocument();
   });
 });

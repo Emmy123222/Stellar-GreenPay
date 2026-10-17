@@ -54,6 +54,14 @@ chmod +x scripts/setup-dev.sh
 ./scripts/setup-dev.sh
 ```
 
+### Backend environment
+
+Before starting the API, copy `backend/.env.example` to `backend/.env` and set
+`DATABASE_URL` to a reachable PostgreSQL database. That file groups each
+backend variable by subsystem, marks required and optional settings, and lists
+defaults. Most integrations (Redis, Stellar, email, S3/IPFS, Sentry, and
+Turrets) are optional for a basic local setup.
+
 Start Backend
 
 ```
