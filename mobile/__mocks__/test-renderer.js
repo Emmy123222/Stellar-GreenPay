@@ -208,6 +208,16 @@ function createRoot(options) {
             Object.defineProperty(root, 'queryAll', {
               value: (predicate, options = {}) => {
                 const matches = root.findAll(predicate);
+                // Legacy react-test-renderer walks composite instances as
+                // well as host ones, so a predicate that only inspects props
+                // (e.g. RNTL's testID match) also matches the composite
+                // component wrapping the real host node. RNTL 14 matchers
+                // require host instances (`typeof instance.type === 'string'`),
+                // so drop composites before deduping.
+                const hostMatches = matches.filter(
+                  (node) => node && typeof node.type === 'string'
+                );
+                const candidates = hostMatches.length > 0 ? hostMatches : matches;
                 // Dedupe by default: when match A is a descendant of another
                 // match B, exclude A. React Native's `TouchableOpacity` and
                 // `Pressable` propagate `testID` to their inner View, so a
@@ -221,9 +231,9 @@ function createRoot(options) {
                 // out of dedupe and returns all matches (the legacy
                 // behaviour). Callers that need to enumerate nested roles
                 // (e.g. accessibility-role audits) pass `matchOutermostOnly: false`.
-                if (options.matchOutermostOnly === false) return matches;
-                return matches.filter((node) =>
-                  matches.every(
+                if (options.matchOutermostOnly === false) return candidates;
+                return candidates.filter((node) =>
+                  candidates.every(
                     (other) => other === node || !other.findAll(() => true).includes(node)
                   )
                 );

@@ -37,7 +37,7 @@ describe('LeaderboardScreen component', () => {
       },
     });
 
-    const { getByText } = render(<LeaderboardScreen />);
+    const { getByText, root } = await render(<LeaderboardScreen />);
 
     await waitFor(() => {
       expect(axios.get).toHaveBeenCalledWith(
@@ -47,8 +47,11 @@ describe('LeaderboardScreen component', () => {
         })
       );
       expect(getByText('Donor 1')).toBeTruthy();
-      expect(getByText('Donor 20')).toBeTruthy();
     });
+
+    // RNTL 14's FlatList only mounts the initial render window, so assert the
+    // full first page through the list data rather than through the tree.
+    expect(root.findByType(FlatList).props.data).toHaveLength(20);
   });
 
   test('loads next page on end reached and appends items', async () => {
@@ -88,13 +91,13 @@ describe('LeaderboardScreen component', () => {
         },
       });
 
-    const { getByText, UNSAFE_getByType } = render(<LeaderboardScreen />);
+    const { getByText, root } = await render(<LeaderboardScreen />);
 
     await waitFor(() => {
       expect(getByText('Donor 1')).toBeTruthy();
     });
 
-    const flatList = UNSAFE_getByType(FlatList);
+    const flatList = root.findByType(FlatList);
 
     await act(async () => {
       flatList.props.onEndReached();
@@ -108,7 +111,9 @@ describe('LeaderboardScreen component', () => {
           params: expect.objectContaining({ limit: 20, cursor: 'cursor-page-2' }),
         })
       );
-      expect(getByText('Donor 21')).toBeTruthy();
+      const data = flatList.props.data as Array<{ displayName: string }>;
+      expect(data).toHaveLength(25);
+      expect(data.map((entry) => entry.displayName)).toContain('Donor 21');
     });
   });
 
@@ -133,13 +138,13 @@ describe('LeaderboardScreen component', () => {
       },
     });
 
-    const { getByText, UNSAFE_getByType } = render(<LeaderboardScreen />);
+    const { getByText, root } = await render(<LeaderboardScreen />);
 
     await waitFor(() => {
       expect(getByText('Only Donor')).toBeTruthy();
     });
 
-    const flatList = UNSAFE_getByType(FlatList);
+    const flatList = root.findByType(FlatList);
 
     await act(async () => {
       flatList.props.onEndReached();

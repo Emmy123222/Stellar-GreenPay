@@ -44,6 +44,14 @@ jest.mock('../utils/recurringDonations', () => ({
     status: 'active',
   }),
   loadPaymentHistory: jest.fn().mockResolvedValue([]),
+  useRecurringDonations: () => ({
+    donations: [],
+    isSyncing: false,
+    error: null,
+    refresh: jest.fn(),
+    create: jest.fn(),
+    cancel: jest.fn(),
+  }),
 }));
 
 describe('Dark Mode consistent theme application', () => {
@@ -55,7 +63,7 @@ describe('Dark Mode consistent theme application', () => {
   });
 
   it('renders RecurringScreen using ThemeProvider theme colors', async () => {
-    const { getByText } = render(
+    const { getByText } = await render(
       <ThemeProvider>
         <RecurringScreen />
       </ThemeProvider>
@@ -65,8 +73,8 @@ describe('Dark Mode consistent theme application', () => {
     });
   });
 
-  it('renders ScanScreen using ThemeProvider theme colors', () => {
-    const { getByText } = render(
+  it('renders ScanScreen using ThemeProvider theme colors', async () => {
+    const { getByText } = await render(
       <ThemeProvider>
         <ScanScreen />
       </ThemeProvider>
@@ -74,8 +82,8 @@ describe('Dark Mode consistent theme application', () => {
     expect(getByText('Point the camera at a project wallet QR code')).toBeTruthy();
   });
 
-  it('renders ImpactScreen using ThemeProvider theme colors', () => {
-    const { getByText } = render(
+  it('renders ImpactScreen using ThemeProvider theme colors', async () => {
+    const { getByText } = await render(
       <ThemeProvider>
         <ImpactScreen />
       </ThemeProvider>

@@ -185,7 +185,7 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
 
         {/* Leaderboard Section */}
         <div className="bg-white rounded-3xl border border-forest-100 shadow-xl shadow-forest-100/30 p-8 mb-16 relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-forest-50 rounded-bl-full -z-0 opacity-50 group-hover:scale-110 transition-transform duration-500" />
+          <div className="absolute top-0 right-0 w-32 h-32 bg-forest-50 rounded-bl-full -z-0 opacity-50 group-hover:scale-110 transition-transform motion-reduce:transition-none duration-500" />
           <h2 className="text-2xl font-display font-bold text-forest-900 mb-8 relative z-10 flex items-center gap-2">
             🏆 Top Impact Leaders
           </h2>
@@ -249,7 +249,7 @@ export function StatCard({
 
   return (
     <div className="bg-white p-8 rounded-3xl border border-forest-100 shadow-sm hover:shadow-md transition-shadow relative group">
-      <div className="w-12 h-12 rounded-2xl bg-forest-50 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform">
+      <div className="w-12 h-12 rounded-2xl bg-forest-50 flex items-center justify-center text-2xl mb-6 group-hover:scale-110 transition-transform motion-reduce:transition-none">
         {icon}
       </div>
       <p className="text-forest-500 font-medium text-sm uppercase tracking-wider mb-2">{label}</p>
@@ -257,7 +257,7 @@ export function StatCard({
         {!isLoading ? (
           <AnimatedNumber value={normalizedValue} formatter={formatter} duration={duration} />
         ) : (
-          <span className="w-24 h-8 bg-forest-50 animate-pulse rounded" />
+          <span className="w-24 h-8 bg-forest-50 animate-pulse motion-reduce:animate-none rounded" />
         )}
         {unit && <span className="text-xl text-[var(--text-secondary)] dark:text-forest-400 font-normal">{unit}</span>}
       </div>

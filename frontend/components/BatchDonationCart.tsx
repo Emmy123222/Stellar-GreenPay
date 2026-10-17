@@ -120,7 +120,7 @@ export default function BatchDonationCart({
   }
 
   return (
-    <div className="card animate-slide-up">
+    <div className="card animate-slide-up motion-reduce:animate-none">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-display text-lg font-semibold text-forest-900">
           Donation Cart ({cart.length}/10)

@@ -96,7 +96,7 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
   if (loading) return (
     <div className="space-y-2">
       {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} className="animate-pulse flex items-center gap-4 p-4 rounded-xl bg-forest-50 border border-forest-100">
+        <div key={i} className="animate-pulse motion-reduce:animate-none flex items-center gap-4 p-4 rounded-xl bg-forest-50 border border-forest-100">
           <div className="w-8 h-8 rounded-full bg-forest-200" />
           <div className="flex-1 space-y-2">
             <div className="h-3 bg-forest-200 rounded w-1/3" />
@@ -134,7 +134,7 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
           <Link
             key={entry.publicKey}
             href={`/donors/${entry.publicKey}`}
-            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] hover:shadow-sm transition-all cursor-pointer block group"
+            className="flex items-center gap-4 p-4 rounded-xl bg-white border border-[rgba(34,114,57,0.10)] hover:border-[rgba(34,114,57,0.25)] hover:shadow-sm transition-all motion-reduce:transition-none cursor-pointer block group"
           >
             {/* Rank */}
             <div className="w-8 text-center flex-shrink-0">

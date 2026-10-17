@@ -36,7 +36,7 @@ export function isUrlAllowed(urlStr: string, allowlist: string[]): boolean {
 }
 
 /** Validate a user-entered host/path allowlist pattern before saving it. */
-export function isValidAllowlistPattern(pattern: string): boolean {
+export function isValidPattern(pattern: string): boolean {
   const value = pattern.trim();
   if (!value || /\s/.test(value)) return false;
   const match = value.match(/^(\*:\/\/|https?:\/\/)?([^/]+)(\/.*)?$/i);
@@ -53,6 +53,44 @@ export function isValidAllowlistPattern(pattern: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Normalize a user-entered allowlist pattern, or return null when it is invalid.
+ *
+ * Normalization rules (shown as hints in the settings UI):
+ * - surrounding whitespace is removed
+ * - the scheme and host are lower-cased (hosts are case-insensitive), while the
+ *   path keeps its case because URL paths are case-sensitive
+ * - a bare host, or a host followed by only `/`, becomes the site-wide
+ *   `host/*` form so `Example.COM/` and `example.com/*` are the same entry
+ * - a path ending in `/` is treated as a directory prefix and gains `*`
+ *   (`example.com/donate/` → `example.com/donate/*`)
+ */
+export function normalizeAllowlistPattern(pattern: string): string | null {
+  const trimmed = pattern.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+
+  let scheme = '';
+  let rest = trimmed;
+  const schemeMatch = trimmed.match(/^(\*:\/\/|https?:\/\/)/i);
+  if (schemeMatch) {
+    scheme = schemeMatch[1].toLowerCase();
+    rest = trimmed.slice(schemeMatch[1].length);
+  }
+
+  const slashIndex = rest.indexOf('/');
+  const host = (slashIndex === -1 ? rest : rest.slice(0, slashIndex)).toLowerCase();
+  let path = slashIndex === -1 ? '' : rest.slice(slashIndex);
+
+  if (!path || path === '/') {
+    path = '/*';
+  } else if (path.endsWith('/')) {
+    path += '*';
+  }
+
+  const normalized = `${scheme}${host}${path}`;
+  return isValidPattern(normalized) ? normalized : null;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { DEFAULT_ALLOWLIST, isUrlAllowed, isValidAllowlistPattern } from './allowlist';
+import { DEFAULT_ALLOWLIST, isUrlAllowed, normalizeAllowlistPattern } from './allowlist';
 
 export interface ExtensionSettings {
   backendUrl: string;
@@ -55,11 +55,11 @@ export function saveSettings(settings: ExtensionSettings): Promise<void> {
 
 export async function addSiteToAllowlist(pattern: string): Promise<string[]> {
   const settings = await loadSettings();
-  const trimmed = pattern.trim().toLowerCase();
-  if (!trimmed) return settings.allowlist;
+  const normalized = normalizeAllowlistPattern(pattern);
+  if (!normalized) return settings.allowlist;
 
-  if (!settings.allowlist.some((entry) => entry.toLowerCase() === trimmed)) {
-    const updated = [...settings.allowlist, trimmed];
+  if (!settings.allowlist.some((entry) => entry.toLowerCase() === normalized)) {
+    const updated = [...settings.allowlist, normalized];
     await saveSettings({ ...settings, allowlist: updated });
     return updated;
   }
@@ -255,7 +255,7 @@ if (typeof document !== 'undefined') {
     function handleAddSite() {
       if (!allowlistInput) return;
       allowlistError?.classList.add('hidden');
-      const val = allowlistInput.value.trim().toLowerCase();
+      const val = allowlistInput.value.trim();
       if (!val) {
         if (allowlistError) {
           allowlistError.textContent = 'Please enter a site or pattern.';
@@ -264,15 +264,17 @@ if (typeof document !== 'undefined') {
         return;
       }
 
-      if (!isValidAllowlistPattern(val)) {
+      const normalized = normalizeAllowlistPattern(val);
+      if (!normalized) {
         if (allowlistError) {
-          allowlistError.textContent = 'Enter a valid host pattern, such as example.com/*.';
+          allowlistError.textContent =
+            'Enter a valid host pattern, such as example.com/*.';
           allowlistError.classList.remove('hidden');
         }
         return;
       }
 
-      if (currentAllowlist.includes(val)) {
+      if (currentAllowlist.includes(normalized)) {
         if (allowlistError) {
           allowlistError.textContent = 'Site pattern is already in allowlist.';
           allowlistError.classList.remove('hidden');
@@ -280,7 +282,7 @@ if (typeof document !== 'undefined') {
         return;
       }
 
-      currentAllowlist.push(val);
+      currentAllowlist.push(normalized);
       allowlistInput.value = '';
       renderAllowlist();
     }

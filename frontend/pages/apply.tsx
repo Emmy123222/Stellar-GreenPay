@@ -262,7 +262,7 @@ export default function ApplyPage() {
 
   if (step === "done") {
     return (
-      <div className="max-w-xl mx-auto px-4 py-20 text-center animate-fade-in">
+      <div className="max-w-xl mx-auto px-4 py-20 text-center animate-fade-in motion-reduce:animate-none">
         <div className="text-6xl mb-6">🔍</div>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-3">{T("subThanks")}</h1>
         <p className="text-[var(--text-secondary)] font-body mb-8">
@@ -276,7 +276,7 @@ export default function ApplyPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-10 animate-fade-in">
+    <div className="max-w-2xl mx-auto px-4 py-10 animate-fade-in motion-reduce:animate-none">
       <p className="text-xs uppercase tracking-widest text-forest-600 font-bold mb-2 font-body">
         {T("pageTitle")}
       </p>

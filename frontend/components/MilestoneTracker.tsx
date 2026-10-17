@@ -70,7 +70,7 @@ export default function MilestoneTracker({
   }
 
   return (
-    <div className="card animate-fade-in">
+    <div className="card animate-fade-in motion-reduce:animate-none">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="font-display text-lg font-semibold text-forest-900">
@@ -84,7 +84,7 @@ export default function MilestoneTracker({
           <div className="text-2xl font-bold text-forest-700">{progress}%</div>
           <div className="w-24 h-2 bg-forest-100 rounded-full mt-1">
             <div
-              className="h-full bg-forest-500 rounded-full transition-all"
+              className="h-full bg-forest-500 rounded-full transition-all motion-reduce:transition-none"
               style={{ width: `${progress}%` }}
             />
           </div>

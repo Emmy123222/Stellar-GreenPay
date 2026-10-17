@@ -46,7 +46,7 @@ export default function ProjectProgressBar({
         aria-valuetext={hasGoal ? `${percentage}% complete` : "No goal set"}
       >
         <div
-          className="h-full rounded-full bg-emerald-500 transition-all duration-300 dark:bg-emerald-400"
+          className="h-full rounded-full bg-emerald-500 transition-all motion-reduce:transition-none duration-300 dark:bg-emerald-400"
           style={{ width: `${hasGoal ? percentage : 0}%` }}
         />
       </div>

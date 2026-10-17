@@ -49,7 +49,7 @@ export default function ProjectReviewsSection({
           {[1, 2].map((i) => (
             <div
               key={i}
-              className="animate-pulse h-12 bg-forest-100 rounded-xl"
+              className="animate-pulse motion-reduce:animate-none h-12 bg-forest-100 rounded-xl"
             />
           ))}
         </div>

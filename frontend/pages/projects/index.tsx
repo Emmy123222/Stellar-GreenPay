@@ -153,7 +153,7 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
@@ -173,7 +173,7 @@ export default function ProjectsPage() {
         <button
           onClick={() => setFilter("category", "")}
           className={clsx(
-            "px-3 py-1.5 rounded-full text-sm font-medium border transition-all font-body",
+            "px-3 py-1.5 rounded-full text-sm font-medium border transition-all motion-reduce:transition-none font-body",
             !category
               ? "bg-forest-500 text-white border-forest-500"
               : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
@@ -186,7 +186,7 @@ export default function ProjectsPage() {
             key={cat}
             onClick={() => setFilter("category", cat)}
             className={clsx(
-              "px-3 py-1.5 rounded-full text-sm font-medium border transition-all font-body flex items-center gap-1.5",
+              "px-3 py-1.5 rounded-full text-sm font-medium border transition-all motion-reduce:transition-none font-body flex items-center gap-1.5",
               category === cat
                 ? "bg-forest-500 text-white border-forest-500"
                 : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
@@ -258,7 +258,7 @@ export default function ProjectsPage() {
           <ul
             id="tag-autocomplete-list"
             role="listbox"
-            className="absolute top-full left-0 right-0 mt-2 bg-white border border-forest-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in"
+            className="absolute top-full left-0 right-0 mt-2 bg-white border border-forest-200 rounded-xl shadow-xl z-50 overflow-hidden animate-fade-in motion-reduce:animate-none"
           >
             {autocompleteResults.map((tag, i) => (
               <li
@@ -328,7 +328,7 @@ export default function ProjectsPage() {
               >
                 <div
                   className={clsx(
-                    "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+                    "absolute top-1 w-4 h-4 rounded-full bg-white transition-all motion-reduce:transition-none",
                     verified ? "right-1" : "left-1",
                   )}
                 />

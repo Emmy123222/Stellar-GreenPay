@@ -26,16 +26,16 @@ function StatusSkeleton() {
       aria-label="Loading verification status"
     >
       <div className="flex items-center gap-3">
-        <div className="h-6 w-24 rounded-full bg-forest-100 animate-pulse" />
-        <div className="h-4 w-40 rounded bg-forest-100 animate-pulse" />
+        <div className="h-6 w-24 rounded-full bg-forest-100 animate-pulse motion-reduce:animate-none" />
+        <div className="h-4 w-40 rounded bg-forest-100 animate-pulse motion-reduce:animate-none" />
       </div>
       <div className="space-y-2">
-        <div className="h-3 w-28 rounded bg-forest-100 animate-pulse" />
-        <div className="h-4 w-48 rounded bg-forest-100 animate-pulse" />
+        <div className="h-3 w-28 rounded bg-forest-100 animate-pulse motion-reduce:animate-none" />
+        <div className="h-4 w-48 rounded bg-forest-100 animate-pulse motion-reduce:animate-none" />
       </div>
       <div className="space-y-2 pt-2 border-t border-forest-50">
-        <div className="h-3 w-32 rounded bg-forest-100 animate-pulse" />
-        <div className="h-16 w-full rounded bg-forest-100 animate-pulse" />
+        <div className="h-3 w-32 rounded bg-forest-100 animate-pulse motion-reduce:animate-none" />
+        <div className="h-16 w-full rounded bg-forest-100 animate-pulse motion-reduce:animate-none" />
       </div>
     </div>
   );

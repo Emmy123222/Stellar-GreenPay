@@ -183,14 +183,14 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
           role="status"
           className={`flex items-center gap-2 ${wrapperClass} text-xs text-amber-700 dark:text-amber-400 font-body`}
         >
-          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" aria-hidden="true" />
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
           Connection lost — reconnecting…
         </div>
       );
     }
     return (
       <div className={`flex items-center gap-2 ${wrapperClass} text-xs text-forest-500 font-body`}>
-        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
+        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
         {label}
       </div>
     );
@@ -199,7 +199,7 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
   if (loading) return (
     <div className="space-y-3">
       {[1, 2, 3].map(i => (
-        <div key={i} className="animate-pulse flex gap-3 p-3 rounded-xl bg-forest-50">
+        <div key={i} className="animate-pulse motion-reduce:animate-none flex gap-3 p-3 rounded-xl bg-forest-50">
           <div className="w-8 h-8 rounded-full bg-forest-200 flex-shrink-0" />
           <div className="flex-1 space-y-2">
             <div className="h-3 bg-forest-200 rounded w-1/2" />
@@ -223,9 +223,9 @@ export default function DonationFeed({ projectId, walletAddress, refreshKey = 0,
       {donations.map((d) => (
         <div
           key={d.id}
-          className={`flex items-start gap-3 p-3 rounded-xl bg-forest-50 hover:bg-forest-100 transition-all duration-500 ${
+          className={`flex items-start gap-3 p-3 rounded-xl bg-forest-50 hover:bg-forest-100 transition-all motion-reduce:transition-none duration-500 ${
             newIds.has(d.id)
-              ? "animate-slide-in ring-2 ring-emerald-400/50 bg-emerald-50"
+              ? "animate-slide-in motion-reduce:animate-none ring-2 ring-emerald-400/50 bg-emerald-50"
               : ""
           }`}
         >

@@ -4,6 +4,7 @@
  */
 import { useEffect, useState, useRef } from "react";
 import { formatAmount, normalizeXLMAmount } from "@/utils/format";
+import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 
 export { normalizeXLMAmount };
 
@@ -35,6 +36,7 @@ export default function AnimatedNumber({
       : Number(normalizedInput);
 
   const numericValue = isNaN(rawParsed) || !Number.isFinite(rawParsed) ? 0 : rawParsed;
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   const decimalPlaces = (() => {
     if (typeof normalizedInput === "string" && normalizedInput.includes(".")) {
@@ -50,7 +52,8 @@ export default function AnimatedNumber({
   const startTimeRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (duration <= 0) {
+    if (duration <= 0 || prefersReducedMotion) {
+      setDisplayValue(numericValue);
       return;
     }
 
@@ -72,7 +75,7 @@ export default function AnimatedNumber({
 
     animationFrameId = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [numericValue, duration]);
+  }, [numericValue, duration, prefersReducedMotion]);
 
   const formatDisplay = (val: number) => {
     if (formatter) return formatter(val);

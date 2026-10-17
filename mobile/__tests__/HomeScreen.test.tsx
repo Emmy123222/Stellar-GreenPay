@@ -110,9 +110,9 @@ describe('HomeScreen', () => {
     (axios.get as jest.Mock).mockReset();
   });
 
-  it('shows the header before data arrives', () => {
+  it('shows the header before data arrives', async () => {
     (axios.get as jest.Mock).mockReturnValue(new Promise(() => {})); // never resolves
-    const { getByText, queryByText } = render(wrap(<HomeScreen />));
+    const { getByText, queryByText } = await render(wrap(<HomeScreen />));
     expect(getByText('Stellar GreenPay')).toBeTruthy();
     expect(queryByText('Amazon Reforestation Initiative')).toBeNull();
   });
@@ -138,7 +138,7 @@ describe('HomeScreen', () => {
   it('renders the project name after data loads', async () => {
     (axios.get as jest.Mock).mockResolvedValue({ data: { data: [MOCK_PROJECT] } });
 
-    const { getByText } = render(wrap(<HomeScreen />));
+    const { getByText } = await render(wrap(<HomeScreen />));
     await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
   });
 
@@ -193,10 +193,6 @@ describe('HomeScreen', () => {
 
     const view = await act(async () => renderWithTheme(<HomeScreen />));
     await waitFor(() => expect(view.getByText(MOCK_PROJECT.name)).toBeTruthy());
-
-
-    const { getByText } = await render(wrap(<HomeScreen />));
-    await waitFor(() => expect(getByText('Stellar GreenPay')).toBeTruthy());
 
     expect(() => view.unmount()).not.toThrow();
   });

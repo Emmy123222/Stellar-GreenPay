@@ -38,7 +38,7 @@ export default function WidgetPage() {
   if (loading) {
     return (
       <div className={`min-h-screen flex items-center justify-center ${theme === "dark" ? "bg-gray-900" : "bg-white"}`}>
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{ borderBottomColor: accent }} />
+        <div className="animate-spin motion-reduce:animate-none rounded-full h-12 w-12 border-b-2" style={{ borderBottomColor: accent }} />
       </div>
     );
   }
@@ -93,7 +93,7 @@ export default function WidgetPage() {
             </div>
             <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
               <div
-                className="h-full transition-all"
+                className="h-full transition-all motion-reduce:transition-none"
                 style={{
                   width: `${Math.min(pct, 100)}%`,
                   background: `linear-gradient(to right, ${accent}, ${accent}dd)`,

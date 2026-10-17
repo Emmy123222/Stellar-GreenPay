@@ -80,7 +80,7 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <div className="mb-8">
         <p className="text-xs tracking-[0.22em] uppercase text-[var(--text-tertiary)] dark:text-forest-300 font-body">Admin</p>
         <h1 className="font-display text-3xl font-bold text-forest-900 mb-1">Analytics Dashboard</h1>
@@ -90,7 +90,7 @@ export default function AdminAnalytics({ publicKey, onConnect }: AdminAnalyticsP
       </div>
 
       {loading && (
-        <div className="card animate-pulse h-64 flex items-center justify-center">
+        <div className="card animate-pulse motion-reduce:animate-none h-64 flex items-center justify-center">
           <p className="text-[var(--text-tertiary)]">Loading data...</p>
         </div>
       )}

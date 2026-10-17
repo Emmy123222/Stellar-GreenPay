@@ -54,7 +54,7 @@ export default function ProjectHero({
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2 mb-2">
             {isComplete ? (
-              <span className="badge text-xs px-3 py-1.5 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white border-2 border-white shadow-lg font-body font-bold animate-pulse">
+              <span className="badge text-xs px-3 py-1.5 rounded-full bg-gradient-to-r from-green-500 to-emerald-600 text-white border-2 border-white shadow-lg font-body font-bold animate-pulse motion-reduce:animate-none">
                 ✅ Fully Funded
               </span>
             ) : (
@@ -87,7 +87,7 @@ export default function ProjectHero({
               <button
                 onClick={onToggleFollow}
                 disabled={followLoading}
-                className={`text-xs py-1 px-3 rounded-lg border font-medium transition-all duration-200 ${
+                className={`text-xs py-1 px-3 rounded-lg border font-medium transition-all motion-reduce:transition-none duration-200 ${
                   isFollowing
                     ? "bg-green-50 text-green-700 border-green-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300"
                     : "bg-forest-50 text-forest-700 border-forest-200 hover:bg-green-50 hover:text-green-700 hover:border-green-300"
@@ -103,7 +103,7 @@ export default function ProjectHero({
             )}
             <button
               onClick={onToggleWishlist}
-              className={`p-2 rounded-lg border transition-all duration-300 transform active:scale-90 ${
+              className={`p-2 rounded-lg border transition-all motion-reduce:transition-none duration-300 transform active:scale-90 ${
                 isInWishlist
                   ? "bg-red-50 text-red-500 border-red-200"
                   : "bg-forest-50 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-200 hover:text-red-400 hover:border-red-200"

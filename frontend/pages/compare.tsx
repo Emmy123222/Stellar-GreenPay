@@ -51,7 +51,7 @@ export default function ComparePage() {
 
   if (loading) {
     return (
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-pulse motion-reduce:animate-none">
         <div className="h-8 bg-forest-200 rounded w-1/3 mb-6" />
         <div className="space-y-4">
           {[1, 2].map((i) => (
@@ -110,7 +110,7 @@ export default function ComparePage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <Head>
         <title>
           Compare {projects.map((p) => p.name).join(" vs ")} — Stellar GreenPay
