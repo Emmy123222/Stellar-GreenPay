@@ -1,0 +1,5 @@
+# hadolint configuration for Stellar GreenPay Dockerfiles.
+#
+# Rules suppressed below are addressed with inline `# hadolint ignore=DLxxxx`
+# comments in the Dockerfiles, each carrying a reason.
+ignored: []
