@@ -40,13 +40,13 @@ describe("ProjectCard", () => {
   });
 
   it("renders an uploaded project image as decorative (not announced by screen readers)", () => {
-    const { getByRole, queryByRole } = render(
+    const { container, queryByRole } = render(
       <ProjectCard
         project={{ ...mockProject, imageUrl: "https://example.com/banner.png" }}
       />,
     );
 
-    const img = getByRole("img");
+    const img = container.querySelector("img") as HTMLImageElement;
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");

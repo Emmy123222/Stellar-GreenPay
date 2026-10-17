@@ -50,7 +50,9 @@ describe("ImpactCertificate", () => {
 
     const residue = /^\s*(?:main|fix\/[\w./-]+|feature\/[\w./-]+)\s*$/m;
     for (const path of sourceFiles(__dirname)) {
-      expect(readFileSync(path, "utf8"), path).not.toMatch(residue);
+      const contents = readFileSync(path, "utf8");
+      const hit = contents.match(residue);
+      expect({ path, residue: hit?.[0] }).toEqual({ path });
     }
   });
 

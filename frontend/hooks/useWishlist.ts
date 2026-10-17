@@ -10,7 +10,8 @@ const WISHLIST_CHANGED_EVENT = 'greenpay:wishlist-changed';
 // return the same array reference. useSyncExternalStore's getSnapshot must
 // be referentially stable when the underlying data hasn't changed, or it
 // will force re-renders indefinitely.
-let cachedRaw: string | null | undefined;
+const STORAGE_UNAVAILABLE = Symbol("wishlist-storage-unavailable");
+let cachedRaw: string | null | undefined | typeof STORAGE_UNAVAILABLE;
 let cachedWishlist: string[] = [];
 
 function readWishlist(): string[] {
@@ -19,8 +20,12 @@ function readWishlist(): string[] {
     raw = localStorage.getItem(WISHLIST_STORAGE_KEY);
   } catch {
     // Storage can be disabled by browser privacy settings or sandboxing.
-    cachedRaw = undefined;
-    cachedWishlist = [];
+    // Cache a stable empty array: getSnapshot must not return a fresh
+    // reference on every call, or React will re-render forever.
+    if (cachedRaw !== STORAGE_UNAVAILABLE) {
+      cachedRaw = STORAGE_UNAVAILABLE;
+      cachedWishlist = [];
+    }
     return cachedWishlist;
   }
   if (raw === cachedRaw) return cachedWishlist;

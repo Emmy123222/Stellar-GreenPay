@@ -58,7 +58,7 @@ describe("Navbar", () => {
     expect(screen.getByRole("link", { name: "nav.home" })).not.toHaveAttribute(
       "aria-current",
     );
-    expect(screen.getByRole("link", { name: "nav.map" })).not.toHaveAttribute(
+    expect(screen.getByRole("link", { name: "map.title" })).not.toHaveAttribute(
       "aria-current",
     );
   });
