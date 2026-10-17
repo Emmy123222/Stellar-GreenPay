@@ -1,0 +1,46 @@
+name: Deployment manifest validation
+
+on:
+  pull_request:
+    paths:
+      - "helm/greenpay/**"
+      - "k8s/**"
+      - "scripts/render-k8s-manifests.sh"
+      - ".github/workflows/manifest-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "helm/greenpay/**"
+      - "k8s/**"
+      - "scripts/render-k8s-manifests.sh"
+      - ".github/workflows/manifest-validation.yml"
+
+jobs:
+  helm:
+    name: Validate Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.16.4"
+      - name: Lint chart
+        run: helm lint helm/greenpay
+      - name: Render and validate chart resources
+        run: |
+          helm template greenpay helm/greenpay > /tmp/helm-manifests.yaml
+          docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary -kubernetes-version 1.30.0 < /tmp/helm-manifests.yaml
+
+  kustomize:
+    name: Validate Kustomize manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.30.0"
+      - name: Render and validate resources
+        run: |
+          kubectl kustomize k8s/ | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary -kubernetes-version 1.30.0
