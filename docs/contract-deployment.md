@@ -62,9 +62,11 @@ CONTRACT_ID=<contract-id>
 ## 6. Record the contract ID
 
 `contracts/addresses.json` is the source of truth for deployed contract IDs per
-network. Update it whenever you deploy, so a testnet reset or a rollback has a
-single place to correct. Pair it with the env files above — the running
-services read the env vars, not the JSON.
+network. Each network uses `contractId` for GreenPay and `escrowContractId` for
+the escrow contract. Update it whenever you deploy, so a testnet reset or a
+rollback has a single place to correct. The frontend's `predev` and `prebuild`
+hooks copy configured IDs for the selected network into `frontend/.env.local`;
+the running services read the env vars, not the JSON.
 
 ## 7. Verify the deployment
 
