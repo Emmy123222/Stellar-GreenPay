@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: ../../SECURITY.md
+    about: Do not open a public issue. Follow the private disclosure process in SECURITY.md.
+  - name: Project roadmap
+    url: ../../ROADMAP.md
+    about: Check the roadmap before filing a feature request.

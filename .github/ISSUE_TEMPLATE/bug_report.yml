@@ -1,0 +1,91 @@
+name: Bug Report
+description: File a bug report to help us improve Stellar GreenPay
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Fill out the form below
+        so we can reproduce and fix the issue quickly.
+
+        > **Security vulnerability?** Do **not** use this form. Follow the
+        > private disclosure process in [SECURITY.md](../../SECURITY.md).
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Affected layer
+      description: Which part of GreenPay is affected?
+      options:
+        - Frontend (web)
+        - Backend (API)
+        - Contracts (Soroban)
+        - Mobile
+        - Extension (browser)
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: A minimal, step-by-step walkthrough.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead?
+    validations:
+      required: true
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js version
+      description: Run `node --version` if applicable (backend / contracts).
+      placeholder: "e.g. 20.11.0"
+  - type: input
+    id: browser
+    attributes:
+      label: Browser / platform
+      description: Browser name and version (frontend / extension / mobile).
+      placeholder: "e.g. Chrome 125, Firefox 121, Safari 17"
+  - type: input
+    id: network
+    attributes:
+      label: Network
+      description: Which Stellar network were you using?
+      placeholder: "Testnet / Mainnet / Futurenet"
+  - type: input
+    id: tx_hash
+    attributes:
+      label: Transaction hash (if applicable)
+      description: On-chain tx hash for contract or donation issues. Leave blank for non-chain bugs.
+      placeholder: "e.g. a1b2c3..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Paste relevant console output, error messages, or add screenshots. No need for backticks.
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (I will use SECURITY.md instead if it is).
+          required: true

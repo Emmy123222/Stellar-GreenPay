@@ -158,6 +158,10 @@ Every UI string must exist in **all** locale files in `frontend/locales/` (`en.j
 node scripts/check-locale-keys.js
 ```
 
+### README translations
+
+The README is also available in [Spanish](docs/README.es.md) and [French](docs/README.fr.md). If your PR makes a substantive change to `README.md` (features, project structure, quick start or prerequisites), please mention it in the PR description so the translations can be flagged for update. Perfect sync is not required: the translations carry a "may lag behind the English README" notice, and the English `README.md` is always the source of truth. Translation-only PRs are welcome.
+
 ## Testing
 
 ```bash

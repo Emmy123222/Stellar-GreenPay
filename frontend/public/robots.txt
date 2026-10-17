@@ -1,0 +1,12 @@
+# GreenPay — crawl rules for public pages.
+User-agent: *
+Allow: /
+# Dynamic social-preview images are fetched by link unfurlers.
+Allow: /api/og/
+Disallow: /admin
+Disallow: /api/
+Disallow: /dashboard
+Disallow: /settings
+Disallow: /donate/
+
+Sitemap: https://stellar-greenpay.app/sitemap.xml

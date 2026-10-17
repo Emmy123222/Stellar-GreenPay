@@ -166,6 +166,25 @@ describe("POST /api/donations", () => {
     jest.clearAllMocks();
   });
 
+  test("uses one project lookup with the fields needed to record a donation", async () => {
+    const client = createMockClient(queryResult([]));
+
+    const { res } = await invokeRecordDonation({
+      projectId: "missing-project",
+      donorAddress: makePublicKey("A"),
+      amountXLM: "10",
+      transactionHash: makeTxHash("a"),
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe("Project not found");
+    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(client.query).toHaveBeenCalledWith(
+      "SELECT id, co2_per_xlm, name, wallet_address, preferred_asset_code, preferred_asset_issuer FROM projects WHERE id = $1",
+      ["missing-project"],
+    );
+  });
+
   test("records a valid donation and updates the donor profile", async () => {
     const donorAddress = makePublicKey("A");
     const transactionHash = makeTxHash("a");

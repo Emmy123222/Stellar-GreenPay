@@ -1,0 +1,55 @@
+name: Feature Request
+description: Suggest a new feature or improvement for Stellar GreenPay
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Tell us what problem it solves and
+        how it fits the project roadmap.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the pain point or limitation you're running into.
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change you'd like to see.
+    validations:
+      required: true
+  - type: dropdown
+    id: roadmap
+    attributes:
+      label: ROADMAP.md fit
+      description: Which roadmap milestone does this relate to? See [ROADMAP.md](../../ROADMAP.md).
+      options:
+        - v1.0 — Foundation
+        - v1.1 — Developer Experience
+        - v1.2 — Verified Projects
+        - v1.3 — Impact NFT Badges
+        - v1.4 — Community Features
+        - v1.5 — Impact Dashboard
+        - v2.0 — Multi-Currency
+        - v2.0 — Bridge & On/Off-Ramp
+        - v2.1 — DAO Governance
+        - Not on the roadmap (new direction)
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, links, references, or alternative solutions considered.
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
