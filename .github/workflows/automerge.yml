@@ -1,6 +1,7 @@
 name: Auto-merge bot
 
-# Merges every non-draft pull request automatically, without waiting for CI.
+# Enables GitHub auto-merge for eligible non-draft pull requests. GitHub waits
+# for the repository's required checks and approvals before completing a merge.
 # To disable the bot, delete this file from the default branch.
 on:
   pull_request_target:
@@ -49,16 +50,12 @@ jobs:
             echo "Skipping: PR modifies the automerge workflow"
             exit 0
           fi
-          # Retry a few times: GitHub may still be computing mergeability
-          # right after the PR event fires.
-          for attempt in 1 2 3 4 5; do
-            if gh pr merge --merge "$PR_URL"; then
-              gh pr comment "$PR_URL" --body "🎉 Well done @$AUTHOR — great implementation! Your PR has been merged. Thank you for contributing to **Stellar Wave**! 🚀"
-              echo "Merged $PR_URL"
-              exit 0
-            fi
-            echo "Attempt $attempt failed; retrying in 20s..."
-            sleep 20
-          done
-          gh pr comment "$PR_URL" --body "👋 Hey @$AUTHOR, nice work so far! 💪 There's just a merge conflict with \`main\` — please update your branch and resolve it, and this will be merged right away."
-          exit 1
+          # Ask GitHub to merge when required checks and reviews are satisfied.
+          # `--auto` avoids failing early while workflows are awaiting approval
+          # and avoids misreporting any merge blocker as a branch conflict.
+          if gh pr merge --auto --merge "$PR_URL"; then
+            echo "Auto-merge requested for $PR_URL; GitHub will apply required checks and approvals."
+          else
+            echo "::error::Could not request auto-merge for $PR_URL. See the GitHub CLI error above."
+            exit 1
+          fi
