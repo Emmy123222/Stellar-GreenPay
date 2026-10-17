@@ -73,11 +73,9 @@ async function applyPendingMigrations(client) {
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
-  } finally {
-    client.release();
   }
 
-  await seedDatabase();
+  await seedDatabase(client);
   logger.info({ event: "db_migration_complete" }, "[DB] Migration complete");
 }
 
@@ -95,16 +93,7 @@ async function runMigrations(options) {
  * Roll back the last `steps` applied migrations (default: 1).
  * Each migration's `down()` function is called in reverse-applied order.
  */
-async function applyRollbackMigrations(steps) {
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (err) {
-    throw new Error(`Failed to acquire database connection: ${err.message}`);
-  }
-  if (!client) {
-    throw new Error("Failed to obtain database client from connection pool");
-  }
+async function applyRollbackMigrations(client, steps) {
   try {
     await client.query("BEGIN");
     await ensureMigrationsTable(client);
@@ -144,8 +133,6 @@ async function applyRollbackMigrations(steps) {
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
-  } finally {
-    client.release();
   }
 }
 
@@ -154,19 +141,12 @@ async function applyRollbackMigrations(steps) {
  */
 async function rollbackMigrations(steps = 1, options) {
   if (steps < 1) throw new Error("steps must be >= 1");
-  return withMigrationLock(() => applyRollbackMigrations(steps), options);
+  return withMigrationLock(async (client) => {
+    await applyRollbackMigrations(client, steps);
+  }, options);
 }
 
-async function seedDatabase() {
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (err) {
-    throw new Error(`Failed to acquire database connection: ${err.message}`);
-  }
-  if (!client) {
-    throw new Error("Failed to obtain database client from connection pool");
-  }
+async function seedDatabase(client) {
   try {
     await client.query("BEGIN");
 
@@ -237,8 +217,6 @@ async function seedDatabase() {
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
-  } finally {
-    client.release();
   }
 }
 
