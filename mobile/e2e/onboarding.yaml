@@ -1,0 +1,41 @@
+# mobile/e2e/onboarding.yaml
+#
+# Sub-flow: walk through the three onboarding slides and reach Home.
+#
+# Slide labels (from OnboardingScreen.tsx):
+#   Slide 1 — "Welcome to GreenPay"  button text: "Next"  (accessibilityLabel: "Next slide")
+#   Slide 2 — "How donations work"   button text: "Next"  (accessibilityLabel: "Next slide")
+#   Slide 3 — "Connect your wallet"  button text: "Get Started" (accessibilityLabel: "Get started")
+#
+# After "Get Started" the router calls replace('/') which lands on Home.
+# We assert the search field that only the Projects/Home screen renders.
+
+appId: com.stellargreenpay.app
+---
+# ── Cold-start ──────────────────────────────────────────────────────────────
+- launchApp:
+    clearState: true
+- waitForAnimationToEnd
+
+# ── Slide 1: Welcome to GreenPay ────────────────────────────────────────────
+- assertVisible: "Welcome to GreenPay"
+- tapOn:
+    text: "Next"
+- waitForAnimationToEnd
+
+# ── Slide 2: How donations work ─────────────────────────────────────────────
+- assertVisible: "How donations work"
+- tapOn:
+    text: "Next"
+- waitForAnimationToEnd
+
+# ── Slide 3: Connect your wallet ────────────────────────────────────────────
+- assertVisible: "Connect your wallet"
+- tapOn:
+    text: "Get Started"
+- waitForAnimationToEnd
+
+# ── Home screen ─────────────────────────────────────────────────────────────
+# The Home screen renders a project list.  We check for the screen header
+# title set in _layout.tsx: "Home".
+- assertVisible: "Home"

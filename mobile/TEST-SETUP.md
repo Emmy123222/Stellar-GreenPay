@@ -145,3 +145,127 @@ EXPO_PUBLIC_USE_RN_FETCH=1 npx jest --no-coverage --no-cache \
 ```
 
 The failure-mode → piece mapping is documented at the top of this file.
+
+---
+
+## Maestro E2E smoke test (issue #1656)
+
+### What it covers
+
+One end-to-end smoke flow exercising the full donate path on a real Android
+emulator (or a physical device):
+
+```
+Cold start → Onboarding (3 slides) → Home → Projects list → Project detail → Donate form → Submit
+```
+
+The network layer and wallet key are stubbed so **no real funds move and no
+real Stellar keys are required**.
+
+### Files at a glance
+
+| Path | Purpose |
+|---|---|
+| `mobile/e2e/donate_smoke.yaml` | Entry-point — runs the four sub-flows |
+| `mobile/e2e/onboarding.yaml` | Cold-start + walk through 3 onboarding slides |
+| `mobile/e2e/browse_projects.yaml` | Navigate to Projects, search, open a project |
+| `mobile/e2e/donate.yaml` | Fill donate form with stubbed key, tap Donate |
+| `mobile/e2e/launch.yaml` | Reusable cold-start sub-flow |
+
+### Prerequisites
+
+1. **Install Maestro CLI** (one-time, macOS / Linux / WSL):
+
+   ```sh
+   curl -fsSL "https://get.maestro.mobile.dev" | bash
+   # Then add ~/.maestro/bin to your PATH
+   export PATH="$HOME/.maestro/bin:$PATH"
+   ```
+
+   Verify: `maestro --version`
+
+2. **Start an Android emulator** (API 33+ recommended) **or** connect a
+   physical Android device with USB debugging on:
+
+   ```sh
+   # List available AVDs
+   emulator -list-avds
+   # Start one (replace with your AVD name)
+   emulator -avd Pixel_6_API_33 -no-audio -no-window &
+   # Wait for the emulator to boot
+   adb wait-for-device
+   ```
+
+3. **Install the Expo dev build** onto the emulator/device.  With EAS:
+
+   ```sh
+   cd mobile
+   npx eas build --platform android --profile preview --non-interactive
+   # Then install the produced .apk:
+   adb install path/to/app.apk
+   ```
+
+   Or run the Metro dev server and install via Expo Go (flow will differ
+   slightly for production-only native modules like `expo-secure-store`).
+
+4. **Start the stub API server** so the projects list returns deterministic
+   data (optional for manual smoke; required for the assertion on
+   "Amazon Reforestation" in `browse_projects.yaml`):
+
+   ```sh
+   # From the repo root — starts a WireMock stub on port 4000
+   docker run --rm -p 4000:8080 \
+     -v "$(pwd)/mobile/e2e/wiremock:/home/wiremock/__files" \
+     wiremock/wiremock:3
+   ```
+
+   If you skip this step the projects list will load from the real backend
+   (or return an error offline).  The smoke test will still pass as long as
+   at least one project card is visible — adjust the `assertVisible` text in
+   `browse_projects.yaml` to match a real project name if needed.
+
+### Running the smoke test locally
+
+```sh
+# From the repository root
+maestro test mobile/e2e/donate_smoke.yaml
+```
+
+To run a single sub-flow in isolation:
+
+```sh
+maestro test mobile/e2e/onboarding.yaml
+maestro test mobile/e2e/browse_projects.yaml
+maestro test mobile/e2e/donate.yaml
+```
+
+To open the interactive Maestro Studio (live REPL against a running app):
+
+```sh
+maestro studio
+```
+
+### CI
+
+The smoke test runs automatically in
+`.github/workflows/mobile.yml` on every push and pull-request targeting
+`main`.  The workflow:
+
+1. Starts an `ubuntu-latest` runner with `macos-13` for hardware
+   acceleration.
+2. Boots a `Pixel_6_API_33` AVD via `reactivecircus/android-emulator-runner`.
+3. Installs Maestro CLI.
+4. Builds the Expo APK with EAS (profile `preview`).
+5. Installs the APK and runs `maestro test mobile/e2e/donate_smoke.yaml`.
+
+See `.github/workflows/mobile.yml` for the full step-by-step.
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `maestro: command not found` | PATH not updated | `export PATH="$HOME/.maestro/bin:$PATH"` |
+| `No connected devices` | Emulator not booted | `adb devices` — see Prerequisites step 2 |
+| `Element not found: "Amazon Reforestation"` | Stub API not running | Start WireMock stub (Prerequisites step 4) or update text in `browse_projects.yaml` |
+| `Element not found: "Welcome to GreenPay"` | App already completed onboarding | Run `adb shell pm clear com.stellargreenpay.app` to reset app data |
+| Biometric sheet blocks the flow | Emulator enrolled biometrics | Disable in emulator Settings → Security → Fingerprint |

@@ -1,0 +1,76 @@
+{
+  "mappings": [
+    {
+      "name": "GET /api/projects - full list",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/api/projects(\\?.*)?$"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "bodyFileName": "projects.json"
+      }
+    },
+    {
+      "name": "GET /api/projects/project-1 - detail",
+      "request": {
+        "method": "GET",
+        "url": "/api/projects/project-1"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "bodyFileName": "project-detail.json"
+      }
+    },
+    {
+      "name": "POST /api/projects/project-1/follows",
+      "request": {
+        "method": "POST",
+        "urlPattern": "/api/projects/project-1/follows"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "ok": true }
+      }
+    },
+    {
+      "name": "GET /api/projects/project-1/follows",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/api/projects/project-1/follows.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "jsonBody": { "following": false }
+      }
+    },
+    {
+      "name": "Horizon account lookup - stub funded account",
+      "request": {
+        "method": "GET",
+        "urlPattern": "/accounts/.*"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "bodyFileName": "horizon-account.json"
+      }
+    },
+    {
+      "name": "Horizon transaction submission",
+      "request": {
+        "method": "POST",
+        "url": "/transactions"
+      },
+      "response": {
+        "status": 200,
+        "headers": { "Content-Type": "application/json" },
+        "bodyFileName": "horizon-submit.json"
+      }
+    }
+  ]
+}

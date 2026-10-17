@@ -1,0 +1,12 @@
+{
+  "hash": "abc123def456abc123def456abc123def456abc123def456abc123def456abc1",
+  "ledger": 12345,
+  "envelope_xdr": "AAAAAA==",
+  "result_xdr": "AAAAAAAAAGQAAAAAAAAAAAAAAAAAAA==",
+  "result_meta_xdr": "AAAAAA==",
+  "_links": {
+    "transaction": {
+      "href": "http://localhost:9090/transactions/abc123def456abc123def456abc123def456abc123def456abc123def456abc1"
+    }
+  }
+}

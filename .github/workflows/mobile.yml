@@ -1,26 +1,152 @@
-name: Mobile Preview Build
+name: Mobile CI
 
 on:
   push:
+    branches: [main, develop]
+  pull_request:
     branches: [main]
 
+# ── Required Secrets ──────────────────────────────────────────────────────────
+# EXPO_TOKEN  — Expo / EAS token for EAS Build (required for preview APK build
+#               in the maestro-smoke job). Obtain at expo.dev → Account →
+#               Access Tokens and store as a GitHub Actions encrypted secret.
+# ──────────────────────────────────────────────────────────────────────────────
+
 jobs:
+  # ── Job 1: EAS preview build (runs only on push to main) ──────────────────
   build:
     name: EAS Preview Build
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     defaults:
       run:
         working-directory: mobile
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: '.nvmrc'
           cache: "npm"
           cache-dependency-path: mobile/package-lock.json
+
       - run: npm ci
+
       - uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
+
       - run: eas build --platform all --profile preview --non-interactive
+
+  # ── Job 2: Maestro donate-flow smoke test (runs on every PR and push) ─────
+  maestro-smoke:
+    name: Maestro Smoke Test (Android)
+    # macOS runner required for Android hardware acceleration (HAXM / HVF).
+    runs-on: macos-13
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Set up Java (required by Android SDK / emulator)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Maestro CLI
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Expose Expo public env vars for the build
+        run: |
+          echo "EXPO_PUBLIC_API_URL=http://localhost:4000"       >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_HORIZON_URL=http://localhost:9090"   >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_STELLAR_NETWORK=testnet"             >> "$GITHUB_ENV"
+
+      - name: Start WireMock stub API (projects + Horizon)
+        run: |
+          # Pull and start WireMock in the background; stub files live in
+          # mobile/e2e/wiremock/__files and mappings/.
+          docker run -d --rm \
+            --name wiremock \
+            -p 4000:8080 \
+            -p 9090:8081 \
+            -v "${{ github.workspace }}/mobile/e2e/wiremock:/home/wiremock" \
+            wiremock/wiremock:3 \
+            --port 8080 \
+            --verbose
+          # Wait for the stub server to be ready.
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:4000/__admin/health && break || sleep 2
+          done
+
+      - name: Build Expo APK (local Gradle build via expo-dev-client)
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build Android APK with EAS (preview profile)
+        run: |
+          eas build \
+            --platform android \
+            --profile preview \
+            --non-interactive \
+            --local \
+            --output /tmp/greenpay-preview.apk
+
+      - name: Run Maestro smoke test on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          avd-name: Pixel_6_API_33
+          disable-animations: true
+          emulator-options: >-
+            -no-snapshot-save
+            -no-window
+            -gpu swiftshader_indirect
+            -noaudio
+            -no-boot-anim
+          script: |
+            # Install the APK built in the previous step.
+            adb install -r /tmp/greenpay-preview.apk
+
+            # Give the app a moment to settle after install.
+            sleep 3
+
+            # Run the full donate smoke flow.
+            maestro test \
+              --format junit \
+              --output maestro-results.xml \
+              mobile/e2e/donate_smoke.yaml
+
+      - name: Upload Maestro results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maestro-smoke-results
+          path: |
+            mobile/maestro-results.xml
+            ~/.maestro/tests/**/*.png
+          retention-days: 7
+          if-no-files-found: warn

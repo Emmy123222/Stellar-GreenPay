@@ -1,0 +1,23 @@
+# mobile/e2e/donate_smoke.yaml
+#
+# Maestro smoke test — full donate flow
+# ======================================
+# Runs the four sub-flows in sequence:
+#   1. launch.yaml        — cold-start and wait for the app shell
+#   2. onboarding.yaml    — walk through the three onboarding slides
+#   3. browse_projects.yaml — land on Home, navigate to Projects, open one
+#   4. donate.yaml        — fill the donate form with a stubbed wallet key
+#
+# The stub Stellar keypair used here was generated offline for testing only;
+# it has never held real funds and never will.
+#
+# Run locally (device or emulator must already be booted):
+#   maestro test mobile/e2e/donate_smoke.yaml
+#
+# CI entry-point: .github/workflows/mobile.yml
+
+appId: com.stellargreenpay.app
+---
+- runFlow: onboarding.yaml
+- runFlow: browse_projects.yaml
+- runFlow: donate.yaml

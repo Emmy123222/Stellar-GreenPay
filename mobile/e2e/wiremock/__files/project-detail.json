@@ -1,0 +1,17 @@
+{
+  "id": "project-1",
+  "name": "Amazon Reforestation",
+  "description": "Planting 1 million native trees in the Brazilian Amazon to restore degraded land and sequester CO2.",
+  "category": "Reforestation",
+  "imageUrl": null,
+  "goalXLM": "50000",
+  "raisedXLM": "32450",
+  "donorCount": 412,
+  "status": "Active",
+  "verified": true,
+  "walletAddress": "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  "latitude": -3.4653,
+  "longitude": -62.2159,
+  "updates": [],
+  "milestones": []
+}

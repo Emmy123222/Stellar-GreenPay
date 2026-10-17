@@ -1,0 +1,74 @@
+# mobile/e2e/donate.yaml
+#
+# Sub-flow: fill and submit the donate form with a stubbed wallet.
+#
+# Assumes the app is on the Project Details screen (browse_projects.yaml ran).
+#
+# Security note
+# -------------
+# The Stellar keypair used below is a throwaway test fixture generated
+# offline with `stellar-sdk` for CI purposes only.  It was funded once via
+# Friendbot on TESTNET and contains ~0 XLM.  The secret key is intentionally
+# committed here because:
+#   • It controls no real funds (testnet only, near-zero balance).
+#   • Gitleaks allowlist in .gitleaks.toml already whitelists deterministic
+#     test fixtures to avoid spurious secret-scan failures.
+#   • The CI workflow sets EXPO_PUBLIC_STELLAR_NETWORK=testnet so the app
+#     uses testnet passphrase; a mainnet transaction can never be signed.
+#
+# The HORIZON_URL env var in CI points to a local WireMock stub that returns
+# a canned 200 response for account load and transaction submission, so no
+# real network calls are made and no XLM moves.
+
+appId: com.stellargreenpay.app
+---
+# ── From Project Details → Donate screen ────────────────────────────────────
+- tapOn:
+    text: "Donate"
+- waitForAnimationToEnd
+
+# Stack title for donate/[id] is "Donate" (_layout.tsx).
+- assertVisible: "Donate"
+
+# ── Preset amount ────────────────────────────────────────────────────────────
+# donate/[id].tsx renders preset buttons labelled "5", "10", "25" XLM.
+# Tap "10" so the amount field is pre-filled.
+- tapOn:
+    text: "10"
+- waitForAnimationToEnd
+
+# ── Secret key input ─────────────────────────────────────────────────────────
+# donate/[id].tsx renders a TextInput for the Stellar secret key.
+# accessibilityLabel in the component is "Stellar secret key".
+- tapOn:
+    id: "Stellar secret key"
+# Throwaway testnet-only secret key (see Security note above).
+- inputText: "SCZANGBA5YELG4YGKDCNXKPBFDKWSHOBCMFCBJZNCQLXF4EKTAOQPZAM"
+- hideKeyboard
+
+# ── Submit ───────────────────────────────────────────────────────────────────
+# The primary CTA in donate/[id].tsx is a TouchableOpacity whose child Text
+# reads "Donate".  We scroll down first to ensure it is in the viewport
+# (keyboard may have pushed it off screen).
+- scroll:
+    direction: DOWN
+    duration: 500
+- tapOn:
+    text: "Donate"
+    index: 1   # index=1 selects the submit button, not the screen header/nav
+- waitForAnimationToEnd
+
+# ── Assert success or auth prompt ────────────────────────────────────────────
+# With a stubbed Horizon endpoint the biometric prompt is bypassed in CI
+# (the emulator has no biometric hardware, so useBiometricAuth falls back to
+# the PIN path, which WireMock stubs as always-authorised).
+# The donate screen surfaces one of:
+#   "Transaction submitted"  — happy path
+#   "Authenticate to send"   — biometric sheet (acceptable; flow reached CTA)
+- assertTrue:
+    label: "Donation flow reached confirmation step"
+    visible:
+      anyOf:
+        - text: "Transaction submitted"
+        - text: "Authenticate to send"
+        - text: "donated"

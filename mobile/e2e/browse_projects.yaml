@@ -1,0 +1,46 @@
+# mobile/e2e/browse_projects.yaml
+#
+# Sub-flow: navigate from Home to the Projects list and open the first result.
+#
+# Assumes the app is already on the Home screen (onboarding.yaml ran first).
+#
+# The mock API server (started by the CI workflow before Maestro runs) always
+# returns a deterministic project list whose first item has id "project-1"
+# and name "Amazon Reforestation".  The flow therefore taps that known card
+# and asserts the detail screen header.
+
+appId: com.stellargreenpay.app
+---
+# ── Home → Projects tab / nav item ──────────────────────────────────────────
+# _layout.tsx registers a Stack.Screen name="projects" with title "Projects".
+# The header button / back-stack entry is labelled "Projects".
+- tapOn:
+    text: "Projects"
+- waitForAnimationToEnd
+
+# ── Projects list screen ─────────────────────────────────────────────────────
+# projects/index.tsx renders a TextInput with accessibilityLabel "Search projects"
+- assertVisible:
+    id: "Search projects"
+
+# Type a search term to exercise the debounced search path.
+- tapOn:
+    id: "Search projects"
+- inputText: "Amazon"
+- waitForAnimationToEnd
+
+# The mock API returns "Amazon Reforestation" for that query.
+- assertVisible: "Amazon Reforestation"
+
+# Tap the project card — accessibilityLabel is "View Amazon Reforestation project"
+- tapOn:
+    text: "Amazon Reforestation"
+- waitForAnimationToEnd
+
+# ── Project detail screen ────────────────────────────────────────────────────
+# Stack title for projects/[id] is "Project Details" (_layout.tsx).
+- assertVisible: "Project Details"
+
+# The detail screen renders a "Donate" button that navigates to /donate/[id].
+# (projects/[id].tsx renders a TouchableOpacity labelled "Donate")
+- assertVisible: "Donate"

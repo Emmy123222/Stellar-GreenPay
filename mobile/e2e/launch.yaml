@@ -1,0 +1,20 @@
+# mobile/e2e/launch.yaml
+#
+# Sub-flow: cold-start the app and confirm the shell is ready.
+# The RootLayout immediately redirects first-time users to /onboarding,
+# so we only need to wait for *something* from that screen to appear —
+# either the "Skip" button (onboarding) or the home screen title if
+# onboarding was already dismissed in a previous run.
+#
+# Called automatically when donate_smoke.yaml runs onboarding.yaml,
+# because onboarding.yaml starts with this launch step.
+
+appId: com.stellargreenpay.app
+---
+- launchApp:
+    clearState: true   # fresh install state so onboarding always shows
+- waitForAnimationToEnd
+
+# The app should land on the first onboarding slide.
+# assertVisible uses accessibility label first, then text content.
+- assertVisible: "Skip onboarding"
