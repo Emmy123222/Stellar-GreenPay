@@ -45,6 +45,9 @@ async function getAppliedVersions(client) {
 
 async function applyPendingMigrations() {
   const client = await pool.connect();
+  if (!client) {
+    throw new Error("Failed to obtain database client from connection pool");
+  }
   try {
     await client.query("BEGIN");
     await ensureMigrationsTable(client);
