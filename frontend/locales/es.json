@@ -147,7 +147,12 @@
     "confirm": "Confirmar",
     "back": "Atrás",
     "next": "Siguiente",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "serverErrorTitle": "Algo salió mal",
+    "serverErrorDescription": "No pudimos cargar esta página. Inténtalo de nuevo o vuelve a la página de inicio.",
+    "retry": "Intentar de nuevo",
+    "backToHome": "Ir al inicio",
+    "language": "Idioma"
   },
   "apply": {
     "pageTitle": "Solicitar Verificación",

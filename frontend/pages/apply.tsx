@@ -12,9 +12,9 @@
  * to the verification_requests table and uses to email admins via
  * Resend. Backend behaviour lives in backend/src/routes/verification.js.
  */
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/router";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type ApplyTranslationSubkey, type TranslationKey } from "@/lib/i18n";
 import { PROJECT_CATEGORIES } from "@/utils/format";
 import {
   submitVerificationRequest,
@@ -56,11 +56,13 @@ const ACCEPTED_DOC_TYPES = ".pdf,.png,.jpg,.jpeg,.webp,.gif,.doc,.docx,.xls,.xls
 function Field({
   label,
   error,
+  errorId,
   helper,
   children,
 }: {
   label: string;
   error?: string;
+  errorId?: string;
   helper?: string;
   children: React.ReactNode;
 }) {
@@ -76,7 +78,7 @@ function Field({
         {children}
       </label>
       {helper && !error && <p className="text-xs text-[var(--text-tertiary)] font-body">{helper}</p>}
-      {error && <p className="text-xs text-red-500 font-body">{error}</p>}
+      {error && <p id={errorId} className="text-xs text-red-500 font-body">{error}</p>}
     </div>
   );
 }
@@ -84,7 +86,8 @@ function Field({
 export default function ApplyPage() {
   const router = useRouter();
   const { t } = useI18n();
-  const T = (key: string) => (t(`apply.${key}`) as string) || key;
+  const T = (key: ApplyTranslationSubkey) =>
+    t(`apply.${key}` as Extract<TranslationKey, `apply.${string}`>);
 
   const [step, setStep] = useState<Step>("org");
   const [submitting, setSubmitting] = useState(false);
@@ -95,6 +98,29 @@ export default function ApplyPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const stepHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const pendingFocusFieldRef = useRef<keyof FormData | null>(null);
+  const previousStepRef = useRef<Step>(step);
+
+  useEffect(() => {
+    if (previousStepRef.current !== step) {
+      previousStepRef.current = step;
+      stepHeadingRef.current?.focus();
+    }
+  }, [step]);
+
+  useEffect(() => {
+    const field = pendingFocusFieldRef.current;
+    if (!field) return;
+    document.getElementById(field)?.focus();
+    pendingFocusFieldRef.current = null;
+  }, [fieldErrors]);
+
+  const fieldA11y = (field: keyof FormData) => ({
+    id: field,
+    "aria-invalid": fieldErrors[field] ? true : undefined,
+    "aria-describedby": fieldErrors[field] ? `${field}-error` : undefined,
+  });
 
   const [form, setForm] = useState<FormData>({
     organizationName: "",
@@ -148,6 +174,7 @@ export default function ApplyPage() {
     }
 
     setFieldErrors(errs);
+    pendingFocusFieldRef.current = (Object.keys(errs)[0] as keyof FormData | undefined) ?? null;
     return Object.keys(errs).length === 0;
   }
 
@@ -259,6 +286,9 @@ export default function ApplyPage() {
       <p className="text-[var(--text-secondary)] font-body mb-8 text-sm">{T("pageIntro")}</p>
 
       {/* Step indicator */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {STEP_LABELS[step]} step {stepIndex + 1} of {progressSteps.length}
+      </p>
       <div className="flex items-center gap-2 mb-10">
         {progressSteps.map((s, i) => (
           <div key={s} className="flex items-center gap-2 flex-1">
@@ -291,11 +321,12 @@ export default function ApplyPage() {
         {/* Step: org */}
         {step === "org" && (
           <>
-            <h2 className="font-display text-xl font-bold text-forest-900">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="font-display text-xl font-bold text-forest-900">
               {T("stepOrg")}
             </h2>
-            <Field label={`${T("orgName")} *`} error={fieldErrors.organizationName}>
+            <Field label={`${T("orgName")} *`} error={fieldErrors.organizationName} errorId="organizationName-error">
               <input
+                {...fieldA11y("organizationName")}
                 className="input-field"
                 value={form.organizationName}
                 onChange={set("organizationName")}
@@ -321,8 +352,10 @@ export default function ApplyPage() {
             <Field
               label={`${T("contactEmail")} *`}
               error={fieldErrors.contactEmail}
+              errorId="contactEmail-error"
             >
               <input
+                {...fieldA11y("contactEmail")}
                 className="input-field"
                 type="email"
                 value={form.contactEmail}
@@ -334,8 +367,10 @@ export default function ApplyPage() {
               label={`${T("walletAddress")} *`}
               helper={T("walletHelper")}
               error={fieldErrors.walletAddress}
+              errorId="walletAddress-error"
             >
               <input
+                {...fieldA11y("walletAddress")}
                 className="input-field font-mono text-sm"
                 spellCheck={false}
                 value={form.walletAddress}
@@ -349,19 +384,21 @@ export default function ApplyPage() {
         {/* Step: project */}
         {step === "project" && (
           <>
-            <h2 className="font-display text-xl font-bold text-forest-900">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="font-display text-xl font-bold text-forest-900">
               {T("stepProject")}
             </h2>
-            <Field label={`${T("projectName")} *`} error={fieldErrors.projectName}>
+            <Field label={`${T("projectName")} *`} error={fieldErrors.projectName} errorId="projectName-error">
               <input
+                {...fieldA11y("projectName")}
                 className="input-field"
                 value={form.projectName}
                 onChange={set("projectName")}
                 placeholder="Acme Solar Farm Phase 1"
               />
             </Field>
-            <Field label={`${T("projectCategory")} *`} error={fieldErrors.projectCategory}>
+            <Field label={`${T("projectCategory")} *`} error={fieldErrors.projectCategory} errorId="projectCategory-error">
               <select
+                {...fieldA11y("projectCategory")}
                 className="input-field"
                 value={form.projectCategory}
                 onChange={set("projectCategory")}
@@ -373,8 +410,9 @@ export default function ApplyPage() {
                 ))}
               </select>
             </Field>
-            <Field label={`${T("projectLocation")} *`} error={fieldErrors.projectLocation}>
+            <Field label={`${T("projectLocation")} *`} error={fieldErrors.projectLocation} errorId="projectLocation-error">
               <input
+                {...fieldA11y("projectLocation")}
                 className="input-field"
                 value={form.projectLocation}
                 onChange={set("projectLocation")}
@@ -395,7 +433,7 @@ export default function ApplyPage() {
         {/* Step: impact */}
         {step === "impact" && (
           <>
-            <h2 className="font-display text-xl font-bold text-forest-900">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="font-display text-xl font-bold text-forest-900">
               {T("stepImpact")}
             </h2>
             <p className="text-[var(--text-secondary)] text-sm font-body">
@@ -404,9 +442,11 @@ export default function ApplyPage() {
             <Field
               label={`${T("co2PerXLM")} *`}
               error={fieldErrors.co2PerXLM}
+              errorId="co2PerXLM-error"
               helper="e.g. 0.05 kg CO₂ per XLM."
             >
               <input
+                {...fieldA11y("co2PerXLM")}
                 className="input-field"
                 type="number"
                 inputMode="decimal"
@@ -420,8 +460,10 @@ export default function ApplyPage() {
             <Field
               label={T("annualTonnes")}
               error={fieldErrors.expectedAnnualTonnesCO2}
+              errorId="expectedAnnualTonnesCO2-error"
             >
               <input
+                {...fieldA11y("expectedAnnualTonnesCO2")}
                 className="input-field"
                 type="number"
                 inputMode="decimal"
@@ -446,7 +488,7 @@ export default function ApplyPage() {
         {/* Step: documents */}
         {step === "documents" && (
           <>
-            <h2 className="font-display text-xl font-bold text-forest-900">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="font-display text-xl font-bold text-forest-900">
               {T("documentsTitle")}
             </h2>
             <p className="text-[var(--text-secondary)] text-sm font-body">{T("documentsHint")}</p>
@@ -506,7 +548,7 @@ export default function ApplyPage() {
         {/* Step: review */}
         {step === "review" && (
           <>
-            <h2 className="font-display text-xl font-bold text-forest-900">
+            <h2 ref={stepHeadingRef} tabIndex={-1} className="font-display text-xl font-bold text-forest-900">
               {T("stepReview")}
             </h2>
             <p className="text-sm text-[var(--text-secondary)] font-body">
@@ -558,7 +600,7 @@ export default function ApplyPage() {
             </dl>
 
             {serverError && (
-              <p className="text-sm text-red-500 font-body">{serverError}</p>
+              <p role="alert" className="text-sm text-red-500 font-body">{serverError}</p>
             )}
           </>
         )}
@@ -572,12 +614,12 @@ export default function ApplyPage() {
           disabled={stepIndex === 0}
           className="btn-secondary disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {T("common.back") || "Back"}
+          {t("common.back")}
         </button>
 
         {step === "documents" ? (
           <button type="button" onClick={nextStep} className="btn-primary">
-            {T("common.next") || "Next"}
+            {t("common.next")}
           </button>
         ) : step === "review" ? (
           <button
@@ -590,7 +632,7 @@ export default function ApplyPage() {
           </button>
         ) : (
           <button type="button" onClick={nextStep} className="btn-primary">
-            {T("common.next") || "Next"}
+            {t("common.next")}
           </button>
         )}
       </div>

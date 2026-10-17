@@ -11,6 +11,16 @@ module.exports = {
   transformIgnorePatterns: [
     "/node_modules/(?!uuid|uint8array-extras|@exodus/bytes|@noble/hashes|@noble/ed25519)",
   ],
+  // Keep the floor intentionally conservative while ensuring coverage cannot
+  // disappear unnoticed. Raise these values when the suite baseline grows.
+  coverageThreshold: {
+    global: {
+      branches: 20,
+      functions: 25,
+      lines: 30,
+      statements: 30,
+    },
+  },
   moduleNameMapper: {
     // uuid v14 is pure ESM; map to a CJS shim so Jest can require() it.
     "^uuid$": path.resolve(__dirname, "__mocks__/uuid.js"),

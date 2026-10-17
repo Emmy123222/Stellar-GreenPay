@@ -40,6 +40,16 @@ Freighter is a browser extension wallet for the Stellar network.
 
 ## 2. Clone and Run Locally
 
+### Run the development stack with Docker
+
+The frontend uses a dedicated development image target with Next.js hot reload. From the repository root, run:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
+The development compose override mounts the frontend source and enables polling so file changes are detected inside Docker. The production `runner` image target is unchanged.
+
 - 📥 Clone the Repository
 
 ```

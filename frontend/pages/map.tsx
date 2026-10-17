@@ -87,7 +87,8 @@ export default function MapPage({ projects, fetchedAt }: MapPageProps) {
             {/* Link to full project listing */}
             <Link
               href="/projects"
-              className="text-xs font-body font-medium text-forest-600 hover:text-forest-800 hover:underline transition-colors hidden sm:block"
+              className="text-xs font-body font-medium text-forest-600 hover:text-forest-800 hover:underline transition-colors"
+              aria-label={`${t("map.browseAll")} (list view)`}
             >
               {t("map.browseAll")} →
             </Link>
