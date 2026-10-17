@@ -1,6 +1,6 @@
 "use strict";
 
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const logger = require("../logger");
 
 async function main() {

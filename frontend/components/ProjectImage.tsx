@@ -11,6 +11,8 @@
  */
 import Image from "next/image";
 
+export const PROJECT_PLACEHOLDER_SRC = "/project-placeholder.svg";
+
 interface ProjectImageProps {
   src?: string;
   name: string;
@@ -51,7 +53,6 @@ export function ProjectImage({
         className={className}
         width={width}
         height={height}
-        priority={priority}
         loading={priority ? "eager" : "lazy"}
         decoding="async"
       />
@@ -67,7 +68,6 @@ export function ProjectImage({
         className={className}
         width={width}
         height={height}
-        priority={priority}
         loading={priority ? "eager" : "lazy"}
         decoding="async"
       />
@@ -81,7 +81,6 @@ export function ProjectImage({
       className={className}
       width={width}
       height={height}
-      priority={priority}
       loading={priority ? "eager" : "lazy"}
       decoding="async"
     />
