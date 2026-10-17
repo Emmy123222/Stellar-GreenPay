@@ -42,10 +42,15 @@ frontend/coverage/
 *.lcov
 clover.xml
 
+# Playwright test artifacts
+test-results/
+playwright-report/
+
 # Extension build artifacts
 extension/*.zip
 extension/dist/
 
 # Next.js build cache
 frontend/.next/
-tsconfig.tsbuildinfo
+*.tsbuildinfo
+
