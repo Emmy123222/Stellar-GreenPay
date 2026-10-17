@@ -24,24 +24,24 @@ jobs:
         with:
           targets: wasm32v1-none
 
+      # The Makefile in contracts/ is the single source of truth for these
+      # commands — CI runs the exact same `make` targets developers run
+      # locally, so local and CI commands cannot drift.
+      #
       # Build the WASM artifact first. include_bytes! in integration.rs
       # resolves at compile time, so the .wasm must exist before cargo test
-      # or cargo clippy attempt to compile the integration test crate.
+      # or cargo clippy attempt to compile the integration test crate (the
+      # Makefile encodes this ordering via the test/lint dependencies).
       - name: Build WASM artifacts
-        run: cargo build --workspace --target wasm32v1-none --release
+        run: make build
 
-      - name: Run unit tests
-        run: cargo test --workspace
+      # Unit tests and integration tests (the `test` target builds the WASM
+      # artifacts first, then runs both suites).
+      - name: Run tests
+        run: make test
 
+      # Clippy stays non-blocking in CI (warnings are reported but do not
+      # fail the job); the underlying `make lint` target is strict and can
+      # be run locally to fail on any warning.
       - name: Run Clippy
-        run: cargo clippy --workspace -- -D warnings || true
-
-      # Integration tests exercise multi-contract interaction, oracle TTL
-      # expiry via ledger timestamp manipulation, and the admin upgrade flow.
-      # They require the testutils feature and the compiled WASM (built above).
-      - name: Run integration tests
-        run: >
-          cargo test
-          --features testutils
-          --test integration
-          --manifest-path greenpay-contract/Cargo.toml
+        run: make lint || true
