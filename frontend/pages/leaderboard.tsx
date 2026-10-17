@@ -67,7 +67,7 @@ export default function LeaderboardPage() {
                 <div key={b.name} className="bg-white rounded-xl p-3 border border-forest-100">
                   <p className="text-2xl mb-1">{b.emoji}</p>
                   <p className="text-xs font-semibold text-forest-900 font-body">{b.name}</p>
-                  <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">{b.req}</p>
+                  <p className="text-xs text-forest-600 dark:text-forest-300 font-body">{b.req}</p>
                 </div>
               ))}
             </div>
