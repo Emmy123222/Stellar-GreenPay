@@ -44,6 +44,9 @@ async function getAppliedVersions(client) {
 }
 
 async function applyPendingMigrations(client) {
+  if (!client) {
+    throw new Error("applyPendingMigrations: client is undefined or null");
+  }
   try {
     await client.query("BEGIN");
     await ensureMigrationsTable(client);
