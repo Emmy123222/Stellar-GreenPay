@@ -4,9 +4,18 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { fetchLeaderboard } from "@/lib/api";
-import { formatXLM, formatUSDEquivalent, formatCO2, shortenAddress, badgeEmoji } from "@/utils/format";
+import {
+  formatXLM,
+  formatUSDEquivalent,
+  formatCO2,
+  formatRank,
+  formatNumber,
+  getFormattingLocale,
+} from "@/lib/formatLocale";
+import { shortenAddress, badgeEmoji } from "@/utils/format";
 import { accountUrl } from "@/lib/stellar";
 import { useXlmPrice } from "@/lib/priceContext";
+import { useI18n } from "@/lib/i18n";
 import type { LeaderboardEntry } from "@/utils/types";
 
 const AVATAR_COLORS = [
@@ -75,6 +84,8 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [error,   setError]   = useState<string | null>(null);
   const xlmUsd = useXlmPrice();
+  const { locale } = useI18n();
+  const activeLocale = locale && locale !== "en" ? locale : getFormattingLocale();
 
   // `loading` is derived by comparing the in-flight request to the last one
   // that resolved, rather than toggled synchronously inside the effect
@@ -140,7 +151,7 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
             <div className="w-8 text-center flex-shrink-0">
               {entry.rank <= 3
                 ? <span className="text-lg">{medals[entry.rank - 1]}</span>
-                : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>
+                : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">{formatRank(entry.rank, activeLocale)}</span>
               }
             </div>
 
@@ -159,7 +170,7 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
                   {nameOrAddress}
                 </span>
                 <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
-                  {entry.projectsSupported} project{entry.projectsSupported !== 1 ? "s" : ""} supported
+                  {formatNumber(entry.projectsSupported, undefined, activeLocale)} project{entry.projectsSupported !== 1 ? "s" : ""} supported
                 </p>
               </div>
             </div>
@@ -168,18 +179,18 @@ export default function LeaderboardTable({ limit = 20, period = "all" }: { limit
             <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
               <div>
                 <p className="font-mono font-semibold text-forest-600 text-sm">
-                  {formatXLM(entry.totalDonatedXLM)}
+                  {formatXLM(entry.totalDonatedXLM, undefined, activeLocale)}
                 </p>
-                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+                {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd, activeLocale) && (
                   <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
-                    {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+                    {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd, activeLocale)}
                   </p>
                 )}
                 <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
               </div>
               <div>
                 <p className="font-mono font-semibold text-forest-600 text-sm">
-                  {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
+                  {formatCO2(Number(entry.totalCO2OffsetKg || 0), undefined, activeLocale)}
                 </p>
                 <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
               </div>

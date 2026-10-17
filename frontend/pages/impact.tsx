@@ -10,8 +10,18 @@ import WalletConnect from "@/components/WalletConnect";
 import WorldMap from "@/components/WorldMap";
 import { fetchImpactDonor, fetchImpactGlobal, fetchLeaderboard, fetchProjects } from "@/lib/api";
 import { getGlobalImpactStats } from "@/lib/stellar";
-import { formatCO2, formatXLM, shortenAddress, normalizeXLMAmount } from "@/utils/format";
+import {
+  formatCO2,
+  formatXLM,
+  formatNumber,
+  formatRank,
+  formatTonnes,
+  normalizeXLMAmount,
+  getFormattingLocale,
+} from "@/lib/formatLocale";
+import { shortenAddress } from "@/utils/format";
 import { usePriceContext } from "@/lib/priceContext";
+import { useI18n } from "@/lib/i18n";
 import type { LeaderboardEntry } from "@/utils/types";
 import type { ImpactGlobalStats } from "@/lib/api";
 
@@ -27,6 +37,8 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [personalImpact, setPersonalImpact] = useState<Awaited<ReturnType<typeof fetchImpactDonor>> | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { locale } = useI18n();
+  const activeLocale = locale && locale !== "en" ? locale : getFormattingLocale();
 
   const { formatFiatEquivalent } = usePriceContext();
   const totalRaisedFiat = formatFiatEquivalent(sorobanStats?.totalRaisedXLM ?? "0");
@@ -87,6 +99,7 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
             unit="XLM"
             isLoading={isLoading}
             subtitle={totalRaisedFiat ? totalRaisedFiat : undefined}
+            locale={activeLocale}
           />
           <StatCard
             label="CO₂ Offset"
@@ -94,31 +107,36 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
             value={sorobanStats ? Number(sorobanStats.totalCO2OffsetGrams) / 1000 : 0}
             unit="Kg"
             isLoading={isLoading}
-            formatter={(val) => formatCO2(Math.floor(val))}
+            formatter={(val) => formatCO2(Math.floor(val), undefined, activeLocale)}
+            locale={activeLocale}
           />
           <StatCard
             label="Unique Donors"
             icon="💝"
             value={stats?.donorCount ?? 0}
             isLoading={isLoading}
+            locale={activeLocale}
           />
           <StatCard
             label="Unique Countries"
             icon="🌎"
             value={stats?.uniqueCountries ?? 0}
             isLoading={isLoading}
+            locale={activeLocale}
           />
           <StatCard
             label="Projects"
             icon="🌍"
             value={projectCount}
             isLoading={isLoading}
+            locale={activeLocale}
           />
           <StatCard
             label="Trees Equivalent"
             icon="🌲"
             value={stats?.treesEquivalent ?? 0}
             isLoading={isLoading}
+            locale={activeLocale}
           />
         </div>
 
@@ -133,9 +151,10 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
                 unit="XLM"
                 isLoading={isLoading}
                 subtitle={personalDonatedFiat ? personalDonatedFiat : undefined}
+                locale={activeLocale}
               />
-              <StatCard label="Projects supported" icon="🌱" value={personalImpact?.projectsSupported ?? 0} isLoading={isLoading} />
-              <StatCard label="CO₂ offset" icon="🌿" value={personalImpact?.co2OffsetKg ?? 0} unit="Kg" isLoading={isLoading} />
+              <StatCard label="Projects supported" icon="🌱" value={personalImpact?.projectsSupported ?? 0} isLoading={isLoading} locale={activeLocale} />
+              <StatCard label="CO₂ offset" icon="🌿" value={personalImpact?.co2OffsetKg ?? 0} unit="Kg" isLoading={isLoading} locale={activeLocale} />
             </div>
           ) : (
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-2xl bg-forest-50 p-5">
@@ -168,11 +187,11 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
                   <div className="min-w-0">
                     <p className="font-semibold text-forest-900 truncate">{row.category}</p>
                     <p className="text-xs text-forest-600 mt-1">
-                      {row.donorCount} donor{row.donorCount !== 1 ? "s" : ""} • {formatCO2(row.co2OffsetKg)}
+                      {formatNumber(row.donorCount, undefined, activeLocale)} donor{row.donorCount !== 1 ? "s" : ""} • {formatCO2(row.co2OffsetKg, undefined, activeLocale)}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="font-mono font-semibold text-forest-700">{formatXLM(row.totalDonationsXLM)}</p>
+                    <p className="font-mono font-semibold text-forest-700">{formatXLM(row.totalDonationsXLM, undefined, activeLocale)}</p>
                     <p className="text-[11px] text-forest-500">donated</p>
                   </div>
                 </div>
@@ -194,12 +213,12 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
               leaderboard.map((entry, idx) => (
                 <div key={entry.publicKey} className="flex flex-col items-center text-center p-6 bg-forest-50/50 rounded-2xl hover:bg-forest-50 transition-colors border border-transparent hover:border-forest-200">
                   <div className="w-12 h-12 rounded-full bg-forest-900 text-white flex items-center justify-center font-bold mb-4">
-                    #{idx + 1}
+                    {formatRank(idx + 1, activeLocale)}
                   </div>
                   <span className="font-bold text-lg text-forest-800 break-all">
                     {entry.displayName || shortenAddress(entry.publicKey)}
                   </span>
-                  <p className="text-forest-500 text-sm mt-1">{entry.totalDonatedXLM} XLM Total</p>
+                  <p className="text-forest-500 text-sm mt-1">{formatXLM(entry.totalDonatedXLM, undefined, activeLocale)} Total</p>
                   <div className="mt-4 px-3 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-bold uppercase tracking-wider">
                     {entry.topBadge || "Seedling"}
                   </div>
@@ -234,6 +253,7 @@ export function StatCard({
   formatter,
   duration,
   subtitle,
+  locale,
 }: {
   label: string;
   icon: string;
@@ -243,6 +263,7 @@ export function StatCard({
   formatter?: (val: number) => string;
   duration?: number;
   subtitle?: React.ReactNode;
+  locale?: string;
 }) {
   const isXLM = unit === "XLM" || label.toUpperCase().includes("XLM");
   const normalizedValue = isXLM ? normalizeXLMAmount(value) : value;
@@ -255,7 +276,7 @@ export function StatCard({
       <p className="text-forest-500 font-medium text-sm uppercase tracking-wider mb-2">{label}</p>
       <div className="text-4xl font-display font-bold text-forest-900 flex items-baseline gap-1.5">
         {!isLoading ? (
-          <AnimatedNumber value={normalizedValue} formatter={formatter} duration={duration} />
+          <AnimatedNumber value={normalizedValue} formatter={formatter} duration={duration} locale={locale} />
         ) : (
           <span className="w-24 h-8 bg-forest-50 animate-pulse rounded" />
         )}

@@ -7,8 +7,16 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { fetchTeamLeaderboard } from "@/lib/api";
-import { formatXLM, formatUSDEquivalent, formatCO2 } from "@/utils/format";
+import {
+  formatXLM,
+  formatUSDEquivalent,
+  formatCO2,
+  formatRank,
+  formatNumber,
+  getFormattingLocale,
+} from "@/lib/formatLocale";
 import { useXlmPrice } from "@/lib/priceContext";
+import { useI18n } from "@/lib/i18n";
 import type { TeamLeaderboardEntry } from "@/utils/types";
 
 const PAGE_SIZE = 20;
@@ -19,6 +27,8 @@ export default function TeamsLeaderboard({ period = "all" }: { period?: "all" | 
   const [error, setError] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const xlmUsd = useXlmPrice();
+  const { locale } = useI18n();
+  const activeLocale = locale && locale !== "en" ? locale : getFormattingLocale();
 
   // `loading` is derived by comparing the in-flight request to the last one
   // that resolved, rather than toggled synchronously inside the effect
@@ -101,7 +111,7 @@ export default function TeamsLeaderboard({ period = "all" }: { period?: "all" | 
           <div className="w-8 text-center flex-shrink-0">
             {entry.rank <= 3
               ? <span className="text-lg">{medals[entry.rank - 1]}</span>
-              : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">#{entry.rank}</span>}
+              : <span className="text-sm font-semibold text-[#8aaa8a] dark:text-forest-300 font-body">{formatRank(entry.rank, activeLocale)}</span>}
           </div>
 
           {/* Team logo / initial */}
@@ -120,7 +130,7 @@ export default function TeamsLeaderboard({ period = "all" }: { period?: "all" | 
               {entry.name}
             </p>
             <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-0.5">
-              👥 {entry.memberCount} member{entry.memberCount === 1 ? "" : "s"}
+              👥 {formatNumber(entry.memberCount, undefined, activeLocale)} member{entry.memberCount === 1 ? "" : "s"}
             </p>
           </div>
 
@@ -128,18 +138,18 @@ export default function TeamsLeaderboard({ period = "all" }: { period?: "all" | 
           <div className="text-right flex-shrink-0 flex gap-4 sm:gap-6">
             <div>
               <p className="font-mono font-semibold text-forest-600 text-sm">
-                {formatXLM(entry.totalDonatedXLM)}
+                {formatXLM(entry.totalDonatedXLM, undefined, activeLocale)}
               </p>
-              {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd) && (
+              {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd, activeLocale) && (
                 <p className="text-[11px] text-[#8aaa8a] dark:text-forest-300 font-body">
-                  {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd)}
+                  {formatUSDEquivalent(entry.totalDonatedXLM, xlmUsd, activeLocale)}
                 </p>
               )}
               <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">donated</p>
             </div>
             <div>
               <p className="font-mono font-semibold text-forest-600 text-sm">
-                {formatCO2(Number(entry.totalCO2OffsetKg || 0))}
+                {formatCO2(Number(entry.totalCO2OffsetKg || 0), undefined, activeLocale)}
               </p>
               <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-auto">offset</p>
             </div>

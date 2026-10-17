@@ -3,7 +3,8 @@
  * Renders the target during SSR/hydration, then animates to it after mount.
  */
 import { useEffect, useState, useRef } from "react";
-import { formatAmount, normalizeXLMAmount } from "@/utils/format";
+import { formatAmount, normalizeXLMAmount, getFormattingLocale } from "@/lib/formatLocale";
+import { useI18n } from "@/lib/i18n";
 
 export { normalizeXLMAmount };
 
@@ -12,6 +13,7 @@ export interface AnimatedNumberProps {
   duration?: number;
   formatter?: (val: number) => string;
   unit?: string;
+  locale?: string;
 }
 
 export default function AnimatedNumber({
@@ -19,7 +21,16 @@ export default function AnimatedNumber({
   duration = 1500,
   formatter,
   unit,
+  locale: propLocale,
 }: AnimatedNumberProps) {
+  let ctxLocale = "";
+  try {
+    const { locale } = useI18n();
+    ctxLocale = locale;
+  } catch {
+    // Outside I18nProvider
+  }
+  const activeLocale = propLocale || (ctxLocale && ctxLocale !== "en" ? ctxLocale : getFormattingLocale());
   const isXLM = unit === "XLM";
   const isScientific = typeof value === "string" && /[eE]/.test(value);
   const isSmallFloat = typeof value === "number" && !Number.isInteger(value);
@@ -39,6 +50,9 @@ export default function AnimatedNumber({
   const decimalPlaces = (() => {
     if (typeof normalizedInput === "string" && normalizedInput.includes(".")) {
       return normalizedInput.split(".")[1]?.length ?? 0;
+    }
+    if (typeof normalizedInput === "number" && !Number.isInteger(normalizedInput)) {
+      return String(normalizedInput).split(".")[1]?.length ?? 0;
     }
     if (isXLM) return 7;
     return 0;
@@ -76,8 +90,8 @@ export default function AnimatedNumber({
 
   const formatDisplay = (val: number) => {
     if (formatter) return formatter(val);
-    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces, undefined, decimalPlaces);
-    return formatAmount(Math.floor(val), 0, undefined, 0);
+    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces, activeLocale, decimalPlaces);
+    return formatAmount(Math.floor(val), 0, activeLocale, 0);
   };
 
   const effectiveValue = duration <= 0 ? numericValue : displayValue;
