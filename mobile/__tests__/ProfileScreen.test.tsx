@@ -73,7 +73,7 @@ describe('ProfileScreen Avatar Upload', () => {
   });
 
   it('renders profile details and avatar upload button', async () => {
-    const { getByText, getByTestId } = render(<ProfileScreen address={MOCK_ADDRESS} />);
+    const { getByText, getByTestId } = await render(<ProfileScreen address={MOCK_ADDRESS} />);
 
     await waitFor(() => {
       expect(getByText('Green Champion')).toBeTruthy();
@@ -111,7 +111,7 @@ describe('ProfileScreen Avatar Upload', () => {
       });
     });
 
-    const { getByTestId, queryByTestId } = render(<ProfileScreen address={MOCK_ADDRESS} />);
+    const { getByTestId, queryByTestId } = await render(<ProfileScreen address={MOCK_ADDRESS} />);
 
     await waitFor(() => {
       expect(getByTestId('avatar-upload-button')).toBeTruthy();
@@ -187,7 +187,7 @@ describe('ProfileScreen Avatar Upload', () => {
       },
     });
 
-    const { getByTestId } = render(<ProfileScreen address={MOCK_ADDRESS} />);
+    const { getByTestId } = await render(<ProfileScreen address={MOCK_ADDRESS} />);
 
     await waitFor(() => {
       expect(getByTestId('avatar-upload-button')).toBeTruthy();
@@ -214,7 +214,7 @@ describe('ProfileScreen Avatar Upload', () => {
       assets: null,
     });
 
-    const { getByTestId } = render(<ProfileScreen address={MOCK_ADDRESS} />);
+    const { getByTestId } = await render(<ProfileScreen address={MOCK_ADDRESS} />);
 
     await waitFor(() => {
       expect(getByTestId('avatar-upload-button')).toBeTruthy();

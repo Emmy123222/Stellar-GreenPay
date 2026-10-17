@@ -5,7 +5,13 @@ import React from 'react';
 import { render, fireEvent, waitFor, act } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { OnboardingScreen, ONBOARDING_SLIDES } from '../src/screens/OnboardingScreen';
+// The route module wraps the screen, so importing it pulls in expo-router.
+const mockReplace = jest.fn();
+jest.mock('expo-router', () => ({
+  useRouter: () => ({ replace: (...args: unknown[]) => mockReplace(...args) }),
+}));
+
+import { OnboardingScreen, ONBOARDING_SLIDES } from '../app/onboarding';
 import {
   hasCompletedOnboarding,
   markOnboardingComplete,
@@ -39,16 +45,16 @@ describe('onboarding persistence', () => {
 });
 
 describe('OnboardingScreen', () => {
-  it('renders the three slides in order', () => {
+  it('renders the three slides in order', async () => {
     expect(ONBOARDING_SLIDES).toHaveLength(3);
 
-    const { getByText, queryByText } = render(<OnboardingScreen onDone={jest.fn()} />);
+    const { getByText, queryByText } = await render(<OnboardingScreen onDone={jest.fn()} />);
     expect(getByText('Welcome to GreenPay')).toBeTruthy();
     expect(queryByText('Connect your wallet')).toBeNull();
   });
 
-  it('advances through the slides and shows the Get Started CTA last', () => {
-    const { getByText } = render(<OnboardingScreen onDone={jest.fn()} />);
+  it('advances through the slides and shows the Get Started CTA last', async () => {
+    const { getByText } = await render(<OnboardingScreen onDone={jest.fn()} />);
 
     fireEvent.press(getByText('Next'));
     expect(getByText('How donations work')).toBeTruthy();
@@ -60,7 +66,7 @@ describe('OnboardingScreen', () => {
 
   it('marks onboarding complete and calls onDone from Get Started', async () => {
     const onDone = jest.fn();
-    const { getByText } = render(<OnboardingScreen onDone={onDone} />);
+    const { getByText } = await render(<OnboardingScreen onDone={onDone} />);
 
     fireEvent.press(getByText('Next'));
     fireEvent.press(getByText('Next'));
@@ -72,7 +78,7 @@ describe('OnboardingScreen', () => {
 
   it('lets the user skip from any slide', async () => {
     const onDone = jest.fn();
-    const { getByText } = render(<OnboardingScreen onDone={onDone} />);
+    const { getByText } = await render(<OnboardingScreen onDone={onDone} />);
 
     await act(async () => {
       fireEvent.press(getByText('Skip'));

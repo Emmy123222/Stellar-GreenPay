@@ -310,7 +310,7 @@ export default function ApiDocsPage() {
   const resources = ["Projects", "Donations", "Leaderboard", "Profiles"];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <div className="mb-10">
         <h1 className="font-display text-4xl font-bold text-forest-900 mb-3">
           API Documentation

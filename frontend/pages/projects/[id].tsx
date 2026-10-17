@@ -744,7 +744,7 @@ export default function ProjectDetail({
 
   if (loading || !project)
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-pulse motion-reduce:animate-none">
         <div className="h-8 bg-forest-200 rounded w-2/3 mb-4" />
         <div className="card space-y-4">
           {[1, 2, 3].map((i) => (
@@ -788,22 +788,9 @@ export default function ProjectDetail({
     : ogProject?.imageUrl || `${appUrl}/og-default.png`;
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in">
-      <Head>
-        <title>{ogTitle}</title>
-        <meta name="greenpay:project:id" content={project.id} />
-        <meta name="description" content={ogDescription} />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content={ogTitle} />
-        <meta property="og:description" content={ogDescription} />
-        <meta property="og:image" content={ogImage} />
-        <meta property="og:image:width" content="1200" />
-        <meta property="og:image:height" content="630" />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={ogTitle} />
-        <meta name="twitter:description" content={ogDescription} />
-        <meta name="twitter:image" content={ogImage} />
-      </Head>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 pb-24 sm:pb-10 animate-fade-in motion-reduce:animate-none">
+      <ProjectHeadMeta project={project} ogProject={ogProject} />
+
       <ToastNotification
         toasts={toasts}
         onDismiss={(toastId) => setToasts((prev) => prev.filter((t) => t.id !== toastId))}

@@ -20,7 +20,7 @@ export default function LeaderboardPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
 
       <div className="text-center mb-10">
         <div className="text-5xl mb-4">🏆</div>
@@ -41,7 +41,7 @@ export default function LeaderboardPage() {
           <button
             key={b.key}
             onClick={() => setBoard(b.key as Board)}
-            className={`px-5 py-2.5 rounded-xl font-body font-semibold transition-all ${
+            className={`px-5 py-2.5 rounded-xl font-body font-semibold transition-all motion-reduce:transition-none ${
               board === b.key
                 ? "bg-forest-600 text-white shadow-md"
                 : "bg-forest-50 text-forest-900 hover:bg-forest-100 border border-forest-200"
@@ -84,7 +84,7 @@ export default function LeaderboardPage() {
               <button
                 key={p.key}
                 onClick={() => setPeriod(p.key as Period)}
-                className={`px-4 py-2 rounded-lg font-body font-semibold transition-all ${
+                className={`px-4 py-2 rounded-lg font-body font-semibold transition-all motion-reduce:transition-none ${
                   period === p.key
                     ? "bg-forest-600 text-white"
                     : "bg-forest-50 text-forest-900 hover:bg-forest-100 border border-forest-200"

@@ -87,9 +87,9 @@ export default function DonationTicker({
       <span id="donation-ticker-description" className="sr-only">
         Live donation ticker showing recent network transactions. Announcements are disabled to prevent spamming screen readers.
       </span>
-      <div className="flex items-center gap-8 animate-marquee whitespace-nowrap px-4">
+      <div className="flex items-center gap-8 animate-marquee motion-reduce:animate-none whitespace-nowrap px-4">
         <span className="text-forest-400 font-bold uppercase tracking-widest text-xs flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" />
           Live Network Activity
         </span>
         {items.map((item) => (

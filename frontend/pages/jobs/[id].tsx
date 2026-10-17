@@ -162,7 +162,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
     step === "success" || job.status === "completed";
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <nav className="mb-6 text-sm font-body">
         <Link href="/jobs" className="text-forest-600 hover:underline">
           Jobs
@@ -262,7 +262,7 @@ export default function JobDetailPage({ publicKey, onConnect }: JobPageProps) {
             </button>
 
             {step === "signing" && (
-              <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse font-body">
+              <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse motion-reduce:animate-none font-body">
                 Confirm the transaction in Freighter…
               </p>
             )}

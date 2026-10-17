@@ -201,9 +201,9 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
 
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         {/* ── Hero ────────────────────────────────────────────────────── */}
-        <div className="text-center pt-20 pb-16 animate-fade-in relative">
+        <div className="text-center pt-20 pb-16 animate-fade-in motion-reduce:animate-none relative">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-forest-200 bg-forest-50 text-forest-700 text-xs font-semibold mb-8 font-body">
-            <span className="w-1.5 h-1.5 rounded-full bg-forest-500 animate-pulse" />
+            <span className="w-1.5 h-1.5 rounded-full bg-forest-500 animate-pulse motion-reduce:animate-none" />
             Open Source · Built on Stellar · Powered by Soroban
           </div>
 
@@ -286,7 +286,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
             {FEATURES.map((f) => (
               <div
                 key={f.title}
-                className="card hover:shadow-green transition-all"
+                className="card hover:shadow-green transition-all motion-reduce:transition-none"
               >
                 <div className="text-3xl mb-3">{f.icon}</div>
                 <h3 className="font-display font-semibold text-forest-900 mb-2 text-base">
@@ -321,7 +321,7 @@ export default function Home({ publicKey, onConnect }: HomeProps) {
               <Link
                 key={cat.label}
                 href={`/projects?category=${encodeURIComponent(cat.label)}`}
-                className="card text-center hover:shadow-green hover:border-forest-300 transition-all group py-5"
+                className="card text-center hover:shadow-green hover:border-forest-300 transition-all motion-reduce:transition-none group py-5"
               >
                 <div className="text-3xl mb-2">{cat.icon}</div>
                 <p className="text-xs font-semibold text-forest-800 group-hover:text-forest-600 font-body">
@@ -449,11 +449,11 @@ function LiveDonationTicker({ donations }: { donations: LiveDonationTickerItem[]
     <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-forest-800 bg-forest-900/95 backdrop-blur px-4 py-2 overflow-hidden">
       <div className="max-w-6xl mx-auto flex items-center gap-3 text-sm text-white font-body">
         <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-widest text-forest-300 font-bold shrink-0">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none" />
           Live donations
         </span>
         <div key={item.id} className="flex-1 overflow-hidden">
-          <div className="flex items-center gap-2 whitespace-nowrap animate-slide-up">
+          <div className="flex items-center gap-2 whitespace-nowrap animate-slide-up motion-reduce:animate-none">
             <span className="text-emerald-300">⚡ Just now</span>
             <span className="text-forest-100">—</span>
             <span className="font-mono text-forest-100">{donorLabel}</span>
@@ -525,7 +525,7 @@ function CategoryStatsChart({ stats }: { stats: CategoryStats[] }) {
                 style={{ width: "100%" }}
               >
                 <div
-                  className="h-full bg-gradient-to-r from-forest-500 to-forest-600 rounded-full transition-all duration-500 ease-out group-hover:from-forest-600 group-hover:to-forest-700"
+                  className="h-full bg-gradient-to-r from-forest-500 to-forest-600 rounded-full transition-all motion-reduce:transition-none duration-500 ease-out group-hover:from-forest-600 group-hover:to-forest-700"
                   style={{ width: `${percentage}%` }}
                 />
               </div>
@@ -549,7 +549,7 @@ function FeaturedProjectCard({ project }: { project: ClimateProject }) {
           The project making the biggest impact right now
         </p>
       </div>
-      <div className="card border-forest-200 shadow-lg hover:shadow-green transition-all p-6 sm:p-8">
+      <div className="card border-forest-200 shadow-lg hover:shadow-green transition-all motion-reduce:transition-none p-6 sm:p-8">
         <div className="flex flex-col md:flex-row gap-6">
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-3">

@@ -84,9 +84,25 @@ interface ProjectResult {
   name: string;
   category: string;
   walletAddress?: string;
+  description?: string;
+  aiSummary?: string | null;
+  co2OffsetKg?: number;
 }
 
+/** Cache of the last non-empty project search, used when the API is down. */
+interface ProjectSearchCache {
+  query: string;
+  projects: ProjectResult[];
+  cachedAt: number;
+}
+
+const PROJECT_SEARCH_CACHE_KEY = 'projectSearchCache';
+const SEARCH_DEBOUNCE_MS = 300;
+const IMPACT_SNIPPET_MAX_CHARS = 90;
+
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let searchRequestController: AbortController | null = null;
+let searchRequestSeq = 0;
 let activeDropdownIndex = -1;
 let dropdownItems: HTMLLIElement[] = [];
 let selectedProjectId: string | null = null;
@@ -308,21 +324,90 @@ function initProjectListKeyNav() {
   });
 }
 
-function debounce(fn: () => void, ms: number) {
-  if (searchDebounceTimer !== null) clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(fn, ms);
+function cancelProjectSearch() {
+  if (searchDebounceTimer !== null) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = null;
+  }
+  if (searchRequestController) {
+    searchRequestController.abort();
+    searchRequestController = null;
+  }
+  // Invalidate any response that is already in flight.
+  searchRequestSeq += 1;
 }
 
-function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
+/** One-line impact blurb shown under a search result. */
+function projectImpactSnippet(project: ProjectResult): string {
+  const summary = (project.aiSummary || project.description || '').trim();
+  if (summary) {
+    return summary.length > IMPACT_SNIPPET_MAX_CHARS
+      ? `${summary.slice(0, IMPACT_SNIPPET_MAX_CHARS - 1).trimEnd()}…`
+      : summary;
+  }
+  if (typeof project.co2OffsetKg === 'number' && project.co2OffsetKg > 0) {
+    return `Offsets ${project.co2OffsetKg.toLocaleString()} kg CO₂`;
+  }
+  return '';
+}
+
+function loadProjectSearchCache(): Promise<ProjectSearchCache | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get([PROJECT_SEARCH_CACHE_KEY], (result) => {
+        const cached = result?.[PROJECT_SEARCH_CACHE_KEY];
+        if (
+          cached &&
+          typeof cached === 'object' &&
+          Array.isArray((cached as ProjectSearchCache).projects)
+        ) {
+          resolve(cached as ProjectSearchCache);
+          return;
+        }
+        resolve(null);
+      });
+    } catch (err) {
+      console.warn('Project search cache read failed:', err);
+      resolve(null);
+    }
+  });
+}
+
+function saveProjectSearchCache(query: string, projects: ProjectResult[]): void {
+  try {
+    const payload: ProjectSearchCache = { query, projects, cachedAt: Date.now() };
+    chrome.storage.local.set({ [PROJECT_SEARCH_CACHE_KEY]: payload }, () => {
+      void chrome.runtime?.lastError;
+    });
+  } catch (err) {
+    console.warn('Project search cache write failed:', err);
+  }
+}
+
+function renderDropdown(
+  projects: ProjectResult[],
+  dropdown: HTMLUListElement,
+  notice?: { text: string; isError?: boolean },
+) {
   dropdown.innerHTML = '';
   dropdownItems = [];
   activeDropdownIndex = -1;
 
+  if (notice) {
+    const noticeItem = document.createElement('li');
+    noticeItem.className = `search-notice${notice.isError ? ' search-notice-error' : ''}`;
+    noticeItem.setAttribute('role', 'status');
+    noticeItem.textContent = notice.text;
+    dropdown.appendChild(noticeItem);
+  }
+
   if (projects.length === 0) {
-    const empty = document.createElement('li');
-    empty.className = 'search-no-results';
-    empty.textContent = 'No projects found';
-    dropdown.appendChild(empty);
+    if (!notice) {
+      const empty = document.createElement('li');
+      empty.className = 'search-no-results';
+      empty.textContent = 'No projects found';
+      dropdown.appendChild(empty);
+    }
     dropdown.classList.remove('hidden');
     return;
   }
@@ -334,6 +419,7 @@ function renderDropdown(projects: ProjectResult[], dropdown: HTMLUListElement) {
       <div>
         <div class="search-result-name">${escapeHtml(p.name)}</div>
         <div class="search-result-cat">${escapeHtml(p.category)}</div>
+        <div class="search-result-impact">${escapeHtml(projectImpactSnippet(p))}</div>
       </div>
     `;
     li.addEventListener('mousedown', (e) => {
@@ -783,29 +869,86 @@ function showOnboardingIfNeeded() {
   });
 }
 
+async function searchProjects(
+  query: string,
+  signal?: AbortSignal,
+): Promise<ProjectResult[]> {
+  const res = await fetch(
+    `${API_BASE}/api/projects?search=${encodeURIComponent(query)}&limit=5`,
+    { signal },
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json = await res.json();
+  const rows: any[] = Array.isArray(json?.data)
+    ? json.data
+    : Array.isArray(json)
+      ? json
+      : [];
+  return rows
+    .map((row) => ({
+      id: String(row?.id ?? ''),
+      name: String(row?.name ?? ''),
+      category: String(row?.category ?? ''),
+      walletAddress: row?.walletAddress,
+      description: typeof row?.description === 'string' ? row.description : undefined,
+      aiSummary: typeof row?.aiSummary === 'string' ? row.aiSummary : null,
+      co2OffsetKg: typeof row?.co2OffsetKg === 'number' ? row.co2OffsetKg : undefined,
+    }))
+    .filter((row) => row.id && row.name);
+}
+
 async function initProjectSearch() {
   const searchInput = document.getElementById('project-search') as HTMLInputElement | null;
   const dropdown = document.getElementById('search-dropdown') as HTMLUListElement | null;
   if (!searchInput || !dropdown) return;
 
+  const renderFailure = async (requestSeq: number) => {
+    const cached = await loadProjectSearchCache();
+    if (requestSeq !== searchRequestSeq) return;
+
+    if (cached && cached.projects.length > 0) {
+      renderDropdown(cached.projects, dropdown, {
+        text: `Offline — showing cached results for “${cached.query}”`,
+        isError: true,
+      });
+      return;
+    }
+    renderDropdown([], dropdown, {
+      text: 'Search unavailable. Check your connection and try again.',
+      isError: true,
+    });
+  };
+
   searchInput.addEventListener('input', () => {
     const query = searchInput.value.trim();
     if (!query) {
+      cancelProjectSearch();
       dropdown.classList.add('hidden');
       return;
     }
-    debounce(async () => {
+
+    // Any previous timer/request is now stale.
+    cancelProjectSearch();
+    const requestSeq = searchRequestSeq;
+
+    searchDebounceTimer = setTimeout(async () => {
+      searchDebounceTimer = null;
+      const controller =
+        typeof AbortController === 'function' ? new AbortController() : null;
+      searchRequestController = controller;
       try {
-        const res = await fetch(`${API_BASE}/api/projects?search=${encodeURIComponent(query)}&limit=5`);
-        if (res.ok) {
-          const json = await res.json();
-          const projects: ProjectResult[] = json.data ?? json;
-          renderDropdown(projects, dropdown);
-        }
-      } catch (err) {
+        const projects = await searchProjects(query, controller?.signal);
+        if (requestSeq !== searchRequestSeq) return;
+        renderDropdown(projects, dropdown);
+        if (projects.length > 0) saveProjectSearchCache(query, projects);
+      } catch (err: any) {
+        if (requestSeq !== searchRequestSeq || err?.name === 'AbortError') return;
         console.warn('Project search failed:', err);
+        await renderFailure(requestSeq);
+      } finally {
+        if (searchRequestController === controller) searchRequestController = null;
       }
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
   });
 
   searchInput.addEventListener('focus', () => {

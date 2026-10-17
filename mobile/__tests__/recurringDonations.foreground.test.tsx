@@ -102,7 +102,7 @@ describe('useRecurringDonations() foreground sync (#1059)', () => {
   it('fetches the schedule from the backend on mount', async () => {
     mockPledgeList([serverPledge()]);
 
-    const { getByTestId } = render(<ActiveCount />);
+    const { getByTestId } = await render(<ActiveCount />);
     await waitFor(() => expect(getByTestId('count')).toHaveTextContent('1'));
     expect(axios.get).toHaveBeenCalledWith(
       expect.stringContaining('/api/recurring-donations'),
@@ -112,7 +112,7 @@ describe('useRecurringDonations() foreground sync (#1059)', () => {
 
   it('re-fetches and reconciles when the app returns to the foreground', async () => {
     mockPledgeList([serverPledge()]);
-    const { getByTestId } = render(<ActiveCount />);
+    const { getByTestId } = await render(<ActiveCount />);
     await waitFor(() => expect(getByTestId('count')).toHaveTextContent('1'));
 
     // While backgrounded the server advanced the existing pledge and the
@@ -142,7 +142,7 @@ describe('useRecurringDonations() foreground sync (#1059)', () => {
 
   it('ignores background → background transitions', async () => {
     mockPledgeList([serverPledge()]);
-    const { getByTestId } = render(<ActiveCount />);
+    const { getByTestId } = await render(<ActiveCount />);
     await waitFor(() => expect(getByTestId('count')).toHaveTextContent('1'));
     expect(axios.get).toHaveBeenCalledTimes(1);
 
@@ -154,8 +154,8 @@ describe('useRecurringDonations() foreground sync (#1059)', () => {
     expect(axios.get).toHaveBeenCalledTimes(1);
   });
 
-  it('removes the AppState listener on unmount', () => {
-    const { unmount } = render(<ActiveCount />);
+  it('removes the AppState listener on unmount', async () => {
+    const { unmount } = await render(<ActiveCount />);
     unmount();
     expect(addEventListenerSpy).toHaveBeenCalled();
   });
@@ -167,7 +167,7 @@ describe('useRecurringDonations() foreground sync (#1059)', () => {
     );
     (axios.get as jest.Mock).mockRejectedValue(new Error('Network request failed'));
 
-    const { getByTestId } = render(<ActiveCount />);
+    const { getByTestId } = await render(<ActiveCount />);
     await waitFor(() => expect(getByTestId('count')).toHaveTextContent('1'));
 
     const [donation] = await loadRecurringDonations();

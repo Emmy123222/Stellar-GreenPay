@@ -14,14 +14,10 @@ const mockPush = jest.fn();
 const mockGetInitialURL = jest.fn((): Promise<string | null> => Promise.resolve(null));
 const mockAddEventListener = jest.fn((_event: string, _handler: any) => ({ remove: jest.fn() }));
 
-// Mock Alert.alert to verify it's called for invalid links
-const mockAlert = jest.fn();
-jest.mock('react-native', () => ({
-  ...jest.requireActual('react-native'),
-  Alert: {
-    alert: mockAlert,
-  },
-}));
+// Spy on Alert.alert to verify it's called for invalid links. Mocking the
+// whole `react-native` module evaluates every lazy getter (Settings →
+// NativeSettingsManager), which throws in the jest-expo environment.
+const mockAlert = jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 
 jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush }),
@@ -31,12 +27,14 @@ jest.mock('expo-linking', () => ({
   getInitialURL: () => mockGetInitialURL(),
   addEventListener: (event: string, handler: any) => mockAddEventListener(event, handler),
   parse: (url: string) => {
-    const match = url.match(/^greenpay:\/\/(.+)/);
+    // `[\s\S]` so control characters reach the validator instead of being
+    // dropped by the mock parser (the real parser receives percent-encoded URLs).
+    const match = url.match(/^greenpay:\/\/([\s\S]+)/);
     return { path: match ? match[1] : null };
   },
 }));
 
-import { useDeepLink } from '../src/hooks/useDeepLink';
+import { useDeepLink } from '../hooks/useDeepLink';
 
 beforeEach(() => {
   mockPush.mockClear();
@@ -95,7 +93,7 @@ describe('projectId validation', () => {
     '../etc/passwd',              // Path traversal attempt
     '../../../secret',            // Path traversal
     'GABC/XYZ',                   // Contains slash
-    'GABC\XYZ',                  // Contains backslash
+    'GABC\\XYZ',                // Contains backslash
     'GABC>XYZ',                   // Contains special char
     'GABC<XYZ',                   // Contains special char
     'GABC|XYZ',                   // Contains pipe
