@@ -43,16 +43,7 @@ async function getAppliedVersions(client) {
   return result.rows.map((r) => r.version);
 }
 
-async function applyPendingMigrations() {
-  let client;
-  try {
-    client = await pool.connect();
-  } catch (err) {
-    throw new Error(`Failed to acquire database connection: ${err.message}`);
-  }
-  if (!client) {
-    throw new Error("Failed to obtain database client from connection pool");
-  }
+async function applyPendingMigrations(client) {
   try {
     await client.query("BEGIN");
     await ensureMigrationsTable(client);
@@ -95,8 +86,8 @@ async function applyPendingMigrations() {
  * so concurrent runs (rolling deploys, CI, a manual trigger) cannot interleave.
  */
 async function runMigrations(options) {
-  return withMigrationLock(async () => {
-    await applyPendingMigrations();
+  return withMigrationLock(async (client) => {
+    await applyPendingMigrations(client);
   }, options);
 }
 
