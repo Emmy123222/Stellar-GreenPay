@@ -71,7 +71,7 @@ describe("selective CSRF middleware", () => {
     expect(source).not.toMatch(/^\s*main\s*$/m);
     // The selective-CSRF variant must win over the legacy manual path.
     expect(source).toContain("createSelectiveCsrf");
-    expect(source).not.toContain('require("csurf")');
+    expect(source).not.toContain("require(\"csurf\")");
     expect(source).not.toContain("csrfProtection(req, res, next)");
 
     // The file must parse so the API, Docker targets and npm run dev can boot.
