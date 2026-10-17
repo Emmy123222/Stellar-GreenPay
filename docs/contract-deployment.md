@@ -25,7 +25,7 @@ procedure.
 
 ```bash
 cd contracts/greenpay-contract
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 ```
 
 ## 3. Deploy

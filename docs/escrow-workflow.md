@@ -410,10 +410,10 @@ The escrow contract is separate from the GreenPay donation contract. Deploy it u
 
 ```bash
 cd contracts/escrow-contract
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/escrow_contract.wasm \
+  --wasm target/wasm32v1-none/release/escrow_contract.wasm \
   --source <IDENTITY> \
   --network testnet
 ```

@@ -28,7 +28,11 @@ jest.mock('@stellar/stellar-sdk', () => ({
 
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 
-import ScanScreen, { INVALID_QR_MESSAGE, parseScan } from '../app/scan';
+import ScanScreen, {
+  INVALID_QR_MESSAGE,
+  parseManualEntry,
+  parseScan,
+} from '../app/scan';
 
 const VALID_KEY = `G${'A'.repeat(55)}`;
 const OTHER_VALID_KEY = `G${'B'.repeat(55)}`;
@@ -56,6 +60,38 @@ describe('parseScan', () => {
 
   it('rejects a deep-link with an invalid wallet', () => {
     expect(parseScan('greenpay://donate?wallet=NOT_A_KEY&project=abc')).toBeNull();
+  });
+
+  // Formats migrated off the deleted src/screens/QRScannerScreen (issue #1653).
+  it('accepts a donation link carrying a projectId query', () => {
+    expect(parseScan('https://greenpay.app/donate?projectId=proj-42')).toEqual({
+      projectId: 'proj-42',
+    });
+  });
+
+  it('accepts the greenpay://donate/<projectId> form', () => {
+    expect(parseScan('greenpay://donate/proj-42')).toEqual({ projectId: 'proj-42' });
+  });
+
+  it('rejects a project id that is not a safe slug', () => {
+    expect(parseScan('https://greenpay.app/donate?projectId=../etc/passwd')).toBeNull();
+  });
+});
+
+describe('parseManualEntry', () => {
+  it('accepts everything a scan accepts', () => {
+    expect(parseManualEntry(VALID_KEY)).toEqual({ wallet: VALID_KEY });
+    expect(parseManualEntry('greenpay://donate/proj-42')).toEqual({ projectId: 'proj-42' });
+  });
+
+  it('also accepts a bare project id', () => {
+    expect(parseManualEntry('  proj-42  ')).toEqual({ projectId: 'proj-42' });
+  });
+
+  it('rejects free text and oversized ids', () => {
+    expect(parseManualEntry('business card text')).toBeNull();
+    expect(parseManualEntry('')).toBeNull();
+    expect(parseManualEntry('a'.repeat(65))).toBeNull();
   });
 });
 

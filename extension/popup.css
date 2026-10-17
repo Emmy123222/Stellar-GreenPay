@@ -362,6 +362,29 @@ main {
   margin-top: 1px;
 }
 
+.search-result-impact {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  opacity: 0.8;
+  margin-top: 2px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.search-notice {
+  padding: 8px 12px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: default;
+}
+
+.search-notice-error {
+  color: #fbbf24;
+}
+
 .search-no-results {
   padding: 12px;
   text-align: center;

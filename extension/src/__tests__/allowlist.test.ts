@@ -4,7 +4,8 @@ import {
   matchesPattern,
   getSitePatternFromUrl,
   getHostnameFromUrl,
-  isValidAllowlistPattern,
+  isValidPattern,
+  normalizeAllowlistPattern,
 } from '../allowlist';
 
 // Jest resolves JSON requires and hands them to `require`; the extension build
@@ -12,18 +13,58 @@ import {
 declare const require: (id: string) => unknown;
 
 describe('Allowlist Logic', () => {
-  describe('isValidAllowlistPattern', () => {
+  describe('isValidPattern', () => {
     it('accepts supported host, scheme, wildcard, and path forms', () => {
-      expect(isValidAllowlistPattern('example.com/*')).toBe(true);
-      expect(isValidAllowlistPattern('https://*.example.com/donate/*')).toBe(true);
-      expect(isValidAllowlistPattern('*://greenpay.app/projects/*')).toBe(true);
+      expect(isValidPattern('example.com/*')).toBe(true);
+      expect(isValidPattern('https://*.example.com/donate/*')).toBe(true);
+      expect(isValidPattern('*://greenpay.app/projects/*')).toBe(true);
     });
 
     it('rejects malformed or unsafe entries', () => {
-      expect(isValidAllowlistPattern('')).toBe(false);
-      expect(isValidAllowlistPattern('https://bad host')).toBe(false);
-      expect(isValidAllowlistPattern('javascript:alert(1)')).toBe(false);
-      expect(isValidAllowlistPattern('*://*/*')).toBe(false);
+      expect(isValidPattern('')).toBe(false);
+      expect(isValidPattern('https://bad host')).toBe(false);
+      expect(isValidPattern('javascript:alert(1)')).toBe(false);
+      expect(isValidPattern('*://*/*')).toBe(false);
+      expect(isValidPattern('https://example.com/donate?ref=1')).toBe(false);
+    });
+  });
+
+  describe('normalizeAllowlistPattern', () => {
+    it('lower-cases the scheme and host but preserves path case', () => {
+      expect(normalizeAllowlistPattern('  HTTPS://Example.COM/Donate  ')).toBe(
+        'https://example.com/Donate',
+      );
+      expect(normalizeAllowlistPattern('*.Example.COM/*')).toBe('*.example.com/*');
+    });
+
+    it('turns a trailing slash into a wildcard path', () => {
+      expect(normalizeAllowlistPattern('Example.com/')).toBe('example.com/*');
+      expect(normalizeAllowlistPattern('https://example.com/')).toBe('https://example.com/*');
+      expect(normalizeAllowlistPattern('example.com/donate/')).toBe('example.com/donate/*');
+      expect(normalizeAllowlistPattern('example.com')).toBe('example.com/*');
+    });
+
+    it('leaves already-normalized patterns unchanged', () => {
+      expect(normalizeAllowlistPattern('example.com/*')).toBe('example.com/*');
+      expect(normalizeAllowlistPattern('*://greenpay.app/projects/*')).toBe(
+        '*://greenpay.app/projects/*',
+      );
+    });
+
+    it('returns null for malformed patterns', () => {
+      expect(normalizeAllowlistPattern('')).toBeNull();
+      expect(normalizeAllowlistPattern('htp:/example')).toBeNull();
+      expect(normalizeAllowlistPattern('https://example.com/donate?ref=1')).toBeNull();
+      expect(normalizeAllowlistPattern('javascript:alert(1)')).toBeNull();
+    });
+
+    it('produces patterns that actually match the intended URLs', () => {
+      const siteWide = normalizeAllowlistPattern('Example.COM/') as string;
+      expect(matchesPattern(siteWide, new URL('https://example.com/any/page'))).toBe(true);
+
+      const directory = normalizeAllowlistPattern('example.com/donate/') as string;
+      expect(matchesPattern(directory, new URL('https://example.com/donate/campaign'))).toBe(true);
+      expect(matchesPattern(directory, new URL('https://example.com/blog'))).toBe(false);
     });
   });
 

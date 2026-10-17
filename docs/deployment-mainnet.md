@@ -20,13 +20,13 @@ The GreenPay contract lives in `contracts/greenpay-contract`.
 
 ```bash
 cd contracts/greenpay-contract
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 ```
 
 Confirm the WASM artifact exists:
 
 ```bash
-ls -lh target/wasm32-unknown-unknown/release/greenpay_contract.wasm
+ls -lh target/wasm32v1-none/release/greenpay_contract.wasm
 ```
 
 ## 3. Deploy the contract to Mainnet

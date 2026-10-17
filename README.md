@@ -1,5 +1,9 @@
 # 🌱 Stellar GreenPay
 
+**🌐 Languages:** **English** · [Español](docs/README.es.md) · [Français](docs/README.fr.md)
+
+> Translations cover the core sections (what it is, features, project structure, quick start) and may lag behind this English README.
+
 > **Prerequisite:** Node.js >= 20 (required by the Express 5 backend). Run `nvm use` and it picks up the version automatically — `.nvmrc` is the single source of truth.
 
 > Donate directly to verified climate projects using XLM — every transaction tracked on-chain.

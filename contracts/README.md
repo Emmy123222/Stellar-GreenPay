@@ -60,6 +60,10 @@ The compiled WASM file will be located at `target/wasm32v1-none/release/<contrac
 *   **Cause**: The WebAssembly target is not installed for your active Rust toolchain.
 *   **Fix**: Run `rustup target add wasm32v1-none`.
 
+### Stale artifacts from the old `wasm32-unknown-unknown` target
+*   **Cause**: This workspace standardizes on `wasm32v1-none` (soroban-sdk 28 / Contracts CI). Older checkouts, docs, and `scripts/` used `wasm32-unknown-unknown`; `.wasm` files under `target/wasm32-unknown-unknown/release/` are dead leftovers and deployment tooling (`scripts/deploy-contract.sh`, docs) now resolves artifacts under `target/wasm32v1-none/release/` only.
+*   **Fix**: Rebuild with the current target (`cargo build --target wasm32v1-none --release`) and delete the stale directory to avoid confusion: `rm -rf target/wasm32-unknown-unknown`. You can also drop the old target from your toolchain with `rustup target remove wasm32-unknown-unknown` if nothing else in your work needs it.
+
 ### Error: `unresolved import` or `cannot find value` during tests
 *   **Cause**: You might be running tests without the `testutils` feature enabled, which provides mock data and utilities.
 *   **Fix**: Ensure you append `--features testutils` when running `cargo test`.

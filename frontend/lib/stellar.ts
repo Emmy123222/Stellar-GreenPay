@@ -137,6 +137,52 @@ export async function buildDonationTransaction({
   return builder.build();
 }
 
+export interface BatchDonationPayment {
+  toPublicKey: string;
+  amount: string;
+}
+
+/**
+ * Build one Stellar transaction containing a native-XLM payment per project.
+ *
+ * @param params.fromPublicKey - Donor account that authorizes the payments.
+ * @param params.payments - Project recipients and donation amounts.
+ * @returns Unsigned transaction ready for wallet signing.
+ * @throws If no payments are supplied, a payment is invalid, or account loading fails.
+ */
+export async function buildBatchDonationTransaction({
+  fromPublicKey,
+  payments,
+}: {
+  fromPublicKey: string;
+  payments: BatchDonationPayment[];
+}) {
+  if (payments.length === 0 || payments.length > 10) {
+    throw new Error("A batch donation must contain between 1 and 10 payments.");
+  }
+  for (const payment of payments) {
+    if (!payment.toPublicKey || !Number.isFinite(Number(payment.amount)) || Number(payment.amount) <= 0) {
+      throw new Error("Each batch donation payment needs a recipient and a positive amount.");
+    }
+  }
+
+  const source = await server.loadAccount(fromPublicKey);
+  let builder = new TransactionBuilder(source, {
+    fee: String(100 * payments.length),
+    networkPassphrase: NETWORK_PASSPHRASE,
+  });
+  for (const payment of payments) {
+    builder = builder.addOperation(
+      Operation.payment({
+        destination: payment.toPublicKey,
+        asset: Asset.native(),
+        amount: payment.amount,
+      }),
+    );
+  }
+  return builder.setTimeout(60).build();
+}
+
 // ── DEX path-payment donations (#1660) ──────────────────────────────────────
 
 /** SDK Asset for an AssetRef (no issuer = native XLM). */

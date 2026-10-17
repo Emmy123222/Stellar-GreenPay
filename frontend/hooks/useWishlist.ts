@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 const WISHLIST_STORAGE_KEY = 'wishlist';
+const EMPTY_WISHLIST: string[] = [];
 // Fired whenever this tab writes to the wishlist, so this tab's own
 // subscribers re-render too (the native "storage" event only fires in
 // *other* tabs/windows).
@@ -11,7 +12,7 @@ const WISHLIST_CHANGED_EVENT = 'greenpay:wishlist-changed';
 // be referentially stable when the underlying data hasn't changed, or it
 // will force re-renders indefinitely.
 let cachedRaw: string | null | undefined;
-let cachedWishlist: string[] = [];
+let cachedWishlist: string[] = EMPTY_WISHLIST;
 
 function readWishlist(): string[] {
   let raw: string | null;
@@ -20,7 +21,7 @@ function readWishlist(): string[] {
   } catch {
     // Storage can be disabled by browser privacy settings or sandboxing.
     cachedRaw = undefined;
-    cachedWishlist = [];
+    cachedWishlist = EMPTY_WISHLIST;
     return cachedWishlist;
   }
   if (raw === cachedRaw) return cachedWishlist;

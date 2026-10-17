@@ -752,11 +752,11 @@ impl PartnerContract {
 ```bash
 # Build the contract
 cd contracts/example-partner-contract
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32v1-none --release
 
 # Deploy to testnet
 stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/example_partner_contract.wasm \
+  --wasm target/wasm32v1-none/release/example_partner_contract.wasm \
   --source <your-key> \
   --network testnet
 
