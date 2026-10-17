@@ -178,7 +178,7 @@ async function recordDonation(req, res, next) {
   let inTransaction = false;
 
   try {
-    const { projectId, donorAddress, amountXLM, amount, message, transactionHash, pathPayment = false } = req.body;
+    const { projectId, donorAddress, amountXLM, amount, message, transactionHash, assetCode, assetIssuer, pathPayment = false } = req.body;
     let { currency = "XLM" } = req.body;
     const donorCountry = resolveDonorCountry(req.ip);
     validateKey(donorAddress);
@@ -264,12 +264,16 @@ async function recordDonation(req, res, next) {
     const prevTotalDonated = parseFloat(prevTotalResult.rows[0]?.total || "0");
     const newTotalDonated = prevTotalDonated + (currency === "XLM" ? parsedAmount : 0);
 
+    const resolvedAssetCode = assetCode || (currency === "USDC" ? "USDC" : null);
+    const resolvedAssetIssuer = assetIssuer || null;
+
     const donationResult = await client.query(
       `INSERT INTO donations (
-        id, project_id, donor_address, amount_xlm, amount, currency, message, transaction_hash, donor_country,
-        source_asset, source_amount, created_at
+        id, project_id, donor_address, amount_xlm, amount, currency,
+        message, transaction_hash, donor_country,
+        source_asset, source_amount, asset_code, asset_issuer, created_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
       RETURNING *`,
       [
         uuid(),
@@ -278,13 +282,13 @@ async function recordDonation(req, res, next) {
         currency === "XLM" ? parsedAmount : null,
         parsedAmount,
         currency,
-        currency === "USDC" ? assetCode : null,
-        currency === "USDC" ? assetIssuer : null,
         message?.trim().slice(0, 100) || null,
         transactionHash,
         donorCountry,
         sourceAssetId,
         sourceAmount,
+        resolvedAssetCode,
+        resolvedAssetIssuer,
       ],
     );
 

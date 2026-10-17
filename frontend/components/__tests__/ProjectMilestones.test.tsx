@@ -10,12 +10,14 @@ const mockMilestones: ProjectMilestone[] = [
     percentage: 25,
     reachedAt: "2025-01-01T00:00:00.000Z",
     transactionHash: "tx123456",
+    createdAt: "2025-01-01T00:00:00.000Z",
   },
   {
     id: "m-2",
     projectId: "proj-1",
     title: "Phase 2: Planting",
     percentage: 50,
+    createdAt: "2025-01-01T00:00:00.000Z",
   },
 ];
 

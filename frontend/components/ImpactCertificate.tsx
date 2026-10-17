@@ -30,7 +30,10 @@ export default function ImpactCertificate(props: {
     projectsSupported,
   } = props;
 
-  const issuedDate = useMemo(() => formatDate(new Date().toISOString()), []);
+  const issuedDate = useMemo(
+    () => formatDate(new Date().toISOString(), "en-US", { month: "short", day: "numeric", year: "numeric" }),
+    [],
+  );
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
@@ -98,7 +101,7 @@ export default function ImpactCertificate(props: {
           <div className="card text-center border-forest-100/50">
             <p className="text-2xl mb-2">💚</p>
             <p className="font-display font-bold text-forest-900 text-lg">
-              {formatXLM(totalDonatedXLM)}
+              {formatXLM(totalDonatedXLM, 0)}
             </p>
             <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 mt-1 font-body uppercase tracking-wider font-bold opacity-60">
               Total Donated

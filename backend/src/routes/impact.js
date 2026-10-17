@@ -455,4 +455,13 @@ router.post("/certificate/pdf", async (req, res, next) => {
   }
 });
 
+// GET /api/impact/:projectId (alias for /api/impact/project/:id)
+router.get("/:projectId", async (req, res, next) => {
+  try {
+    return await handleProjectImpact(req, res, req.params.projectId);
+  } catch (e) {
+    next(e);
+  }
+});
+
 module.exports = router;

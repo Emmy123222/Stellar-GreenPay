@@ -25,14 +25,24 @@ function initSentry(app) {
     logger.error({ event: "unhandled_rejection", reason }, "[Unhandled Rejection]");
   });
 
-  app.use(Sentry.Handlers.requestHandler());
-  app.use(Sentry.Handlers.tracingHandler());
+  if (Sentry.Handlers && typeof Sentry.Handlers.requestHandler === "function") {
+    app.use(Sentry.Handlers.requestHandler());
+    app.use(Sentry.Handlers.tracingHandler());
+  }
 
   return Sentry;
 }
 
 function errorHandler() {
-  return Sentry.Handlers.errorHandler();
+  if (Sentry.Handlers && typeof Sentry.Handlers.errorHandler === "function") {
+    return Sentry.Handlers.errorHandler();
+  }
+  return (err, req, res, next) => {
+    if (process.env.SENTRY_DSN) {
+      Sentry.captureException(err);
+    }
+    next(err);
+  };
 }
 
 module.exports = { initSentry, errorHandler, Sentry };

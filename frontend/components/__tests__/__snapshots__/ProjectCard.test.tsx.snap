@@ -51,7 +51,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -187,7 +187,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
           Amazon Reforestation Initiative
         </h3>
         <p
-          class="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
+          class="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body"
         >
           Restoring native tree cover across degraded rainforest land.
         </p>
@@ -211,10 +211,9 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                 <span
                   class="text-xs text-[var(--text-secondary)] dark:text-[#a8c2a8]"
                 >
-                  2,500
+                  2,500 XLM
                    / 
-                  10,000
-                   XLM
+                  10,000 XLM
                 </span>
               </div>
               <div

@@ -145,8 +145,8 @@ describe("POST /api/teams", () => {
 
   it("rejects a duplicate invite code", async () => {
     pool.query
-    .mockResolvedValueOnce({ rows: [] }) // no existing membership
-    .mockResolvedValueOnce({ rows: [{ 1: 1 }] }); // invite code taken
+      .mockResolvedValueOnce({ rows: [] }) // no existing membership
+      .mockResolvedValueOnce({ rows: [{ 1: 1 }] }); // invite code taken
 
     const res = await request(app)
       .post("/api/teams")

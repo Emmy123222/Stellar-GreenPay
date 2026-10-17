@@ -38,7 +38,7 @@ const STEP_LABELS: Record<Step, string> = {
   done: "Submitted",
 };
 
-const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{55}$/;
+const STELLAR_ADDRESS_RE = /^G[A-Z2-7]{54,55}$/;
 const IMPACT_METRICS = [
   { label: "CO₂ Reduction", value: "co2-reduction" },
   { label: "Tree Planting", value: "tree-planting" },
@@ -56,8 +56,10 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label className="label">{label}</label>
-      {children}
+      <label className="label">
+        <span className="block mb-1">{label}</span>
+        {children}
+      </label>
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
@@ -364,7 +366,8 @@ export default function SubmitProjectPage() {
               <input className="input-field" value={form.co2DocumentUrl} onChange={set("co2DocumentUrl")} placeholder="https://…" />
             </Field>
 
-            <Field label="Impact Metrics">
+            <div className="flex flex-col gap-1">
+              <span className="label block mb-1">Impact Metrics</span>
               <div className="flex flex-col gap-2 rounded-xl border border-[rgba(34,114,57,0.12)] bg-[#f8fcf8] p-3">
                 {IMPACT_METRICS.map((metric) => (
                   <label key={metric.value} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
@@ -379,7 +382,7 @@ export default function SubmitProjectPage() {
                   </label>
                 ))}
               </div>
-            </Field>
+            </div>
 
             {serverError && (
               <p className="text-sm text-red-500 font-body">{serverError}</p>
@@ -400,7 +403,10 @@ export default function SubmitProjectPage() {
         </button>
 
         {step === "methodology" ? (
-          <span className="tooltip">
+          <span
+            className="tooltip"
+            onClick={publicKey === null ? handleSubmit : undefined}
+          >
             <button
               type="button"
               onClick={handleSubmit}

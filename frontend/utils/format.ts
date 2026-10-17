@@ -2,11 +2,10 @@
  * utils/format.ts
  * Formatting helpers and small UI-friendly utilities shared across the frontend.
  */
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
+import { formatDistanceToNow } from "date-fns";
 import { getFormattingLocale } from "@/lib/formatLocale";
 import type { ProjectStatus, BadgeTier } from "./types";
-dayjs.extend(relativeTime);
+
 
 function toDate(value: string | Date): Date {
   if (value instanceof Date) return value;
@@ -45,7 +44,11 @@ export function formatAmount(
 export function formatXLM(amount: string | number, decimals = 2, locale?: string): string {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
   if (isNaN(n)) return "0 XLM";
-  return `${formatAmount(n, decimals, locale)} XLM`;
+  const minimumFractionDigits = Number.isInteger(n) ? 0 : Math.min(2, decimals);
+  return `${new Intl.NumberFormat(locale ?? getFormattingLocale(), {
+    minimumFractionDigits,
+    maximumFractionDigits: decimals,
+  }).format(n)} XLM`;
 }
 
 /**
@@ -154,8 +157,11 @@ export function progressPercent(raised: string, goal: string): number {
  * @throws {Error} Never throws.
  */
 export function timeAgo(d: string): string {
-  try { return dayjs(d).fromNow(); }
-  catch { return d; }
+  try {
+    return formatDistanceToNow(new Date(d), { addSuffix: true });
+  } catch {
+    return d;
+  }
 }
 
 /**

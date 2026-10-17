@@ -422,5 +422,6 @@ module.exports = {
   sendRecurringDonationReminder,
   sendDonationPushNotification,
   sendFundingMilestonePush,
+  sendDonationConfirmedPush,
   processTickets,
 };

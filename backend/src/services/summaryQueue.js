@@ -35,7 +35,11 @@ async function start(io) {
 
   boss = new PgBoss(connectionString);
 
-  boss.on("error", (err) => logger.error({ event: "summary_queue_pgboss_error", err: err.message }, "[summaryQueue] pg-boss error"));
+  boss.on("error", (err) => {
+    logger.error({ event: "summary_queue_pgboss_error", err: err.message }, "[summaryQueue] pg-boss error");
+    // eslint-disable-next-line no-console
+    console.error("[summaryQueue] pg-boss error:", err.message);
+  });
 
   await boss.start();
 
@@ -128,6 +132,7 @@ async function enqueueAISummary(projectId, projectData) {
 
   // 1. Deduplicate: Skip if a summary job for this project is already queued/running
   if (activeJobs.has(projectId)) {
+    // eslint-disable-next-line no-console
     console.info(`[summaryQueue] [INFO] Job for project ${projectId} already queued/running; skipping.`);
     return null;
   }
@@ -135,6 +140,7 @@ async function enqueueAISummary(projectId, projectData) {
   // 2. Cooldown: Skip if less than 5 minutes have elapsed since last summary generation
   const lastRun = lastRunMap.get(projectId) || 0;
   if (Date.now() - lastRun < FIVE_MINUTES_MS) {
+    // eslint-disable-next-line no-console
     console.info(`[summaryQueue] [INFO] Job for project ${projectId} rate limited (5-min cooldown); skipping.`);
     return null;
   }

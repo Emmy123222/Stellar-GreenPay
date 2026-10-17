@@ -11,5 +11,7 @@ module.exports = {
     "^uuid$": path.resolve(__dirname, "__mocks__/uuid.js"),
     // expo-server-sdk v6+ is pure ESM; same treatment.
     "^expo-server-sdk$": path.resolve(__dirname, "__mocks__/expo-server-sdk.js"),
+    // uint8array-extras is pure ESM; map to CJS shim for Jest.
+    "^uint8array-extras$": path.resolve(__dirname, "__mocks__/uint8array-extras.js"),
   },
 };

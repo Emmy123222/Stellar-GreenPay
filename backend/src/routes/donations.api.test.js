@@ -34,8 +34,6 @@ jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn().mockResolvedValue(null),
   getProjectDonationEvents: jest.fn(),
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
-  getProjectDonationEvents: jest.fn(),
-  getOnChainProject: jest.fn().mockResolvedValue(null),
   CONTRACT_ID: null,
   NETWORK_PASSPHRASE: "Test",
 }));

@@ -14,6 +14,7 @@
 
 import { createLayerComponent, createElementObject, extendContext } from "@react-leaflet/core";
 import L from "leaflet";
+import "leaflet.markercluster";
 import type { ReactNode } from "react";
 
 // In browser environments, attach L to window so leaflet.markercluster binds properly
@@ -52,6 +53,8 @@ export function createClusterIcon(cluster: L.MarkerCluster): L.DivIcon {
 
 export interface MarkerClusterGroupProps extends L.MarkerClusterGroupOptions {
   children?: ReactNode;
+  disableClusteringAtZoom?: number;
+  zoomToBoundsOnClick?: boolean;
 }
 
 const MarkerClusterGroup = createLayerComponent<L.MarkerClusterGroup, MarkerClusterGroupProps>(

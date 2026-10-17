@@ -20,6 +20,7 @@ async function cleanupOldAuditEntries() {
       [AUDIT_RETENTION_DAYS],
     );
   } catch (err) {
+    // eslint-disable-next-line no-console
     console.error("[AuditLog] Failed to apply retention policy:", err.message);
   }
 }

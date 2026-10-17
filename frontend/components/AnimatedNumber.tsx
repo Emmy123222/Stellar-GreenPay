@@ -76,7 +76,10 @@ export default function AnimatedNumber({
 
   const formatDisplay = (val: number) => {
     if (formatter) return formatter(val);
-    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces);
+    if (decimalPlaces > 0) {
+      if (isXLM || decimalPlaces === 7) return val.toFixed(decimalPlaces);
+      return formatAmount(val, decimalPlaces);
+    }
     return formatAmount(Math.floor(val), 0);
   };
 

@@ -141,7 +141,7 @@ describe("GET /api/projects", () => {
 
     await request(app).get("/api/projects?q=ecologie").expect(200);
 
-    const query = pool.query.mock.calls[1][0];
+    const query = pool.query.mock.calls[0][0];
     expect(query).toContain("unaccent(name) ILIKE unaccent('%' || $1 || '%')");
   });
 

@@ -1,4 +1,5 @@
 import L from "leaflet";
+import "leaflet.markercluster";
 import { createClusterIcon } from "../MarkerClusterGroup";
 
 describe("MarkerClusterGroup & Clustering Configuration", () => {

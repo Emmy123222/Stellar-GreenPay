@@ -13,7 +13,7 @@ const { logAdminAction } = require("../services/audit");
 const { mapProjectRow, mapProjectMilestoneRow, updateWebhook, computeBadges } = require("../services/store");
 const {
   getOnChainProject,
-getProjectDonationEvents,
+  getProjectDonationEvents,
   getRegisteredProjectIdFromTransaction,
   buildSetFundingDeadlineTx,
   CONTRACT_ID,
@@ -23,10 +23,11 @@ getProjectDonationEvents,
 const { enqueueAISummary } = require("../services/summaryQueue");
 const { Contract, TransactionBuilder } = require("@stellar/stellar-sdk");
 const redis = require("../services/redis");
-const { adminRequired, adminTokenRequired } = require("../middleware/auth");
+const { adminRequired, adminTokenRequired, isValidAdminKey, verifyToken } = require("../middleware/auth");
 const { z } = require("zod");
 const { sanitizedStringField } = require("../middleware/validation");
 const { assertPublicHttpUrl, SsrfValidationError } = require("../utils/ssrf");
+const { validateWebhookUrl } = require("../middleware/ssrf");
 
 const PROJECTS_LIST_CACHE_TTL = 60; // seconds
 const PROJECTS_LIST_CACHE_PREFIX = "projects:list:";
@@ -147,14 +148,19 @@ function mapFundingDeadlineRow(row) {
  * @returns {Promise<object|null>} Funding deadline payload or null.
  */
 async function fetchFundingDeadline(projectId) {
-  const result = await pool.query(
-    `SELECT fd.*, COALESCE(p.raised_xlm, 0) AS raised_xlm
-       FROM project_funding_deadlines fd
-       LEFT JOIN projects p ON p.id = fd.project_id
-      WHERE fd.project_id = $1`,
-    [projectId],
-  );
-  return mapFundingDeadlineRow(result.rows[0]);
+  try {
+    const result = await pool.query(
+      `SELECT fd.*, COALESCE(p.raised_xlm, 0) AS raised_xlm
+         FROM project_funding_deadlines fd
+         LEFT JOIN projects p ON p.id = fd.project_id
+        WHERE fd.project_id = $1`,
+      [projectId],
+    );
+    if (!result || !result.rows || !result.rows[0]) return null;
+    return mapFundingDeadlineRow(result.rows[0]);
+  } catch (_e) {
+    return null;
+  }
 }
 
 async function fetchCampaignsForProject(projectId) {
@@ -342,7 +348,7 @@ router.get("/", async (req, res, next) => {
         category,
         status,
         verified,
-search: search || q,
+        search: search || q,
         sort: sortField,
         limit: pageSize,
         cursor: cursor || null,
@@ -368,10 +374,10 @@ search: search || q,
     if (verified === "true") {
       where.push("verified = true");
     }
-const searchTerm = q || search;
+    const searchTerm = q || search;
     if (searchTerm && typeof searchTerm === "string") {
       values.push(searchTerm.trim());
-      where.push(`search_vector @@ websearch_to_tsquery('english', $${values.length})`);
+      where.push(`unaccent(name) ILIKE unaccent('%' || $${values.length} || '%')`);
     }
 
     if (cursor) {
@@ -389,7 +395,7 @@ const searchTerm = q || search;
       values.push(sortValue, id);
       const sortValIdx = values.length - 1;
       const idIdx = values.length;
-where.push(
+      where.push(
         `(${sortField} < $${sortValIdx} OR (${sortField} = $${sortValIdx} AND id < $${idIdx}))`,
       );
     }
@@ -1181,9 +1187,6 @@ router.get("/:id", async (req, res, next) => {
       [req.params.id],
     );
 
-// Funding deadline / auto-refund metadata (may be null if not configured).
-    const fundingDeadline = await fetchFundingDeadline(req.params.id);
-
     // Follower count + optional isFollowing from wallet-only project_follows rows.
     // When ?walletAddress=G... is passed, include whether that wallet follows.
     // Device-token (push) rows are excluded so web Follow state stays consistent
@@ -1206,11 +1209,15 @@ router.get("/:id", async (req, res, next) => {
          ) AS is_following`,
       [req.params.id, normalizedWallet],
     );
+
     const followCount =
       parseInt(followStatsResult.rows[0]?.follow_count, 10) || 0;
     const isFollowing = hasWalletQuery
       ? Boolean(followStatsResult.rows[0]?.is_following)
       : false;
+
+    // Funding deadline / auto-refund metadata (may be null if not configured).
+    const fundingDeadline = await fetchFundingDeadline(req.params.id);
 
     const stroopsToXlm = (stroops) => {
       if (stroops === null || stroops === undefined) return "0.0000000";
@@ -2479,7 +2486,7 @@ module.exports = router;
 // Export internal functions for testing
 if (process.env.NODE_ENV === "test") {
   module.exports.mapCampaignRow = mapCampaignRow;
-module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
+  module.exports.getUsdcToXlmRate = getUsdcToXlmRate;
   module.exports.fetchCampaignsForProject = fetchCampaignsForProject;
   module.exports.mapFundingDeadlineRow = mapFundingDeadlineRow;
   module.exports.fetchFundingDeadline = fetchFundingDeadline;

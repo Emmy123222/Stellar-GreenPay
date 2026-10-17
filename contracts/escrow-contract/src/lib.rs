@@ -887,3 +887,5 @@ impl MockPausedGreenPayContract {
             .unwrap_or(false)
     }
 }
+}
+

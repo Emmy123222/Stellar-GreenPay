@@ -252,10 +252,10 @@ async function generatePreSignedTransactions({
   // Generate transactions for different donation amounts
   const donationAmounts = [10, 25, 50, 100, 250];
   
+  const cap = Number(capXlm);
   for (const donationAmount of donationAmounts) {
-    const matchAmount = Math.min(donationAmount * multiplier, capXlm);
-    
-    if (matchAmount <= 0) continue;
+    const matchAmount = donationAmount * multiplier;
+    if (matchAmount <= 0 || matchAmount > cap) continue;
 
     try {
       const account = await getServer().loadAccount(matcherAddress);
@@ -378,5 +378,7 @@ module.exports = {
   matchDonationTxFunction,
   submitMatchingPayment,
   generatePreSignedTransactions,
-  startTurretsServer
+  startTurretsServer,
+  __getServer: getServer,
+  __setServer: (s) => { server = s; }
 };

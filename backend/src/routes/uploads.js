@@ -50,6 +50,7 @@ const router = express.Router();
 const { uploadFile, backendName, UPLOAD_DIR } = require("../services/storage");
 const { generatePresignedPutUrl } = require("../services/s3Presign");
 const { createRateLimiter } = require("../middleware/rateLimiter");
+const moderation = require("../services/moderation");
 const logger = require("../logger");
 
 const uploadRateLimiter = createRateLimiter(20, 15, "uploads"); // 20 uploads per 15 min
@@ -95,8 +96,8 @@ const memory = multer({
  */
 async function detectMimeType(buffer) {
   try {
-    if (!buffer || buffer.length === 0) return null;
-    const type = await fileType.fromBuffer(buffer);
+    const fn = fileType.fromBuffer || fileType.fileTypeFromBuffer;
+    const type = typeof fn === "function" ? await fn(buffer) : null;
     return type ? type.mime : null;
   } catch (err) {
     logger.warn(

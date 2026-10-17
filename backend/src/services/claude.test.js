@@ -1,13 +1,11 @@
 "use strict";
 
-jest.mock("@anthropic-ai/sdk", () => {
-  const create = jest.fn();
-  const Anthropic = jest.fn().mockImplementation((opts) => ({ messages: { create }, _opts: opts }));
-  Anthropic.__create = create;
-  return Anthropic;
-});
+const mockCreate = jest.fn();
+const mockAnthropic = jest.fn().mockImplementation((opts) => ({ messages: { create: mockCreate }, _opts: opts }));
+mockAnthropic.__create = mockCreate;
+jest.mock("@anthropic-ai/sdk", () => mockAnthropic);
 
-const Anthropic = require("@anthropic-ai/sdk");
+const Anthropic = mockAnthropic;
 
 const ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_SUMMARY_MODEL"];
 const SAVED_ENV = {};

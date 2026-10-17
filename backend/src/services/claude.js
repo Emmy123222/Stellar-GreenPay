@@ -16,7 +16,7 @@ let client = null;
 function getClient() {
   if (client) return client;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  if (!apiKey || !apiKey.trim()) {
     const err = new Error("ANTHROPIC_API_KEY is not set");
     err.code = "MISSING_API_KEY";
     throw err;
@@ -80,7 +80,9 @@ async function generateProjectSummary(project) {
     messages: [{ role: "user", content: userPrompt }],
   });
 
-  const textBlock = response.content.find((block) => block.type === "text");
+  const textBlock = Array.isArray(response?.content)
+    ? response.content.find((block) => block.type === "text")
+    : null;
   if (!textBlock) {
     const err = new Error("Claude returned no text content");
     err.code = "EMPTY_RESPONSE";

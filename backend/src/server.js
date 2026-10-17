@@ -171,6 +171,8 @@ app.use("/api/subscriptions", require("./routes/subscriptions"));
 app.use("/api/v1/subscriptions", require("./routes/subscriptions"));
 app.use("/api/referrals", require("./routes/referrals"));
 app.use("/api/v1/referrals", require("./routes/referrals"));
+app.use("/api/profiles", require("./routes/profiles"));
+app.use("/api/v1/profiles", require("./routes/profiles"));
 // Recurring donation schedules are the source of truth for mobile (#1059):
 // the app reads them from here and treats AsyncStorage as an offline cache.
 app.use("/api/recurring-donations", require("./routes/recurringDonations"));
@@ -193,6 +195,11 @@ app.use("/api/v1/teams", require("./routes/teams"));
 // Price oracle endpoints (rates in USD, EUR, BRL)
 app.use("/api/price", require("./routes/price"));
 app.use("/api/v1/price", require("./routes/price"));
+// Browser extension and mobile client routers
+app.use("/api/extension", require("./routes/extension"));
+app.use("/api/v1/extension", require("./routes/extension"));
+app.use("/api/mobile", require("./routes/mobile"));
+app.use("/api/v1/mobile", require("./routes/mobile"));
 // Admin dashboard, audit log and moderation endpoints (dual-prefix like projects/donations).
 app.use("/api/admin", adminRouter);
 app.use("/api/v1/admin", adminRouter);

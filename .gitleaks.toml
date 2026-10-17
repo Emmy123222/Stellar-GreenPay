@@ -11,7 +11,8 @@ paths = [
   '''(^|/)\.env(\.[a-z]+)*\.example$''',
   '''(^|/)(__tests__|__mocks__|e2e|test_snapshots)(/|$)''',
   '''\.(test|spec)\.(js|ts|tsx)$''',
-  '''(^|/)(package-lock\.json|yarn\.lock)$'''
+  '''(^|/)(package-lock\.json|yarn\.lock)$''',
+  '''^docs/.*\.md$'''
 ]
 regexes = [
   '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',

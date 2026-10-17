@@ -410,7 +410,8 @@ function buildStatusChangeText({ request, newStatus, adminUrl }) {
 async function sendRecurringDonationCancelledEmail({ email, projectName, donationId }) {
   if (!RESEND_API_KEY) {
     if (process.env.NODE_ENV !== "test") {
-      console.warn(
+      logger.warn(
+        { event: "email_api_key_missing" },
         "[email] RESEND_API_KEY not set — skipping recurring donation cancellation notification",
       );
     }
@@ -468,7 +469,7 @@ async function sendRecurringDonationCancelledEmail({ email, projectName, donatio
 
   if (!res.ok) {
     const errBody = await res.text();
-    console.error("[email] Resend error (recurring donation cancellation):", errBody);
+    logger.error({ event: "email_resend_error", err: errBody }, "[email] Resend error (recurring donation cancellation)");
   }
 }
 

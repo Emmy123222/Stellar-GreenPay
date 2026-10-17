@@ -31,8 +31,8 @@ if (!isTest || isMockedByJest) {
 const connectionPromise = (isTest && !isMockedByJest)
   ? Promise.resolve()
   : client.connect().catch(() => {
-      // Non-fatal: server runs without cache if Redis is unavailable
-    });
+    // Non-fatal: server runs without cache if Redis is unavailable
+  });
 
 const mockScripts = new Map();
 

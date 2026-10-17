@@ -17,6 +17,7 @@ const PgBoss = require("pg-boss");
 const pool = require("../db/pool");
 const {
   start,
+  stop,
   scheduleRecurringDonationJob,
   cancelRecurringDonationJob,
   PLEDGE_QUEUE,
@@ -31,6 +32,7 @@ describe("recurring donation pledge pg-boss job", () => {
     bossInstance = {
       on: jest.fn(),
       start: jest.fn().mockResolvedValue(undefined),
+      stop: jest.fn().mockResolvedValue(undefined),
       schedule: jest.fn().mockResolvedValue(undefined),
       work: jest.fn().mockResolvedValue(undefined),
       send: jest.fn().mockResolvedValue("pgboss-job-1"),
@@ -39,6 +41,10 @@ describe("recurring donation pledge pg-boss job", () => {
     PgBoss.mockImplementation(() => bossInstance);
 
     await start();
+  });
+
+  afterEach(async () => {
+    await stop();
   });
 
   test("schedules exactly one singleton job keyed by the pledge id", async () => {

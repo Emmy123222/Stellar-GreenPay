@@ -15,6 +15,20 @@ import DescriptionAccordion from "@/components/DescriptionAccordion";
 import WalletAddressQRCode from "@/components/WalletAddressQRCode";
 import ProjectProgressBar from "@/components/ProjectProgressBar";
 import ShareButtons from "@/components/ShareButtons";
+import ProjectCelebration from "@/components/ProjectCelebration";
+import ProjectActiveCampaign from "@/components/ProjectActiveCampaign";
+import ProjectMatchBanner from "@/components/ProjectMatchBanner";
+import ProjectAiSummary from "@/components/ProjectAiSummary";
+import ProjectAbout from "@/components/ProjectAbout";
+import ProjectReviewsSection from "@/components/ProjectReviewsSection";
+import ProjectMilestones from "@/components/ProjectMilestones";
+import ProjectCampaigns from "@/components/ProjectCampaigns";
+import ProjectUpdatesFeed from "@/components/ProjectUpdatesFeed";
+import ProjectDiscussion from "@/components/ProjectDiscussion";
+import ProjectImpactCalculator from "@/components/ProjectImpactCalculator";
+import ProjectShareCard from "@/components/ProjectShareCard";
+import ProjectReportCard from "@/components/ProjectReportCard";
+import ProjectSubscribeCard from "@/components/ProjectSubscribeCard";
 import ProjectComments from "@/components/ProjectComments";
 import {
   fetchProject,
@@ -25,8 +39,19 @@ import {
   followProject,
   unfollowProject,
 } from "@/lib/api";
-import { copyToClipboard, formatXLM, progressPercent, shortenAddress } from "@/utils/format";
-import { fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
+import {
+  copyToClipboard,
+  formatXLM,
+  progressPercent,
+  shortenAddress,
+  CATEGORY_ICONS,
+  statusClass,
+  statusLabel,
+  formatCO2,
+  formatDate,
+  timeAgo,
+} from "@/utils/format";
+import { accountUrl, fetchProjectDiscussion, type ProjectDiscussionMessage } from "@/lib/stellar";
 import { markMonthlySubscriptionPaid } from "@/lib/monthlyGiving";
 import { printProjectReport } from "@/utils/projectReport";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -507,337 +532,6 @@ export default function ProjectDetail({
             </div>
           </div>
 
-          {/* AI-generated impact summary — sits above the full description so
-              donors can decide in <30s whether to read more. The owner sees a
-              Refresh button; everyone sees the disclaimer. */}
-          {(project.aiSummary || (publicKey && publicKey === project.walletAddress)) && (
-            <div className="card border-l-4 border-forest-500 bg-forest-50/40">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg" aria-hidden="true">✨</span>
-                  <h2 className="font-display text-base font-semibold text-forest-900">
-                    Impact at a glance
-                  </h2>
-                  <span className="text-[10px] uppercase tracking-wider font-bold bg-forest-200 text-forest-800 px-2 py-0.5 rounded-full">
-                    AI Generated
-                  </span>
-                </div>
-                {publicKey && publicKey === project.walletAddress && (
-                  <button
-                    onClick={async () => {
-                      if (aiSummaryState === "loading") return;
-                      setAiSummaryState("loading");
-                      setAiSummaryError(null);
-                      try {
-                        const result = await generateProjectSummary(project.id, publicKey);
-                        setProject({ ...project, ...result });
-                        setAiSummaryState("idle");
-                      } catch (err: unknown) {
-                        const msg = err instanceof Error ? err.message : "Failed to generate summary";
-                        setAiSummaryError(msg);
-                        setAiSummaryState("error");
-                      }
-                    }}
-                    disabled={aiSummaryState === "loading"}
-                    className="text-xs font-semibold text-forest-700 hover:text-forest-900 disabled:opacity-50 disabled:cursor-not-allowed font-body"
-                  >
-                    {aiSummaryState === "loading"
-                      ? "Generating…"
-                      : project.aiSummary
-                        ? "Refresh summary"
-                        : "Generate summary"}
-                  </button>
-                )}
-              </div>
-
-              {project.aiSummary ? (
-                <p className="text-sm text-forest-900/90 leading-relaxed font-body">
-                  {project.aiSummary}
-                </p>
-              ) : (
-                <p className="text-sm text-[var(--text-secondary)] dark:text-[#8aaa8a] italic font-body">
-                  No AI summary yet. Click &ldquo;Generate summary&rdquo; to create one for donors.
-                </p>
-              )}
-
-              {aiSummaryError && (
-                <p className="mt-2 text-xs text-red-600 font-body">{aiSummaryError}</p>
-              )}
-
-              <p className="mt-3 text-[11px] text-[#7a9a7a] font-body leading-snug">
-                AI-generated from this project&rsquo;s description. May contain
-                inaccuracies — read the full description below before donating.
-                {project.aiSummaryGeneratedAt && (
-                  <> Generated {timeAgo(project.aiSummaryGeneratedAt)}.</>
-                )}
-              </p>
-            </div>
-          )}
-
-          {/* Description */}
-          <div className="card">
-            <h2 className="font-display text-lg font-semibold text-forest-900 mb-3">
-              About this Project
-            </h2>
-            <DescriptionAccordion description={project.description} />
-            {project.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-4">
-                {project.tags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="text-xs bg-forest-50 text-forest-700 border border-forest-200 px-2.5 py-1 rounded-full font-body"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Donor reviews — star summary plus a paginated list of the
-              most recent reviews, so future donors can see what others
-              experienced. */}
-          <div className="card">
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="font-display text-lg font-semibold text-forest-900">
-                Donor Reviews
-              </h2>
-              {(project.ratingCount || 0) > 0 && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-amber-400 text-lg" aria-hidden="true">★</span>
-                  <span className="font-bold text-forest-900 font-body">
-                    {(project.averageRating || 0).toFixed(1)}
-                  </span>
-                  <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
-                    ({project.ratingCount} review{project.ratingCount === 1 ? "" : "s"})
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {reviewsLoading && reviews.length === 0 ? (
-              <div className="space-y-3">
-                {[1, 2].map((i) => (
-                  <div key={i} className="animate-pulse h-12 bg-forest-100 rounded-xl" />
-                ))}
-              </div>
-            ) : reviews.length === 0 ? (
-              <p className="text-sm text-[#4f6f4f] dark:text-[#8aaa8a] font-body">
-                No reviews yet. Donate to this project and be the first to share your experience.
-              </p>
-            ) : (
-              <>
-                <div className="space-y-4">
-                  {reviews.map((r, i) => (
-                    <div
-                      key={`${r.donorAddress}-${i}`}
-                      className="pb-4 border-b border-forest-100 last:border-0 last:pb-0"
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-amber-400 text-sm tracking-wide" aria-label={`${r.rating} out of 5 stars`}>
-                            {"★".repeat(r.rating)}
-                            <span className="text-forest-200">{"★".repeat(5 - r.rating)}</span>
-                          </span>
-                          <span className="text-xs font-semibold text-forest-700 font-body">
-                            {shortenAddress(r.donorAddress)}
-                          </span>
-                        </div>
-                        <span className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
-                          {timeAgo(r.createdAt)}
-                        </span>
-                      </div>
-                      {r.review && (
-                        <p className="text-sm text-forest-900/90 leading-relaxed font-body">
-                          {r.review}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-                {reviewsHasMore && (
-                  <button
-                    onClick={handleLoadMoreReviews}
-                    disabled={loadingMoreReviews}
-                    className="btn-secondary text-sm py-2 px-4 mt-4 disabled:opacity-60"
-                  >
-                    {loadingMoreReviews ? "Loading…" : `Load more reviews (${reviewsTotal - reviews.length} remaining)`}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Donor discussion (#1662) */}
-          <ProjectComments projectId={project.id} publicKey={publicKey} />
-
-          {/* Milestones */}
-          {project.milestones && project.milestones.length > 0 && (
-            <div className="card">
-              <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
-                Project Milestones
-              </h2>
-              <div className="space-y-4">
-                {project.milestones.map((m) => {
-                  const reached = parseFloat(project.raisedXLM) >= (parseFloat(project.goalXLM) * m.percentage / 100);
-                  return (
-                    <div key={m.id} className="relative">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${m.reachedAt ? 'bg-emerald-500 text-white' : reached ? 'bg-amber-400 text-white' : 'bg-forest-100 text-forest-700'}`}>
-                            {m.percentage}%
-                          </div>
-                          <span className="text-sm font-semibold text-forest-900 font-body">{m.title}</span>
-                        </div>
-                        {m.transactionHash && (
-                          <a
-                            href={`https://stellar.expert/explorer/testnet/tx/${m.transactionHash}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[10px] text-forest-500 hover:text-emerald-600 font-bold uppercase tracking-widest transition-colors"
-                          >
-                            Proof ↗
-                          </a>
-                        )}
-                      </div>
-                      <div className="w-full bg-forest-100 h-1.5 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full transition-all duration-1000 ${m.reachedAt ? 'bg-emerald-500' : reached ? 'bg-amber-400' : 'bg-forest-300'}`}
-                          style={{ width: `${Math.min(100, (parseFloat(project.raisedXLM) / (parseFloat(project.goalXLM) * m.percentage / 100)) * 100)}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {completedCampaigns.length > 0 && (
-            <div className="card">
-              <h2 className="font-display text-lg font-semibold text-forest-900 mb-4">
-                Campaign History
-              </h2>
-              <div className="space-y-3">
-                {completedCampaigns.map((campaign: ProjectCampaign) => (
-                  <div
-                    key={campaign.id}
-                    className="rounded-xl border border-forest-200 bg-forest-50 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <p className="font-semibold text-forest-900 font-body">
-                        {campaign.title}
-                      </p>
-                      <span className="text-xs px-2 py-1 rounded-full bg-forest-100 border border-forest-200 text-forest-700 font-body">
-                        Completed
-                      </span>
-                    </div>
-                    <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-2">
-                      Ended {formatDate(campaign.deadline)}
-                    </p>
-                    <div className="flex justify-between text-xs mb-1 font-body">
-                      <span>{formatXLM(campaign.raisedXLM)} raised</span>
-                      <span>
-                        {campaign.progressPercent}% of{" "}
-                        {formatXLM(campaign.goalXLM)}
-                      </span>
-                    </div>
-                    <div className="progress-bar h-2">
-                      <div
-                        className="progress-fill progress-fill-complete"
-                        style={{
-                          width: `${Math.min(campaign.progressPercent, 100)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="card bg-forest-50 border-forest-200">
-            <h2 className="font-display text-lg font-semibold text-forest-900 mb-2">
-              Campaign Creator
-            </h2>
-            <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body mb-4">
-              Project admins can launch a time-limited campaign with a custom
-              goal and deadline.
-            </p>
-            <form onSubmit={handleCreateCampaign} className="space-y-3">
-              <input
-                type="text"
-                required
-                placeholder="Campaign title"
-                value={campaignForm.title}
-                onChange={(e) =>
-                  setCampaignForm((prev) => ({
-                    ...prev,
-                    title: e.target.value,
-                  }))
-                }
-                className="input-field"
-              />
-              <div className="grid sm:grid-cols-2 gap-3">
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  step="1"
-                  placeholder="Goal (XLM)"
-                  value={campaignForm.goalXLM}
-                  onChange={(e) =>
-                    setCampaignForm((prev) => ({
-                      ...prev,
-                      goalXLM: e.target.value,
-                    }))
-                  }
-                  className="input-field"
-                />
-                <input
-                  type="datetime-local"
-                  required
-                  aria-label="Campaign deadline"
-                  value={campaignForm.deadline}
-                  onChange={(e) =>
-                    setCampaignForm((prev) => ({
-                      ...prev,
-                      deadline: e.target.value,
-                    }))
-                  }
-                  className="input-field"
-                />
-              </div>
-              <textarea
-                placeholder="Description (optional)"
-                value={campaignForm.description}
-                onChange={(e) =>
-                  setCampaignForm((prev) => ({
-                    ...prev,
-                    description: e.target.value,
-                  }))
-                }
-                className="input-field min-h-24"
-              />
-              {campaignError && (
-                <p className="text-xs text-red-600 font-body">
-                  {campaignError}
-                </p>
-              )}
-              <button
-                type="submit"
-                disabled={campaignState === "saving"}
-                className="btn-primary text-sm py-2 px-4"
-              >
-                {campaignState === "saving"
-                  ? "Saving..."
-                  : campaignState === "success"
-                    ? "Campaign Created"
-                    : "Create Campaign"}
-              </button>
-            </form>
-          </div>
-
           <ProjectAiSummary
             project={project}
             publicKey={publicKey}
@@ -907,10 +601,12 @@ export default function ProjectDetail({
           <ProjectDiscussion
             discussion={discussion}
             loading={discussionLoading}
-            onReply={(replyMemo) =>
+            onReply={(replyMemo: string) =>
               router.push({ pathname: router.pathname, query: { ...router.query, replyMemo } })
             }
           />
+
+          <ProjectComments projectId={project.id} publicKey={publicKey} />
         </div>
 
         {/* ── Sidebar ─────────────────────────────────────────────────── */}

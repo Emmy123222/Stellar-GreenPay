@@ -98,10 +98,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   pool.query.mockReset();
   delete process.env.MATCHER_SECRET_KEY;
-  // Each test that exercises loadAccount/submitTransaction must set these
-  // on the freshly-mocked Server instance created by getServer(). The
-  // module-level `server` in turrets.js is lazy-cached, so we grab the
-  // instance the module actually holds via require("./turrets").__getServer.
+  require("./turrets").__setServer(null);
 });
 
 // ── Server lifecycle ──────────────────────────────────────────────────────
@@ -131,10 +128,7 @@ afterAll((done) => {
 // Helper to reach into the module's lazily-cached Horizon Server stub, which
 // is the one used by submitMatchingPayment and generatePreSignedTransactions.
 function horizonStub() {
-  // The SDK Server constructor was called at least once by the module under
-  // test; the last call is the cached instance.
-  const instances = sdk.Server.mock.results.map((r) => r.value).filter(Boolean);
-  return instances[instances.length - 1];
+  return require("./turrets").__getServer();
 }
 
 // ═════════════════════════════════════════════════════════════════════════
