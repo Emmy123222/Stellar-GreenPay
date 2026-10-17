@@ -13,7 +13,7 @@ jest.mock("../db/pool", () => ({
   connect: jest.fn(),
 }));
 
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const pool = require("../db/pool");
 const {
   start,

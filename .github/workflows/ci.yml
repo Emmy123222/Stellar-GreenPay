@@ -131,9 +131,18 @@ jobs:
             ~/.cargo/git
             contracts/target
           key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('contracts/**/Cargo.lock') }}
+      # soroban-sdk v28+ refuses plain `cargo build` for wasm targets: the
+      # contract must be built with `stellar contract build` (>= v25.2.0) so
+      # the contract spec can be shaken. Install the prebuilt binary.
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL -o /tmp/stellar-cli.tar.gz \
+            https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-x86_64-unknown-linux-gnu.tar.gz
+          sudo tar -xzf /tmp/stellar-cli.tar.gz -C /usr/local/bin stellar
+          stellar --version
       - run: cargo check --workspace
       - run: cargo test --workspace
-      - run: cargo build --workspace --target wasm32v1-none --release
+      - run: stellar contract build
 
   helm:
     name: Helm Chart Validation

@@ -178,7 +178,7 @@ export default function ProjectComments({ projectId, publicKey }: ProjectComment
                     {c.authorDisplayName || shortenAddress(c.authorAddress)}
                   </span>
                   <div className="flex items-center gap-3">
-                    <time dateTime={c.createdAt} className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                    <time dateTime={c.createdAt} className="text-xs text-forest-600 dark:text-forest-300 font-body">
                       {timeAgo(c.createdAt)}
                     </time>
                     {publicKey && publicKey === c.authorAddress && (

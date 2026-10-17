@@ -74,6 +74,7 @@ export default function ProjectMapMarker({ project, position }: ProjectMapMarker
           {project.imageUrl ? (
             <ProjectImage
               src={project.imageUrl}
+              name={project.name}
               alt={project.name}
               className="w-full h-24 object-cover rounded-lg border border-forest-100"
             />

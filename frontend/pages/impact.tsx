@@ -59,7 +59,7 @@ export default function ImpactPage({ publicKey, onConnect }: ImpactPageProps) {
   }, [publicKey]);
 
   return (
-    <div className="min-h-screen bg-[#fcfdfc] font-body text-forest-900 selection:bg-forest-100 pb-20">
+    <div className="min-h-screen bg-white font-body text-forest-900 selection:bg-forest-100 pb-20">
       <Head>
         <title>Global Impact | Stellar GreenPay</title>
         <meta name="description" content="Witness the real-time community impact of Stellar GreenPay donors." />

@@ -40,7 +40,7 @@ describe("summaryQueue", () => {
       return mockBoss;
     });
 
-    jest.doMock("pg-boss", () => PgBossCtor);
+    jest.doMock("pg-boss", () => ({ PgBoss: PgBossCtor }));
     jest.doMock("../db/pool", () => ({ query: jest.fn() }));
     jest.doMock("./claude", () => ({ generateProjectSummary: jest.fn() }));
     jest.doMock("./audit", () => ({ logAdminAction: jest.fn() }));
