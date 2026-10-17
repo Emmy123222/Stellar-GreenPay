@@ -41,14 +41,17 @@ describe("ImpactCertificate", () => {
     const { container } = render(<ImpactCertificate {...baseProps} />);
     expect(container).toMatchSnapshot();
   });
-  it.each([
+  const badgeTiers: [string, string][] = [
     ["seedling", "Seedling"],
     ["tree", "Tree"],
     ["forest", "Forest"],
     ["earth", "Earth Guardian"],
-  ] as [string, string][])("renders the %s badge tier", (badgeTier: string, label: string) => {
-    render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
-    expect(screen.getByText(label)).toBeInTheDocument();
+  ];
+  badgeTiers.forEach(([badgeTier, label]) => {
+    it(`renders the ${badgeTier} badge tier`, () => {
+      render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
+      expect(screen.getByText(label)).toBeInTheDocument();
+    });
   });
 });
 
