@@ -24,4 +24,4 @@ paths-ignore:
   - "frontend/utils/__tests__/renderMarkdown.test.ts"
   - "frontend/__tests__/csp.test.ts"
 queries:
-  - +security-and-quality
+  - uses: security-and-quality
