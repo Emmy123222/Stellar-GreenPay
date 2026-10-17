@@ -50,7 +50,7 @@ describe("ImpactCertificate", () => {
 
     const residue = /^\s*(?:main|fix\/[\w./-]+|feature\/[\w./-]+)\s*$/m;
     for (const path of sourceFiles(__dirname)) {
-      expect(readFileSync(path, "utf8"), path).not.toMatch(residue);
+      expect(readFileSync(path, "utf8")).not.toMatch(residue);
     }
   });
 
@@ -68,4 +68,3 @@ describe("ImpactCertificate", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 });
-

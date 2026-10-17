@@ -158,7 +158,24 @@
                         ]
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "address"
+                            },
+                            "val": {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "proposal_expires_at"
+                            },
+                            "val": {
+                              "u64": "604800"
+                            }
+                          }
+                        ]
                       }
                     },
                     {

@@ -787,6 +787,42 @@ export async function fetchSubscriberCount(projectId: string) {
   return data.count;
 }
 
+export interface RecurringDonation {
+  id: string;
+  donorAddress: string;
+  projectId: string;
+  projectName?: string;
+  amountXlm: number;
+  currency: string;
+  nextDueDate: string;
+  durationMonths: number;
+  remainingMonths: number;
+  status: "active" | "paused" | "completed" | "cancelled";
+  createdAt: string;
+}
+
+/**
+ * Create a recurring monthly donation pledge.
+ *
+ * @param payload - Pledge details. The backend enforces a 1 XLM minimum and a
+ *   1–120 month duration.
+ * @returns The created pledge.
+ * @throws If the request fails or validation is rejected by the backend.
+ */
+export async function createRecurringDonation(payload: {
+  donorAddress: string;
+  projectId: string;
+  amountXlm: number;
+  durationMonths: number;
+  startDate?: string;
+}) {
+  const { data } = await api.post<{ success: boolean; data: RecurringDonation }>(
+    "/api/recurring-donations",
+    payload,
+  );
+  return data.data;
+}
+
 export interface ProjectNotificationSubscription {
   id: string;
   projectId: string;

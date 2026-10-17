@@ -33,7 +33,7 @@ describe("ProjectImage alt-text rules", () => {
     expect(img).toHaveAttribute("alt", "Custom alt text");
   });
 
-  it("decorative images get alt="" and role=presentation", () => {
+  it('decorative images get alt="" and role=presentation', () => {
     render(
       <ProjectImage
         src="https://example.com/img.png"
@@ -41,14 +41,14 @@ describe("ProjectImage alt-text rules", () => {
         decorative
       />,
     );
-    const img = screen.getByRole("img");
+    const img = screen.getByRole("presentation");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");
   });
 
-  it("placeholder gets alt="" and role=presentation when no src", () => {
+  it('placeholder gets alt="" and role=presentation when no src', () => {
     render(<ProjectImage {...baseProps} />);
-    const img = screen.getByRole("img");
+    const img = screen.getByRole("presentation");
     expect(img).toHaveAttribute("src", "/project-placeholder.svg");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");
@@ -56,7 +56,7 @@ describe("ProjectImage alt-text rules", () => {
 
   it("placeholder is not announced as project-placeholder by screen readers", () => {
     render(<ProjectImage {...baseProps} />);
-    const img = screen.getByRole("img");
+    const img = screen.getByRole("presentation");
     expect(screen.queryByRole("img", { name: /project-placeholder/i })).not.toBeInTheDocument();
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");

@@ -2,7 +2,14 @@ import type { MonthlySubscription } from "@/utils/types";
 
 export const MONTHLY_GIVING_STORAGE_KEY = "greenpay_monthly_subscriptions";
 
-function addMonths(isoDate: string, months: number) {
+/** Minimum monthly pledge, mirroring the backend's 1 XLM recurring-donation rule. */
+export const MIN_MONTHLY_AMOUNT_XLM = 1;
+
+/**
+ * Advance an ISO date by whole months in UTC, clamping to the last day of the
+ * target month (Jan 31 + 1 month → Feb 28/29) and preserving the time of day.
+ */
+export function addMonths(isoDate: string, months: number) {
   const date = new Date(isoDate);
   const day = date.getUTCDate();
   date.setUTCDate(1);
