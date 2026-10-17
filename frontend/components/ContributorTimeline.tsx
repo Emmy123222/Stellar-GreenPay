@@ -31,7 +31,7 @@ export default function ContributorTimeline({
   );
 
   return (
-    <div className="card animate-fade-in">
+    <div className="card animate-fade-in motion-reduce:animate-none">
       <div className="relative">
         <div className="absolute left-5 top-0 bottom-0 w-0.5 bg-forest-200" />
 

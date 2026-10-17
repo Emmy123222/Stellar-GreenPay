@@ -27,9 +27,9 @@ npm install
 echo ""
 if command -v cargo &>/dev/null; then
   echo "✅ $(rustc --version)"
-  rustup target list --installed | grep -q "wasm32-unknown-unknown" \
-    && echo "✅ wasm32-unknown-unknown installed" \
-    || (rustup target add wasm32-unknown-unknown && echo "✅ Added wasm32-unknown-unknown")
+  rustup target list --installed | grep -q "wasm32v1-none" \
+    && echo "✅ wasm32v1-none installed" \
+    || (rustup target add wasm32v1-none && echo "✅ Added wasm32v1-none")
 else
   echo "⚠️  Rust not found — smart contract development unavailable."
   echo "   Install: https://rustup.rs"

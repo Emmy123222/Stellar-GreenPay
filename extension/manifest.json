@@ -23,7 +23,29 @@
       "32": "icons/icon-32.png",
       "48": "icons/icon-48.png",
       "128": "icons/icon-128.png"
-    }
+    },
+    "theme_icons": [
+      {
+        "light": "icons/icon-16.png",
+        "dark": "icons/icon-dark-16.png",
+        "size": 16
+      },
+      {
+        "light": "icons/icon-32.png",
+        "dark": "icons/icon-dark-32.png",
+        "size": 32
+      },
+      {
+        "light": "icons/icon-48.png",
+        "dark": "icons/icon-dark-48.png",
+        "size": 48
+      },
+      {
+        "light": "icons/icon-128.png",
+        "dark": "icons/icon-dark-128.png",
+        "size": 128
+      }
+    ]
   },
   "background": {
     "service_worker": "dist/background.js",

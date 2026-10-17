@@ -83,6 +83,42 @@ jest.mock('expo-linking', () => ({
 
 jest.mock('expo-status-bar', () => ({ StatusBar: () => null }));
 
+// `@stellar/stellar-sdk` v16 ships ESM-only dependencies that jest-expo
+// cannot execute under CommonJS; the keyboard tests never reach signing, so
+// a structural stub (matching DonateScreen.test.tsx) is enough.
+jest.mock('@stellar/stellar-sdk', () => {
+  class FakeServer {
+    loadAccount = jest.fn(() => Promise.resolve({}));
+    submitTransaction = jest.fn(() => Promise.resolve({ hash: 'fake-hash' }));
+  }
+  const chainable = () => {
+    const builder: Record<string, jest.Mock> = {
+      addOperation: jest.fn().mockImplementation(chainable),
+      addMemo: jest.fn().mockImplementation(chainable),
+      setTimeout: jest.fn().mockImplementation(chainable),
+      build: jest.fn(() => ({ sign: jest.fn(), toXDR: jest.fn(() => 'xdr') })),
+    };
+    return builder;
+  };
+  return {
+    __esModule: true,
+    Keypair: {
+      fromSecret: (seed: string) => ({
+        publicKey: () => `G${String(seed).slice(1, 55)}`,
+        sign: jest.fn(),
+      }),
+      random: () => ({ publicKey: () => 'GRANDOM' }),
+    },
+    Horizon: { Server: FakeServer },
+    TransactionBuilder: jest.fn(() => chainable()),
+    Networks: { TESTNET: 'Test SDF Network ; September 2015' },
+    Operation: { payment: jest.fn(() => ({})) },
+    Asset: { native: jest.fn(() => ({})) },
+    Memo: { text: jest.fn(() => ({})) },
+    StrKey: { isValidEd25519PublicKey: (key: string) => typeof key === 'string' && key.startsWith('G') },
+  };
+});
+
 // Silences the React Native Animated `act()` warnings (see
 // ProjectDetailScreen.test.tsx for the same pattern).
 jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
@@ -120,10 +156,7 @@ afterEach(() => {
 });
 
 async function renderScreen() {
-  // `render` is synchronous in RNTL 12 — wrapping it in `act()` (as some
-  // older suites here do) makes RNTL's host-component probe unmount the
-  // renderer before it can inspect it, so it is called bare.
-  const utils = render(<DonateScreen />);
+  const utils = await render(<DonateScreen />);
   await waitFor(() =>
     expect(utils.getByText('Donate to Amazon Reforestation')).toBeTruthy()
   );
@@ -132,9 +165,9 @@ async function renderScreen() {
 
 describe('DonateScreen – keyboard avoidance (issue #1127)', () => {
   it('wraps the donation form in a KeyboardAvoidingView', async () => {
-    const { UNSAFE_getByType, getByTestId } = await renderScreen();
+    const { root, getByTestId } = await renderScreen();
 
-    const avoiding = UNSAFE_getByType(KeyboardAvoidingView);
+    const avoiding = root.findByType(KeyboardAvoidingView);
     expect(avoiding).toBeTruthy();
     expect(avoiding.props.testID).toBe('donate-keyboard-avoiding-view');
     // The scrollable form is the KAV's only child, so the whole form
@@ -144,20 +177,20 @@ describe('DonateScreen – keyboard avoidance (issue #1127)', () => {
 
   it("uses behavior='height' on iOS", async () => {
     setPlatform('ios');
-    const { UNSAFE_getByType } = await renderScreen();
+    const { root } = await renderScreen();
 
     // iOS never resizes the window for the keyboard, so the container has
     // to shrink and the inner ScrollView scrolls within it.
-    expect(UNSAFE_getByType(KeyboardAvoidingView).props.behavior).toBe('height');
+    expect(root.findByType(KeyboardAvoidingView).props.behavior).toBe('height');
   });
 
   it("uses behavior='padding' on Android", async () => {
     setPlatform('android');
-    const { UNSAFE_getByType } = await renderScreen();
+    const { root } = await renderScreen();
 
     // Android resizes the window itself (softwareKeyboardLayoutMode:
     // "resize" in app.json), so padding is what lines the form up with it.
-    expect(UNSAFE_getByType(KeyboardAvoidingView).props.behavior).toBe('padding');
+    expect(root.findByType(KeyboardAvoidingView).props.behavior).toBe('padding');
   });
 
   it('keeps the first tap on preset chips / the Donate button working with the keyboard open', async () => {

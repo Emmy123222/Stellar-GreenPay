@@ -3,27 +3,38 @@
  * Donation cart for multi-project batch donations
  */
 import { useState } from "react";
-import { formatXLM, formatCO2 } from "@/utils/format";
+import { buildBatchDonationTransaction, submitTransaction } from "@/lib/stellar";
+import { signTransactionWithWallet } from "@/lib/wallet";
+import { formatCO2, formatXLM } from "@/utils/format";
 import type { ClimateProject } from "@/utils/types";
 
-interface CartItem {
+export interface BatchDonationCartItem {
   project: ClimateProject;
   amount: string;
 }
 
 interface BatchDonationCartProps {
   publicKey: string;
-  onDonate?: (items: CartItem[]) => void;
+  projects?: ClimateProject[];
+  onDonate?: (items: BatchDonationCartItem[]) => void;
 }
 
-export default function BatchDonationCart({ publicKey, onDonate }: BatchDonationCartProps) {
-  const [cart, setCart] = useState<CartItem[]>([]);
+export default function BatchDonationCart({
+  publicKey,
+  projects = [],
+  onDonate,
+}: BatchDonationCartProps) {
+  const [cart, setCart] = useState<BatchDonationCartItem[]>([]);
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [newAmount, setNewAmount] = useState("10");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const addToCart = (project: ClimateProject, amount: string) => {
-    if (!amount || parseFloat(amount) <= 0) return;
-    
-    const existingIndex = cart.findIndex(item => item.project.id === project.id);
+    if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0) return;
+
+    const existingIndex = cart.findIndex((item) => item.project.id === project.id);
     if (existingIndex >= 0) {
       const updated = [...cart];
       updated[existingIndex] = { project, amount };
@@ -35,15 +46,16 @@ export default function BatchDonationCart({ publicKey, onDonate }: BatchDonation
       }
       setCart([...cart, { project, amount }]);
     }
+    setError(null);
   };
 
   const removeFromCart = (projectId: string) => {
-    setCart(cart.filter(item => item.project.id !== projectId));
+    setCart(cart.filter((item) => item.project.id !== projectId));
   };
 
   const updateAmount = (projectId: string, amount: string) => {
-    setCart(cart.map(item => 
-      item.project.id === projectId ? { ...item, amount } : item
+    setCart(cart.map((item) =>
+      item.project.id === projectId ? { ...item, amount } : item,
     ));
   };
 
@@ -52,12 +64,42 @@ export default function BatchDonationCart({ publicKey, onDonate }: BatchDonation
     const amount = parseFloat(item.amount) || 0;
     return sum + (amount * (item.project.co2_per_xlm || 0)) / 1000;
   }, 0);
+  const selectedProjectAlreadyInCart = cart.some(
+    (item) => item.project.id === selectedProjectId,
+  );
 
-  const handleDonateAll = () => {
-    if (cart.length === 0) return;
-    onDonate?.(cart);
-    setCart([]);
-    setIsOpen(false);
+  const handleAddProject = () => {
+    const project = projects.find(({ id }) => id === selectedProjectId);
+    if (project) addToCart(project, newAmount);
+  };
+
+  const handleDonateAll = async () => {
+    if (!publicKey || cart.length === 0 || isSubmitting) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const transaction = await buildBatchDonationTransaction({
+        fromPublicKey: publicKey,
+        payments: cart.map(({ project, amount }) => ({
+          toPublicKey: project.walletAddress,
+          amount,
+        })),
+      });
+      const { signedXDR, error: signingError } = await signTransactionWithWallet(
+        transaction.toXDR(),
+      );
+      if (signingError || !signedXDR) {
+        throw new Error(signingError || "Wallet signing failed.");
+      }
+      await submitTransaction(signedXDR);
+      onDonate?.(cart);
+      setCart([]);
+      setIsOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!isOpen) {
@@ -78,7 +120,7 @@ export default function BatchDonationCart({ publicKey, onDonate }: BatchDonation
   }
 
   return (
-    <div className="card animate-slide-up">
+    <div className="card animate-slide-up motion-reduce:animate-none">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-display text-lg font-semibold text-forest-900">
           Donation Cart ({cart.length}/10)
@@ -115,7 +157,7 @@ export default function BatchDonationCart({ publicKey, onDonate }: BatchDonation
                 <input
                   type="number"
                   value={item.amount}
-                  onChange={(e) => updateAmount(item.project.id, e.target.value)}
+                  onChange={(event) => updateAmount(item.project.id, event.target.value)}
                   min="1"
                   step="1"
                   className="w-20 input-field text-sm"
@@ -142,15 +184,73 @@ export default function BatchDonationCart({ publicKey, onDonate }: BatchDonation
               <span className="font-bold text-forest-900">{formatCO2(totalCO2)}</span>
             </div>
           </div>
-
-          <button
-            onClick={handleDonateAll}
-            disabled={!publicKey || cart.length === 0}
-            className="btn-primary w-full mt-4"
-          >
-            Donate All ({formatXLM(totalXLM)})
-          </button>
         </>
+      )}
+
+      {projects.length > 0 ? (
+        <div className="flex flex-wrap gap-2 mt-4">
+          <label className="sr-only" htmlFor="batch-donation-project">
+            Project to add
+          </label>
+          <select
+            id="batch-donation-project"
+            aria-label="Project to add"
+            value={selectedProjectId}
+            onChange={(event) => setSelectedProjectId(event.target.value)}
+            className="input-field min-w-0 flex-1 text-sm"
+          >
+            <option value="">Choose a project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+          <label className="sr-only" htmlFor="batch-donation-new-amount">
+            Amount to add
+          </label>
+          <input
+            id="batch-donation-new-amount"
+            type="number"
+            min="1"
+            step="1"
+            value={newAmount}
+            onChange={(event) => setNewAmount(event.target.value)}
+            aria-label="Amount to add"
+            className="input-field w-24 text-sm"
+          />
+          <button
+            type="button"
+            onClick={handleAddProject}
+            disabled={
+              !selectedProjectId ||
+              (cart.length >= 10 && !selectedProjectAlreadyInCart)
+            }
+            className="btn-secondary text-sm"
+          >
+            Add project
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground mt-4">
+          No projects are available to add.
+        </p>
+      )}
+
+      {error && (
+        <p role="alert" className="text-sm text-red-600 mt-3">
+          {error}
+        </p>
+      )}
+
+      {cart.length > 0 && (
+        <button
+          onClick={handleDonateAll}
+          disabled={!publicKey || isSubmitting}
+          className="btn-primary w-full mt-4"
+        >
+          {isSubmitting ? "Processing batch donation…" : `Donate All (${formatXLM(totalXLM)})`}
+        </button>
       )}
     </div>
   );

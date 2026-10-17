@@ -73,8 +73,17 @@ jest.mock('axios', () => ({
 const mockCreateRecurringDonation = jest.fn();
 jest.mock('../utils/recurringDonations', () => ({
   loadRecurringDonations: jest.fn().mockResolvedValue([]),
+  loadPaymentHistory: jest.fn().mockResolvedValue([]),
   createRecurringDonation: (...args: any[]) => mockCreateRecurringDonation(...args),
   cancelRecurringDonation: jest.fn().mockResolvedValue(undefined),
+  useRecurringDonations: () => ({
+    donations: [],
+    isSyncing: false,
+    error: null,
+    refresh: jest.fn(),
+    create: (...args: any[]) => mockCreateRecurringDonation(...args),
+    cancel: jest.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 import RecurringScreen from '../app/recurring';
@@ -97,14 +106,14 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('shows the create button initially', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
   });
 
   it('shows the form when the create button is pressed', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -115,7 +124,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('displays error and disables submit for amount below 1 XLM', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -133,7 +142,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('disables submit button for amount below 1 XLM', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -149,7 +158,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('shows error for zero amount', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -166,7 +175,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('shows error for negative amount', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -183,7 +192,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('does NOT show error for exactly 1 XLM', async () => {
-    const { getByTestId, queryByTestId } = render(<RecurringScreen />);
+    const { getByTestId, queryByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -198,7 +207,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('does NOT show error for amount above 1 XLM', async () => {
-    const { getByTestId, queryByTestId } = render(<RecurringScreen />);
+    const { getByTestId, queryByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -213,7 +222,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('enables submit button for valid amount', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });
@@ -229,7 +238,7 @@ describe('RecurringScreen – amount validation (issue #802)', () => {
   });
 
   it('does not call createRecurringDonation when amount is below minimum', async () => {
-    const { getByTestId } = render(<RecurringScreen />);
+    const { getByTestId } = await render(<RecurringScreen />);
     await waitFor(() => {
       expect(getByTestId('create-recurring-button')).toBeTruthy();
     });

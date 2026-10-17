@@ -100,7 +100,7 @@ export default function LeaderboardHistoryPage() {
   }, []);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <div className="text-center mb-10">
         <div className="text-5xl mb-4">🏅</div>
         <h1 className="font-display text-3xl sm:text-4xl font-bold text-forest-900 mb-3">

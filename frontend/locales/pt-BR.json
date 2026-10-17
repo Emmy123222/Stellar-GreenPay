@@ -1,5 +1,6 @@
 {
   "nav": {
+    "skipToContent": "Pular para o conteúdo principal",
     "home": "Início",
     "projects": "Projetos",
     "jobs": "Vagas",
@@ -139,6 +140,7 @@
     "dataUpdated": "Dados atualizados em {time}"
   },
   "common": {
+    "skipToContent": "Pular para o conteúdo principal",
     "loading": "Carregando…",
     "error": "Erro",
     "cancel": "Cancelar",

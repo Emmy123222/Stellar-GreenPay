@@ -2,6 +2,8 @@
 
 The indexer is a background service that listens for native XLM payments on the Stellar network and records them as donations in the database. It is the bridge between on-chain activity and the application's leaderboard, profile badges, and donation feed.
 
+For the full schema of every event the contracts emit (topics, data payloads, and when each fires), see the canonical reference: [`docs/contract-events.md`](./contract-events.md).
+
 ---
 
 ## How It Works

@@ -78,6 +78,16 @@ describe('ScanScreen (expo-camera)', () => {
     expect(mockPush).toHaveBeenCalledWith(expect.stringContaining('wallet='));
   });
 
+  it('navigates to the donate screen for a GreenPay project QR code', async () => {
+    await render(<ScanScreen />);
+    await screen.findByTestId('camera-view');
+
+    scan('https://greenpay.app/donate?projectId=proj-42');
+
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/donate/proj-42');
+  });
+
   it('does not trigger duplicate actions for rapid successive scans', async () => {
     await render(<ScanScreen />);
     await screen.findByTestId('camera-view');
@@ -128,6 +138,18 @@ describe('ScanScreen (expo-camera)', () => {
 
     expect(mockPush).toHaveBeenCalledTimes(1);
     expect(mockPush).toHaveBeenCalledWith(expect.stringContaining(`wallet=${WALLET}`));
+  });
+
+  it('accepts a bare project id typed manually', async () => {
+    mockPermission = { granted: false, canAskAgain: false, status: 'denied' };
+    await render(<ScanScreen />);
+
+    fireEvent.press(await screen.findByTestId('manual-entry-link'));
+    fireEvent.changeText(await screen.findByTestId('manual-address-input'), 'proj-42');
+    fireEvent.press(screen.getByLabelText('Continue with typed address'));
+
+    expect(mockPush).toHaveBeenCalledTimes(1);
+    expect(mockPush).toHaveBeenCalledWith('/donate/proj-42');
   });
 
   it('falls back to manual entry when the camera hardware is unavailable', async () => {

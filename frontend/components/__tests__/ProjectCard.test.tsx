@@ -46,8 +46,8 @@ describe("ProjectCard", () => {
       />,
     );
 
-    const img = container.querySelector("img") as HTMLImageElement;
-    expect(img).toBeInTheDocument();
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");
 

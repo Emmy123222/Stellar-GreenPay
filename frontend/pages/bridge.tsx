@@ -450,7 +450,7 @@ export default function BridgePage() {
             <button
               onClick={openCircleBridge}
               disabled={!stellarAddress}
-              className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-forest-500 text-white rounded-xl font-bold text-lg hover:from-blue-600 hover:to-forest-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+              className="w-full py-4 px-6 bg-gradient-to-r from-blue-500 to-forest-500 text-white rounded-xl font-bold text-lg hover:from-blue-600 hover:to-forest-600 transition-all motion-reduce:transition-none disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
             >
               {t("bridge.openBridge")}
             </button>

@@ -108,7 +108,7 @@ describe('keyboard avoidance platform configuration (issue #1127)', () => {
     expect(getKeyboardAvoidingBehavior('macos')).toBe('padding');
   });
 
-  it('defaults to the current Platform.OS when no argument is given', () => {
+  it('defaults to the current Platform.OS when no argument is given', async () => {
     expect(getKeyboardAvoidingBehavior()).toBe(Platform.OS === 'ios' ? 'height' : 'padding');
     expect(getKeyboardDismissMode()).toBe(Platform.OS === 'ios' ? 'interactive' : 'on-drag');
   });
@@ -123,7 +123,7 @@ describe('keyboard avoidance platform configuration (issue #1127)', () => {
 // ── Scroll-into-view geometry ────────────────────────────────────────────────
 
 describe('computeInputScrollTarget', () => {
-  it('returns null when the focused input is already fully visible', () => {
+  it('returns null when the focused input is already fully visible', async () => {
     // Viewport 0..600 (keyboard open, KeyboardAvoidingView shrank it),
     // input at 300..350 with 24 pt of room to spare.
     expect(
@@ -137,7 +137,7 @@ describe('computeInputScrollTarget', () => {
     ).toBeNull();
   });
 
-  it('returns null when the input bottom lands exactly on the gap line', () => {
+  it('returns null when the input bottom lands exactly on the gap line', async () => {
     expect(
       computeInputScrollTarget({
         inputTop: 100,
@@ -149,7 +149,7 @@ describe('computeInputScrollTarget', () => {
     ).toBeNull();
   });
 
-  it('scrolls down just enough to lift a keyboard-covered input into view', () => {
+  it('scrolls down just enough to lift a keyboard-covered input into view', async () => {
     // Small Android device: 640 pt screen, ~300 pt keyboard, so the
     // KeyboardAvoidingView leaves a 0..340 viewport. The amount field
     // measures 300..350 in window coordinates, i.e. the bottom 10 pt sit
@@ -166,7 +166,7 @@ describe('computeInputScrollTarget', () => {
     ).toBe(34);
   });
 
-  it('adds to the current scroll offset instead of replacing it', () => {
+  it('adds to the current scroll offset instead of replacing it', async () => {
     expect(
       computeInputScrollTarget({
         inputTop: 900,
@@ -178,7 +178,7 @@ describe('computeInputScrollTarget', () => {
     ).toBe(774);
   });
 
-  it('honours a caller-supplied gap', () => {
+  it('honours a caller-supplied gap', async () => {
     const geometry = {
       inputTop: 500,
       inputBottom: 550,
@@ -192,7 +192,7 @@ describe('computeInputScrollTarget', () => {
     expect(computeInputScrollTarget({ ...geometry, gap: 8 })).toBeNull();
   });
 
-  it('aligns the top edge when the input is taller than the usable viewport', () => {
+  it('aligns the top edge when the input is taller than the usable viewport', async () => {
     // A 500 pt tall field inside a 200 pt usable viewport can never fully
     // fit, so the top edge is anchored (250) instead of chasing the
     // unreachable bottom edge.
@@ -207,7 +207,7 @@ describe('computeInputScrollTarget', () => {
     ).toBe(150);
   });
 
-  it('scrolls back up when the input has been dragged off the top edge', () => {
+  it('scrolls back up when the input has been dragged off the top edge', async () => {
     // The whole field (‑60..‑10) sits above the viewport, so it is
     // scrolled back by exactly the 10 pt that is missing.
     expect(
@@ -221,7 +221,7 @@ describe('computeInputScrollTarget', () => {
     ).toBe(290);
   });
 
-  it('never returns a negative scroll offset', () => {
+  it('never returns a negative scroll offset', async () => {
     // Would ask for -10; the ScrollView clamps to 0 instead.
     expect(
       computeInputScrollTarget({
@@ -234,7 +234,7 @@ describe('computeInputScrollTarget', () => {
     ).toBe(0);
   });
 
-  it('returns null for non-finite measurements', () => {
+  it('returns null for non-finite measurements', async () => {
     expect(
       computeInputScrollTarget({
         inputTop: Number.NaN,
@@ -255,7 +255,7 @@ describe('computeInputScrollTarget', () => {
     ).toBeNull();
   });
 
-  it('defaults the gap to KEYBOARD_INPUT_GAP', () => {
+  it('defaults the gap to KEYBOARD_INPUT_GAP', async () => {
     // 350 - (340 - KEYBOARD_INPUT_GAP)
     expect(
       computeInputScrollTarget({
@@ -309,7 +309,7 @@ function attachFakeScrollView(
  * destructured value on purpose: `const { result } = renderHook()` would
  * evaluate a getter exactly once and then never observe a later render.
  */
-function renderKeyboardAvoidance(options?: UseKeyboardAvoidanceOptions) {
+async function renderKeyboardAvoidance(options?: UseKeyboardAvoidanceOptions) {
   const store: { current: UseKeyboardAvoidanceResult | null } = { current: null };
 
   function Harness() {
@@ -317,7 +317,7 @@ function renderKeyboardAvoidance(options?: UseKeyboardAvoidanceOptions) {
     return null;
   }
 
-  const { unmount } = render(<Harness />);
+  const { unmount } = await render(<Harness />);
   return {
     read: (): UseKeyboardAvoidanceResult => {
       if (!store.current) throw new Error('useKeyboardAvoidance did not render');
@@ -328,8 +328,8 @@ function renderKeyboardAvoidance(options?: UseKeyboardAvoidanceOptions) {
 }
 
 describe('useKeyboardAvoidance', () => {
-  it('starts with the keyboard closed and no extra content padding', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('starts with the keyboard closed and no extra content padding', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     expect(read().keyboardVisible).toBe(false);
     expect(read().keyboardHeight).toBe(0);
@@ -337,8 +337,8 @@ describe('useKeyboardAvoidance', () => {
     expect(read().keyboardVerticalOffset).toBe(0);
   });
 
-  it('exposes the platform-correct behaviour for KeyboardAvoidingView', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('exposes the platform-correct behaviour for KeyboardAvoidingView', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     expect(read().behavior).toBe(
       Platform.OS === 'ios' ? 'height' : 'padding'
@@ -348,8 +348,8 @@ describe('useKeyboardAvoidance', () => {
     );
   });
 
-  it('registers keyboardDidShow / keyboardDidHide listeners and removes them on unmount', () => {
-    const { unmount } = renderKeyboardAvoidance();
+  it('registers keyboardDidShow / keyboardDidHide listeners and removes them on unmount', async () => {
+    const { unmount } = await renderKeyboardAvoidance();
 
     expect(listeners.keyboardDidShow).toHaveLength(1);
     expect(listeners.keyboardDidHide).toHaveLength(1);
@@ -361,8 +361,8 @@ describe('useKeyboardAvoidance', () => {
     expect(removeHide).toHaveBeenCalled();
   });
 
-  it('tracks keyboard height and adds content padding while the keyboard is open', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('tracks keyboard height and adds content padding while the keyboard is open', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     emitKeyboardEvent('keyboardDidShow', KEYBOARD_SHOW_EVENT);
 
@@ -371,8 +371,8 @@ describe('useKeyboardAvoidance', () => {
     expect(read().contentPaddingBottom).toBe(KEYBOARD_CONTENT_PADDING);
   });
 
-  it('falls back to a zero height when the event carries no coordinates', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('falls back to a zero height when the event carries no coordinates', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     emitKeyboardEvent('keyboardDidShow', undefined);
     emitKeyboardEvent('keyboardDidHide', undefined);
@@ -381,8 +381,8 @@ describe('useKeyboardAvoidance', () => {
     expect(read().keyboardHeight).toBe(0);
   });
 
-  it('honours contentPadding / keyboardVerticalOffset overrides', () => {
-    const { read } = renderKeyboardAvoidance({
+  it('honours contentPadding / keyboardVerticalOffset overrides', async () => {
+    const { read } = await renderKeyboardAvoidance({
       contentPadding: 120,
       keyboardVerticalOffset: 64,
     });
@@ -392,8 +392,8 @@ describe('useKeyboardAvoidance', () => {
     expect(read().contentPaddingBottom).toBe(120);
   });
 
-  it('resets the keyboard state on keyboardDidHide', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('resets the keyboard state on keyboardDidHide', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     emitKeyboardEvent('keyboardDidShow', KEYBOARD_SHOW_EVENT);
     emitKeyboardEvent('keyboardDidHide', { endCoordinates: { height: 0 } });
@@ -403,8 +403,8 @@ describe('useKeyboardAvoidance', () => {
     expect(read().contentPaddingBottom).toBe(0);
   });
 
-  it('scrolls a focused, keyboard-covered input into view', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('scrolls a focused, keyboard-covered input into view', async () => {
+    const { read } = await renderKeyboardAvoidance();
     const scrollTo = attachFakeScrollView(read().scrollRef, { top: 0, height: 340 });
 
     act(() => {
@@ -414,8 +414,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).toHaveBeenCalledWith({ y: 34, animated: true });
   });
 
-  it('does not scroll when the focused input is already visible', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('does not scroll when the focused input is already visible', async () => {
+    const { read } = await renderKeyboardAvoidance();
     const scrollTo = attachFakeScrollView(read().scrollRef, { top: 0, height: 600 });
 
     act(() => {
@@ -425,8 +425,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it('re-scrolls the last focused input once the keyboard finishes animating', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('re-scrolls the last focused input once the keyboard finishes animating', async () => {
+    const { read } = await renderKeyboardAvoidance();
     // Before the keyboard opens the viewport is the full 640 pt screen,
     // so the amount field at 300..350 needs no scrolling …
     const scrollTo = attachFakeScrollView(read().scrollRef, { top: 0, height: 640 });
@@ -447,8 +447,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).toHaveBeenCalledWith({ y: 34, animated: true });
   });
 
-  it('uses the tracked scroll offset when computing the next target', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('uses the tracked scroll offset when computing the next target', async () => {
+    const { read } = await renderKeyboardAvoidance();
     const scrollTo = attachFakeScrollView(read().scrollRef, { top: 0, height: 600 });
 
     act(() => {
@@ -474,8 +474,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).toHaveBeenCalledWith({ y: 284, animated: true });
   });
 
-  it('ignores scroll events without a usable contentOffset', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('ignores scroll events without a usable contentOffset', async () => {
+    const { read } = await renderKeyboardAvoidance();
     const scrollTo = attachFakeScrollView(read().scrollRef, { top: 0, height: 600 });
 
     act(() => {
@@ -488,8 +488,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).toHaveBeenCalledWith({ y: 34, animated: true });
   });
 
-  it('is a no-op when no ScrollView ref or no measuring bridge is available', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('is a no-op when no ScrollView ref or no measuring bridge is available', async () => {
+    const { read } = await renderKeyboardAvoidance();
 
     // No ScrollView attached yet (first layout pass).
     act(() => {
@@ -515,8 +515,8 @@ describe('useKeyboardAvoidance', () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
-  it('survives a measuring bridge that throws', () => {
-    const { read } = renderKeyboardAvoidance();
+  it('survives a measuring bridge that throws', async () => {
+    const { read } = await renderKeyboardAvoidance();
     attachFakeScrollView(read().scrollRef, { top: 0, height: 340 });
 
     act(() => {
@@ -530,7 +530,7 @@ describe('useKeyboardAvoidance', () => {
     });
   });
 
-  it('unmounts cleanly when a listener subscription has no remove() method', () => {
+  it('unmounts cleanly when a listener subscription has no remove() method', async () => {
     // Regression guard for the mock-shape trap documented in
     // mobile/TEST-SETUP.md: some community mocks return a bare object from
     // `Keyboard.addListener`, and calling `remove()` on it would throw
@@ -539,7 +539,7 @@ describe('useKeyboardAvoidance', () => {
       (() => ({})) as unknown as typeof Keyboard.addListener
     );
 
-    const { unmount } = renderKeyboardAvoidance();
+    const { unmount } = await renderKeyboardAvoidance();
     expect(() => unmount()).not.toThrow();
   });
 });

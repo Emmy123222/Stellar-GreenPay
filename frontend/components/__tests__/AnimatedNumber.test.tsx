@@ -32,6 +32,54 @@ describe("AnimatedNumber & XLM normalization", () => {
   });
 
   describe("AnimatedNumber component", () => {
+    it("jumps to the target when reduced motion is enabled during animation", () => {
+      const originalMatchMedia = window.matchMedia;
+      const originalRequestAnimationFrame = window.requestAnimationFrame;
+      const originalCancelAnimationFrame = window.cancelAnimationFrame;
+      let matches = false;
+      let changeListener: ((event: MediaQueryListEvent) => void) | undefined;
+      let nextFrame: FrameRequestCallback | undefined;
+
+      const mediaQueryList = {
+        matches,
+        media: "(prefers-reduced-motion: reduce)",
+        addEventListener: jest.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          changeListener = listener;
+        }),
+        removeEventListener: jest.fn(),
+      } as unknown as MediaQueryList;
+
+      window.matchMedia = jest.fn().mockReturnValue(mediaQueryList);
+      window.requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
+        nextFrame = callback;
+        return 1;
+      });
+      window.cancelAnimationFrame = jest.fn();
+
+      try {
+        const { unmount } = render(<AnimatedNumber value={1000} duration={1500} />);
+
+        act(() => {
+          nextFrame?.(100);
+          nextFrame?.(850);
+        });
+        expect(screen.getByText("875")).toBeInTheDocument();
+
+        act(() => {
+          matches = true;
+          Object.defineProperty(mediaQueryList, "matches", { value: true });
+          changeListener?.({ matches, media: mediaQueryList.media } as MediaQueryListEvent);
+        });
+
+        expect(screen.getByText("1,000")).toBeInTheDocument();
+        unmount();
+      } finally {
+        window.matchMedia = originalMatchMedia;
+        window.requestAnimationFrame = originalRequestAnimationFrame;
+        window.cancelAnimationFrame = originalCancelAnimationFrame;
+      }
+    });
+
     it("input 0.000001 → displays 0.0000010 XLM", () => {
       render(<AnimatedNumber value={0.000001} unit="XLM" duration={0} />);
       expect(screen.getByText("0.0000010 XLM")).toBeInTheDocument();

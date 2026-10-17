@@ -21,7 +21,7 @@ export default function WalletConnect({ onConnect }: WalletConnectProps) {
   };
 
   return (
-    <div className="card max-w-sm mx-auto text-center animate-slide-up shadow-green">
+    <div className="card max-w-sm mx-auto text-center animate-slide-up motion-reduce:animate-none shadow-green">
       <div className="text-4xl mb-4">🌿</div>
       <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Connect Your Wallet</h3>
       <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-5 font-body leading-relaxed">
@@ -39,5 +39,5 @@ export default function WalletConnect({ onConnect }: WalletConnectProps) {
 }
 
 function Spinner() {
-  return <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>;
+  return <svg className="animate-spin motion-reduce:animate-none w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>;
 }

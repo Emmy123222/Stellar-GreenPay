@@ -34,29 +34,29 @@ describe("ProjectImage alt-text rules", () => {
   });
 
   it('decorative images get alt="" and role=presentation', () => {
-    const { container } = render(
+    render(
       <ProjectImage
         src="https://example.com/img.png"
         {...baseProps}
         decorative
       />,
     );
-    const img = container.querySelector("img") as HTMLImageElement;
+    const img = screen.getByRole("presentation");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");
   });
 
   it('placeholder gets alt="" and role=presentation when no src', () => {
-    const { container } = render(<ProjectImage {...baseProps} />);
-    const img = container.querySelector("img") as HTMLImageElement;
+    render(<ProjectImage {...baseProps} />);
+    const img = screen.getByRole("presentation");
     expect(img).toHaveAttribute("src", "/project-placeholder.svg");
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");
   });
 
   it("placeholder is not announced as project-placeholder by screen readers", () => {
-    const { container } = render(<ProjectImage {...baseProps} />);
-    const img = container.querySelector("img") as HTMLImageElement;
+    render(<ProjectImage {...baseProps} />);
+    const img = screen.getByRole("presentation");
     expect(screen.queryByRole("img", { name: /project-placeholder/i })).not.toBeInTheDocument();
     expect(img).toHaveAttribute("alt", "");
     expect(img).toHaveAttribute("role", "presentation");

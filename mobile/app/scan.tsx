@@ -1,10 +1,15 @@
 /**
  * app/scan.tsx
- * Scan to Donate — reads a project wallet QR code and navigates to the donate
- * screen with the scanned wallet address pre-populated as the destination.
+ * Scan to Donate — reads a project QR code and navigates to the donate screen
+ * with the scanned wallet address and/or project id pre-populated.
  *
- * QR format expected: a Stellar public key (G…) or a deep-link of the form
- *   greenpay://donate?wallet=G...&project=<projectId>
+ * QR formats accepted:
+ *   - a bare Stellar public key (G…)
+ *   - greenpay://donate?wallet=G…&project=<projectId>
+ *   - greenpay://donate/<projectId>
+ *   - any link carrying an explicit `?projectId=` (e.g.
+ *     https://greenpay.app/donate?projectId=proj-42)
+ * The manual-entry field additionally accepts a bare project id.
  *
  * Scanning goes through expo-camera's `CameraView` (`onBarcodeScanned` +
  * `barcodeScannerSettings`) — the deprecated `expo-barcode-scanner` package is
@@ -30,14 +35,43 @@ import { isValidStellarAddress } from '../utils/stellarValidation';
 import { createScanGate } from '../utils/scanThrottle';
 
 const DEEP_LINK_RE   = /greenpay:\/\/donate\?(.+)/;
+// greenpay://donate/<projectId> — the form printed on project QR codes.
+const DONATE_PATH_RE = /^greenpay:\/\/(?:[^/]+\/)?donate\/([^/?#\s]+)$/i;
+const PROJECT_ID_QUERY_RE = /[?&]projectId=([^&#\s]+)/i;
+// Same grammar the deep-link handler accepts (hooks/useDeepLink.ts).
+const PROJECT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 // QR codes only — the expo-camera equivalent of the old
 // `barCodeTypes: [BarCodeScanner.Constants.BarCodeType.qr]`.
 const QR_BARCODE_SETTINGS = { barcodeTypes: ['qr'] as BarcodeType[] };
 
 export const INVALID_QR_MESSAGE = 'This QR code is not a valid GreenPay wallet address. Try again.';
+export const INVALID_MANUAL_MESSAGE =
+  'Enter a GreenPay donation link, project id or Stellar address.';
 
-export function parseScan(data: string): { wallet: string; projectId?: string } | null {
+/** What a scan (or manual entry) resolved to; at least one field is set. */
+export interface ScanPayload {
+  wallet?: string;
+  projectId?: string;
+}
+
+function takeProjectId(raw: string): string | null {
+  const pathMatch = raw.match(DONATE_PATH_RE);
+  const candidate = pathMatch
+    ? pathMatch[1]
+    : raw.match(PROJECT_ID_QUERY_RE)?.[1];
+  if (!candidate) return null;
+
+  let value = candidate;
+  try {
+    value = decodeURIComponent(candidate);
+  } catch {
+    // Keep the raw value when it is not valid percent-encoding.
+  }
+  return PROJECT_ID_RE.test(value) ? value : null;
+}
+
+export function parseScan(data: string): ScanPayload | null {
   const deepMatch = data.match(DEEP_LINK_RE);
   if (deepMatch) {
     const params = new URLSearchParams(deepMatch[1]);
@@ -47,11 +81,23 @@ export function parseScan(data: string): { wallet: string; projectId?: string } 
     }
     return null;
   }
+
+  const projectId = takeProjectId(data);
+  if (projectId) return { projectId };
+
   const candidate = data.trim();
   if (candidate && isValidStellarAddress(candidate)) {
     return { wallet: candidate };
   }
   return null;
+}
+
+/** Manual entry accepts everything a scan does, plus a bare project id. */
+export function parseManualEntry(raw: string): ScanPayload | null {
+  const value = raw.trim();
+  if (!value) return null;
+
+  return parseScan(value) ?? (PROJECT_ID_RE.test(value) ? { projectId: value } : null);
 }
 
 export default function ScanScreen() {
@@ -101,11 +147,14 @@ export default function ScanScreen() {
     gate.reset();
   };
 
-  const goToDonate = (parsed: { projectId?: string; wallet: string }) => {
+  const goToDonate = (payload: ScanPayload) => {
+    const walletQuery = payload.wallet
+      ? `?wallet=${encodeURIComponent(payload.wallet)}`
+      : '';
     // The donate/[id] screen reads `wallet` from params to pre-fill the destination.
-    const target = parsed.projectId
-      ? `/donate/${parsed.projectId}?wallet=${encodeURIComponent(parsed.wallet)}`
-      : `/donate/scan?wallet=${encodeURIComponent(parsed.wallet)}`;
+    const target = payload.projectId
+      ? `/donate/${payload.projectId}${walletQuery}`
+      : `/donate/scan?wallet=${encodeURIComponent(payload.wallet ?? '')}`;
     router.push(target as `${string}`);
   };
 
@@ -129,9 +178,9 @@ export default function ScanScreen() {
   };
 
   const submitManual = () => {
-    const parsed = parseScan(manualValue);
+    const parsed = parseManualEntry(manualValue);
     if (!parsed) {
-      setError('Not a valid GreenPay wallet address. Try again.');
+      setError(INVALID_MANUAL_MESSAGE);
       return;
     }
     processingRef.current = true;
@@ -202,7 +251,7 @@ export default function ScanScreen() {
           style={[styles.input, { backgroundColor: colors.inputBackground, borderColor: colors.inputBorder, color: colors.text }]}
           value={manualValue}
           onChangeText={setManualValue}
-          placeholder="Stellar address (G…)"
+          placeholder="Stellar address, project id or GreenPay link"
           autoCapitalize="none"
           autoCorrect={false}
           accessibilityLabel="Wallet address input"

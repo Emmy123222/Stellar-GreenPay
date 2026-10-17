@@ -79,7 +79,7 @@ export default function EditProfileForm({ publicKey }: EditProfileFormProps) {
           <input
             id="displayName"
             type="text"
-            className={`w-full px-4 py-2.5 rounded-xl border font-body text-forest-900 focus:outline-none focus:ring-2 transition-all ${
+            className={`w-full px-4 py-2.5 rounded-xl border font-body text-forest-900 focus:outline-none focus:ring-2 transition-all motion-reduce:transition-none ${
               errors.displayName ? "border-red-300 focus:ring-red-100" : "border-forest-200 focus:ring-forest-100"
             }`}
             placeholder="e.g. Alice_Green"
@@ -97,7 +97,7 @@ export default function EditProfileForm({ publicKey }: EditProfileFormProps) {
           <textarea
             id="bio"
             rows={3}
-            className="w-full px-4 py-2.5 rounded-xl border border-forest-200 font-body text-forest-900 focus:outline-none focus:ring-2 focus:ring-forest-100 transition-all resize-none"
+            className="w-full px-4 py-2.5 rounded-xl border border-forest-200 font-body text-forest-900 focus:outline-none focus:ring-2 focus:ring-forest-100 transition-all motion-reduce:transition-none resize-none"
             placeholder="Tell us why you support climate projects..."
             value={bio}
             onChange={(e) => setBio(e.target.value)}
@@ -109,7 +109,7 @@ export default function EditProfileForm({ publicKey }: EditProfileFormProps) {
         </div>
 
         {message && (
-          <div className={`p-4 rounded-xl flex items-center gap-3 animate-fade-in ${
+          <div className={`p-4 rounded-xl flex items-center gap-3 animate-fade-in motion-reduce:animate-none ${
             message.type === "success" ? "bg-emerald-50 text-emerald-700 border border-emerald-100" : "bg-red-50 text-red-700 border border-red-100"
           }`}>
             <span className="text-xl">{message.type === "success" ? "✅" : "⚠️"}</span>
@@ -120,13 +120,13 @@ export default function EditProfileForm({ publicKey }: EditProfileFormProps) {
         <button
           type="submit"
           disabled={isSaving}
-          className={`w-full btn-primary py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${
+          className={`w-full btn-primary py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all motion-reduce:transition-none ${
             isSaving ? "opacity-70 cursor-not-allowed scale-[0.98]" : "hover:scale-[1.01]"
           }`}
         >
           {isSaving ? (
             <>
-              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin motion-reduce:animate-none" />
               Saving Profile...
             </>
           ) : (

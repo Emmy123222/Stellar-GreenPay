@@ -28,7 +28,7 @@ const ProjectMap = dynamic(
     loading: () => (
       <div className="flex h-full w-full items-center justify-center bg-forest-50">
         <div className="flex flex-col items-center gap-3 text-forest-600">
-          <span className="text-3xl animate-spin">🌍</span>
+          <span className="text-3xl animate-spin motion-reduce:animate-none">🌍</span>
           <span className="text-sm font-body">Loading map…</span>
         </div>
       </div>
@@ -80,7 +80,7 @@ export default function MapPage({ projects, fetchedAt }: MapPageProps) {
           <div className="flex items-center gap-2">
             {/* Project count badge */}
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-forest-100 text-forest-700 text-xs font-body font-semibold border border-forest-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-forest-500 animate-pulse" aria-hidden="true" />
+              <span className="w-1.5 h-1.5 rounded-full bg-forest-500 animate-pulse motion-reduce:animate-none" aria-hidden="true" />
               {activeCount} {t("map.activeProjects")}
             </span>
 

@@ -20,7 +20,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
   return (
     <div className="relative group">
       <Link href={`/projects/${project.id}`}>
-        <div className="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden">
+        <div className="card-hover group animate-fade-in motion-reduce:animate-none flex flex-col h-full relative overflow-hidden">
           {project.imageUrl ? (
             <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
               <ProjectImage
@@ -134,7 +134,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           e.stopPropagation();
           toggleWishlist(project.id);
         }}
-        className={`absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
+        className={`absolute top-4 right-4 p-2.5 rounded-xl border transition-all motion-reduce:transition-none duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
           ${
             isWishlisted
               ? "bg-red-50 text-red-500 border-red-200 opacity-100"
@@ -143,7 +143,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
         aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
       >
         <svg
-          className={`w-5 h-5 transition-all duration-300 ${isWishlisted ? "fill-current" : "fill-none"}`}
+          className={`w-5 h-5 transition-all motion-reduce:transition-none duration-300 ${isWishlisted ? "fill-current" : "fill-none"}`}
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
@@ -161,7 +161,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
 
 export function ProjectCardSkeleton() {
   return (
-    <div className="card animate-pulse flex flex-col h-full border border-[rgba(34,114,57,0.06)] shadow-none pointer-events-none">
+    <div className="card animate-pulse motion-reduce:animate-none flex flex-col h-full border border-[rgba(34,114,57,0.06)] shadow-none pointer-events-none">
       {/* Category icon + badges skeleton */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">

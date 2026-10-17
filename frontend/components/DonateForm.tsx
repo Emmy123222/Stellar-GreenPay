@@ -398,7 +398,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 
   if (step === "success") {
     return (
-      <div className="card text-center animate-slide-up">
+      <div className="card text-center animate-slide-up motion-reduce:animate-none">
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
         <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
@@ -424,7 +424,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
     );
   }
   return (
-    <div className="card animate-fade-in">
+    <div className="card animate-fade-in motion-reduce:animate-none">
       <h3 className="font-display text-lg font-semibold text-forest-900 mb-1">Make a Donation</h3>
           <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-5 font-body">100% goes directly to the project wallet.</p>
 
@@ -434,11 +434,11 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <label className="label">Currency</label>
           <div className="flex gap-2">
             <button onClick={() => setCurrency("XLM")} disabled={isProcessing}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "XLM" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all motion-reduce:transition-none font-body ${currency === "XLM" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
               XLM
             </button>
             <button onClick={() => setCurrency("USDC")} disabled={isProcessing}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all font-body ${currency === "USDC" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
+              className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all motion-reduce:transition-none font-body ${currency === "USDC" ? "bg-forest-500 text-white" : "bg-white"} ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`}>
               USDC
             </button>
           </div>
@@ -449,7 +449,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
           <div className="flex flex-wrap gap-2 mb-3">
             {(currency === "XLM" ? PRESETS_XLM : PRESETS_USDC).map((p) => (
               <button key={p} onClick={() => setAmount(p)} disabled={isProcessing}
-                className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all font-body ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium border transition-all motion-reduce:transition-none font-body ${
                   amount === p
                     ? "bg-forest-500 text-white border-forest-500"
                     : "bg-forest-50 text-forest-700 border-forest-200 hover:border-forest-400"
@@ -613,13 +613,13 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         )}
 
         {(step === "building" || step === "signing") && (
-          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse font-body">
+          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse motion-reduce:animate-none font-body">
             Signing with Freighter… Please confirm in your Freighter wallet.
           </p>
         )}
 
         {(step === "submitting" || step === "recording") && (
-          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse font-body">
+          <p className="text-center text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] animate-pulse motion-reduce:animate-none font-body">
             Submitting to Stellar network…
           </p>
         )}
@@ -630,7 +630,7 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
 
 function Spinner() {
   return (
-    <svg role="status" aria-label="Loading" className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+    <svg role="status" aria-label="Loading" className="animate-spin motion-reduce:animate-none w-4 h-4" viewBox="0 0 24 24" fill="none">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
     </svg>

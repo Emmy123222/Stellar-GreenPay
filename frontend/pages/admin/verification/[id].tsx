@@ -233,7 +233,7 @@ export default function AdminVerificationDetail({
 
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-pulse space-y-4">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-pulse motion-reduce:animate-none space-y-4">
         {[1, 2, 3, 4].map((i) => (
           <div key={i} className="h-5 bg-forest-100 rounded" />
         ))}
@@ -259,7 +259,7 @@ export default function AdminVerificationDetail({
   // ── Main render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
 
       {/* Breadcrumb */}
       <nav className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] font-body mb-6">
@@ -388,7 +388,7 @@ export default function AdminVerificationDetail({
 
           if (documents === null) {
             return (
-              <div className="animate-fade-in">
+              <div className="animate-fade-in motion-reduce:animate-none">
                 <p className="text-sm text-[var(--text-tertiary)] font-body mb-3">
                   {docCount} supporting document{docCount === 1 ? "" : "s"} attached to this
                   submission.
@@ -586,7 +586,7 @@ export default function AdminVerificationDetail({
 
           {/* Feedback messages */}
           {actionState === "success" && (
-            <p className="mt-3 text-sm text-emerald-700 font-body animate-fade-in">
+            <p className="mt-3 text-sm text-emerald-700 font-body animate-fade-in motion-reduce:animate-none">
               ✓ Status updated successfully.
             </p>
           )}

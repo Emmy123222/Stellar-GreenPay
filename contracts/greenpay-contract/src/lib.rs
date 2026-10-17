@@ -17,11 +17,11 @@ mod fuzz_tests;
  *   6. Community governance: badge holders vote to verify new projects
  *
  * Build:
- *   cargo build --target wasm32-unknown-unknown --release
+ *   cargo build --target wasm32v1-none --release
  *
  * Deploy:
  *   stellar contract deploy \
- *     --wasm target/wasm32-unknown-unknown/release/greenpay_contract.wasm \
+ *     --wasm target/wasm32v1-none/release/greenpay_contract.wasm \
  *     --source alice --network testnet
  */
 use soroban_sdk::{

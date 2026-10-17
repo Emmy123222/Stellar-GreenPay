@@ -45,7 +45,7 @@ export default function ThemeToggle() {
       {/* Sun icon — visible when active theme is dark (i.e. press to bring light) */}
       <svg
         className={clsx(
-          "w-5 h-5 transition-opacity",
+          "w-5 h-5 transition-opacity motion-reduce:transition-none",
           isDark ? "opacity-0" : "opacity-100",
         )}
         viewBox="0 0 24 24"
@@ -65,7 +65,7 @@ export default function ThemeToggle() {
       {/* Moon icon — visible when active theme is light (i.e. press to bring dark) */}
       <svg
         className={clsx(
-          "w-5 h-5 transition-opacity",
+          "w-5 h-5 transition-opacity motion-reduce:transition-none",
           isDark ? "opacity-100" : "opacity-0",
         )}
         viewBox="0 0 24 24"

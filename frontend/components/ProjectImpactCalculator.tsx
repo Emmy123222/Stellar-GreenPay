@@ -37,7 +37,7 @@ export default function ProjectImpactCalculator({
           <button
             key={p}
             onClick={() => onAmountChange(p)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all motion-reduce:transition-none ${
               calcAmount === p
                 ? "bg-forest-600 text-white border-forest-600 shadow-sm"
                 : "bg-white text-forest-700 border-forest-200 hover:border-forest-400"
@@ -60,7 +60,7 @@ export default function ProjectImpactCalculator({
       </div>
 
       {calcAmountNum > 0 && (
-        <div className="p-3 bg-white rounded-lg border border-forest-100 shadow-sm animate-fade-in">
+        <div className="p-3 bg-white rounded-lg border border-forest-100 shadow-sm animate-fade-in motion-reduce:animate-none">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-lg">♻️</span>
             <span className="font-semibold text-forest-800 text-sm font-body">

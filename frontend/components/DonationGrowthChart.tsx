@@ -63,7 +63,7 @@ export default function DonationGrowthChart({ projectId, data: initialData }: Do
         role="status"
         aria-busy="true"
         aria-label="Loading donation growth chart"
-        className="h-full w-full animate-pulse rounded-xl bg-forest-100/60 dark:bg-forest-900/30"
+        className="h-full w-full animate-pulse motion-reduce:animate-none rounded-xl bg-forest-100/60 dark:bg-forest-900/30"
       />
     );
   }

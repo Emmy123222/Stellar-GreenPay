@@ -1,5 +1,6 @@
 {
   "nav": {
+    "skipToContent": "Passer au contenu principal",
     "home": "Accueil",
     "projects": "Projets",
     "jobs": "Emplois",
@@ -130,6 +131,7 @@
     "expires": "Expire"
   },
   "common": {
+    "skipToContent": "Passer au contenu principal",
     "loading": "Chargement…",
     "error": "Erreur",
     "cancel": "Annuler",

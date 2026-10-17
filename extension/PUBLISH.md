@@ -92,9 +92,39 @@ Both the Chrome Web Store and Firefox Add-ons require a **working privacy policy
 - Clear privacy policy linked in manifest — see repo-root [`../PRIVACY.md`](../PRIVACY.md) (referenced by `privacy_policy_url`); verify it is checked in the pre-upload checklist above
 - No data collection beyond user donations
 
-## Firefox Add-ons (Future)
+## Firefox Add-ons
 
-For Firefox support, use `manifest.firefox.json` and submit to:
+`manifest.firefox.json` is the Firefox variant of the manifest. It parses as
+strict JSON and passes the same isolated-manifest `web-ext lint` check that CI
+runs (`npx web-ext lint --source-dir <tmp> --self-hosted`). It intentionally
+differs from `manifest.json` only in:
+
+- `browser_specific_settings.gecko` (add-on ID and `strict_min_version`)
+- `background.scripts: ["dist-firefox/background.js"]` instead of Chrome's
+  `background.service_worker` + `"type": "module"` (Firefox does not support
+  service workers for extension backgrounds)
+- content script paths under `dist-firefox/` instead of `dist/`
+
+To package for Firefox, build the bundles into `dist-firefox/` (e.g. run
+webpack with its output directory set to `dist-firefox`, or copy the `dist/`
+output there), place `manifest.firefox.json` as `manifest.json` in the packaged
+directory, then run `npx web-ext lint --source-dir <pkg>` followed by
+`npx web-ext build --source-dir <pkg>` and submit the resulting zip to
+https://addons.mozilla.org/
+
+Known remaining `web-ext lint` output for this manifest (documented, not
+blocking):
+
+- Warning `MISSING_DATA_COLLECTION_PERMISSIONS` — AMO will require
+  `browser_specific_settings.gecko.data_collection_permissions` for new
+  versions; add it before the first store submission.
+- When linting the manifest alone in a temp directory (as CI does), errors
+  `MANIFEST_BACKGROUND_FILE_NOT_FOUND`,
+  `MANIFEST_CONTENT_SCRIPT_FILE_NOT_FOUND`, and `MANIFEST_ICON_NOT_FOUND` are
+  expected because `dist-firefox/` and `icons/` are not copied into the temp
+  directory; they disappear when linting the packaged build.
+
+Submit to:
 https://addons.mozilla.org/
 
 Similar process, but additional developer verification required.

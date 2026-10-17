@@ -86,7 +86,7 @@ export default function FreelancerProfilePage() {
         />
       </Head>
 
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
         <nav className="mb-6 text-sm font-body">
           <Link href="/jobs" className="text-forest-600 hover:underline">
             Jobs

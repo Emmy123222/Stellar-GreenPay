@@ -68,7 +68,13 @@
 
         <div class="settings-field">
           <label class="settings-label" for="new-allowlist-item">Allowed Sites (Allowlist)</label>
-          <p class="settings-hint">Websites where the GreenPay donation widget is enabled.</p>
+          <p class="settings-hint">
+            Websites where the GreenPay donation widget is enabled. Patterns are
+            normalized on add: the host is lower-cased, a trailing slash becomes
+            a wildcard path (Example.com/ → example.com/*), and a path ending in
+            / matches everything beneath it (example.com/donate/ →
+            example.com/donate/*).
+          </p>
           <div class="allowlist-input-group">
             <input
               type="text"

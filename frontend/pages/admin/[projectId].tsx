@@ -417,7 +417,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10 animate-fade-in motion-reduce:animate-none">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <p className="text-xs tracking-[0.22em] uppercase text-[var(--text-tertiary)] dark:text-forest-300 font-body">Project Admin</p>
@@ -466,7 +466,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
           <h2 className="font-display text-xl font-bold text-forest-900">Donation Growth</h2>
           <button
             onClick={downloadCsv}
-            className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all"
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all motion-reduce:transition-none"
           >
             Download donor report CSV
           </button>
@@ -522,7 +522,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                     </div>
                     <div className="w-full bg-forest-100 h-1.5 rounded-full overflow-hidden">
                       <div 
-                        className={`h-full transition-all duration-1000 ${m.reachedAt ? 'bg-emerald-500' : reached ? 'bg-amber-400' : 'bg-forest-300'}`}
+                        className={`h-full transition-all motion-reduce:transition-none duration-1000 ${m.reachedAt ? 'bg-emerald-500' : reached ? 'bg-amber-400' : 'bg-forest-300'}`}
                         style={{ width: `${Math.min(100, (parseFloat(project.raisedXLM) / (parseFloat(project.goalXLM) * m.percentage / 100)) * 100)}%` }}
                       />
                     </div>
@@ -679,7 +679,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             <button
               onClick={handleReject}
               disabled={approvalState === "loading" || !rejectionReason.trim() || project.status === "rejected"}
-              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-3 rounded-xl transition-all motion-reduce:transition-none duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {approvalState === "loading" ? "Processing…" : "Reject"}
             </button>
@@ -873,7 +873,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                   <button
                     key={c}
                     onClick={() => setWidgetAccent(c)}
-                    className={`w-7 h-7 rounded-full border-2 transition-all ${widgetAccent === c ? "border-forest-900 scale-110" : "border-transparent"}`}
+                    className={`w-7 h-7 rounded-full border-2 transition-all motion-reduce:transition-none ${widgetAccent === c ? "border-forest-900 scale-110" : "border-transparent"}`}
                     style={{ backgroundColor: c }}
                     aria-label={`Select colour ${c}`}
                   />
@@ -914,7 +914,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
                   <button
                     key={c}
                     onClick={() => setWidgetCurrency(c)}
-                    className={`px-5 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                    className={`px-5 py-2 rounded-xl text-sm font-semibold border transition-all motion-reduce:transition-none ${
                       widgetCurrency === c
                         ? "bg-forest-600 text-white border-forest-600"
                         : "bg-white text-[var(--text-secondary)] border-forest-200 hover:bg-forest-50"
@@ -947,7 +947,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             />
             <button
               onClick={copyEmbed}
-              className={`btn-primary w-full text-sm py-2.5 transition-all ${
+              className={`btn-primary w-full text-sm py-2.5 transition-all motion-reduce:transition-none ${
                 copied ? "bg-emerald-600 hover:bg-emerald-700" : ""
               }`}
             >
@@ -997,7 +997,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
               />
               <button
                 onClick={generateSecret}
-                className="px-4 py-2 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all whitespace-nowrap"
+                className="px-4 py-2 rounded-xl text-sm font-semibold border border-forest-200 bg-forest-50 hover:bg-forest-100 transition-all motion-reduce:transition-none whitespace-nowrap"
               >
                 Generate
               </button>
@@ -1014,7 +1014,7 @@ export default function ProjectAdmin({ publicKey, onConnect }: AdminProps) {
             <button
               onClick={sendTestWebhook}
               disabled={testState === "testing" || !webhookUrl.trim()}
-              className="flex-1 bg-forest-100 hover:bg-forest-200 text-forest-900 font-semibold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 bg-forest-100 hover:bg-forest-200 text-forest-900 font-semibold px-6 py-3 rounded-xl transition-all motion-reduce:transition-none duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {testState === "testing" ? "Sending…" : "Send Test Event"}
             </button>
