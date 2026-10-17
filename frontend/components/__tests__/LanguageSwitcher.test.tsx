@@ -37,13 +37,16 @@ describe("LanguageSwitcher", () => {
     expect(select).toHaveTextContent(/English/);
     expect(select).toHaveTextContent(/Español/);
     expect(select).toHaveTextContent(/Français/);
+    expect(select).toHaveTextContent(/العربية/);
+    expect(select.querySelector('option[value="es"]')).toHaveAttribute("lang", "es");
+    expect(select).not.toHaveTextContent(/[🇺🇸🇪🇸🇫🇷🇸🇦]/u);
   });
 
   it("saves the picked locale under the namespaced key", () => {
     renderSwitcher();
-    fireEvent.change(screen.getByLabelText("Language"), { target: { value: "fr" } });
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "fr" } });
 
-    expect(screen.getByLabelText("Language")).toHaveValue("fr");
+    expect(screen.getByRole("combobox", { name: "Langue" })).toHaveValue("fr");
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("fr");
     expect(document.documentElement.lang).toBe("fr");
   });
@@ -54,8 +57,8 @@ describe("LanguageSwitcher", () => {
     renderSwitcher();
 
     // Remount to prove the control reads the preference, not its default.
-    fireEvent.change(screen.getByLabelText("Language"), { target: { value: "es" } });
-    expect(screen.getByLabelText("Language")).toHaveValue("es");
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "es" } });
+    expect(screen.getByRole("combobox", { name: "Idioma" })).toHaveValue("es");
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe("es");
   });
 
@@ -72,6 +75,6 @@ describe("LanguageSwitcher", () => {
 
     renderSwitcher();
 
-    expect(screen.getByLabelText("Language")).toHaveValue("fr");
+    expect(screen.getByRole("combobox", { name: "Langue" })).toHaveValue("fr");
   });
 });

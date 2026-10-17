@@ -13,6 +13,7 @@ describe("statsRefreshQueue", () => {
   let metrics;
   let statsRefreshQueue;
   let mockBoss;
+  let logger;
 
   beforeEach(() => {
     jest.resetModules();
@@ -44,10 +45,12 @@ describe("statsRefreshQueue", () => {
         inc: jest.fn(),
       },
     }));
+    jest.doMock("../logger", () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }));
 
     pool = require("../db/pool");
     sentry = require("./sentry").Sentry;
     metrics = require("./metrics");
+    logger = require("../logger");
     statsRefreshQueue = require("./statsRefreshQueue");
   });
 
@@ -120,14 +123,12 @@ describe("statsRefreshQueue", () => {
 
     test("catches database insertion error without crashing", async () => {
       pool.query.mockRejectedValueOnce(new Error("insert failure"));
-      const spyConsole = jest.spyOn(console, "error").mockImplementation(() => {});
 
       await expect(
         statsRefreshQueue.moveToDeadLetter({ id: "job-error" })
       ).resolves.not.toThrow();
 
-      expect(spyConsole).toHaveBeenCalled();
-      spyConsole.mockRestore();
+      expect(logger.error).toHaveBeenCalled();
     });
   });
 

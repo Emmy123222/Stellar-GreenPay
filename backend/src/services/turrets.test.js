@@ -24,6 +24,12 @@ jest.mock("../middleware/auth", () => ({
   adminKeyRequired: (req, res, next) => next(),
 }));
 
+const mockServerInstance = {
+  _url: "https://horizon-testnet.stellar.org",
+  loadAccount: jest.fn(),
+  submitTransaction: jest.fn(),
+};
+
 jest.mock("@stellar/stellar-sdk", () => {
   const Keypair = {
     fromSecret: jest.fn((secret) => ({
@@ -50,11 +56,10 @@ jest.mock("@stellar/stellar-sdk", () => {
   }
 
   return {
-    Server: jest.fn().mockImplementation((url) => ({
-      _url: url,
-      loadAccount: jest.fn(),
-      submitTransaction: jest.fn(),
-    })),
+    Server: jest.fn().mockImplementation((url) => {
+      mockServerInstance._url = url;
+      return mockServerInstance;
+    }),
     TransactionBuilder: jest.fn().mockImplementation(() => makeBuilder()),
     Networks: { PUBLIC: "Public Global Stellar Network ; September 2015", TESTNET: "Test SDF Network ; September 2015" },
     Operation: {
@@ -131,10 +136,8 @@ afterAll((done) => {
 // Helper to reach into the module's lazily-cached Horizon Server stub, which
 // is the one used by submitMatchingPayment and generatePreSignedTransactions.
 function horizonStub() {
-  // The SDK Server constructor was called at least once by the module under
-  // test; the last call is the cached instance.
-  const instances = sdk.Server.mock.results.map((r) => r.value).filter(Boolean);
-  return instances[instances.length - 1];
+  const instances = sdk.Server.mock.results ? sdk.Server.mock.results.map((r) => r.value).filter(Boolean) : [];
+  return instances[instances.length - 1] || mockServerInstance;
 }
 
 // ═════════════════════════════════════════════════════════════════════════

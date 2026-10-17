@@ -73,13 +73,13 @@ function mockChallengeRow({ nonce, consumed = false, expiresAt } = {}) {
       return Promise.resolve({
         rows: matches
           ? [
-              {
-                nonce,
-                wallet_address: WALLET_ADDRESS,
-                expires_at: expiresAt || new Date(Date.now() + 5 * 60 * 1000),
-                consumed_at: consumed ? new Date().toISOString() : null,
-              },
-            ]
+            {
+              nonce,
+              wallet_address: WALLET_ADDRESS,
+              expires_at: expiresAt || new Date(Date.now() + 5 * 60 * 1000),
+              consumed_at: consumed ? new Date().toISOString() : null,
+            },
+          ]
           : [],
       });
     }

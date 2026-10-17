@@ -19,6 +19,7 @@ const express = require("express");
 const router = express.Router();
 const { v4: uuidv4 } = require("uuid");
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { mapProjectUpdateRow, mapProjectRow } = require("../services/store");
 const { sendUpdateNotifications } = require("../services/email");
 const { sendUpdatePushNotifications } = require("../services/push");
@@ -199,17 +200,17 @@ router.post("/", adminTokenRequired, async (req, res, next) => {
         return sendUpdateNotifications({ project, update, emails });
       })
       .catch((err) => {
-        console.error(
-          "[updates] Failed to send email notifications:",
-          err.message,
+        logger.error(
+          { event: "updates_email_notification_failed", projectId, err: err.message },
+          "[updates] Failed to send email notifications",
         );
       });
 
     // Send push notifications (non-blocking)
     sendUpdatePushNotifications({ project, update }).catch((err) => {
-      console.error(
-        "[updates] Failed to send push notifications:",
-        err.message,
+      logger.error(
+        { event: "updates_push_notification_failed", projectId, err: err.message },
+        "[updates] Failed to send push notifications",
       );
     });
 

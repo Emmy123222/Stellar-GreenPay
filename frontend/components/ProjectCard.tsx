@@ -3,7 +3,7 @@
  */
 import Link from "next/link";
 import type { ClimateProject } from "@/utils/types";
-import { formatDate, formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
+import { formatXLM, formatUSDEquivalent, formatCO2, progressPercent, statusClass, statusLabel, CATEGORY_ICONS } from "@/utils/format";
 import CircularProgress from "./CircularProgress";
 import { useXlmPrice } from "@/lib/priceContext";
 import { useWishlist } from "@/hooks/useWishlist";
@@ -25,7 +25,8 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
             <div className="mb-4 overflow-hidden rounded-2xl border border-forest-100 bg-forest-50">
               <ProjectImage
                 src={project.imageUrl}
-                alt={project.name}
+                name={project.name}
+                decorative
                 className="h-40 w-full object-cover"
               />
             </div>
@@ -38,10 +39,10 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 {CATEGORY_ICONS[project.category] || "🌿"}
               </div>
               <div>
-                <p className="text-xs text-[var(--text-secondary)] dark:text-[#8aaa8a] font-body">
+                <p className="text-xs text-forest-600 dark:text-forest-400 font-body">
                   {project.category}
                 </p>
-                <p className="text-xs text-[var(--text-tertiary)] dark:text-forest-300 font-body">
+                <p className="text-forest-400 dark:text-forest-300 font-body">
                   {project.location}
                 </p>
               </div>
@@ -74,17 +75,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           <h3 className="font-display font-semibold text-forest-900 text-base leading-snug mb-2 group-hover:text-forest-600 transition-colors line-clamp-2">
             {project.name}
           </h3>
-
-          {/* Active 2x Donation Match Badge */}
-          {project.activeMatch && Number(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM) > 0 && new Date(project.activeMatch.expiresAt).getTime() > Date.now() ? (
-            <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold tracking-tight shadow-sm">
-              <span>
-                🔥 Matched: {project.activeMatch.multiplier || 2}x up to {formatXLM(project.activeMatch.remainingXLM ?? project.activeMatch.capXLM)} until {formatDate(project.activeMatch.expiresAt, undefined, { month: "short", day: "numeric" })}
-              </span>
-            </div>
-          ) : null}
-
-          <p className="text-[#5a7a5a] dark:text-[#8aaa8a] text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
+          <p className="text-forest-600 dark:text-forest-400 text-sm leading-relaxed line-clamp-3 mb-4 flex-1 font-body">
             {project.description}
           </p>
 
@@ -101,11 +92,8 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
                 goalXLM={project.goalXLM}
                 className="w-full"
               />
-              <div className="flex items-center justify-between text-[11px] text-[var(--text-tertiary)] font-body">
+              <div className="flex items-center justify-between text-[11px] text-forest-400 font-body">
                 <span>{formatXLM(project.raisedXLM)} raised</span>
-                {Number(project.raisedUSDC || 0) > 0 && (
-                  <span className="block text-xs text-[var(--text-secondary)]">+ {formatAmount(Number(project.raisedUSDC))} USDC</span>
-                )}
                 <span>{project.goalXLM && Number(project.goalXLM) > 0 ? `Goal: ${formatXLM(project.goalXLM)}` : "No goal set"}</span>
               </div>
             </div>
@@ -114,7 +102,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
 
 	        {/* Stats row */}
 	        <div className="flex items-center justify-between pt-3 border-t border-[rgba(34,114,57,0.07)]">
-	          <div className="flex items-center gap-3 text-xs text-[var(--text-secondary)] font-body">
+	          <div className="flex items-center gap-3 text-xs text-forest-600 font-body">
 	            <span>👥 {project.donorCount} donors</span>
             <span className="flex items-center gap-1">
               ♻️ {formatCO2(project.co2OffsetKg)}
@@ -150,7 +138,7 @@ export default function ProjectCard({ project }: { project: ClimateProject }) {
           ${
             isWishlisted
               ? "bg-red-50 text-red-500 border-red-200 opacity-100"
-              : "bg-white/90 text-[var(--text-tertiary)] dark:text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
+              : "bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
           }`}
         aria-label={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
       >

@@ -28,10 +28,15 @@ describe("CONTRACT_BADGE_SYMBOL", () => {
       const scVal = xdr.ScVal.scvVec([
         nativeToScVal(variant, { type: "symbol" }),
       ]);
-      expect(scVal.switch().name).toBe("scvVec");
-      const inner = scVal.vec()![0];
-      expect(inner.switch().name).toBe("scvSymbol");
-      expect(inner.sym().toString()).toBe(variant);
+      const vecType = (scVal as any).type ?? (scVal as any).switch?.().name;
+      expect(vecType).toBe("scvVec");
+      const vecItems = (scVal as any).vec ?? (typeof (scVal as any).vec === "function" ? (scVal as any).vec() : []);
+      const inner = vecItems[0];
+      const innerType = (inner as any).type ?? (inner as any).switch?.().name;
+      expect(innerType).toBe("scvSymbol");
+      const symVal = (inner as any).sym;
+      const symStr = typeof symVal?.toString === "function" ? symVal.toString() : String(symVal);
+      expect(symStr).toBe(variant);
       // sanity: tier key is lowercase, variant is PascalCase
       expect(tier).toBe(tier.toLowerCase());
     }

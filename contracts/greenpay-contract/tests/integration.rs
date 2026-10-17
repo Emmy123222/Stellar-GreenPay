@@ -213,7 +213,7 @@ fn test_donate_usdc_cross_contract_oracle_records_correct_xlm_equivalent() {
     env.ledger().set_timestamp(1_000);
 
     let usdc_amount: i128 = 10 * 1_000_000; // 10 USDC
-    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &0u32);
+    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &0u32);
 
     // 10 USDC × 8 XLM/USDC = 80 XLM = 80 × STROOP stroops.
     let expected_xlm: i128 = 80 * STROOP;
@@ -248,8 +248,8 @@ fn test_donate_usdc_oracle_invoked_per_transaction() {
 
     let usdc_amount: i128 = 5 * 1_000_000; // 5 USDC per call
 
-    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &1u32);
-    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &2u32);
+    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &1u32);
+    client.donate_usdc(&usdc_token, &donor, &project_id, &usdc_amount, &8i128, &2u32);
 
     // 2 × 5 USDC × 8 XLM/USDC = 80 XLM total.
     assert_eq!(client.get_global_total(), 80 * STROOP);
@@ -276,6 +276,7 @@ fn test_donate_usdc_stale_oracle_price_is_rejected() {
         &donor,
         &project_id,
         &(10 * 1_000_000i128),
+        &8i128,
         &0u32,
     );
     assert!(result.is_err(), "stale oracle prices must be rejected");
@@ -296,6 +297,7 @@ fn test_donate_usdc_oracle_price_at_exact_max_age_boundary_is_accepted() {
         &donor,
         &project_id,
         &(10 * 1_000_000i128),
+        &8i128,
         &0u32,
     );
 
@@ -317,6 +319,7 @@ fn test_donate_usdc_fresh_oracle_price_is_accepted() {
         &donor,
         &project_id,
         &(10 * 1_000_000i128),
+        &8i128,
         &0u32,
     );
 

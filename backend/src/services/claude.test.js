@@ -1,10 +1,9 @@
-"use strict";
+const mockCreate = jest.fn();
+const mockAnthropic = jest.fn().mockImplementation((opts) => ({ messages: { create: mockCreate }, _opts: opts }));
+mockAnthropic.__create = mockCreate;
 
 jest.mock("@anthropic-ai/sdk", () => {
-  const create = jest.fn();
-  const Anthropic = jest.fn().mockImplementation((opts) => ({ messages: { create }, _opts: opts }));
-  Anthropic.__create = create;
-  return Anthropic;
+  return mockAnthropic;
 });
 
 const Anthropic = require("@anthropic-ai/sdk");

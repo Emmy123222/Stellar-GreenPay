@@ -1,5 +1,5 @@
 import React from "react";
-import { formatXLM } from "@/utils/format";
+import { formatAmount } from "@/utils/format";
 
 interface ProjectProgressBarProps {
   raisedXLM: string | number;
@@ -27,11 +27,11 @@ export default function ProjectProgressBar({
         </span>
         {hasGoal ? (
           <span className="text-xs text-[var(--text-secondary)] dark:text-[#a8c2a8]">
-            {formatXLM(parsedRaised)} / {formatXLM(parsedGoal)}
+            {formatAmount(parsedRaised, 0)} / {formatAmount(parsedGoal, 0)} XLM
           </span>
         ) : (
           <span className="text-xs text-[var(--text-tertiary)] dark:text-[#a8c2a8]">
-            Raised: {formatXLM(parsedRaised)}
+            Raised: {formatAmount(parsedRaised, 0)} XLM
           </span>
         )}
       </div>

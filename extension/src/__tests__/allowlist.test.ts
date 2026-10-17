@@ -7,6 +7,10 @@ import {
   isValidAllowlistPattern,
 } from '../allowlist';
 
+// Jest resolves JSON requires and hands them to `require`; the extension build
+// never compiles test files, so the browser tsconfig does not need node types.
+declare const require: (id: string) => unknown;
+
 describe('Allowlist Logic', () => {
   describe('isValidAllowlistPattern', () => {
     it('accepts supported host, scheme, wildcard, and path forms', () => {
@@ -27,12 +31,32 @@ describe('Allowlist Logic', () => {
     it('contains GreenPay internal domains only and no external pages', () => {
       expect(DEFAULT_ALLOWLIST.length).toBeGreaterThan(0);
       DEFAULT_ALLOWLIST.forEach((pattern) => {
-        expect(pattern).toMatch(/greenpay\.(io|app)/);
+        expect(pattern).toMatch(/greenpay\.app/);
       });
       // Verify common external domains are not in default
       expect(DEFAULT_ALLOWLIST).not.toContain('google.com/*');
       expect(DEFAULT_ALLOWLIST).not.toContain('github.com/*');
       expect(DEFAULT_ALLOWLIST).not.toContain('wikipedia.org/*');
+    });
+
+    it('agrees with the host permissions of both manifests', () => {
+      // A default that no host permission covers can never inject: the settings
+      // UI would advertise a site the widget cannot run on.
+      for (const manifestFile of ['manifest.json', 'manifest.firefox.json']) {
+        const manifest = require(`../../${manifestFile}`) as { host_permissions: string[] };
+        // `<all_urls>` is deliberately ignored: it is slated for removal (#1645),
+        // so every default must be backed by an explicit host permission.
+        const explicitHosts = manifest.host_permissions
+          .filter((permission) => permission !== '<all_urls>')
+          .map((permission) => new URL(permission.replace('*', 'wildcard')).host)
+          .filter((host) => !host.startsWith('api.') && !host.startsWith('horizon'));
+
+        for (const pattern of DEFAULT_ALLOWLIST) {
+          const host = new URL(pattern.replace('*', 'wildcard')).host;
+          expect(explicitHosts).toContain(host);
+          expect(host).not.toContain('greenpay.io');
+        }
+      }
     });
   });
 
@@ -51,9 +75,8 @@ describe('Allowlist Logic', () => {
     });
 
     it('returns true for default allowlisted domains', () => {
-      expect(isUrlAllowed('https://greenpay.io/', DEFAULT_ALLOWLIST)).toBe(true);
-      expect(isUrlAllowed('https://greenpay.io/projects/abc-123', DEFAULT_ALLOWLIST)).toBe(true);
-      expect(isUrlAllowed('https://greenpay.app/explore', DEFAULT_ALLOWLIST)).toBe(true);
+      expect(isUrlAllowed('https://greenpay.app/', DEFAULT_ALLOWLIST)).toBe(true);
+      expect(isUrlAllowed('https://greenpay.app/projects/abc-123', DEFAULT_ALLOWLIST)).toBe(true);
       expect(isUrlAllowed('https://staging.greenpay.app/test', DEFAULT_ALLOWLIST)).toBe(true);
     });
 
@@ -66,11 +89,11 @@ describe('Allowlist Logic', () => {
     });
 
     it('handles wildcard subdomains when configured', () => {
-      const allowlistWithWildcard = ['*.greenpay.io/*', '*.user-partner.com/*'];
+      const allowlistWithWildcard = ['*.greenpay.app/*', '*.user-partner.com/*'];
 
-      expect(isUrlAllowed('https://sub.greenpay.io/page', allowlistWithWildcard)).toBe(true);
-      expect(isUrlAllowed('https://nested.sub.greenpay.io/page', allowlistWithWildcard)).toBe(true);
-      expect(isUrlAllowed('https://greenpay.io/page', allowlistWithWildcard)).toBe(true);
+      expect(isUrlAllowed('https://sub.greenpay.app/page', allowlistWithWildcard)).toBe(true);
+      expect(isUrlAllowed('https://nested.sub.greenpay.app/page', allowlistWithWildcard)).toBe(true);
+      expect(isUrlAllowed('https://greenpay.app/page', allowlistWithWildcard)).toBe(true);
       expect(isUrlAllowed('https://partner.user-partner.com/donate', allowlistWithWildcard)).toBe(true);
       expect(isUrlAllowed('https://notpartner.com', allowlistWithWildcard)).toBe(false);
     });

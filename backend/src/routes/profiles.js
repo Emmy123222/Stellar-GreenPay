@@ -5,6 +5,7 @@
 const express = require("express");
 const router  = express.Router();
 const pool = require("../db/pool");
+const logger = require("../logger");
 const { mapProfileRow } = require("../services/store");
 const { createRateLimiter } = require("../middleware/rateLimiter");
 const { sanitizedStringField, validateBody } = require("../middleware/validation");
@@ -96,7 +97,7 @@ router.post("/", profilePostLimiter, validateBody(profileSchema), async (req, re
 
     if (normalizedAvatarUrl) {
       enqueueAvatarProcessing(publicKey, normalizedAvatarUrl).catch((err) => {
-        console.error("[profiles] Failed to enqueue avatar processing:", err.message);
+        logger.error({ event: "avatar_processing_enqueue_failed", err: err.message }, "[profiles] Failed to enqueue avatar processing: " + err.message);
       });
     }
 
@@ -154,7 +155,7 @@ router.patch("/:publicKey", profilePostLimiter, validateBody(profilePatchSchema)
 
     if (newAvatarUrl) {
       enqueueAvatarProcessing(req.params.publicKey, newAvatarUrl).catch((err) => {
-        console.error("[profiles] Failed to enqueue avatar processing:", err.message);
+        logger.error({ event: "avatar_processing_enqueue_failed", err: err.message }, "[profiles] Failed to enqueue avatar processing: " + err.message);
       });
     }
 

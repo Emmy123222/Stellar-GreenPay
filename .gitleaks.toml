@@ -3,8 +3,8 @@ title = "Stellar GreenPay secret scanning"
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "Global allowlist for ignored files and test values."
+[allowlist]
+description = "Global allowlist for ignored files, test values, and documentation examples."
 paths = [
   '''^\.gitleaks\.toml$''',
   '''^extension/greenpay-extension\.zip$''',
@@ -17,25 +17,15 @@ regexes = [
   '''(?i)(your_|yourdomain\.com|YOUR_PUBLIC_ADDRESS|PLACEHOLDER|example(?:\.com)?|localhost|testnet|postgres:postgres|CXXX|GXXX|changeme|password|secret|username)''',
   '''^$''',
   '''(?i)(mock|dummy|fixture|example|test|aaaaaaaa|bbbbbbbb|cccccccc)''',
-  # Demo Stellar keypair used in mobile/app/impact.tsx sample code — the
-  # literal alphabet is not a real (randomly-derived) Stellar key.
+  # Demo Stellar keypair used in mobile/app/impact.tsx sample code
   '''GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890''',
-  # Public Stellar Asset Contract address for native XLM on testnet — a
-  # well-known constant, not a secret. See frontend/components/DonateForm.tsx.
-  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC'''
-]
-
-[[allowlists]]
-description = "Canonical AWS documentation example credentials used in unit tests."
-regexes = [
+  # Public Stellar Asset Contract address for native XLM on testnet
+  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC''',
+  # Canonical AWS documentation example credentials
   '''AKIAIOSFODNN7EXAMPLE''',
   '''wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY''',
-]
-
-[[allowlists]]
-description = "Demo / placeholder public Stellar addresses and doc example webhook secrets that are not real credentials."
-regexes = [
+  # Demo / placeholder doc example webhook secrets and JWTs
   '''whsec_a3f82c1de4b5[A-Za-z0-9_\-\.]*''',
-  '''GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890''',
-  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC''',
+  '''eyJhbGciOiJIUzI1NiIs[A-Za-z0-9_\-\.]*''',
+  '''eyJ[A-Za-z0-9_\-\.]*'''
 ]

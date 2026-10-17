@@ -15,6 +15,7 @@
  * Icons: Leaflet's built-in SVG divIcon so we avoid broken default-icon paths
  * that occur when Leaflet's image assets are bundled through webpack.
  */
+/// <reference types="leaflet.markercluster" />
 "use client";
 
 import { useEffect, useState } from "react";

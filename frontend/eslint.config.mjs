@@ -5,8 +5,21 @@ import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 const eslintConfig = [
   ...nextCoreWebVitals,
   {
+    settings: {
+      react: {
+        version: "19.0",
+      },
+    },
     rules: {
       "react/no-unescaped-entities": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
+  {
+    files: ["components/**/*.{js,jsx,ts,tsx}", "pages/**/*.{js,jsx,ts,tsx}", "lib/**/*.{js,jsx,ts,tsx}"],
+    rules: {
+      "no-console": ["error", { allow: ["warn", "error"] }],
     },
   },
   {

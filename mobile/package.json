@@ -13,7 +13,7 @@
     "@react-native-community/netinfo": "^12.0.1",
     "@react-navigation/native": "^7.4.1",
     "@react-navigation/native-stack": "^6.9.17",
-    "@stellar/stellar-sdk": "^16.2.0",
+    "@stellar/stellar-sdk": "^17.0.1",
     "axios": "^1.20.0",
     "expo": "~57.0.25",
     "expo-camera": "~15.0.0",
@@ -61,9 +61,9 @@
       "^@react-native-community/netinfo$": "<rootDir>/__mocks__/@react-native-community/netinfo.js",
       "^expo-local-authentication$": "<rootDir>/__mocks__/expo-local-authentication.js",
       "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
-      "^expo-modules-core(.*)$": "<rootDir>/__mocks__/expo-modules-core.js",
+      "^expo-modules-core(.*)$": "<rootDir>//__mocks__/expo-modules-core.js",
       "^react-native-maps$": "<rootDir>/__mocks__/react-native-maps.js",
-      "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>/__mocks__/rn-batched-bridge.js",
+      "^react-native/Libraries/BatchedBridge/NativeModules$": "<rootDir>//__mocks__/rn-batched-bridge.js",
       "^test-renderer$": "<rootDir>/__mocks__/test-renderer.js"
     },
     "setupFiles": [

@@ -147,7 +147,8 @@
     "confirm": "Confirmar",
     "back": "Voltar",
     "next": "Próximo",
-    "close": "Fechar"
+    "close": "Fechar",
+    "language": "Idioma"
   },
   "apply": {
     "pageTitle": "Solicitar Verificação",

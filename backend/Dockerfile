@@ -3,8 +3,6 @@ FROM node:22-alpine AS test
 
 RUN addgroup -S greenpay && adduser -S greenpay -G greenpay
 
-RUN addgroup -S greenpay && adduser -S greenpay -G greenpay
-
 WORKDIR /app
 
 COPY --chown=greenpay:greenpay package*.json ./
@@ -17,15 +15,15 @@ USER greenpay
 CMD ["npm", "test"]
 
 # 1. Builder Stage
-FROM node:26-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # 2. Production Runner Stage
-FROM node:26-alpine AS runner
+FROM node:22-alpine AS runner
 
 RUN addgroup -S greenpay && adduser -S greenpay -G greenpay
 

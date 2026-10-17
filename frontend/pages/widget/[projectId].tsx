@@ -59,7 +59,7 @@ export default function WidgetPage() {
   const secondaryClass = theme === "dark" ? "text-gray-400" : "text-gray-600";
   const borderClass = theme === "dark" ? "border-gray-700" : "border-gray-200";
 
-  const formatAmount = (xlm: string) => {
+  const displayAmount = (xlm: string) => {
     if (currency === "USDC") {
       const val = parseFloat(xlm);
       return `$${formatAmount(val)}`;
@@ -85,10 +85,10 @@ export default function WidgetPage() {
           <div>
             <div className="flex justify-between items-baseline mb-2">
               <p className={`text-sm font-semibold ${textClass}`}>
-                {formatAmount(project.raisedXLM)} raised
+                {displayAmount(project.raisedXLM)} raised
               </p>
               <p className={`text-xs ${secondaryClass}`}>
-                {pct}% of {formatAmount(project.goalXLM)}
+                {pct}% of {displayAmount(project.goalXLM)}
               </p>
             </div>
             <div className="h-2 rounded-full bg-gray-200 overflow-hidden">

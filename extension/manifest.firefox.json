@@ -3,9 +3,49 @@
   "name": "GreenPay Companion",
   "version": "1.0.0",
   "description": "Support your favorite sustainable projects with a single click.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "dark_icons": {
+    "16": "icons/icon-dark-16.png",
+    "32": "icons/icon-dark-32.png",
+    "48": "icons/icon-dark-48.png",
+    "128": "icons/icon-dark-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GreenPay Companion"
+    "default_title": "GreenPay Companion",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    },
+    "theme_icons": [
+      {
+        "light": "icons/icon-16.png",
+        "dark": "icons/icon-dark-16.png",
+        "size": 16
+      },
+      {
+        "light": "icons/icon-32.png",
+        "dark": "icons/icon-dark-32.png",
+        "size": 32
+      },
+      {
+        "light": "icons/icon-48.png",
+        "dark": "icons/icon-dark-48.png",
+        "size": 48
+      },
+      {
+        "light": "icons/icon-128.png",
+        "dark": "icons/icon-dark-128.png",
+        "size": 128
+      }
+    ]
   },
   "permissions": [
     "storage",
@@ -21,7 +61,9 @@
     "<all_urls>",
     "https://api.stellar-greenpay.app/*",
     "https://horizon.stellar.org/*",
-    "https://horizon-testnet.stellar.org/*"
+    "https://horizon-testnet.stellar.org/*",
+    "https://greenpay.app/*",
+    "https://staging.greenpay.app/*"
   ],
   "content_scripts": [
     {

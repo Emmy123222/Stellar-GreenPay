@@ -96,7 +96,7 @@ export default function DonationTicker({
           <div key={item.id} className="flex items-center gap-2 text-sm">
             <span className="text-forest-300">{shortenAddress(item.from)}</span>
             <span className="font-mono text-emerald-400">
-              +{item.asset === "XLM" ? formatXLM(item.amount) : `${formatAmount(parseFloat(item.amount))} ${item.asset}`}
+              +{item.asset === "XLM" ? formatXLM(item.amount) : `${formatAmount(parseFloat(item.amount), 2, undefined, 2)} ${item.asset}`}
             </span>
             <span className="text-forest-500 text-xs">{item.time}</span>
           </div>

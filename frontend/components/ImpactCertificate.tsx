@@ -30,7 +30,10 @@ export default function ImpactCertificate(props: {
     projectsSupported,
   } = props;
 
-  const issuedDate = useMemo(() => formatDate(new Date().toISOString()), []);
+  const issuedDate = useMemo(
+    () => formatDate(new Date().toISOString(), undefined, { month: "short", day: "numeric", year: "numeric" }),
+    [],
+  );
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 

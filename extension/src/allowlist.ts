@@ -1,6 +1,13 @@
+/**
+ * Sites the widget is enabled on out of the box.
+ *
+ * These are the canonical product hosts. Every entry here must also be covered
+ * by an explicit host permission in `manifest.json` and `manifest.firefox.json`,
+ * otherwise the content script can never inject on it — a default the settings
+ * UI would offer but that can never work. `allowlist.test.ts` enforces that
+ * agreement, so add new defaults to both manifests as well.
+ */
 export const DEFAULT_ALLOWLIST: string[] = [
-  'greenpay.io/*',
-  'https://greenpay.io/*',
   'https://greenpay.app/*',
   'https://staging.greenpay.app/*',
 ];
@@ -52,9 +59,9 @@ export function isValidAllowlistPattern(pattern: string): boolean {
  * Matches a single pattern against a parsed URL.
  *
  * Supported pattern formats:
- * - Scheme + Host + Path: `https://greenpay.io/*`, `http://*.example.com/donate/*`, `*://*.greenpay.app/*`
- * - Host + Path: `greenpay.io/*`, `*.example.com/*`, `example.com/checkout`
- * - Host only: `greenpay.io`, `example.com`, `*.example.com`
+ * - Scheme + Host + Path: `https://greenpay.app/*`, `http://*.example.com/donate/*`, `*://*.greenpay.app/*`
+ * - Host + Path: `greenpay.app/*`, `*.example.com/*`, `example.com/checkout`
+ * - Host only: `greenpay.app`, `example.com`, `*.example.com`
  */
 export function matchesPattern(pattern: string, url: URL): boolean {
   if (!pattern || typeof pattern !== 'string') return false;

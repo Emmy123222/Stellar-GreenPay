@@ -65,6 +65,14 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
   const [trustlineMissing, setTrustlineMissing] = useState<boolean>(false);
   const [donorBadge, setDonorBadge] = useState<string | null>(null);
 
+  const {
+    currency: fiatCurrency,
+    setCurrency: setFiatCurrency,
+    formatFiatEquivalent,
+    rates,
+    supportedCurrencies,
+  } = usePriceContext();
+
   // DEX conversion (#1660): when the project prefers an asset other than the
   // one the donor pays with, quote a path payment and show it before signing.
   const [slippageBps, setSlippageBps] = useState<number>(DEFAULT_SLIPPAGE_BPS);
@@ -394,7 +402,11 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
         <div className="text-4xl mb-3">🌱</div>
         <h3 className="font-display text-xl font-semibold text-forest-900 mb-2">Transaction confirmed!</h3>
         <p className="text-[var(--text-secondary)] dark:text-[#8aaa8a] text-sm mb-4 font-body">
-          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${formatAmount(amountNum)} ${currency}`}</span> has been sent to <span className="font-semibold">{project.name}</span>{deliveredLabel && <> and arrived as <span className="font-semibold text-forest-700">{deliveredLabel}</span></>}. Thank you!
+          Your donation of <span className="font-semibold text-forest-700">{currency === "XLM" ? formatXLM(amountNum) : `${formatAmount(amountNum)} ${currency}`}</span>
+          {fiatEquivalent && (
+            <span data-testid="receipt-fiat-equivalent" className="text-forest-600 dark:text-forest-400 font-medium"> ({fiatEquivalent})</span>
+          )}
+          {" "}has been sent to <span className="font-semibold">{project.name}</span>{deliveredLabel && <> and arrived as <span className="font-semibold text-forest-700">{deliveredLabel}</span></>}. Thank you!
         </p>
         {donorBadge && (
           <div className="mb-4 p-3 bg-forest-50 border border-forest-200 rounded-xl">
@@ -452,6 +464,30 @@ export default function DonateForm({ project, publicKey, initialAmount, initialM
             id={`donation-amount-${currency}`}
             className={`input-field ${isProcessing ? "opacity-50 cursor-not-allowed" : ""}`} />
           {amount && !amountValid && <p className="mt-1 text-xs text-red-500">Minimum donation is 1 {currency}</p>}
+
+          <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-secondary)] dark:text-forest-300 font-body" data-testid="fiat-preview">
+            <span className="font-medium text-forest-700 dark:text-forest-300" data-testid="fiat-equivalent">
+              {fiatEquivalent ? fiatEquivalent : `Approx. in ${fiatCurrency}`}
+            </span>
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="fiat-currency-select" className="text-[11px] text-[var(--text-secondary)]">
+                Fiat:
+              </label>
+              <select
+                id="fiat-currency-select"
+                aria-label="Select fiat currency"
+                value={fiatCurrency}
+                onChange={(e) => setFiatCurrency(e.target.value as any)}
+                className="bg-forest-50 dark:bg-forest-900 border border-forest-200 dark:border-forest-700 rounded px-1.5 py-0.5 text-xs text-forest-700 dark:text-forest-200 focus:outline-none focus:ring-1 focus:ring-forest-500 cursor-pointer"
+              >
+                {supportedCurrencies.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           
           {/* CO₂ Impact Calculator */}
           {currency === "XLM" && amount && !isNaN(amountNum) && co2Impact > 0 && (

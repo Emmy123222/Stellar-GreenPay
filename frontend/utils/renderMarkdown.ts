@@ -32,7 +32,7 @@ export function renderMarkdown(text: string): string {
     .replace(/\*(.+?)\*/g, "<em>$1</em>");
 
   return escaped
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, href: string) => {
+    .replace(/\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g, (_match, label: string, href: string) => {
       if (!isAllowedLink(href)) return label;
       return `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-forest-600 hover:underline">${label}</a>`;
     })

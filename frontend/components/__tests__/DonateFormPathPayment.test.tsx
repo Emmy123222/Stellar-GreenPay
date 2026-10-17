@@ -46,6 +46,7 @@ const baseProject: ClimateProject = {
   verified: true,
   tags: [],
   createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
 } as ClimateProject;
 
 const usdcProject = { ...baseProject, preferredAsset: { code: "USDC", issuer: ISSUER } };

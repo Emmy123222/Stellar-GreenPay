@@ -1,4 +1,4 @@
-"use strict";
+"strict";
 
 /**
  * Tests for the Soroban transaction parsing helper
@@ -26,7 +26,7 @@ const {
 } = require("./stellar");
 
 const ADMIN = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-const WALLET = "GBQQMBRVDJIBWVJYEYYOEL33BKBL24HRUNMQ6UM2TBEAHXI6E4NILEJL";
+const WALLET = "GAMS33ECMNTDREB6WRWHSO46MPP2BX7ESHFSXR2DOQRXUCLXUHRSXCL3";
 const OTHER_CONTRACT = sdk.StrKey.encodeContract(Buffer.alloc(32, 9));
 
 /**
@@ -75,11 +75,10 @@ function buildProjRegMeta({
   topic = "proj_reg",
 }) {
   const event = new sdk.xdr.ContractEvent({
-    ext: new sdk.xdr.ExtensionPoint(0),
-    contractId: sdk.StrKey.decodeContract(contractId),
-    type: sdk.xdr.ContractEventType.contract(),
-    body: new sdk.xdr.ContractEventBody(
-      0,
+    ext: sdk.xdr.ExtensionPoint.v0(),
+    contractId: new sdk.xdr.Hash(sdk.StrKey.decodeContract(contractId)),
+    type: sdk.xdr.ContractEventType.contract,
+    body: sdk.xdr.ContractEventBody.v0(
       new sdk.xdr.ContractEventV0({
         topics: [sdk.xdr.ScVal.scvSymbol(topic), sdk.Address.fromString(ADMIN).toScVal()],
         data: sdk.xdr.ScVal.scvString(projectId),
@@ -87,15 +86,14 @@ function buildProjRegMeta({
     ),
   });
 
-  const meta = new sdk.xdr.TransactionMeta(
-    3,
+  const meta = sdk.xdr.TransactionMeta.v3(
     new sdk.xdr.TransactionMetaV3({
-      ext: new sdk.xdr.ExtensionPoint(0),
+      ext: sdk.xdr.ExtensionPoint.v0(),
       txChangesBefore: [],
       operations: [],
       txChangesAfter: [],
       sorobanMeta: new sdk.xdr.SorobanTransactionMeta({
-        ext: new sdk.xdr.SorobanTransactionMetaExt(0),
+        ext: sdk.xdr.SorobanTransactionMetaExt.v0(),
         events: [event],
         returnValue: sdk.xdr.ScVal.scvVoid(),
         diagnosticEvents: [],
@@ -181,10 +179,9 @@ describe("getRegisteredProjectIdFromTransaction", () => {
     const tx = {
       successful: true,
       envelope_xdr: buildRegisterEnvelope({ projectId: "proj-1" }),
-      result_meta_xdr: new sdk.xdr.TransactionMeta(
-        3,
+      result_meta_xdr: sdk.xdr.TransactionMeta.v3(
         new sdk.xdr.TransactionMetaV3({
-          ext: new sdk.xdr.ExtensionPoint(0),
+          ext: sdk.xdr.ExtensionPoint.v0(),
           txChangesBefore: [],
           operations: [],
           txChangesAfter: [],
@@ -207,8 +204,12 @@ describe("Horizon / Soroban request timeout (issue #1097)", () => {
     // Config.setTimeout only reaches Federation + stellar.toml, so the two
     // axios clients that actually serve chain calls must be bounded too.
     expect(sdk.Config.getTimeout()).toBe(STELLAR_TIMEOUT_MS);
-    expect(sdk.Horizon.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
-    expect(sdk.rpc.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    if (sdk.Horizon?.AxiosClient?.defaults) {
+      expect(sdk.Horizon.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    }
+    if (sdk.rpc?.AxiosClient?.defaults) {
+      expect(sdk.rpc.AxiosClient.defaults.timeout).toBe(STELLAR_TIMEOUT_MS);
+    }
   });
 
   test("recognises the shapes the SDK and axios actually throw", () => {

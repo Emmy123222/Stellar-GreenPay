@@ -34,8 +34,6 @@ jest.mock("../services/stellar", () => ({
   getOnChainProject: jest.fn().mockResolvedValue(null),
   getProjectDonationEvents: jest.fn(),
   server: { getTransaction: jest.fn().mockResolvedValue({ successful: true }) },
-  getProjectDonationEvents: jest.fn(),
-  getOnChainProject: jest.fn().mockResolvedValue(null),
   CONTRACT_ID: null,
   NETWORK_PASSPHRASE: "Test",
 }));
@@ -248,6 +246,7 @@ describe("GET /api/projects/:id", () => {
     pool.query.mockResolvedValueOnce({ rows: [] }); // recent reviews
     pool.query.mockResolvedValueOnce({ rows: [{ count: 0 }] }); // subscribers
     pool.query.mockResolvedValueOnce({ rows: [] }); // milestones
+    pool.query.mockResolvedValueOnce({ rows: [] }); // funding deadline
     pool.query.mockResolvedValueOnce({ rows: [{ follow_count: 3, is_following: false }] }); // follow stats
 
     const res = await request(app).get("/api/projects/proj-1").expect(200);

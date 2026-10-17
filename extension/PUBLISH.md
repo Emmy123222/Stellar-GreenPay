@@ -43,6 +43,21 @@ Key Features:
 
 Built on Stellar for transparent, fast, and low-cost donations."
 
+### Privacy Policy (required for store review)
+
+Both the Chrome Web Store and Firefox Add-ons require a **working privacy policy** for extensions that request `storage`, `activeTab`, `scripting`, and host access.
+
+- `manifest.json` sets `privacy_policy_url` to the repo-root policy:
+  `https://github.com/Emmy123222/Stellar-GreenPay/blob/main/PRIVACY.md`
+- That path is backed by [`../PRIVACY.md`](../PRIVACY.md), which documents exactly what the extension stores locally (allowlist, `pendingDonations`, etc.), what it sends to the GreenPay backend / Stellar Horizon, and the "no browsing history" guarantee.
+
+**Pre-upload checklist:**
+
+- [ ] [`../PRIVACY.md`](../PRIVACY.md) exists at the repo root and matches the data actually touched in `extension/src/`
+- [ ] `privacy_policy_url` in `manifest.json` (and `manifest.firefox.json`) points to the live PRIVACY.md URL and returns **200** (not 404)
+- [ ] Privacy policy text describes local storage, backend/Horizon calls, and the absence of browsing-history collection
+- [ ] Store console "Privacy" section: single-purpose statement + no remote-data-sale attestation matches PRIVACY.md
+
 ## Submission Steps
 
 1. **Create Developer Account**
@@ -74,7 +89,7 @@ Built on Stellar for transparent, fast, and low-cost donations."
 
 - No malware or unsafe behavior
 - No content scripts that modify user experience without consent (our tooltip is an opt-in donation feature)
-- Clear privacy policy linked in manifest
+- Clear privacy policy linked in manifest — see repo-root [`../PRIVACY.md`](../PRIVACY.md) (referenced by `privacy_policy_url`); verify it is checked in the pre-upload checklist above
 - No data collection beyond user donations
 
 ## Firefox Add-ons (Future)

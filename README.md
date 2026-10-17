@@ -51,16 +51,40 @@ Watch a complete walkthrough of the donation flow on **Stellar Testnet**:
 
 ```
 stellar-greenpay/
-├── frontend/          # Next.js + React + Tailwind CSS
+├── frontend/          # Next.js + React + Tailwind web app
 ├── backend/           # Node.js + Express API
 ├── contracts/         # Stellar Soroban smart contracts (Rust)
-├── docs/              # Architecture & API documentation
+├── mobile/            # Expo / React Native mobile app
+├── extension/         # MV3 browser extension (GreenPay Companion)
+├── docs/              # Architecture, API & operations documentation
 ├── scripts/           # Deployment & utility scripts
+├── helm/              # Helm chart for Kubernetes deployments
+├── k8s/               # Kubernetes manifests (Kustomize)
+├── monitoring/        # Grafana dashboards & Prometheus config
+├── load-tests/        # k6 load / performance test scripts
+├── infra/             # Infrastructure configs (nginx reverse proxy)
+├── pages/             # Standalone page routes (public impact certificate)
 ├── .github/           # CI/CD workflows & issue templates
 ├── CONTRIBUTING.md
 ├── ROADMAP.md
 └── LICENSE
 ```
+
+### Directory guide
+
+- [`frontend/`](frontend) — Next.js + React + Tailwind web app.
+- [`backend/`](backend) — Node.js + Express API ([`docs/api.md`](docs/api.md)).
+- [`contracts/`](contracts) — Stellar Soroban smart contracts (Rust).
+- [`mobile/`](mobile) — Expo / React Native mobile app — see [`mobile/README.md`](mobile/README.md).
+- [`extension/`](extension) — MV3 browser extension (GreenPay Companion) — store guide in [`extension/PUBLISH.md`](extension/PUBLISH.md).
+- [`docs/`](docs) — architecture, API & operations documentation.
+- [`scripts/`](scripts) — deployment & utility scripts.
+- [`helm/`](helm) · [`k8s/`](k8s) — deploy manifests — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+- [`monitoring/`](monitoring) — Grafana/Prometheus — see [`docs/observability.md`](docs/observability.md).
+- [`load-tests/`](load-tests) — k6 performance tests — see [`docs/performance.md`](docs/performance.md).
+- [`infra/`](infra) — nginx reverse-proxy configuration.
+- [`pages/`](pages) — standalone page routes (public impact certificate).
+- [`.github/`](.github) — CI/CD workflows & issue templates.
 
 ---
 
@@ -183,13 +207,3 @@ See [ROADMAP.md](ROADMAP.md) for planned features.
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE)
-Optimized transaction settlement logic to accelerate payment verification workflows.
-​Updated Stellar SDK configurations and network payload definitions.
-​Enhanced inline comments across payment processing routines for clarity.
-​Corrected outdated environment configurations and build settings.
-​Clarified testing procedures for validating green payment ledger transactions.
-​Standardized error reporting response structures across API handlers.
-​Strengthened security protocols regarding account key management and signatures.
-​Resolved formatting inconsistencies across main project documentation.
-​Added step-by-step instructions for deploying service components to production.
-​Updated system status logging and network health monitoring utilities.....

@@ -2,11 +2,9 @@
  * utils/format.ts
  * Formatting helpers and small UI-friendly utilities shared across the frontend.
  */
-import dayjs from "dayjs";
-import relativeTime from "dayjs/plugin/relativeTime";
+import { formatDistanceToNow } from "date-fns";
 import { getFormattingLocale } from "@/lib/formatLocale";
 import type { ProjectStatus, BadgeTier } from "./types";
-dayjs.extend(relativeTime);
 
 function toDate(value: string | Date): Date {
   if (value instanceof Date) return value;
@@ -21,8 +19,9 @@ export function formatAmount(
   amount: number,
   decimals = 2,
   locale?: string,
+  minDecimals?: number,
 ): string {
-  const minimumFractionDigits = Math.min(2, decimals);
+  const minimumFractionDigits = minDecimals !== undefined ? minDecimals : (amount % 1 === 0 ? 0 : Math.min(2, decimals));
   return new Intl.NumberFormat(locale ?? getFormattingLocale(), {
     minimumFractionDigits,
     maximumFractionDigits: decimals,
@@ -45,7 +44,7 @@ export function formatAmount(
 export function formatXLM(amount: string | number, decimals = 2, locale?: string): string {
   const n = typeof amount === "string" ? parseFloat(amount) : amount;
   if (isNaN(n)) return "0 XLM";
-  return `${formatAmount(n, decimals, locale)} XLM`;
+  return `${formatAmount(n, decimals, locale, n % 1 === 0 ? 0 : decimals)} XLM`;
 }
 
 /**
@@ -80,7 +79,7 @@ export function formatFiatEquivalent(
   const n = typeof xlmAmount === "string" ? parseFloat(xlmAmount) : xlmAmount;
   if (isNaN(n) || !isFinite(n)) return null;
   const fiatVal = n * rate;
-  const formatted = formatAmount(fiatVal, 2, locale);
+  const formatted = formatAmount(fiatVal, 2, locale, 2);
 
   switch (currency) {
     case "EUR":
@@ -122,9 +121,9 @@ export function formatUSDEquivalent(
  * formatCO2(1200) // "1.2k kg CO₂"
  */
 export function formatCO2(kg: number): string {
-  if (kg >= 1_000_000) return `${formatAmount(kg / 1_000_000, 1)}M kg CO₂`;
-  if (kg >= 1_000) return `${formatAmount(kg / 1_000, 1)}k kg CO₂`;
-  return `${formatAmount(kg, 0)} kg CO₂`;
+  if (kg >= 1_000_000) return `${formatAmount(kg / 1_000_000, 1, undefined, 1)}M kg CO₂`;
+  if (kg >= 1_000) return `${formatAmount(kg / 1_000, 1, undefined, 1)}k kg CO₂`;
+  return `${formatAmount(kg, 0, undefined, 0)} kg CO₂`;
 }
 
 /**
@@ -154,7 +153,7 @@ export function progressPercent(raised: string, goal: string): number {
  * @throws {Error} Never throws.
  */
 export function timeAgo(d: string): string {
-  try { return dayjs(d).fromNow(); }
+  try { return formatDistanceToNow(new Date(d), { addSuffix: true }); }
   catch { return d; }
 }
 

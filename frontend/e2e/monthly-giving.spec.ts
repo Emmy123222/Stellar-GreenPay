@@ -7,7 +7,7 @@ const PROJECT = {
   description: "Planting native trees in the Brazilian Amazon.",
   category: "Reforestation",
   location: "Brazil",
-  walletAddress: "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN",
+  walletAddress: "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ",
   goalXLM: "50000",
   raisedXLM: "18420",
   donorCount: 147,
@@ -45,6 +45,7 @@ test.describe("monthly giving setup", () => {
     await page.getByLabel("Amount (XLM)").fill("40");
     await page.getByRole("button", { name: "6 months" }).click();
     await page.getByRole("button", { name: "Save Monthly Giving" }).click();
+    await page.getByRole("button", { name: "Continue" }).click();
 
     await expect(page.getByRole("heading", { name: "Monthly Giving Setup" })).not.toBeVisible();
     const subscriptions = await page.evaluate(() =>

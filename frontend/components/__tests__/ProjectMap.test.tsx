@@ -3,6 +3,17 @@ import { render } from "@testing-library/react";
 import ProjectMap from "../ProjectMap";
 import type { ClimateProject } from "@/utils/types";
 
+// Mock next/router for jsdom
+jest.mock("next/router", () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    pathname: "/",
+    route: "/",
+    asPath: "/",
+    query: {},
+  }),
+}));
+
 // Mock react-leaflet components for jsdom
 jest.mock("react-leaflet", () => {
   return {

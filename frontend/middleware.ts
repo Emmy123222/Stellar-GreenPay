@@ -22,12 +22,52 @@ const UNPKG = 'https://unpkg.com'
 // GitHub avatars rendered on the /contributors timeline
 const GITHUB_AVATARS = 'https://avatars.githubusercontent.com'
 
-function buildCsp(nonce: string, isWidget: boolean): string {
+/**
+ * Origin of the backend API configured for this deployment.
+ *
+ * Same-origin deployments are already covered by `'self'`; a deployment that
+ * points NEXT_PUBLIC_API_URL at another host (e.g. api.stellar-greenpay.app)
+ * needs that origin in connect-src or every fetch is blocked by the enforced CSP.
+ */
+export function apiOrigins(): string[] {
+  const raw = process.env.NEXT_PUBLIC_API_URL
+  if (!raw) return []
+  try {
+    const { protocol, origin } = new URL(raw)
+    return protocol === 'http:' || protocol === 'https:' ? [origin] : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Where browser-side Sentry events are sent.
+ *
+ * sentry.client.config.js posts straight to the DSN host (no tunnel route is
+ * configured), so that host must be in connect-src or the enforced CSP silently
+ * drops every client event. Self-hosted DSNs are covered by parsing the DSN;
+ * without one, allow Sentry's SaaS ingest domains.
+ */
+export function sentryOrigins(): string[] {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN
+  if (dsn) {
+    try {
+      return [new URL(dsn).origin]
+    } catch {
+      // Malformed DSN: fall through to the SaaS allowlist.
+    }
+  }
+  return ['https://*.ingest.sentry.io', 'https://*.ingest.us.sentry.io']
+}
+
+export function buildCsp(nonce: string, isWidget: boolean): string {
   // API origin: 'self' covers same-origin deploys; localhost:4000 covers local dev.
   const connectSrc = [
     "'self'",
     STELLAR_CONNECT,
     'https://api.coingecko.com',
+    ...apiOrigins(),
+    ...sentryOrigins(),
     ...(process.env.NODE_ENV === 'development' ? ['http://localhost:4000'] : []),
   ].join(' ')
 

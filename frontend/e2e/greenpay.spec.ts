@@ -10,8 +10,8 @@ import { test, expect, type Page, type Route } from "@playwright/test";
 // ── Mock data ───────────────────────────────────────────────────────────────
 
 const MOCK_PROJECT_ID = "8d9ac19b-52eb-42f7-80d9-19a88ba59e43";
-const MOCK_WALLET     = "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN";
-const MOCK_PUBLIC_KEY = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGLEWZE5BGYTG2XTGQBC3VP";
+const MOCK_WALLET     = "GAF6M5I5RPS3KTU2RV77D6H47BLPNN52AUG22KSD4VEWLDBM7VDU6ZRZ";
+const MOCK_PUBLIC_KEY = "GCXIWOIPXZ7TIMU4FQRNLOFXRY7HGHOE2OIJMJVCW7EK5QKPIOATGKNJ";
 
 const MOCK_PROJECT = {
   id: MOCK_PROJECT_ID,
@@ -192,8 +192,8 @@ test.describe("Project detail & DonateForm", () => {
     await form.getByPlaceholder(/or enter custom amount/i).fill("10");
     await form.getByRole("button", { name: /Donate/ }).click();
 
-    await expect(form.getByRole("heading", { name: /transaction confirmed/i })).toBeVisible();
-    await expect(form).toContainText("10 XLM");
+    await expect(page.getByRole("heading", { name: /transaction confirmed/i })).toBeVisible();
+    await expect(page.locator(".card", { hasText: /transaction confirmed/i })).toContainText("10 XLM");
   });
 
   test.describe("with a connected (mocked) Freighter wallet", () => {

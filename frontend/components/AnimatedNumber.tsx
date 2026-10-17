@@ -76,8 +76,8 @@ export default function AnimatedNumber({
 
   const formatDisplay = (val: number) => {
     if (formatter) return formatter(val);
-    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces);
-    return formatAmount(Math.floor(val), 0);
+    if (decimalPlaces > 0) return formatAmount(val, decimalPlaces, undefined, decimalPlaces);
+    return formatAmount(Math.floor(val), 0, undefined, 0);
   };
 
   const effectiveValue = duration <= 0 ? numericValue : displayValue;

@@ -19,7 +19,7 @@ const customJestConfig = {
 module.exports = async () => {
   const config = await createJestConfig(customJestConfig)();
   config.transformIgnorePatterns = [
-    "/node_modules/(?!(@noble|@stellar|uint8array-extras)/)",
+    "[\\\\/]node_modules[\\\\/](?!(@noble|@stellar|@exodus|uint8array-extras|@react-leaflet|react-leaflet)[\\\\/])",
   ];
   return config;
 };

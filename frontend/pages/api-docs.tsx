@@ -354,11 +354,9 @@ export default function ApiDocsPage() {
         <div className="bg-forest-50 p-4 rounded border border-forest-200 overflow-auto">
           <pre className="text-sm text-forest-700 font-mono">{`// Fetch all projects
 const response = await fetch('http://localhost:4000/api/v1/projects');
-const { success, data } = await response.json();
+const { success } = await response.json();
 
-if (success) {
-  console.log('Projects:', data);
-}
+if (!success) throw new Error('Project request failed');
 
 // Record a donation
 const donationRes = await fetch('http://localhost:4000/api/v1/donations', {
@@ -373,7 +371,7 @@ const donationRes = await fetch('http://localhost:4000/api/v1/donations', {
 });
 
 const donation = await donationRes.json();
-console.log('Donation recorded:', donation.data);`}</pre>
+if (!donationRes.ok) throw new Error('Donation request failed');`}</pre>
         </div>
       </div>
     </div>
