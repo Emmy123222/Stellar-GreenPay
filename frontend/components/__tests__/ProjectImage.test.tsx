@@ -33,7 +33,7 @@ describe("ProjectImage alt-text rules", () => {
     expect(img).toHaveAttribute("alt", "Custom alt text");
   });
 
-  it("decorative images get alt="" and role=presentation", () => {
+  it('decorative images get alt="" and role=presentation', () => {
     render(
       <ProjectImage
         src="https://example.com/img.png"
@@ -46,7 +46,7 @@ describe("ProjectImage alt-text rules", () => {
     expect(img).toHaveAttribute("role", "presentation");
   });
 
-  it("placeholder gets alt="" and role=presentation when no src", () => {
+  it('placeholder gets alt="" and role=presentation when no src', () => {
     render(<ProjectImage {...baseProps} />);
     const img = screen.getByRole("img");
     expect(img).toHaveAttribute("src", "/project-placeholder.svg");
