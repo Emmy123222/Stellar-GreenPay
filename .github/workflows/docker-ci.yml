@@ -1,0 +1,133 @@
+name: Docker CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
+      - 'docker-compose.yml'
+      - 'docker-compose.dev.yml'
+      - 'docker-compose.test.yml'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'mobile/package.json'
+      - 'mobile/package-lock.json'
+      - 'extension/package.json'
+      - 'extension/package-lock.json'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/Dockerfile'
+      - 'frontend/Dockerfile'
+      - 'docker-compose.yml'
+      - 'docker-compose.dev.yml'
+      - 'docker-compose.test.yml'
+      - 'backend/package.json'
+      - 'backend/package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'mobile/package.json'
+      - 'mobile/package-lock.json'
+      - 'extension/package.json'
+      - 'extension/package-lock.json'
+
+jobs:
+  compose-config:
+    name: Validate Docker Compose configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate base compose config
+        run: docker compose config -q
+
+      - name: Validate dev compose config
+        run: docker compose -f docker-compose.dev.yml config -q
+
+      - name: Validate test compose config
+        run: docker compose -f docker-compose.test.yml config -q
+
+  build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    needs: compose-config
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend test stage
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          target: test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build backend builder stage
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          target: builder
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build backend runner stage
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/Dockerfile
+          target: runner
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend dev stage
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          target: dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend builder stage
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          target: builder
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend runner stage
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          target: runner
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  hadolint:
+    name: Lint Dockerfiles with hadolint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run hadolint on backend/Dockerfile
+        uses: hadolint/hadolint-action@v3
+        with:
+          dockerfile: backend/Dockerfile
+          config: .hadolint.yaml
+
+      - name: Run hadolint on frontend/Dockerfile
+        uses: hadolint/hadolint-action@v3
+        with:
+          dockerfile: frontend/Dockerfile
+          config: .hadolint.yaml
