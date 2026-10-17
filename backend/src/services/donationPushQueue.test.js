@@ -39,7 +39,7 @@ function makeBoss() {
  * @param {object} bossInstance - pg-boss instance returned by the constructor
  */
 function mockQueueDeps(bossInstance) {
-  jest.doMock("pg-boss", () => jest.fn(() => bossInstance));
+  jest.doMock("pg-boss", () => ({ PgBoss: jest.fn(() => bossInstance) }));
   jest.doMock("../logger", () => ({
     info: jest.fn(),
     warn: jest.fn(),
@@ -63,7 +63,7 @@ describe("donationPushQueue queue lifecycle and enqueue", () => {
     bossInstance = makeBoss();
     mockQueueDeps(bossInstance);
 
-    PgBoss = require("pg-boss");
+    ({ PgBoss } = require("pg-boss"));
     logger = require("../logger");
     Sentry = require("@sentry/node");
     queue = require("./donationPushQueue");

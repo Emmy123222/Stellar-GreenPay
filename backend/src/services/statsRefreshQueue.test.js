@@ -33,7 +33,7 @@ describe("statsRefreshQueue", () => {
       return mockBoss;
     }
 
-    jest.doMock("pg-boss", () => MockPgBoss);
+    jest.doMock("pg-boss", () => ({ PgBoss: MockPgBoss }));
     jest.doMock("../db/pool", () => ({ query: jest.fn() }));
     jest.doMock("./sentry", () => ({
       Sentry: {

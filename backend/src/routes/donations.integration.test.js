@@ -367,6 +367,15 @@ describe("Donation flow integration (testcontainers)", () => {
     );
 
     const donor = makePublicKey("E");
+    // Seed a prior XLM donation. Profile totals are recomputed from the
+    // donations table (processProfileUpdate sums amount_xlm), so the donor's
+    // "existing 200 XLM" must be backed by a real donation row — a bare
+    // profiles row would be overwritten by the recompute after this donation.
+    await testPool.query(
+      `INSERT INTO donations (id, project_id, donor_address, amount_xlm, amount, currency, transaction_hash, created_at)
+       VALUES (gen_random_uuid(), $1, $2, 200, 200, 'XLM', $3, NOW() - INTERVAL '1 hour')`,
+      [projectId, donor, makeTxHash("d")],
+    );
     // Seed profile with existing XLM total
     await testPool.query(
       `INSERT INTO profiles (public_key, total_donated_xlm, projects_supported, badges)

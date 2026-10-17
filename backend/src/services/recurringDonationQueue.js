@@ -14,7 +14,7 @@
  */
 "use strict";
 
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
 // `./push` is required lazily inside runReminderCheck() so that importing this

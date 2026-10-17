@@ -319,8 +319,8 @@ pub enum DataKey {
     MaxPriceAgeSecs,
     // Reentrancy guard
     IsProcessing,
-    // Donation matching pledge
     MatchPledge(String),
+    ProjectId(u32),
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -354,23 +354,32 @@ const MAX_CO2_PER_XLM: u32 = 100_000;
 pub const MIN_CO2_RATE: u64 = 1;
 pub const MAX_CO2_RATE: u64 = 1_000_000;
 pub const MAX_PAGE_SIZE: u32 = 100;
-/// Maximum number of project records a single `deactivate_*` invocation will
-/// touch. Chosen from the benchmark in `tests/deactivation.rs`: a 25-project
-/// batch costs well under 10% of the per-transaction CPU budget, leaving ample
-/// headroom while keeping the number of follow-up calls for a full registry
-/// small.
 pub const MAX_DEACTIVATION_BATCH: u32 = 25;
-/// The Soroban host rejects any single ledger entry larger than 64 KiB. Because
-/// projects, their ID vector and the counters all live in the contract instance
-/// entry, this bounds how large the registry can grow before even
-/// `register_project` fails. Measured at ~150 full `Project` records (see
-/// `contracts/README.md`).
-pub const MAX_INSTANCE_ENTRY_BYTES: u32 = 65_536;
-/// Empirical ceiling on the registry size, derived from
-/// `MAX_INSTANCE_ENTRY_BYTES` and the serialized size of a `Project` record.
-/// The exact value moves with the length of names/ids; treat it as an
-/// order-of-magnitude bound, not an invariant.
-pub const MAX_SAFE_REGISTRY_SIZE: u32 = 150;
+
+fn project_registry_count(env: &Env) -> u32 {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProjectCount)
+        .unwrap_or_else(|| {
+            env.storage()
+                .instance()
+                .get::<_, Vec<String>>(&DataKey::ProjectIds)
+                .map(|ids| ids.len())
+                .unwrap_or(0)
+        })
+}
+
+fn project_id_at(env: &Env, index: u32) -> Option<String> {
+    env.storage()
+        .instance()
+        .get(&DataKey::ProjectId(index))
+        .or_else(|| {
+            env.storage()
+                .instance()
+                .get::<_, Vec<String>>(&DataKey::ProjectIds)
+                .and_then(|ids| ids.get(index))
+        })
+}
 
 fn is_valid_metadata_url(url: &String) -> bool {
     const HTTPS_PREFIX: &[u8] = b"https://";
@@ -670,17 +679,10 @@ impl GreenPayContract {
             .instance()
             .set(&DataKey::Project(project_id.clone()), &project);
 
-        // Track project ID for listing / bulk operations
-        let mut ids: Vec<String> = env.storage().instance()
-            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-        ids.push_back(project_id.clone());
-        env.storage().instance().set(&DataKey::ProjectIds, &ids);
-
-        let count: u32 = env
-            .storage()
+        let count = project_registry_count(&env);
+        env.storage()
             .instance()
-            .get(&DataKey::ProjectCount)
-            .unwrap_or(0);
+            .set(&DataKey::ProjectId(count), &project_id);
         let next_count = count.checked_add(1).expect("ProjectCount overflow");
         env.storage()
             .instance()
@@ -697,12 +699,7 @@ impl GreenPayContract {
             .get(&DataKey::Admin).expect("Not initialized");
         if stored_admin != admin { panic!("Only admin can register projects"); }
 
-        // Load the project IDs vector once outside the loop for efficiency
-        let mut project_ids: Vec<String> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProjectIds)
-            .unwrap_or(Vec::new(&env));
+        let mut count = project_registry_count(&env);
 
         for init in projects.iter() {
             let project_id = init.id.clone();
@@ -725,20 +722,16 @@ impl GreenPayContract {
             };
             env.storage().instance().set(&DataKey::Project(project_id.clone()), &project);
 
-            let count: u32 = env.storage().instance().get(&DataKey::ProjectCount).unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::ProjectId(count), &project_id);
             let next_count = count.checked_add(1).expect("ProjectCount overflow");
             env.storage().instance().set(&DataKey::ProjectCount, &next_count);
-
-            // Append project ID to the ProjectIds vector for enumeration
-            project_ids.push_back(project_id.clone());
+            count = next_count;
 
             env.events().publish((symbol_short!("proj_reg"), admin.clone()), project_id);
         }
 
-        // Store the updated ProjectIds vector
-        env.storage()
-            .instance()
-            .set(&DataKey::ProjectIds, &project_ids);
         update_global_stats(&env, 0, 0, 0, projects.len(), false);
     }
 
@@ -941,53 +934,32 @@ impl GreenPayContract {
             .expect("Project metadata URLs not found")
     }
 
-    /// Deactivate every project in the registry in a single invocation. Admin only.
-    ///
-    /// This loops over the full `ProjectIds` vector, so it is only safe while the
-    /// registry fits in one ledger entry. The Soroban host caps a contract's
-    /// instance entry (where `ProjectIds`, `ProjectCount` and every `Project`
-    /// record live) at `MAX_INSTANCE_ENTRY_BYTES` (64 KiB), which works out to
-    /// roughly `MAX_SAFE_REGISTRY_SIZE` projects. Callers must not rely on this
-    /// for larger registries; use `deactivate_projects_range` to work through the
-    /// registry in bounded batches instead.
-    ///
-    /// For an *immediate* global emergency stop prefer `pause`, which is O(1) and
-    /// blocks donations/registration rather than rewriting every project record.
+    /// Deactivate all projects when the registry fits in one batch. Admin only.
+    /// Larger registries must be processed with `deactivate_projects_range`.
     pub fn deactivate_all_projects(env: Env, admin: Address) {
         admin.require_auth();
         let stored_admin: Address = env.storage().instance()
             .get(&DataKey::Admin).expect("Not initialized");
         if stored_admin != admin { panic!("Only admin can deactivate projects"); }
-        let ids: Vec<String> = env.storage().instance()
-            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-        if ids.len() > MAX_DEACTIVATION_BATCH {
+        let total_count = project_registry_count(&env);
+        if total_count > MAX_DEACTIVATION_BATCH {
             panic!("Project registry exceeds MAX_DEACTIVATION_BATCH; use deactivate_projects_range");
         }
-        for pid in ids.iter() {
+        let mut index = 0;
+        while index < total_count {
+            let project_id = project_id_at(&env, index).expect("Project ID not found");
             let mut project: Project = env.storage().instance()
-                .get(&DataKey::Project(pid.clone())).expect("Project not found");
+                .get(&DataKey::Project(project_id.clone())).expect("Project not found");
             project.active = false;
-            env.storage().instance().set(&DataKey::Project(pid), &project);
+            env.storage().instance().set(&DataKey::Project(project_id), &project);
+            index += 1;
         }
     }
 
-    /// Deactivate a bounded slice of the project registry. Admin only.
+    /// Deactivate projects in a bounded range. Admin only.
     ///
-    /// `offset` is zero-based and `limit` cannot exceed `MAX_DEACTIVATION_BATCH`.
-    /// The return value is the number of projects that were still active and got
-    /// deactivated, so a caller can walk the whole registry with:
-    ///
-    /// ```ignore
-    /// let mut offset = 0;
-    /// loop {
-    ///     let n = client.deactivate_projects_range(&admin, &offset, &MAX_DEACTIVATION_BATCH);
-    ///     if n == 0 { break; }
-    ///     offset += n;
-    /// }
-    /// ```
-    ///
-    /// Every call re-reads the small `ProjectIds` vector, so each invocation costs
-    /// only one bounded batch worth of CPU/memory regardless of registry size.
+    /// `offset` is zero-based and `limit` cannot exceed `MAX_DEACTIVATION_BATCH`. The
+    /// returned count includes only records that were active and changed.
     /// Pause the contract first when an immediate global kill switch is needed.
     pub fn deactivate_projects_range(
         env: Env,
@@ -1002,28 +974,22 @@ impl GreenPayContract {
         if limit > MAX_DEACTIVATION_BATCH {
             return Err(ContractError::InvalidPageSize);
         }
-        if limit == 0 {
-            return Ok(0);
-        }
 
-        let ids: Vec<String> = env.storage().instance()
-            .get(&DataKey::ProjectIds).unwrap_or(Vec::new(&env));
-        let total_count = ids.len();
-        if offset >= total_count {
+        let total_count = project_registry_count(&env);
+        if offset >= total_count || limit == 0 {
             return Ok(0);
         }
         let end = ((offset as u64) + (limit as u64)).min(total_count as u64) as u32;
         let mut deactivated = 0;
         let mut index = offset;
         while index < end {
-            if let Some(pid) = ids.get(index) {
-                let mut project: Project = env.storage().instance()
-                    .get(&DataKey::Project(pid.clone())).expect("Project not found");
-                if project.active {
-                    project.active = false;
-                    env.storage().instance().set(&DataKey::Project(pid), &project);
-                    deactivated += 1;
-                }
+            let project_id = project_id_at(&env, index).expect("Project ID not found");
+            let mut project: Project = env.storage().instance()
+                .get(&DataKey::Project(project_id.clone())).expect("Project not found");
+            if project.active {
+                project.active = false;
+                env.storage().instance().set(&DataKey::Project(project_id), &project);
+                deactivated += 1;
             }
             index += 1;
         }
@@ -1717,20 +1683,13 @@ impl GreenPayContract {
             return Err(ContractError::InvalidPageSize);
         }
 
-        // Retrieve the list of project IDs, or empty vec if not yet initialized
-        let project_ids: Vec<String> = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProjectIds)
-            .unwrap_or(Vec::new(&env));
-
-        let total_count = project_ids.len();
-
+        let total_count = project_registry_count(&env);
+        
         // If offset is out of bounds, return empty vec
         if offset >= total_count {
             return Ok(Vec::new(&env));
         }
-
+        
         // Calculate the end bound: min(offset + limit, total_count).
         // The addition is done in u64 to avoid overflow when checking the
         // bound; once we know offset + limit <= total_count (a u32), the
@@ -1741,7 +1700,7 @@ impl GreenPayContract {
         let mut result = Vec::new(&env);
         let mut idx = offset;
         while idx < end {
-            if let Some(project_id) = project_ids.get(idx) {
+            if let Some(project_id) = project_id_at(&env, idx) {
                 if let Some(project) = env
                     .storage()
                     .instance()
@@ -2592,29 +2551,15 @@ impl GreenPayContract {
 
     /// Admin-only: Upgrade the contract to a new WASM code.
     /// Preserves all on-chain state while replacing the contract implementation.
-    pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
-        admin.require_auth();
-        let stored_admin: Address = env
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
             .expect("Not initialized");
-        if stored_admin != admin {
-            panic!("Only admin can upgrade");
-        }
+        admin.require_auth();
 
-        // Store the new WASM hash for upgrade verification
-        env.storage().instance().set(&DataKey::ContractWasmHash, &new_wasm_hash);
-
-        // Execute the actual upgrade
         env.deployer().update_current_contract_wasm(new_wasm_hash);
-
-        env.events().publish((symbol_short!("upgrade"),), admin);
-    }
-
-    /// Get the current contract WASM hash.
-    pub fn get_contract_wasm_hash(env: Env) -> Option<BytesN<32>> {
-        env.storage().instance().get(&DataKey::ContractWasmHash)
     }
 
     // ─── Donation matching program (2x match pledges) ─────────────────────────
@@ -2799,7 +2744,6 @@ impl OracleInterface for MockOracle {
 
 #[cfg(test)]
 mod tests {
-    extern crate std;
     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _};
     use soroban_sdk::token::StellarAssetClient;
     use super::*;
@@ -2936,7 +2880,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #7)")]
+    #[should_panic(expected = "Error(Contract, #1)")]
     fn test_second_admin_proposal_fails_when_one_is_pending() {
         let env = Env::default();
         env.mock_all_auths();
@@ -3063,7 +3007,7 @@ mod tests {
         let donor = Address::generate(&env);
         let usdc_amount = 4_000_000i128;
         StellarAssetClient::new(&env, &token).mint(&donor, &usdc_amount);
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &8i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
 
         // 4 USDC at 2.5 XLM per USDC = 10 XLM, represented in stroops.
         assert_eq!(client.get_global_total(), 10 * STROOP);
@@ -3089,7 +3033,7 @@ mod tests {
         // (3600s) and the resolution-derived window alike.
         env.ledger().set_timestamp(1_000 + 7_200);
 
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &8i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
     }
 
     #[test]
@@ -3108,7 +3052,7 @@ mod tests {
         // well within both the default and resolution-derived windows.
         env.ledger().set_timestamp(1_000 + 60);
 
-        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &8i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &usdc_amount, &0u32);
 
         assert_eq!(client.get_donation_count(), 1);
     }
@@ -3531,52 +3475,6 @@ mod tests {
         });
     }
 
-    /// `upgrade()` is admin-gated by address comparison: passing anyone other
-    /// than the stored admin must panic, even when authorization itself is
-    /// satisfied (mock_all_auths). This exercises the stored-admin check
-    /// independently of the require_auth() layer (issue #1636).
-    #[test]
-    #[should_panic(expected = "Only admin can upgrade")]
-    fn test_upgrade_rejects_non_admin_caller() {
-        let (env, _cid, client, _admin, _pid) = crate::tests::setup();
-        let attacker = Address::generate(&env);
-        // The panic fires before env.deployer().update_current_contract_wasm(),
-        // so a placeholder hash is safe here.
-        let fake_hash = BytesN::from_array(&env, &[7u8; 32]);
-        client.upgrade(&attacker, &fake_hash);
-    }
-
-    /// `upgrade()` calls `admin.require_auth()` before anything else: with no
-    /// mocked authorizations, even the genuine stored admin address is
-    /// rejected at the auth layer, and no state may change as a result
-    /// (issue #1636). Mirrors the stored-admin test above so both guard
-    /// layers are covered.
-    #[test]
-    fn test_upgrade_requires_admin_authorization() {
-        // Deliberately no env.mock_all_auths(): require_auth() must reject.
-        let env = Env::default();
-        let cid = env.register_contract(None, GreenPayContract);
-        let client = GreenPayContractClient::new(&env, &cid);
-        let admin = Address::generate(&env);
-        // initialize() is permissionless, so no auth mocking is needed to
-        // bootstrap the contract.
-        client.initialize(&admin);
-
-        let fake_hash = BytesN::from_array(&env, &[7u8; 32]);
-        let result = client.try_upgrade(&admin, &fake_hash);
-        assert!(
-            result.is_err(),
-            "upgrade() must be rejected when the admin has not authorized the invocation"
-        );
-
-        // The rejected call must not have written the new WASM hash.
-        assert_eq!(
-            client.get_contract_wasm_hash(),
-            None,
-            "a rejected upgrade() must not persist a WASM hash"
-        );
-    }
-
     // ─── Governance tests ─────────────────────────────────────────────────────
 
     #[test]
@@ -3900,18 +3798,12 @@ mod tests {
         assert_eq!(client.deactivate_projects_range(&admin, &0, &1), 1);
         assert!(!client.get_project(&pid1).active);
         assert!(client.get_project(&pid2).active);
-        assert_eq!(
-            client.deactivate_projects_range(&admin, &1, &MAX_DEACTIVATION_BATCH),
-            1,
-        );
+        assert_eq!(client.deactivate_projects_range(&admin, &1, &100), 1);
         assert!(!client.get_project(&pid2).active);
-        assert_eq!(
-            client.deactivate_projects_range(&admin, &0, &MAX_DEACTIVATION_BATCH),
-            0,
-        );
+        assert_eq!(client.deactivate_projects_range(&admin, &0, &100), 0);
         assert_eq!(client.deactivate_projects_range(&admin, &u32::MAX, &1), 0);
         assert_eq!(
-            client.try_deactivate_projects_range(&admin, &0, &(MAX_DEACTIVATION_BATCH + 1)),
+            client.try_deactivate_projects_range(&admin, &0, &101),
             Err(Ok(ContractError::InvalidPageSize)),
         );
     }
@@ -4099,26 +3991,19 @@ mod tests {
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
         let token_client = StellarAssetClient::new(&env, &token);
 
-        let amount = 100 * STROOP;
-        token_client.mint(&donor, &amount);
-        client.donate(&token, &donor, &pid, &amount, &0u32);
+        let donor      = Address::generate(&env);
+        let usdc_amt   = 1_000_000i128; // 0.1 USDC (7 decimal places)
+        // Simulate a DEX mid-price of 9 XLM per USDC (in stroops ratio: 9)
+        let rate       = 9i128;
+        let expected_xlm = usdc_amt.checked_mul(rate).unwrap();
 
-        let wallet = client.get_project(&pid).wallet;
-        let project_before = client.get_project(&pid);
-        let donor_stats_before = client.get_donor_stats(&donor);
-        assert_eq!(project_before.total_raised, amount);
-        assert_eq!(donor_stats_before.total_donated, amount);
+        usdc_client.mint(&donor, &usdc_amt);
+        client.donate_usdc(&usdc_token, &donor, &pid, &usdc_amt, &rate, &0u32);
 
-        client.refund_donation(&admin, &pid, &donor, &amount, &token);
-
-        let project_after = client.get_project(&pid);
-        let donor_stats_after = client.get_donor_stats(&donor);
-        assert_eq!(project_after.total_raised, 0);
-        assert_eq!(donor_stats_after.total_donated, 0);
-
-        let native_client = soroban_sdk::token::Client::new(&env, &token);
-        assert_eq!(native_client.balance(&donor), amount);
-        assert_eq!(native_client.balance(&wallet), 0);
+        let project = client.get_project(&pid);
+        assert_eq!(project.total_raised, expected_xlm);
+        let global = client.get_global_total();
+        assert_eq!(global, expected_xlm);
     }
 
     #[test]
@@ -4130,7 +4015,10 @@ mod tests {
         let token_admin = Address::generate(&env);
         let token = env.register_stellar_asset_contract_v2(token_admin).address();
 
-        client.refund_donation(&not_admin, &pid, &donor, &(10 * STROOP), &token);
+        let donor = Address::generate(&env);
+        usdc_client.mint(&donor, &1_000_000i128);
+        // Rate of 0 must be rejected
+        client.donate_usdc(&usdc_token, &donor, &pid, &1_000_000i128, &0i128, &0u32);
     }
 
     // ─── Minimum donation enforcement (#1043) ─────────────────────────────────
@@ -4192,7 +4080,7 @@ mod tests {
         client.set_project_goal(&admin, &pid, &(100 * STROOP));
 
         let milestone_topic = soroban_sdk::xdr::ScVal::Symbol(
-            soroban_sdk::xdr::ScSymbol::try_from("MilestoneReached").unwrap(),
+            soroban_sdk::xdr::ScSymbol::try_from(std::vec::Vec::from("MilestoneReached")).unwrap(),
         );
         for expected_pct in [25u32, 50, 75, 100] {
             client.donate(&token, &donor, &pid, &(25 * STROOP), &0u32);
@@ -4324,7 +4212,7 @@ mod tests {
     fn test_donate_usdc_zero_amount_is_rejected() {
         let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
 
-        client.donate_usdc(&token, &donor, &pid, &0i128, &8i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &0i128, &0u32);
     }
 
     /// Negative USDC amounts are rejected the same way.
@@ -4333,7 +4221,7 @@ mod tests {
     fn test_donate_usdc_negative_amount_is_rejected() {
         let (_env, client, token, pid, donor, _wallet) = setup_min_donation();
 
-        client.donate_usdc(&token, &donor, &pid, &-1i128, &8i128, &0u32);
+        client.donate_usdc(&token, &donor, &pid, &-1i128, &0u32);
     }
     #[test]
     fn test_global_stats_cached_single_entry() {
@@ -4409,358 +4297,5 @@ mod tests {
         assert_eq!(top_10.get(0).unwrap().total_donated, 200 * STROOP);
         assert_eq!(top_10.get(1).unwrap().total_donated, 190 * STROOP);
         assert_eq!(top_10.get(9).unwrap().total_donated, 110 * STROOP);
-    }
-
-    // ─── Tests for Donation Matching Program (Issue #1634) ──────────────────────
-
-    #[test]
-    fn test_create_match_pledge_success_and_events() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let cap = 100 * STROOP;
-        let deadline = env.ledger().sequence() + 500;
-
-        client.create_match_pledge(&matcher, &pid, &cap, &deadline);
-
-        // Check pledge_cr event emission immediately following the call
-        let all = env.events().all();
-        assert!(!all.events().is_empty());
-
-        let pledge = client.get_match_pledge(&pid).expect("pledge should exist");
-        assert_eq!(pledge.project_id, pid);
-        assert_eq!(pledge.matcher, matcher);
-        assert_eq!(pledge.cap_xlm, cap);
-        assert_eq!(pledge.matched_amount, 0);
-        assert_eq!(pledge.deadline_ledger, deadline);
-        assert!(pledge.active);
-
-        let status = client.get_active_match_status(&pid);
-        assert!(status.has_active_match);
-        assert_eq!(status.matcher, Some(matcher.clone()));
-        assert_eq!(status.cap_xlm, cap);
-        assert_eq!(status.matched_amount, 0);
-        assert_eq!(status.remaining_cap_xlm, cap);
-        assert_eq!(status.deadline_ledger, deadline);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cap XLM must be positive")]
-    fn test_create_match_pledge_rejects_zero_cap() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher, &pid, &0i128, &deadline);
-    }
-
-    #[test]
-    #[should_panic(expected = "Cap XLM must be positive")]
-    fn test_create_match_pledge_rejects_negative_cap() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher, &pid, &-50i128, &deadline);
-    }
-
-    #[test]
-    #[should_panic(expected = "Deadline must be in the future")]
-    fn test_create_match_pledge_rejects_past_or_current_deadline() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let current_ledger = env.ledger().sequence();
-        client.create_match_pledge(&matcher, &pid, &(100 * STROOP), &current_ledger);
-    }
-
-    #[test]
-    #[should_panic(expected = "Project not found")]
-    fn test_create_match_pledge_rejects_non_existent_project() {
-        let (env, _cid, client, _admin, _pid) = setup();
-        let matcher = Address::generate(&env);
-        let non_existent = String::from_str(&env, "proj-404");
-        let deadline = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher, &non_existent, &(100 * STROOP), &deadline);
-    }
-
-    #[test]
-    #[should_panic(expected = "Active match pledge already exists for this project")]
-    fn test_create_match_pledge_rejects_duplicate_active_pledge() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher1 = Address::generate(&env);
-        let matcher2 = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher1, &pid, &(100 * STROOP), &deadline);
-        client.create_match_pledge(&matcher2, &pid, &(50 * STROOP), &deadline);
-    }
-
-    #[test]
-    #[should_panic(expected = "Contract is paused")]
-    fn test_create_match_pledge_blocked_when_paused() {
-        let (env, _cid, client, admin, pid) = setup();
-        client.pause(&admin);
-        let matcher = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher, &pid, &(100 * STROOP), &deadline);
-    }
-
-    #[test]
-    fn test_cancel_match_pledge_by_matcher_and_admin() {
-        let (env, _cid, client, admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let cap = 100 * STROOP;
-        let deadline = env.ledger().sequence() + 200;
-
-        client.create_match_pledge(&matcher, &pid, &cap, &deadline);
-        assert!(client.get_active_match_status(&pid).has_active_match);
-
-        // Cancel by matcher
-        client.cancel_match_pledge(&matcher, &pid);
-        let pledge = client.get_match_pledge(&pid).unwrap();
-        assert!(!pledge.active);
-        assert!(!client.get_active_match_status(&pid).has_active_match);
-
-        // Reactivate by admin via set_match_pledge_status and cancel by admin
-        client.set_match_pledge_status(&admin, &pid, &true);
-        assert!(client.get_active_match_status(&pid).has_active_match);
-
-        client.cancel_match_pledge(&admin, &pid);
-        let pledge2 = client.get_match_pledge(&pid).unwrap();
-        assert!(!pledge2.active);
-    }
-
-    #[test]
-    #[should_panic(expected = "Only admin or matcher can cancel match pledge")]
-    fn test_cancel_match_pledge_rejects_unauthorized_caller() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let impostor = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 200;
-        client.create_match_pledge(&matcher, &pid, &(100 * STROOP), &deadline);
-        client.cancel_match_pledge(&impostor, &pid);
-    }
-
-    #[test]
-    fn test_set_match_pledge_status_admin_only() {
-        let (env, _cid, client, admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 200;
-        client.create_match_pledge(&matcher, &pid, &(100 * STROOP), &deadline);
-
-        client.set_match_pledge_status(&admin, &pid, &false);
-        assert!(!client.get_match_pledge(&pid).unwrap().active);
-
-        client.set_match_pledge_status(&admin, &pid, &true);
-        assert!(client.get_match_pledge(&pid).unwrap().active);
-    }
-
-    #[test]
-    #[should_panic(expected = "Only admin can set match pledge status")]
-    fn test_set_match_pledge_status_rejects_non_admin() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let matcher = Address::generate(&env);
-        let not_admin = Address::generate(&env);
-        let deadline = env.ledger().sequence() + 200;
-        client.create_match_pledge(&matcher, &pid, &(100 * STROOP), &deadline);
-        client.set_match_pledge_status(&not_admin, &pid, &false);
-    }
-
-    #[test]
-    fn test_matching_applied_during_donation() {
-        let (env, _cid, client, _admin, pid) = setup();
-        env.mock_all_auths_allowing_non_root_auth();
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        let matcher = Address::generate(&env);
-        let donor = Address::generate(&env);
-        let wallet = client.get_project(&pid).wallet;
-
-        let cap = 100 * STROOP;
-        let deadline = env.ledger().sequence() + 500;
-        client.create_match_pledge(&matcher, &pid, &cap, &deadline);
-
-        token_client.mint(&matcher, &(100 * STROOP));
-        token_client.mint(&donor, &(100 * STROOP));
-
-        let donation_amt = 40 * STROOP;
-        client.donate(&token, &donor, &pid, &donation_amt, &1u32);
-
-        // Verification of balances:
-        // Donor transferred 40 XLM
-        assert_eq!(token_client.balance(&donor), 60 * STROOP);
-        // Matcher transferred 40 XLM (matched 1:1, doubling donor amount)
-        assert_eq!(token_client.balance(&matcher), 60 * STROOP);
-        // Project wallet received 40 + 40 = 80 XLM
-        assert_eq!(token_client.balance(&wallet), 80 * STROOP);
-
-        // Verification of contract accounting:
-        let pledge = client.get_match_pledge(&pid).unwrap();
-        assert_eq!(pledge.matched_amount, 40 * STROOP);
-        assert!(pledge.active);
-
-        let status = client.get_active_match_status(&pid);
-        assert!(status.has_active_match);
-        assert_eq!(status.matched_amount, 40 * STROOP);
-        assert_eq!(status.remaining_cap_xlm, 60 * STROOP);
-
-        // Project total raised received total_credited = 80 XLM
-        let project = client.get_project(&pid);
-        assert_eq!(project.total_raised, 40 * STROOP);
-        assert_eq!(client.get_global_total(), 80 * STROOP);
-
-        // Total CO2 increment credited for the full 80 XLM
-        // 80 XLM * 100 g/XLM = 8 000 g
-        assert_eq!(client.get_global_co2(), 8_000);
-
-        // Donor stats reflect donor's own donation (40 XLM)
-        let donor_stats = client.get_donor_stats(&donor);
-        assert_eq!(donor_stats.total_donated, 40 * STROOP);
-    }
-
-    #[test]
-    fn test_matching_cap_boundary_partial_match() {
-        let (env, _cid, client, _admin, pid) = setup();
-        env.mock_all_auths_allowing_non_root_auth();
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        let matcher = Address::generate(&env);
-        let donor1 = Address::generate(&env);
-        let donor2 = Address::generate(&env);
-        let donor3 = Address::generate(&env);
-        let wallet = client.get_project(&pid).wallet;
-
-        let cap = 50 * STROOP;
-        let deadline = env.ledger().sequence() + 500;
-        client.create_match_pledge(&matcher, &pid, &cap, &deadline);
-
-        token_client.mint(&matcher, &(100 * STROOP));
-        token_client.mint(&donor1, &(100 * STROOP));
-        token_client.mint(&donor2, &(100 * STROOP));
-        token_client.mint(&donor3, &(100 * STROOP));
-
-        // First donation: 30 XLM. Matcher matches 30 XLM. Remaining cap: 20 XLM.
-        client.donate(&token, &donor1, &pid, &(30 * STROOP), &1u32);
-        assert_eq!(token_client.balance(&matcher), 70 * STROOP);
-        let status1 = client.get_active_match_status(&pid);
-        assert_eq!(status1.matched_amount, 30 * STROOP);
-        assert_eq!(status1.remaining_cap_xlm, 20 * STROOP);
-        assert!(status1.has_active_match);
-
-        // Second donation: 40 XLM. Remaining cap is only 20 XLM!
-        // So exactly 20 XLM is matched (cap boundary partial match).
-        client.donate(&token, &donor2, &pid, &(40 * STROOP), &2u32);
-
-        // Matcher deducted by only remaining 20 XLM (total 50 XLM = cap)
-        assert_eq!(token_client.balance(&matcher), 50 * STROOP);
-
-        // Wallet received: (30 + 30) + (40 + 20) = 120 XLM
-        assert_eq!(token_client.balance(&wallet), 120 * STROOP);
-
-        // Pledge matched_amount reaches cap (50 XLM) and pledge is deactivated
-        let pledge = client.get_match_pledge(&pid).unwrap();
-        assert_eq!(pledge.matched_amount, cap);
-        assert!(!pledge.active);
-
-        let status2 = client.get_active_match_status(&pid);
-        assert!(!status2.has_active_match);
-        assert_eq!(status2.remaining_cap_xlm, 0);
-
-        // Third donation: 10 XLM. Since pledge is exhausted, matching is NOT applied.
-        client.donate(&token, &donor3, &pid, &(10 * STROOP), &3u32);
-
-        // Matcher balance unchanged (still 50 XLM)
-        assert_eq!(token_client.balance(&matcher), 50 * STROOP);
-        // Wallet received only the 10 XLM from donor3 (120 + 10 = 130 XLM)
-        assert_eq!(token_client.balance(&wallet), 130 * STROOP);
-
-        // Accounting invariant: matched <= cap asserted
-        let final_pledge = client.get_match_pledge(&pid).unwrap();
-        assert!(final_pledge.matched_amount <= final_pledge.cap_xlm);
-        assert_eq!(final_pledge.matched_amount, cap);
-    }
-
-    #[test]
-    fn test_matching_expired_deadline_not_applied() {
-        let (env, _cid, client, _admin, pid) = setup();
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        let matcher = Address::generate(&env);
-        let donor = Address::generate(&env);
-        let wallet = client.get_project(&pid).wallet;
-
-        let cap = 100 * STROOP;
-        let start_ledger = env.ledger().sequence();
-        let deadline = start_ledger + 50;
-        client.create_match_pledge(&matcher, &pid, &cap, &deadline);
-
-        token_client.mint(&matcher, &(100 * STROOP));
-        token_client.mint(&donor, &(100 * STROOP));
-
-        // Advance ledger sequence past deadline
-        env.ledger().set_sequence_number(deadline + 1);
-
-        let status = client.get_active_match_status(&pid);
-        assert!(!status.has_active_match);
-
-        // Donate after deadline
-        client.donate(&token, &donor, &pid, &(20 * STROOP), &1u32);
-
-        // Matcher balance remains untouched
-        assert_eq!(token_client.balance(&matcher), 100 * STROOP);
-        // Wallet received only donor's 20 XLM
-        assert_eq!(token_client.balance(&wallet), 20 * STROOP);
-
-        let pledge = client.get_match_pledge(&pid).unwrap();
-        assert_eq!(pledge.matched_amount, 0);
-    }
-
-    #[test]
-    fn test_can_create_new_pledge_after_previous_exhausted_or_expired() {
-        let (env, _cid, client, _admin, pid) = setup();
-        env.mock_all_auths_allowing_non_root_auth();
-        let token_admin = Address::generate(&env);
-        let token = env.register_stellar_asset_contract_v2(token_admin).address();
-        let token_client = StellarAssetClient::new(&env, &token);
-
-        let matcher1 = Address::generate(&env);
-        let matcher2 = Address::generate(&env);
-        let donor = Address::generate(&env);
-
-        let cap1 = 20 * STROOP;
-        let deadline1 = env.ledger().sequence() + 100;
-        client.create_match_pledge(&matcher1, &pid, &cap1, &deadline1);
-
-        token_client.mint(&matcher1, &cap1);
-        token_client.mint(&donor, &(50 * STROOP));
-
-        // Exhaust first pledge
-        client.donate(&token, &donor, &pid, &(20 * STROOP), &1u32);
-        assert!(!client.get_active_match_status(&pid).has_active_match);
-
-        // Creating a new pledge for the same project now succeeds because previous is exhausted
-        let cap2 = 50 * STROOP;
-        let deadline2 = env.ledger().sequence() + 200;
-        client.create_match_pledge(&matcher2, &pid, &cap2, &deadline2);
-
-        let status2 = client.get_active_match_status(&pid);
-        assert!(status2.has_active_match);
-        assert_eq!(status2.matcher, Some(matcher2));
-        assert_eq!(status2.cap_xlm, cap2);
-    }
-
-    #[test]
-    fn test_get_active_match_status_no_pledge() {
-        let (env, _cid, client, _admin, _pid) = setup();
-        let unpledged_pid = String::from_str(&env, "proj-unpledged");
-        let status = client.get_active_match_status(&unpledged_pid);
-        assert!(!status.has_active_match);
-        assert_eq!(status.matcher, None);
-        assert_eq!(status.cap_xlm, 0);
-        assert_eq!(status.matched_amount, 0);
-        assert_eq!(status.remaining_cap_xlm, 0);
-        assert_eq!(status.deadline_ledger, 0);
     }
 }

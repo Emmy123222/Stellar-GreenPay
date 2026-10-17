@@ -77,7 +77,10 @@ describeWithRedis("Redis cache namespace (live Redis)", () => {
         process.env.REDIS_URL = `redis://${container.getHost()}:${container.getMappedPort(6379)}`;
       }
       // The service builds its client while the module is evaluated, so it is
-      // required only once REDIS_URL is known.
+      // required only once REDIS_URL is known. USE_REAL_REDIS=1 keeps redis.js
+      // from falling back to ioredis-mock under Jest — this suite exists to
+      // verify the keys the *real* service writes to a live Redis.
+      process.env.USE_REAL_REDIS = "1";
       redisService = require(redisServicePath);
 
       await redisService.ping();
@@ -112,6 +115,7 @@ describeWithRedis("Redis cache namespace (live Redis)", () => {
     try {
       if (container) await container.stop();
     } catch { /* ignore */ }
+    delete process.env.USE_REAL_REDIS;
     if (originalRedisUrl === undefined) {
       delete process.env.REDIS_URL;
     } else {

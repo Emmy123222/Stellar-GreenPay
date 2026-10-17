@@ -7,7 +7,7 @@
 "use strict";
 
 const crypto = require("crypto");
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { generateProjectSummary } = require("./claude");

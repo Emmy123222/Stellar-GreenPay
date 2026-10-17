@@ -68,7 +68,7 @@ test.describe("Leaderboard page", () => {
     await mockApi(page);
     await page.goto("/leaderboard");
 
-    const rows = page.locator(".space-y-2 > div");
+    const rows = page.locator(".space-y-2 > a");
     await expect(rows.first()).toBeVisible();
 
     const amounts = await rows.evaluateAll((els) =>
@@ -120,7 +120,7 @@ test.describe("Leaderboard page", () => {
     await mockApi(page);
     await page.goto("/leaderboard");
 
-    const fourthRow = page.locator(".space-y-2 > div").nth(3);
+    const fourthRow = page.locator(".space-y-2 > a").nth(3);
     await expect(fourthRow).toBeVisible();
   });
 

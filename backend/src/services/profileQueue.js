@@ -1,6 +1,6 @@
 "use strict";
 
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const pool = require("../db/pool");
 const logger = require("../logger");
 const { computeBadges } = require("./store");
