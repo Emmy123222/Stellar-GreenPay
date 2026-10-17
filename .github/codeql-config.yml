@@ -1,0 +1,27 @@
+# CodeQL configuration for Stellar GreenPay.
+# Scans the javascript-typescript language across all four JS/TS packages
+# (backend, frontend, mobile, extension) on pull requests to main and weekly.
+#
+# Triaged findings:
+# - Test fixture files intentionally contain XSS payloads (javascript:, data:,
+#   vbscript:) to verify renderMarkdown sanitises them. They are excluded from
+#   scanning to avoid false-positive XSS alerts; the fixtures are covered by
+#   unit tests instead (frontend/lib/__tests__/renderMarkdown.test.ts,
+#   frontend/utils/__tests__/renderMarkdown.test.ts, frontend/__tests__/csp.test.ts).
+paths:
+  - "backend"
+  - "frontend"
+  - "mobile"
+  - "extension"
+paths-ignore:
+  - "**/node_modules/**"
+  - "**/__tests__/**"
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.test.js"
+  - "**/*.test.jsx"
+  - "frontend/lib/__tests__/renderMarkdown.test.ts"
+  - "frontend/utils/__tests__/renderMarkdown.test.ts"
+  - "frontend/__tests__/csp.test.ts"
+queries:
+  - uses: security-and-quality

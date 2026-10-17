@@ -11,7 +11,7 @@ const url = process.env.REDIS_URL || "redis://localhost:6379";
 
 let client;
 
-if (isTest && !isMockedByJest) {
+if (isTest && !isMockedByJest && !process.env.REDIS_URL) {
   const RedisMock = require("ioredis-mock");
   client = new RedisMock();
 } else {

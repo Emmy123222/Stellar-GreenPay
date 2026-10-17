@@ -14,6 +14,7 @@ import React from "react";
 import "@testing-library/jest-dom";
 import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import Link from "next/link";
 import { I18nProvider, LOCALE_STORAGE_KEY, useI18n, type Locale } from "@/lib/i18n";
 import SkipLink from "@/components/SkipLink";
 
@@ -122,8 +123,8 @@ describe("SkipLink", () => {
         <div>
           <SkipLink />
           <nav>
-            <a href="/">Home</a>
-            <a href="/projects">Projects</a>
+            <Link href="/">Home</Link>
+            <Link href="/projects">Projects</Link>
           </nav>
           <main id="main-content" tabIndex={-1}>
             <button>Inside Main</button>

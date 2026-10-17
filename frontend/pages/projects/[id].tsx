@@ -1658,6 +1658,14 @@ export default function ProjectDetail({
             </div>
           )}
 
+          {/* Give monthly button */}
+          <button
+            onClick={() => setShowMonthlySetup(true)}
+            className="btn-primary text-sm py-2 px-4 w-full inline-flex items-center justify-center gap-2"
+          >
+            💚 Give monthly
+          </button>
+
           {/* Share card */}
           <div className="card text-center bg-forest-50 border-forest-200">
             <p className="font-display font-semibold text-forest-900 mb-2">Spread the word 🌍</p>
