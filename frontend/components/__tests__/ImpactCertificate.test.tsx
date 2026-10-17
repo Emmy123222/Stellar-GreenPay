@@ -44,22 +44,22 @@ describe("ImpactCertificate", () => {
   });
 
   it("renders the seedling badge tier", () => {
-    render(<ImpactCertificate {...baseProps} badgeTier="seedling" as BadgeTier />);
+    render(<ImpactCertificate {...baseProps} badgeTier={"seedling" as BadgeTier} />);
     expect(screen.getByText("Seedling")).toBeInTheDocument();
   });
 
   it("renders the tree badge tier", () => {
-    render(<ImpactCertificate {...baseProps} badgeTier="tree" as BadgeTier />);
+    render(<ImpactCertificate {...baseProps} badgeTier={"tree" as BadgeTier} />);
     expect(screen.getByText("Tree")).toBeInTheDocument();
   });
 
   it("renders the forest badge tier", () => {
-    render(<ImpactCertificate {...baseProps} badgeTier="forest" as BadgeTier />);
+    render(<ImpactCertificate {...baseProps} badgeTier={"forest" as BadgeTier} />);
     expect(screen.getByText("Forest")).toBeInTheDocument();
   });
 
   it("renders the earth badge tier", () => {
-    render(<ImpactCertificate {...baseProps} badgeTier="earth" as BadgeTier />);
+    render(<ImpactCertificate {...baseProps} badgeTier={"earth" as BadgeTier} />);
     expect(screen.getByText("Earth Guardian")).toBeInTheDocument();
   });
 });
