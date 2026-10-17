@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import ImpactCertificate from "../ImpactCertificate";
 import { badgeLabel } from "@/utils/format";
+import type { BadgeTier } from "@/utils/types";
 
 const baseProps = {
   donorAddress: "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRST",
@@ -47,7 +48,7 @@ describe("ImpactCertificate", () => {
     ["forest", "Forest"],
     ["earth", "Earth Guardian"],
   ] as [string, string][])("renders the %s badge tier", (badgeTier: string, label: string) => {
-    render(<ImpactCertificate {...baseProps} badgeTier={badgeTier} />);
+      render(<ImpactCertificate {...baseProps} badgeTier={badgeTier as BadgeTier} />);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 });
