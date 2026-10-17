@@ -13,7 +13,7 @@
 "use strict";
 
 const crypto = require("crypto");
-const PgBoss = require("pg-boss");
+const { PgBoss } = require("pg-boss");
 const https = require("https");
 const http = require("http");
 const pool = require("../db/pool");
@@ -526,7 +526,10 @@ async function checkAndDeliverMilestones(projectId) {
     const raised = Number.parseFloat(project.raised_xlm);
     if (goal <= 0 || Number.isNaN(goal) || Number.isNaN(raised)) return;
 
-    const progressPercent = (raised / goal) * 100;
+    // Milestone percentages are integers; a fractional value (e.g.
+    // 55.00000000000001 from binary float math) is rejected by Postgres when
+    // compared against project_milestones.percentage (INTEGER).
+    const progressPercent = Math.floor((raised / goal) * 100);
 
     const milestoneResult = await pool.query(
       `SELECT id, percentage, title

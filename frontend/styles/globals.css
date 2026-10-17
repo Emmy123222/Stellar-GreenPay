@@ -115,7 +115,7 @@
   }
 
   .btn-primary {
-    @apply bg-[#227239] dark:bg-[#3da668] hover:bg-[#1a5a2c] dark:hover:bg-[#60d07b]
+    @apply bg-[#227239] dark:bg-[#1d5e31] hover:bg-[#1a5a2c] dark:hover:bg-[#227239]
            text-white font-semibold px-6 py-3 rounded-xl
            transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed
            focus:outline-none focus:ring-2 focus:ring-green-500 dark:focus:ring-[#60d07b] focus:ring-offset-2
@@ -443,6 +443,9 @@
 .dark .bg-forest-50  { background-color: #0d1e0d; }
 .dark .bg-forest-100 { background-color: #122412; }
 .dark .bg-forest-200 { background-color: #1a3a1a; }
+.dark .bg-forest-50\/40 { background-color: #0d1e0d; }
+.dark .bg-forest-50\/50 { background-color: #0d1e0d; }
+.dark .bg-forest-100\/50 { background-color: #122412; }
 
 /* Text colors */
 .dark .text-forest-50  { color: #e8f3e8; }

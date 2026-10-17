@@ -4,8 +4,8 @@ import DonationQRCode, { DonationQRCodeHandle } from "../DonationQRCode";
 
 // Mock qrcode.react
 jest.mock("qrcode.react", () => ({
-  QRCodeCanvas: ({ value }: { value: string }) => (
-    <canvas data-testid="qr-canvas" data-value={value} />
+  QRCodeCanvas: ({ value, ...props }: { value: string }) => (
+    <canvas data-testid="qr-canvas" data-value={value} {...props} />
   ),
 }));
 

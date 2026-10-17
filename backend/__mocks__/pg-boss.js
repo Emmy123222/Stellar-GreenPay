@@ -24,3 +24,7 @@ const PgBoss = jest.fn().mockImplementation(createDefaultInstance);
 
 module.exports = PgBoss;
 module.exports.default = PgBoss;
+// pg-boss v12 is pure-ESM: `require("pg-boss")` in production resolves to a
+// module namespace whose constructor is the *named* export `PgBoss`. Mirror
+// that shape so services can uniformly destructure `{ PgBoss }`.
+module.exports.PgBoss = PgBoss;

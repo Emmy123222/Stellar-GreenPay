@@ -24,11 +24,21 @@ jobs:
         with:
           targets: wasm32v1-none
 
+      # soroban-sdk v28+ refuses plain `cargo build` for wasm targets: the
+      # contract must be built with `stellar contract build` (>= v25.2.0) so
+      # the contract spec can be shaken. Install the prebuilt binary.
+      - name: Install Stellar CLI
+        run: |
+          curl -fsSL -o /tmp/stellar-cli.tar.gz \
+            https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-25.2.0-x86_64-unknown-linux-gnu.tar.gz
+          sudo tar -xzf /tmp/stellar-cli.tar.gz -C /usr/local/bin stellar
+          stellar --version
+
       # Build the WASM artifact first. include_bytes! in integration.rs
       # resolves at compile time, so the .wasm must exist before cargo test
       # or cargo clippy attempt to compile the integration test crate.
       - name: Build WASM artifacts
-        run: cargo build --workspace --target wasm32v1-none --release
+        run: stellar contract build
 
       - name: Run unit tests
         run: cargo test --workspace
@@ -44,4 +54,14 @@ jobs:
           cargo test
           --features testutils
           --test integration
+          --manifest-path greenpay-contract/Cargo.toml
+
+      # Bounded emergency-deactivation tests (issue #1635) also require the
+      # testutils feature. They pin the deactivate_projects_range API and record
+      # the measured resource costs documented in contracts/README.md.
+      - name: Run deactivation tests
+        run: >
+          cargo test
+          --features testutils
+          --test deactivation
           --manifest-path greenpay-contract/Cargo.toml

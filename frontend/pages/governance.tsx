@@ -200,7 +200,7 @@ export default function GovernancePage() {
     totalVotes(p) === 0 ? 0 : Math.round((p.votesFor / totalVotes(p)) * 100);
 
   return (
-    <div className="min-h-screen bg-[#fcfdfc] font-body text-forest-900 pb-20">
+    <div className="min-h-screen bg-white font-body text-forest-900 pb-20">
       <Head>
         <title>Governance | Stellar GreenPay</title>
         <meta name="description" content="Vote on project verification proposals with your impact badge." />
@@ -237,7 +237,7 @@ export default function GovernancePage() {
             </div>
           ) : (
             <div className="flex items-center justify-between gap-4">
-              <p className="text-sm text-zinc-600">Connect your Freighter wallet to vote.</p>
+              <p className="text-sm text-zinc-600 dark:text-zinc-300">Connect your Freighter wallet to vote.</p>
               <button
                 onClick={handleConnect}
                 className="rounded-full bg-forest-600 px-4 py-2 text-sm font-semibold text-white hover:bg-forest-700"
@@ -261,7 +261,7 @@ export default function GovernancePage() {
         )}
 
         {isLoading ? (
-          <p className="text-center text-zinc-500 py-16">Loading proposals…</p>
+          <p className="text-center text-zinc-500 dark:text-zinc-400 py-16">Loading proposals…</p>
         ) : proposals.length === 0 ? (
           <div className="rounded-2xl border border-zinc-100 bg-white p-12 text-center shadow-sm">
             <p className="text-zinc-500">No open proposals at the moment.</p>

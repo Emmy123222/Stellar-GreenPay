@@ -1,13 +1,18 @@
 /**
  * components/ProjectImage.tsx
  *
- * Alt-text rules (documented here):
+ * A project cover `<img>` that degrades gracefully (#1069) while applying
+ * the documented alt-text rules:
  * 1. If `decorative` is true → alt="" + role="presentation" (skipped by screen readers)
  * 2. Else if `alt` prop is provided → use it verbatim
  * 3. Else if `description` is provided → use description as alt text
  * 4. Else → fall back to project `name` as alt text (alt={name})
- * 5. Placeholder image (when src is missing) always gets alt="" + role="presentation"
- *    so it is never announced as "project-placeholder".
+ * 5. Placeholder image (when src is missing or fails to load) always gets
+ *    alt="" + role="presentation" so it is never announced as "project-placeholder".
+ *
+ * Uploaded cover URLs are third-party (IPFS gateways, admin-pasted links) and can
+ * 404 or be unreachable, which used to leave a broken-image icon in the card. On
+ * any load error we swap in the branded leaf placeholder.
  */
 import { useEffect, useState } from "react";
 

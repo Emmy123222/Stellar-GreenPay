@@ -523,7 +523,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                     </div>
                     <div>
                       <p className="font-semibold text-forest-900 font-body">{myTeam.name}</p>
-                      <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body">
+                      <p className="text-xs text-forest-600 dark:text-forest-300 font-body">
                         👥 {myTeam.memberCount} member{myTeam.memberCount === 1 ? "" : "s"}
                       </p>
                     </div>
@@ -539,7 +539,7 @@ export default function Dashboard({ publicKey, onConnect }: DashboardProps) {
                   <p className="font-display text-2xl font-bold text-forest-900">
                     {formatXLM(myTeam.totalDonatedXLM)} XLM
                   </p>
-                  <p className="text-xs text-[#8aaa8a] dark:text-forest-300 font-body mt-1">
+                  <p className="text-xs text-forest-600 dark:text-forest-300 font-body mt-1">
                     ≈ {formatCO2(Number(myTeam.totalCO2OffsetKg || 0))} CO₂ offset combined
                   </p>
                 </div>
