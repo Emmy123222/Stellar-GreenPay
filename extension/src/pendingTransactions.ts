@@ -94,10 +94,16 @@ export async function checkPendingDonations(): Promise<PendingDonation[]> {
 
   await Promise.all(
     pending.map(async (tx) => {
-      const status = await lookupTxStatus(tx.hash);
-      if (status !== 'pending' || Date.now() - tx.createdAt > PENDING_TTL_MS) {
+      // Once the Stellar transaction's ledger timeout and grace window have
+      // elapsed, it cannot become valid again. Expire it without waiting for
+      // Horizon so cleanup still works when the network is unavailable.
+      if (Date.now() - tx.createdAt > PENDING_TTL_MS) {
         settled.add(tx.hash);
+        return;
       }
+
+      const status = await lookupTxStatus(tx.hash);
+      if (status !== 'pending') settled.add(tx.hash);
     })
   );
 
