@@ -6,7 +6,7 @@ RUN addgroup -S greenpay && adduser -S greenpay -G greenpay
 WORKDIR /app
 
 COPY --chown=greenpay:greenpay package*.json ./
-RUN npm ci && chown -R greenpay:greenpay /app/node_modules
+RUN npm ci --legacy-peer-deps && chown -R greenpay:greenpay /app/node_modules
 
 COPY --chown=greenpay:greenpay . .
 
@@ -20,7 +20,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --only=production --legacy-peer-deps
 
 # 2. Production Runner Stage
 FROM node:22-alpine AS runner
