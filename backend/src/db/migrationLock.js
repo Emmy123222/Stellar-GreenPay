@@ -54,6 +54,9 @@ async function acquireMigrationLock(options = {}) {
   } = options;
 
   const client = await pool.connect();
+  if (!client) {
+    throw new Error("Failed to obtain database client from connection pool");
+  }
   const deadline = Date.now() + Math.max(0, timeoutSeconds) * 1000;
 
   try {
