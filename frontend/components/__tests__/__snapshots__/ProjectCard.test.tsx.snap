@@ -9,7 +9,7 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
       href="/projects/proj-1"
     >
       <div
-        class="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden"
+        class="card-hover group animate-fade-in motion-reduce:animate-none flex flex-col h-full relative overflow-hidden"
       >
         <div
           class="flex items-center justify-between mb-4"
@@ -111,11 +111,11 @@ exports[`ProjectCard matches snapshot for a fully-funded project 1`] = `
     </a>
     <button
       aria-label="Add to wishlist"
-      class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
+      class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all motion-reduce:transition-none duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
           bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
     >
       <svg
-        class="w-5 h-5 transition-all duration-300 fill-none"
+        class="w-5 h-5 transition-all motion-reduce:transition-none duration-300 fill-none"
         stroke="currentColor"
         viewBox="0 0 24 24"
       >
@@ -140,7 +140,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
       href="/projects/proj-1"
     >
       <div
-        class="card-hover group animate-fade-in flex flex-col h-full relative overflow-hidden"
+        class="card-hover group animate-fade-in motion-reduce:animate-none flex flex-col h-full relative overflow-hidden"
       >
         <div
           class="flex items-center justify-between mb-4"
@@ -227,7 +227,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
                 role="progressbar"
               >
                 <div
-                  class="h-full rounded-full bg-emerald-500 transition-all duration-300 dark:bg-emerald-400"
+                  class="h-full rounded-full bg-emerald-500 transition-all motion-reduce:transition-none duration-300 dark:bg-emerald-400"
                   style="width: 25%;"
                 />
               </div>
@@ -292,11 +292,11 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
     </a>
     <button
       aria-label="Add to wishlist"
-      class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
+      class="absolute top-4 right-4 p-2.5 rounded-xl border transition-all motion-reduce:transition-none duration-300 transform hover:scale-110 active:scale-95 z-20 shadow-sm
           bg-white/90 text-forest-300 border-forest-100 hover:text-red-400 hover:border-red-100 opacity-0 group-hover:opacity-100"
     >
       <svg
-        class="w-5 h-5 transition-all duration-300 fill-none"
+        class="w-5 h-5 transition-all motion-reduce:transition-none duration-300 fill-none"
         stroke="currentColor"
         viewBox="0 0 24 24"
       >
@@ -315,7 +315,7 @@ exports[`ProjectCard matches snapshot for an active, partially-funded project 1`
 exports[`ProjectCard matches snapshot for the loading skeleton 1`] = `
 <div>
   <div
-    class="card animate-pulse flex flex-col h-full border border-[rgba(34,114,57,0.06)] shadow-none pointer-events-none"
+    class="card animate-pulse motion-reduce:animate-none flex flex-col h-full border border-[rgba(34,114,57,0.06)] shadow-none pointer-events-none"
   >
     <div
       class="flex items-center justify-between mb-4"
