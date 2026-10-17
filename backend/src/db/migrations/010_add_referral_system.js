@@ -6,8 +6,10 @@
  * - Create referrals table to track referral relationships
  */
 module.exports = {
-  async up(queryInterface, Sequelize) {
-    await queryInterface.sequelize.query(`
+  name: "010_add_referral_system",
+
+  async up(client) {
+    await client.query(`
       -- Add referral tracking columns to profiles
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS referred_by TEXT;
       ALTER TABLE profiles ADD COLUMN IF NOT EXISTS referral_bonus_xlm NUMERIC(20, 7) NOT NULL DEFAULT 0;
@@ -32,12 +34,10 @@ module.exports = {
     `);
   },
 
-  async down(queryInterface, Sequelize) {
-    await queryInterface.sequelize.query(`
-      DROP TABLE IF EXISTS referrals;
-      ALTER TABLE profiles DROP COLUMN IF EXISTS referral_count;
-      ALTER TABLE profiles DROP COLUMN IF EXISTS referral_bonus_xlm;
-      ALTER TABLE profiles DROP COLUMN IF EXISTS referred_by;
-    `);
-  }
+  async down(client) {
+    await client.query("DROP TABLE IF EXISTS referrals");
+    await client.query("ALTER TABLE profiles DROP COLUMN IF EXISTS referral_count");
+    await client.query("ALTER TABLE profiles DROP COLUMN IF EXISTS referral_bonus_xlm");
+    await client.query("ALTER TABLE profiles DROP COLUMN IF EXISTS referred_by");
+  },
 };
